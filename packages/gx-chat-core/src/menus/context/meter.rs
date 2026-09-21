@@ -131,8 +131,7 @@ pub struct ContextMeterResult {
 pub fn compute_context_meter(
     input: &ContextMeterInput<'_>,
     preferences: &ContextDetailsPreferences,
-    now: f64,
-    utc_offset_minutes: i32,
+    context: &crate::ChatContext,
 ) -> ContextMeterResult {
     let agent = ContextDetailsAgent::from_icon(input.icon);
     let has_details = input.icon == Some("codex") || input.icon == Some("claude");
@@ -173,22 +172,14 @@ pub fn compute_context_meter(
         resolve_context_detail_groups(
             Some(&status),
             preferences,
-            now,
-            utc_offset_minutes,
+            context,
             RowSelection::Shown,
             Some(&session),
             agent,
         )
     });
     let starred = if has_details {
-        resolve_starred_context_details(
-            Some(&status),
-            preferences,
-            now,
-            utc_offset_minutes,
-            Some(&session),
-            agent,
-        )
+        resolve_starred_context_details(Some(&status), preferences, context, Some(&session), agent)
     } else {
         Vec::new()
     };

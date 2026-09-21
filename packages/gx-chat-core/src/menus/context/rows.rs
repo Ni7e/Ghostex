@@ -88,12 +88,26 @@ pub struct ContextDetailSession {
 /// What every row's value function reads.
 pub struct RowInput<'a> {
     pub status: &'a ContextDetailStatus,
-    /// Milliseconds since the epoch, for the reset and expiry countdowns.
-    pub now: f64,
     /// `None` when the host did not describe the session; the session row is skipped.
     pub session: Option<&'a ContextDetailSession>,
+    /// The host's clock, offset and pre-formatted times for this turn.
+    ///
+    /// The whole context rather than the two numbers the rows read today, so a later input (the
+    /// host's locale rendering of a stamp was the first) costs no signature change here or in the
+    /// three builders that construct this.
+    pub context: &'a crate::ChatContext,
+}
+
+impl RowInput<'_> {
+    /// Milliseconds since the epoch, for the reset and expiry countdowns.
+    pub fn now(&self) -> f64 {
+        self.context.now_ms
+    }
+
     /// Only `startedAt` reads it, for `toLocaleString`.
-    pub utc_offset_minutes: i32,
+    pub fn utc_offset_minutes(&self) -> i32 {
+        self.context.utc_offset_minutes
+    }
 }
 
 /// Text a click on a status line item copies, with the title of the toast that says so.
@@ -212,7 +226,7 @@ fn usage_row_value(
     join(
         usage_windows(input.status, kind)
             .iter()
-            .map(|window| render(window, input.now))
+            .map(|window| render(window, input.now()))
             .collect::<Vec<_>>(),
     )
 }
@@ -260,7 +274,7 @@ fn value_cache_time_left(input: &RowInput) -> Option<String> {
     if cache.warm != Some(true) || !is_finite(cache.expires_at) {
         return None;
     }
-    let left = format_countdown(cache.expires_at.unwrap_or_default(), input.now)?;
+    let left = format_countdown(cache.expires_at.unwrap_or_default(), input.now())?;
     Some(format!("{left} left"))
 }
 
@@ -452,7 +466,7 @@ fn value_account_spending(input: &RowInput) -> Option<String> {
             .map(|window| {
                 join_parts([
                     usage_percent_text(window),
-                    usage_reset_countdown(window, input.now),
+                    usage_reset_countdown(window, input.now()),
                 ])
             })
             .collect::<Vec<_>>(),
@@ -467,7 +481,7 @@ fn value_account_usage_updated(input: &RowInput) -> Option<String> {
         .and_then(|account| account.usage_updated_at.as_deref())
         .filter(|stamp| !stamp.is_empty())
         .and_then(date_parse)?;
-    Some(format!("{} ago", format_duration(input.now - updated)))
+    Some(format!("{} ago", format_duration(input.now() - updated)))
 }
 
 fn value_account_usage_status(input: &RowInput) -> Option<String> {

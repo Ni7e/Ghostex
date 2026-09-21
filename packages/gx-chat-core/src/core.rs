@@ -121,8 +121,8 @@ impl ChatCore {
     }
 
     /// The clock and locale the host last passed in.
-    pub fn context(&self) -> ChatContext {
-        self.context
+    pub fn context(&self) -> &ChatContext {
+        &self.context
     }
 
     /// The frame for a host whose last seen revision is `last_revision`.
@@ -248,14 +248,14 @@ impl ChatCore {
             self.state.transcript_view.projection_revision += 1;
         }
         self.parts_revision = self.state.transcript_view.projection_revision;
-        self.published_context = self.context;
+        self.published_context = self.context.clone();
         self.revision += 1;
     }
 
     /// Replaces the document and bumps the revision, for a host seeding a cached frame.
     pub fn publish(&mut self, document: Document) {
         self.document = document;
-        self.published_context = self.context;
+        self.published_context = self.context.clone();
         self.revision += 1;
     }
 }

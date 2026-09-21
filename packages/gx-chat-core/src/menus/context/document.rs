@@ -42,12 +42,7 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
         hide_account_emails: state.core.hide_account_emails,
     };
     let agent = crate::menus::context::ContextDetailsAgent::from_icon(input.icon);
-    let result = compute_context_meter(
-        &input,
-        pickers.context.preferences.get(agent),
-        context.now_ms,
-        context.utc_offset_minutes,
-    );
+    let result = compute_context_meter(&input, pickers.context.preferences.get(agent), context);
     into.context_meter = match result.meter {
         Value::Null => Tri::Null,
         meter => Tri::Value(meter),
@@ -58,8 +53,7 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
         pickers.context.editor.as_ref(),
         &result.status,
         Some(&result.session),
-        context.now_ms,
-        context.utc_offset_minutes,
+        context,
         move |text| {
             if hide {
                 mask_account_text(text)

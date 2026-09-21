@@ -54,7 +54,7 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
                 .as_ref()
                 .and_then(|selected| selected.get("contextUsage")),
             state.core.hide_account_emails,
-            now_ms,
+            context,
         )),
     });
     into.account_switch_card = Tri::Value(match &status.visible {

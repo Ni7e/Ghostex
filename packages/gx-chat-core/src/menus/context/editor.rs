@@ -115,8 +115,7 @@ pub fn context_editor_projection(
     editor: Option<&ContextEditorState>,
     status: &ContextDetailStatus,
     session: Option<&ContextDetailSession>,
-    now: f64,
-    utc_offset_minutes: i32,
+    context: &crate::ChatContext,
     mask: impl Fn(&str) -> String,
 ) -> Value {
     let Some(editor) = editor else {
@@ -127,9 +126,8 @@ pub fn context_editor_projection(
     let project = |row: &RowDefinition| {
         let input = RowInput {
             status,
-            now,
             session,
-            utc_offset_minutes,
+            context,
         };
         let sample = (row.value)(&input);
         json!({

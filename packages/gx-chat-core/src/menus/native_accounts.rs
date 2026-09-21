@@ -149,8 +149,9 @@ pub fn native_account_panel(
     busy: bool,
     context_usage: Option<&Value>,
     hide_account_emails: bool,
-    now_ms: i64,
+    chat_context: &crate::ChatContext,
 ) -> AccountPanel {
+    let now_ms = chat_context.now_millis();
     let text = |value: &str| account_text(hide_account_emails, value);
     let session = data.and_then(|data| data.session.as_ref());
     // Same gate as SessionAccountsPanel: without a saved account for this provider, offer Add
@@ -233,7 +234,7 @@ pub fn native_account_panel(
                 next: recovery.next_attempt_at.as_deref().map(|at| {
                     format!(
                         "Next attempt: {} \u{b7} Attempt {}",
-                        locale_date_time(at),
+                        locale_date_time(at, chat_context),
                         recovery.attempt + 1
                     )
                 }),
@@ -377,11 +378,15 @@ pub fn native_account_switch_card(
 /// core reads no locale, so it writes the `en-US` form QuickJS produces for the default locale
 /// rather than guessing the user's. It reaches a document only on the recovery line of a session
 /// whose automatic continuation is retrying.
-fn locale_date_time(value: &str) -> String {
+fn locale_date_time(value: &str, context: &crate::ChatContext) -> String {
     use crate::menus::time::parse_iso_millis;
     let Some(millis) = parse_iso_millis(value) else {
         return "Invalid Date".to_string();
     };
+    // The host's own locale rendering when it supplied one for this stamp.
+    if let Some(text) = context.formatted_time(crate::FormattedTimeStyle::AccountDateTime, millis) {
+        return text.to_string();
+    }
     let iso = crate::menus::time::iso_from_millis(millis);
     // `M/D/YYYY, h:mm:ss AM` from the ISO parts, which are UTC; the host's offset is not applied
     // because the engine's own answer here is already environment dependent.

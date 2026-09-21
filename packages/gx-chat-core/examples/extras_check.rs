@@ -471,12 +471,7 @@ impl Core {
         let mut core = Self {
             core: ChatCore::new(),
             // 2026-09-22T12:00:00.000Z, the same instant `extras-parity.ts` fixes.
-            context: ChatContext {
-                now_ms: 1_790_078_400_000.0,
-                utc_offset_minutes: 0,
-                random_units: [0.0; 2],
-                random_ids: [0; 2],
-            },
+            context: ChatContext::at(1_790_078_400_000.0),
             last_effects: Vec::new(),
             document: Value::Null,
         };
@@ -518,7 +513,7 @@ impl Core {
     }
 
     fn drive(&mut self, event: Event) {
-        self.last_effects = self.core.handle(event, self.context);
+        self.last_effects = self.core.handle(event, self.context.clone());
         self.document = serde_json::to_value(self.core.document()).expect("the document is JSON");
     }
 

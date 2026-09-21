@@ -48,12 +48,7 @@ fn main() -> ExitCode {
     };
     let fixture: Value = serde_json::from_str(&text).expect("the fixture is JSON");
     let now = fixture["now"].as_f64().expect("the fixture carries `now`");
-    let context = ChatContext {
-        now_ms: now,
-        utc_offset_minutes: 0,
-        random_units: [0.0; 2],
-        random_ids: [0; 2],
-    };
+    let context = ChatContext::at(now);
 
     let mut checked = 0usize;
     let mut differences: BTreeMap<String, usize> = BTreeMap::new();

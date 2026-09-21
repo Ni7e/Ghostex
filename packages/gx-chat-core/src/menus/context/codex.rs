@@ -164,7 +164,15 @@ fn value_started_at(input: &RowInput) -> Option<String> {
         .and_then(|codex| codex.started_at.clone())
         .unwrap_or_default();
     let timestamp = date_parse(&stamp)?;
-    Some(to_locale_string(timestamp, input.utc_offset_minutes))
+    // The host's own locale rendering when it supplied one for this stamp; the crate's `en-US`
+    // fallback otherwise, which is what V8 printed for QuickJS and what the replay reproduces.
+    if let Some(text) = input.context.formatted_time(
+        crate::FormattedTimeStyle::ContextStartedAt,
+        timestamp.round() as i64,
+    ) {
+        return Some(text.to_string());
+    }
+    Some(to_locale_string(timestamp, input.utc_offset_minutes()))
 }
 
 /// `CODEX_CONTEXT_DETAIL_ROWS`, in catalog order.

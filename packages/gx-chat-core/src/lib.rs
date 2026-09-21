@@ -50,7 +50,8 @@ pub use crate::document::{
     ViewState, WorkingStrip,
 };
 pub use crate::state::{
-    ChatContext, ChatState, CommandMarker, ComposerState, CoreState, ExtrasState, FramePosition,
+    ChatContext, ChatState, CommandMarker, ComposerState, CoreState, ExtrasState, FormattedTime,
+    FormattedTimeStyle, FramePosition,
     LoadEarlierRequest, MenusState, MessagesState, PendingSend, PendingState, QuestionsState,
     ResyncState, SessionIdentity, SessionState, TerminalStream, TranscriptViewState,
 };

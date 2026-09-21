@@ -331,8 +331,7 @@ pub enum RowSelection {
 pub fn resolve_context_detail_groups(
     status: Option<&ContextDetailStatus>,
     preferences: &ContextDetailsPreferences,
-    now: f64,
-    utc_offset_minutes: i32,
+    context: &crate::ChatContext,
     select: RowSelection,
     session: Option<&ContextDetailSession>,
     agent: ContextDetailsAgent,
@@ -353,9 +352,8 @@ pub fn resolve_context_detail_groups(
             }
             let input = RowInput {
                 status,
-                now,
                 session,
-                utc_offset_minutes,
+                context,
             };
             if let Some(value) = (row.value)(&input) {
                 items.push(ContextDetailItem {
@@ -382,8 +380,7 @@ pub fn resolve_context_detail_groups(
 pub fn resolve_starred_context_details(
     status: Option<&ContextDetailStatus>,
     preferences: &ContextDetailsPreferences,
-    now: f64,
-    utc_offset_minutes: i32,
+    context: &crate::ChatContext,
     session: Option<&ContextDetailSession>,
     agent: ContextDetailsAgent,
 ) -> Vec<ContextDetailItem> {
@@ -394,9 +391,8 @@ pub fn resolve_starred_context_details(
     for row in ordered_starred_rows(preferences, agent) {
         let input = RowInput {
             status,
-            now,
             session,
-            utc_offset_minutes,
+            context,
         };
         let Some(value) = (row.value)(&input) else {
             continue;

@@ -6,8 +6,40 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Which locale-formatted rendering of a stamp a [`FormattedTime`] carries.
+///
+/// One variant per place the brain calls a locale formatter. There are exactly two today, both
+/// `new Date(stamp).toLocaleString()` with V8's default arguments, and the brain has no `Intl.*`
+/// call anywhere else (`docs/2026-09-21/rust-chat/SEAM.md` section 7.5).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FormattedTimeStyle {
+    /// `new Date(startedAt).toLocaleString()`, the Codex context panel's "Started" row.
+    ContextStartedAt,
+    /// `new Date(stamp).toLocaleString()`, the account panel's recovery line.
+    AccountDateTime,
+}
+
+/// One stamp the host has already rendered in the user's own locale.
+///
+/// The core cannot read a locale any more than it can read a clock, so a host that wants the
+/// user's format rather than the crate's `en-US` fallback passes the rendering in.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormattedTime {
+    /// Which rendering this is.
+    pub style: FormattedTimeStyle,
+    /// The epoch milliseconds that were formatted.
+    pub stamp_ms: i64,
+    /// What the host's locale printed.
+    pub text: String,
+}
+
 /// The host's clock and locale for this turn.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+///
+/// Not `Copy`: [`ChatContext::formatted_times`] owns its strings. Pass it by reference inside the
+/// crate and build it with [`ChatContext::at`] plus the `with_*` setters outside it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatContext {
     /// Epoch milliseconds, the same number `Date.now()` returns.
@@ -37,19 +69,72 @@ pub struct ChatContext {
     /// version 4 UUID, and a replay parses the recorded `u` queue back into the same numbers, so
     /// the id the two brains write is the same string.
     ///
-    /// Numbers rather than strings so this type stays `Copy` and stays UniFFI friendly.
+    /// Numbers rather than strings so this type stays UniFFI friendly.
     pub random_ids: [u128; 2],
+    /// Stamps the host has already rendered in the user's locale, for this turn.
+    ///
+    /// Empty is the normal case and means "use the crate's own `en-US` rendering", which is what
+    /// QuickJS printed under V8's default and therefore what the replay must reproduce. A desktop
+    /// or mobile host that wants the user's real locale fills the entries it knows the stamps for;
+    /// anything it leaves out falls back.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub formatted_times: Vec<FormattedTime>,
 }
 
 impl ChatContext {
     /// A context at `now_ms` in UTC, for a host that has not wired its offset yet.
+    ///
+    /// This is the constructor every caller should start from. Build the rest with the `with_*`
+    /// setters rather than an exhaustive struct literal: a field added here then costs the host
+    /// nothing, where a literal stops compiling. See "API changes for the host" in
+    /// `docs/2026-09-21/rust-chat/PROGRESS.md`.
     pub fn at(now_ms: f64) -> Self {
         Self {
             now_ms,
             utc_offset_minutes: 0,
             random_units: [0.0; 2],
             random_ids: [0; 2],
+            formatted_times: Vec::new(),
         }
+    }
+
+    /// The same context with the host's offset east of UTC, in minutes.
+    #[must_use]
+    pub fn with_utc_offset_minutes(mut self, minutes: i32) -> Self {
+        self.utc_offset_minutes = minutes;
+        self
+    }
+
+    /// The same context with this turn's two uniform draws in `[0, 1)`.
+    #[must_use]
+    pub fn with_random_units(mut self, units: [f64; 2]) -> Self {
+        self.random_units = units;
+        self
+    }
+
+    /// The same context with this turn's two 128-bit identity draws.
+    #[must_use]
+    pub fn with_random_ids(mut self, ids: [u128; 2]) -> Self {
+        self.random_ids = ids;
+        self
+    }
+
+    /// The same context with the host's locale-formatted times for this turn.
+    #[must_use]
+    pub fn with_formatted_times(mut self, times: Vec<FormattedTime>) -> Self {
+        self.formatted_times = times;
+        self
+    }
+
+    /// The host's rendering of `stamp_ms` in `style`, or `None` when the host supplied none.
+    ///
+    /// A caller that gets `None` falls back to the crate's own `en-US` formatter, which is what the
+    /// replay wants (V8's default under Bun) and what a host that has not wired its locale gets.
+    pub fn formatted_time(&self, style: FormattedTimeStyle, stamp_ms: i64) -> Option<&str> {
+        self.formatted_times
+            .iter()
+            .find(|entry| entry.style == style && entry.stamp_ms == stamp_ms)
+            .map(|entry| entry.text.as_str())
     }
 
     /// One of the turn's random ids, as the canonical lowercase UUID text.

@@ -110,7 +110,7 @@ impl BridgeTranslator {
             other => {
                 let mut outcome = BridgeOutcome::default();
                 for event in self.events_for(other) {
-                    let effects = core.handle(event, context);
+                    let effects = core.handle(event, context.clone());
                     self.record(&effects);
                     outcome.effects.extend(effects);
                     outcome.applied += 1;
@@ -127,7 +127,7 @@ impl BridgeTranslator {
     pub fn flush_storage(&mut self, core: &mut ChatCore, context: ChatContext) -> Vec<Effect> {
         let mut effects = Vec::new();
         while let Some(event) = self.storage_answers.pop_front() {
-            let round = core.handle(event, context);
+            let round = core.handle(event, context.clone());
             self.record(&round);
             effects.extend(round);
         }
