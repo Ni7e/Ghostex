@@ -75,7 +75,7 @@ impl GhostexGpuiApp {
             })
             .and_then(Value::as_str)
             .is_some_and(|seed| !seed.is_empty());
-        self.dispatch_open_gpui_app_modal_message(action.open, cx);
+        self.open_app_modal_from_bridge(action.open, cx);
         self.gx_store.diagnostics.sidebar_modal_opened(
             is_rename,
             seeded,

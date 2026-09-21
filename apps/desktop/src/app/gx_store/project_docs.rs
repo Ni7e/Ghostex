@@ -268,7 +268,7 @@ impl GhostexGpuiApp {
                 if let Some(project_id) = member_project_id {
                     open["memberProjectId"] = Value::from(project_id);
                 }
-                self.dispatch_open_gpui_app_modal_message(open, cx);
+                self.open_app_modal_from_bridge(open, cx);
             }
         }
     }

@@ -78,7 +78,7 @@ impl GhostexGpuiApp {
                 }
                 ghostex_gx_core::ActionEffect::OpenAppModal { payload } => {
                     self.gx_store.sidebar_open.opens += 1;
-                    self.dispatch_open_gpui_app_modal_message(payload.clone(), cx);
+                    self.open_app_modal_from_bridge(payload.clone(), cx);
                 }
                 ghostex_gx_core::ActionEffect::StartLocalGxserver => {
                     self.gx_store.sidebar_open.gxserver_starts += 1;
