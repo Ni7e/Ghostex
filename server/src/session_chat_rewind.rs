@@ -861,30 +861,34 @@ impl RewindDriver<'_> {
         the handler ran before this job reached the front of the session's send
         queue. What matters is the state of the screen one instant before the
         first keystroke.
+
+        CDXC:SessionChat 2026-09-21 WHY:
+        The composer is waited for, like every send, instead of being judged from one capture. A rewind asked for right after stopping a turn, or queued behind a /model write, reads a frame Claude is still repainting; that frame has no input box and the single capture refused a rewind that would have worked 100 ms later.
         */
-        let screen = self.capture().await.ok_or_else(|| {
-            session_not_running(
+        if self.capture().await.is_none() {
+            return Err(session_not_running(
                 "The session's screen could not be read, so the rewind was not started."
                     .to_string(),
-            )
-        })?;
-        match composer_draft(&screen) {
-            Some(draft) if draft.is_empty() => {}
-            Some(draft) if is_restored_draft(self.project_id, self.session_id, &draft) => {
-                self.clear_restored_draft(&draft).await?;
-            }
-            Some(_) => {
+            ));
+        }
+        let draft = self
+            .wait_for("composer", composer_draft)
+            .await
+            .map_err(|error| match error.code {
+                "timeout" => agent_busy(
+                    "Claude Code is not showing its input box, so the rewind was not started."
+                        .to_string(),
+                ),
+                _ => error,
+            })?;
+        if !draft.is_empty() {
+            if !is_restored_draft(self.project_id, self.session_id, &draft) {
                 return Err(agent_busy(
                     "The terminal composer holds unsent text, so the rewind was not started. Send it or clear it in the terminal first."
                         .to_string(),
-                ))
+                ));
             }
-            None => {
-                return Err(agent_busy(
-                    "Claude Code is not showing its input box, so the rewind was not started."
-                        .to_string(),
-                ))
-            }
+            self.clear_restored_draft(&draft).await?;
         }
 
         self.write(CLAUDE_REWIND_COMMAND).await?;
