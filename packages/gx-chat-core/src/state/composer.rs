@@ -74,6 +74,11 @@ pub struct ComposerState {
     pub received_handoffs: Vec<String>,
     /// The acknowledgement call for a transfer, by request id.
     pub handoff_acknowledgement: Option<(u64, String)>,
+    /// A queue mutation in flight, and the row a remove took out.
+    ///
+    /// Every mutation answers with the whole authoritative queue, so the answer replaces the
+    /// strip rather than patching it (`queueMutation` in `controller.ts`).
+    pub queue_mutation: Option<(u64, Option<String>)>,
     /// The boot read has answered, so the two catalog reads may go out.
     pub boot_read: bool,
     /// `sendBlockedReason(state)`, recomputed once per event by family d's settle.

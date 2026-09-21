@@ -119,6 +119,7 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             ChatRpcMethod::UpdateSessionChatQueuedPrompt,
             json!({ "promptId": string_param(action, "promptId"), "retry": true }),
             state.composer.transport.update_queued_prompt,
+            None,
         ),
         ActionKind::RemoveQueue => remove_queue(state, action),
         ActionKind::SendQueue => queue_rpc(
@@ -126,12 +127,20 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             ChatRpcMethod::SendSessionChatQueuedPrompt,
             json!({ "promptId": string_param(action, "promptId") }),
             state.composer.transport.send_queued_prompt,
+            None,
         ),
-        ActionKind::ReorderQueue => queue_rpc(
+        ActionKind::ReorderQueue => reorder_queue(
             state,
-            ChatRpcMethod::ReorderSessionChatQueue,
-            json!({ "promptIds": action.param("promptIds").cloned().unwrap_or(Value::Null) }),
-            state.composer.transport.reorder_queue,
+            action
+                .param("promptIds")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
         ),
         ActionKind::MoveQueue => move_queue(state, action),
         ActionKind::ToggleNote => toggle_note(state),
@@ -605,11 +614,29 @@ fn remove_queue(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
             return Vec::new();
         }
     }
+    let prompt_id = prompt_id.to_string();
     queue_rpc(
         state,
         ChatRpcMethod::RemoveSessionChatQueuedPrompt,
         json!({ "promptId": prompt_id }),
         state.composer.transport.remove_queued_prompt,
+        Some(prompt_id.clone()),
+    )
+}
+
+/// The strip's own order, applied optimistically and then confirmed.
+fn reorder_queue(state: &mut ChatState, visible: Vec<String>) -> Vec<Effect> {
+    if !state.composer.transport.reorder_queue || state.session.queue_prompts.is_none() {
+        state.core.fail("This session cannot queue prompts.", None);
+        return Vec::new();
+    }
+    let order = reorder_optimistically(state, &visible);
+    queue_rpc(
+        state,
+        ChatRpcMethod::ReorderSessionChatQueue,
+        json!({ "promptIds": order }),
+        state.composer.transport.reorder_queue,
+        None,
     )
 }
 
@@ -629,31 +656,56 @@ fn move_queue(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
         .into_iter()
         .map(|prompt| prompt.id)
         .collect();
-    queue_rpc(
-        state,
-        ChatRpcMethod::ReorderSessionChatQueue,
-        json!({ "promptIds": order }),
-        state.composer.transport.reorder_queue,
-    )
+    reorder_queue(state, order)
 }
 
 /// A queue mutation, refused outright when the capability is off rather than calling an endpoint
 /// that would answer 404.
+///
+/// Every mutation answers with the WHOLE authoritative queue, so an optimistic step that lost a
+/// race self-corrects on the next answer instead of needing a rollback path (`queueMutation` in
+/// `controller.ts`). The answer is adopted in `crate::composer::send::settle_queue_mutation`.
 fn queue_rpc(
     state: &mut ChatState,
     method: ChatRpcMethod,
     params: Value,
     available: bool,
+    removed: Option<String>,
 ) -> Vec<Effect> {
     if !available || state.session.queue_prompts.is_none() {
         state.core.fail("This session cannot queue prompts.", None);
         return Vec::new();
     }
+    let request_id = state.core.allocate_request_id();
+    state.composer.queue_mutation = Some((request_id, removed));
     vec![Effect::SendRpc {
-        request_id: 0,
+        request_id,
         method,
         params: Box::new(params),
     }]
+}
+
+/// The order the strip settles into before the answer lands.
+///
+/// `reorder` in `controller.ts` moves the rows itself first, because the drag must land where the
+/// user dropped it rather than a round trip later, and the ids the strip shows are only the
+/// VISIBLE ones: `sessionChatFullQueueOrder` folds them back into the whole queue.
+fn reorder_optimistically(state: &mut ChatState, visible: &[String]) -> Vec<String> {
+    let Some(queue) = state.session.queue_prompts.clone() else {
+        return visible.to_vec();
+    };
+    let order = crate::session::startup_sends::full_queue_order(&queue, visible);
+    let mut next = queue;
+    for (target, id) in order.iter().enumerate() {
+        let from = next
+            .iter()
+            .position(|prompt| prompt.get("id").and_then(Value::as_str) == Some(id.as_str()));
+        if let Some(from) = from {
+            next = move_queue_row(&next, from as isize, target as isize);
+        }
+    }
+    state.session.queue_prompts = Some(next);
+    order
 }
 
 fn toggle_note(state: &mut ChatState) -> Vec<Effect> {

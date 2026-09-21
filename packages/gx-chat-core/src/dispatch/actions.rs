@@ -175,6 +175,9 @@ pub fn owner(kind: &ActionKind) -> Option<Family> {
 /// the closing publish; only the first of them is conditional, and its condition is a state change
 /// the core's own republish rule already catches.
 pub fn dispatch(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
+    if clears_error(&action.kind) {
+        state.core.clear_error();
+    }
     let effects = match owner(&action.kind) {
         Some(Family::Session) => session::handle(state, action, context),
         Some(Family::Transcript) => transcript::handle(state, action, context),
@@ -188,6 +191,43 @@ pub fn dispatch(state: &mut ChatState, action: &UserAction, context: &ChatContex
         state.core.request_publish();
     }
     effects
+}
+
+/// Whether this action clears the refusal the composer is showing.
+///
+/// `native-host.ts` clears `operationError` just before its switch, so every gesture that can
+/// itself refuse starts from a clean line. Two groups do not reach it: the five kinds listed
+/// there, which are measurements and selection changes rather than gestures, and the arms that
+/// return earlier (the composer wheel, the open-row list, and the panel, search, terminal-tail and
+/// subagent sub-controllers, which are pure view state and never clear a send error).
+fn clears_error(kind: &ActionKind) -> bool {
+    !matches!(
+        kind,
+        ActionKind::RestoreSubmission
+            | ActionKind::ComposerSelection
+            | ActionKind::SuggestionHighlight
+            | ActionKind::MeasureComposer
+            | ActionKind::MeasureContextStatus
+            | ActionKind::ComposerScroll
+            | ActionKind::ComposerExpand
+            | ActionKind::RowDetails
+            | ActionKind::ToggleAgentFleet
+            | ActionKind::ToggleAgentTasks
+            | ActionKind::ToggleAgentTasksCompleted
+            | ActionKind::SearchOpen
+            | ActionKind::SearchClose
+            | ActionKind::SearchQuery
+            | ActionKind::SearchNext
+            | ActionKind::SearchPrevious
+            | ActionKind::TerminalTailHover
+            | ActionKind::TerminalTailToggle
+            | ActionKind::OpenSubagent
+            | ActionKind::SubagentBack
+            | ActionKind::SubagentClose
+            | ActionKind::SubagentRetry
+            | ActionKind::SubagentLoadEarlier
+            | ActionKind::Other(_)
+    )
 }
 
 /// Whether this kind reaches the closing `publish(controller.current())`.

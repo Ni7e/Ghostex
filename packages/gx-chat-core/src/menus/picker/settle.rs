@@ -110,6 +110,7 @@ pub fn settle(
         .pickers
         .model_selection
         .adopt_pending(&state.session.pending_model_selection);
+    settle_desired_receipt(state, context);
 
     // `forkBranches.ensure()` at the top of `publish`: once per chat, never again.
     if !state.pickers.fork_branches.asked {
@@ -198,6 +199,58 @@ fn settle_picker_timers(state: &mut ChatState, context: &ChatContext) -> Vec<Eff
             "scope": outcome.scope.as_str(),
         })),
     }]
+}
+
+/// `computeModelSelectionOutbox`'s second `useEffect`: the pills show where the session is HEADING.
+///
+/// While a selection is on its way (in the outbox, or pending on the server) the option controls
+/// read it rather than the agent's last confirmed values, so a pick does not snap back for the
+/// round trip. The receipt completes when the selection is acknowledged, replaced by another, or
+/// cleared.
+fn settle_desired_receipt(state: &mut ChatState, context: &ChatContext) {
+    let desired = state.pickers.model_selection.desired().cloned();
+    let current = state
+        .pickers
+        .model_selection
+        .dispatch_receipt
+        .as_ref()
+        .map(|(id, _)| id.clone());
+    match desired {
+        Some(desired) if current.as_deref() != Some(desired.id.as_str()) => {
+            if let Some((_, receipt)) = state.pickers.model_selection.dispatch_receipt.take() {
+                state.menus.options.complete(receipt, context.now_millis());
+            }
+            let mut values: Vec<(String, String)> = Vec::new();
+            if !desired.model.is_empty() {
+                let model_id = crate::menus::option_catalog::session_option_catalog(
+                    &state.menus.model_catalog,
+                    state.session.agent.as_deref(),
+                )
+                .map(|catalog| catalog.model.id.clone())
+                .unwrap_or_else(|| "model".to_string());
+                values.push((model_id, desired.model.clone()));
+            }
+            if !desired.effort.is_empty() {
+                values.push(("effort".to_string(), desired.effort.clone()));
+            }
+            for (key, value) in &desired.options {
+                if let Some(value) = value.as_str() {
+                    values.push((key.clone(), value.to_string()));
+                }
+            }
+            let receipt = state
+                .menus
+                .options
+                .begin_dispatch(values, context.now_millis());
+            state.pickers.model_selection.dispatch_receipt = Some((desired.id, receipt));
+        }
+        None => {
+            if let Some((_, receipt)) = state.pickers.model_selection.dispatch_receipt.take() {
+                state.menus.options.complete(receipt, context.now_millis());
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Arms the one timer the picker's animations and the outbox retry share.

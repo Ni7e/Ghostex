@@ -40,16 +40,22 @@ pub fn model_outbox_key(session_key: &str) -> StorageKey {
 /// count as readable at all, which is the check `modelSelectionPersistence.read` makes.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// The field ORDER is `persist`'s object literal, because the crate builds with `serde_json`'s
+/// `preserve_order` and the record is written to the user's own outbox: a selection stored by one
+/// brain and read by the other must be the same bytes.
 pub struct ModelSelectionIntent {
-    pub id: String,
     pub model: String,
     pub effort: String,
     /// `mode` and `fastMode`, the two options a selection can carry.
-    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    ///
+    /// Always on the wire, even empty: `persist` spreads `{...latest.options, ...options}`, which
+    /// is an object on every intent it writes.
+    #[serde(default)]
     pub options: Map<String, Value>,
     /// Omitted means `default`, which is what every pick did before the scope existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<ModelSelectionScope>,
+    pub id: String,
 }
 
 impl ModelSelectionIntent {
@@ -98,6 +104,12 @@ pub struct ModelSelectionState {
     pub retry_at_ms: Option<f64>,
     /// A delivery is in flight; a second one never starts while one is running.
     pub delivering: bool,
+    /// The intent id the option pills are currently showing as dispatched, and its receipt.
+    ///
+    /// `computeModelSelectionOutbox`'s second `useEffect`: while a selection is on its way, the
+    /// pills read it rather than the agent's last confirmed values, and the receipt completes when
+    /// the selection is acknowledged or replaced.
+    pub dispatch_receipt: Option<(String, crate::menus::option_store::DispatchReceipt)>,
 }
 
 impl ModelSelectionState {

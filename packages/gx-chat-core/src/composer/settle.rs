@@ -32,6 +32,9 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
                     })
                     .or_else(|| {
                         crate::composer::send::settle_handoff_acknowledgement(state, *request_id)
+                    })
+                    .or_else(|| {
+                        crate::composer::send::settle_queue_mutation(state, *request_id, outcome)
                     });
             match claimed {
                 Some(round) => effects.extend(round),

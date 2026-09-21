@@ -151,6 +151,14 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
                 context.random_units[slot] = draw.as_f64().unwrap_or(0.0);
             }
         }
+        // `u` is every `crypto.randomUUID()` the live run read during this call. The core takes
+        // them as numbers so its context stays `Copy`; parsing the recorded text back and letting
+        // `ChatContext::random_id` print it again round-trips to the same string.
+        if let Some(ids) = record.get("u").and_then(Value::as_array) {
+            for (slot, id) in ids.iter().take(context.random_ids.len()).enumerate() {
+                context.random_ids[slot] = id.as_str().map(uuid_bits).unwrap_or_default();
+            }
+        }
 
         let Some(call) = BridgeCall::parse(method, &args) else {
             if kind == "in" {
@@ -238,6 +246,15 @@ fn fingerprint(text: &str) -> String {
         fnv(text, 0x811c_9dc5),
         fnv(text, 0x0f1b_bcd9)
     )
+}
+
+/// The 128 bits of a canonical UUID string, so the core can print the same one back.
+fn uuid_bits(text: &str) -> u128 {
+    let mut bits = 0u128;
+    for digit in text.chars().filter_map(|unit| unit.to_digit(16)) {
+        bits = (bits << 4) | u128::from(digit);
+    }
+    bits
 }
 
 fn fnv(text: &str, seed: u32) -> u32 {

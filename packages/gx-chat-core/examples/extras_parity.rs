@@ -52,6 +52,7 @@ fn main() -> ExitCode {
         now_ms: now,
         utc_offset_minutes: 0,
         random_units: [0.0; 2],
+        random_ids: [0; 2],
     };
 
     let mut checked = 0usize;

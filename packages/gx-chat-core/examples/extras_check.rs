@@ -475,6 +475,7 @@ impl Core {
                 now_ms: 1_790_078_400_000.0,
                 utc_offset_minutes: 0,
                 random_units: [0.0; 2],
+                random_ids: [0; 2],
             },
             last_effects: Vec::new(),
             document: Value::Null,

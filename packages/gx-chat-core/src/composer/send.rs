@@ -382,6 +382,37 @@ pub fn settle_request(
     Some(effects)
 }
 
+/// A queue mutation answered.
+///
+/// `queueMutation` in `controller.ts`: every endpoint hands back the whole authoritative queue, so
+/// the strip is replaced rather than patched and an optimistic step that lost a race self-corrects
+/// here instead of needing a rollback path. A remove also drops the echo that had become that row.
+pub fn settle_queue_mutation(
+    state: &mut ChatState,
+    request_id: u64,
+    outcome: &crate::wire::RpcOutcome,
+) -> Option<Vec<Effect>> {
+    let (pending, removed) = state.composer.queue_mutation.clone()?;
+    if pending != request_id {
+        return None;
+    }
+    state.composer.queue_mutation = None;
+    match outcome {
+        crate::wire::RpcOutcome::Ok { result } => {
+            if let Some(queue) = result.get("queue").and_then(Value::as_array) {
+                state.session.queue_prompts = Some(queue.clone());
+            }
+            if let Some(removed) = removed.as_deref() {
+                sends::drop_queued_send(state, removed);
+            }
+        }
+        crate::wire::RpcOutcome::Err { message, code, .. } => {
+            state.core.fail(message.clone(), code.clone());
+        }
+    }
+    Some(Vec::new())
+}
+
 /// The stored write or flush the head phase was waiting for answered.
 pub fn settle_storage(
     state: &mut ChatState,

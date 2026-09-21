@@ -77,7 +77,7 @@ run() {
 }
 
 if [ "$regenerate" = "1" ]; then
-  for generator in synthetic-recording synthetic-c synthetic-e1 synthetic-composer synthetic-b extras-parity; do
+  for generator in synthetic-recording synthetic-c synthetic-e1 synthetic-send synthetic-composer synthetic-b extras-parity; do
     run "generate $generator" bun "$root/tooling/gx-chat-core/$generator.ts"
   done
   run "generate samples" bun "$root/tooling/gx-chat-core/sample-document.ts"

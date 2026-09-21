@@ -163,7 +163,7 @@ fn select_option(state: &mut ChatState, action: &UserAction, context: &ChatConte
         Some(model_pick_scope(options.model_provider, secondary)),
     );
     if let Some(queued) = queued {
-        return queue_effects(state, queued);
+        return queue_effects(state, context, queued);
     }
     if state.menus.option_dispatch_id.is_some() || crate::session::working::is_working(state) {
         return Vec::new();
@@ -198,43 +198,56 @@ fn select_option(state: &mut ChatState, action: &UserAction, context: &ChatConte
     crate::menus::dispatch_run::begin(state, context, plan.steps, receipt)
 }
 
-/// A choice the daemon queues rather than the TUI accepting: family e2 owns the queue itself, so
-/// the decision is recorded and handed on.
-fn queue_effects(state: &mut ChatState, queued: QueuedOption) -> Vec<Effect> {
-    match queued {
-        QueuedOption::Swallowed => Vec::new(),
+/// A choice the daemon queues rather than the TUI accepting.
+///
+/// `queueSessionChatOption` hands it to `modelSelection.select` / `.selectOptions`, which is the
+/// durable OUTBOX, not the endpoint: the record survives a disconnect and the pills read it as
+/// where the session is heading. Delivery is `native-options.ts`'s own `selectSessionChatModel`
+/// lane, and it is not wired yet (see the report): nothing here calls the endpoint.
+///
+/// The intent's id is the host's: `crypto.randomUUID()` in the TypeScript, and
+/// `ChatContext::random_id` here, which is the turn's own draw of random bits
+/// (`docs/2026-09-21/rust-chat/SEAM.md` section 7.3).
+fn queue_effects(
+    state: &mut ChatState,
+    context: &ChatContext,
+    queued: QueuedOption,
+) -> Vec<Effect> {
+    let (selection, options, scope) = match queued {
+        QueuedOption::Swallowed => return Vec::new(),
         QueuedOption::SelectOptions { mode, fast_mode } => {
-            let mut params = serde_json::Map::new();
+            let mut options = serde_json::Map::new();
             if let Some(mode) = mode {
-                params.insert("mode".to_string(), Value::String(mode));
+                options.insert("mode".to_string(), Value::String(mode));
             }
             if let Some(fast_mode) = fast_mode {
-                params.insert("fastMode".to_string(), Value::String(fast_mode));
+                options.insert("fastMode".to_string(), Value::String(fast_mode));
             }
-            let request_id = state.core.allocate_request_id();
-            vec![Effect::SendRpc {
-                request_id,
-                method: ChatRpcMethod::SelectSessionChatModel,
-                params: Box::new(Value::Object(params)),
-            }]
+            (
+                state.pickers.model_selection.options_only_selection(),
+                options,
+                None,
+            )
         }
         QueuedOption::SelectModel {
             model,
             effort,
             scope,
-        } => {
-            let mut params = serde_json::Map::new();
-            params.insert("model".to_string(), Value::String(model));
-            params.insert("effort".to_string(), Value::String(effort));
-            if let Some(scope) = scope {
-                params.insert("scope".to_string(), Value::String(scope));
-            }
-            let request_id = state.core.allocate_request_id();
-            vec![Effect::SendRpc {
-                request_id,
-                method: ChatRpcMethod::SelectSessionChatModel,
-                params: Box::new(Value::Object(params)),
-            }]
-        }
-    }
+        } => (
+            crate::menus::picker::ModelPickerSelection { model, effort },
+            serde_json::Map::new(),
+            scope.and_then(|scope| crate::menus::picker::ModelSelectionScope::from_wire(&scope)),
+        ),
+    };
+    let intent = state.pickers.model_selection.persist(
+        selection,
+        Some(&options),
+        scope,
+        context.random_id(0),
+    );
+    vec![Effect::WriteStorage {
+        key: crate::menus::picker::selection::model_outbox_key(&state.identity.session_key),
+        value: Some(serde_json::to_string(&intent).unwrap_or_else(|_| "null".to_string())),
+        durable: true,
+    }]
 }
