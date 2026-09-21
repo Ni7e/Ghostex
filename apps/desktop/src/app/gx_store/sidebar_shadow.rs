@@ -485,9 +485,10 @@ impl GhostexGpuiApp {
         // The runtime facts channel rides the same periodic path, and for the same reason: its
         // zeros are what says it is alive and agreeing (gx_store/diagnostics_runtime_facts.rs).
         let runtime_facts = self.gx_store.runtime_facts.counters;
+        let runtime_route = self.gx_store.runtime_route;
         self.gx_store
             .diagnostics
-            .runtime_facts_summary(runtime_facts);
+            .runtime_facts_summary(runtime_facts, runtime_route);
         // The workspace session groups counters ride this path too, because it is the one that is
         // proved to reach the log in a quiet run: everything through `record()` is silent until the
         // shared settings snapshot is warm, and the two places this used to be emitted from (a push

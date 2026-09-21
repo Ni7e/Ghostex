@@ -1,5 +1,5 @@
 //! The workspace session groups document as an instance of the shared guard, plus the two scripts
-//! the bridge to the sidebar page is made of.
+//! the bridge to the sidebar runtime is made of.
 //!
 //! CDXC:Sessions 2026-09-21 WHY:
 //! The guard this document needs is the same guard the project collections document and the Spaces
@@ -23,7 +23,7 @@ use crate::doc_sync::{DocumentSync, EmptyEchoRule, SyncPolicy, SyncedDocument};
 
 use super::document::WorkspaceGroupsDocument;
 
-/// The `type` of the message the sidebar page posts when it hands an edited document over.
+/// The `type` of the message the sidebar runtime posts when it hands an edited document over.
 ///
 /// A constant shared by the host's routing arm and the gate, because the two ends of a bridge
 /// agreeing on a string is the one thing neither side can check alone: piece 3d shipped an entire
@@ -34,26 +34,26 @@ pub const WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE: &str = "persistWorkspaceGroups
 /// [`workspace_groups_hand_back_script`] serializes it with quotes and the substitution is exact.
 pub const WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER: &str = "__GX_WORKSPACE_GROUPS_STATE__";
 
-/// The script the host runs in the sidebar page to ask it to post its own document.
+/// The script the host runs in the sidebar runtime to ask it to post its own document.
 ///
-/// Used once, after a read of the stored key that failed while the page was editing: the page's
-/// copy is then the only one carrying that edit, and handing the stored document back would replace
-/// it. The page answers with an ordinary `persistWorkspaceGroups`, so the recovery and every other
-/// edit take the same path.
+/// Used once, after a read of the stored key that failed while the runtime was editing: the
+/// runtime's copy is then the only one carrying that edit, and handing the stored document back
+/// would replace it. It answers with an ordinary `persistWorkspaceGroups`, so the recovery and
+/// every other edit take the same path.
 pub fn workspace_groups_request_script() -> String {
     "(function(bridge) { if (bridge && bridge.requestWorkspaceGroups) bridge.requestWorkspaceGroups(); })(window.ghostexGpui); undefined;".to_string()
 }
 
-/// The script the host runs in the sidebar page to hand the held document back.
+/// The script the host runs in the sidebar runtime to hand the held document back.
 ///
 /// Here rather than in the desktop crate so a harness can evaluate the REAL text against the real
-/// page code: the function name, the parking branch and the guard on a bridge that is not there yet
-/// are all things only an end-to-end run can check, and everything else about this piece is
+/// runtime code: the function name, the parking branch and the guard on a bridge that is not there
+/// yet are all things only an end-to-end run can check, and everything else about this piece is
 /// gateable without it.
 ///
-/// The parking branch is not a fallback that hides a failure: the controller drains
-/// `pendingWorkspaceGroups` when it installs the hook, so a document that arrives before the page
-/// has connected its sidebar is delivered late rather than lost.
+/// The parking branch is not a fallback that hides a failure: `installGpuiWorkspaceGroupsHandBack`
+/// drains `pendingWorkspaceGroups` when it installs the hook, so a document that arrives before
+/// the runtime has started is delivered late rather than lost.
 pub fn workspace_groups_hand_back_script(state: &Value) -> String {
     format!(
         "(function(bridge, state) {{ if (!bridge) return; if (bridge.applyWorkspaceGroups) bridge.applyWorkspaceGroups(state); else bridge.pendingWorkspaceGroups = state; }})(window.ghostexGpui, {state}); undefined;"

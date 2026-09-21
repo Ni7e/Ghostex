@@ -126,21 +126,11 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     previousFocusedSessionId = focused;
     publish();
   };
-  // The app owns the stored workspace session groups document and hands the held one back after
-  // every change, so this page's copy is never the stale base its next edit is computed from. A
-  // document that arrived before this ran is parked on the bridge and taken here.
-  bridge.applyWorkspaceGroups = (state) => {
-    runtime.applyWorkspaceGroupsFromHost(state);
-  };
-  bridge.requestWorkspaceGroups = () => {
-    runtime.persistWorkspaceGroups();
-  };
-  if (bridge.pendingWorkspaceGroups !== undefined) {
-    const parked = bridge.pendingWorkspaceGroups;
-    delete bridge.pendingWorkspaceGroups;
-    runtime.applyWorkspaceGroupsFromHost(parked);
-  }
-  // The same hand-back for the project collections document and the Spaces document, which the app
+  // The workspace session groups hand-back and request are the RUNTIME's since M4d part 2 step 5
+  // (gxserver-runtime/workspace-groups-sync.ts): it is the half that still edits that document,
+  // and the app's two scripts must keep working once this page is gone.
+  //
+  // The hand-back for the project collections document and the Spaces document, which the app
   // has owned since M5 piece 7d. Both are parked on the bridge when they arrive before this runs
   // and drained here, so a document is delivered late rather than lost.
   bridge.applyProjectCollections = (state) => {
@@ -226,8 +216,6 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     unsubscribe();
     runtime.messageSource.removeEventListener('message', receive);
     delete bridge.onNativeSidebarCommand;
-    delete bridge.applyWorkspaceGroups;
-    delete bridge.requestWorkspaceGroups;
     delete bridge.applyProjectCollections;
     delete bridge.applySidebarSpaces;
     delete bridge.requestProjectCollections;

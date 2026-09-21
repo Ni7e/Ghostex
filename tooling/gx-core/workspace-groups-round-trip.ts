@@ -109,8 +109,9 @@ export function runWorkspaceGroupsRoundTrip(
   (globalThis.window as any).webkit = {
     messageHandlers: { ghostexNativeHost: { postMessage: (message: Json) => posts.push(message) } },
   };
-  // The bridge object the host's script reaches for. The hook is installed the way `connectNativeSidebar`
-  // installs it, and drained the way it drains `pendingWorkspaceGroups`.
+  // The bridge object the host's script reaches for. The hook is installed the way
+  // `installGpuiWorkspaceGroupsHandBack` (gxserver-runtime/workspace-groups-sync.ts) installs it,
+  // and drained the way it drains `pendingWorkspaceGroups`.
   const gpuiBridge: Json = {};
   const previousGpui = (globalThis.window as any).ghostexGpui;
   (globalThis.window as any).ghostexGpui = gpuiBridge;

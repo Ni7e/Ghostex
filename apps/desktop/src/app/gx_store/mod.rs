@@ -42,6 +42,8 @@
 //! `sidebar_ui_paths.rs` holds the three routes into the sidebar's own state that are NOT
 //! sidebar commands (the per-Space session memory, the Space-editor delete, and the project slot
 //! hotkey), and `sidebar_slot_jump.rs` the rest of that hotkey's jump, its focus and its reveal;
+//! `sidebar_runtime_route.rs` sends a command the store did not perform itself straight to the
+//! runtime, which is where the sidebar page used to forward it;
 //! `runtime_facts.rs` ingests the runtime's one-way channel of the facts the list still borrows
 //! from the old projection (the HUD, a project's git numbers, the two armed timers and a reveal
 //! request) and compares it with the publish, with `diagnostics_runtime_facts.rs` writing its
@@ -86,6 +88,7 @@ mod sidebar_open;
 mod sidebar_reload;
 mod sidebar_remote;
 mod sidebar_remote_focus;
+mod sidebar_runtime_route;
 mod sidebar_scratch_compare;
 mod sidebar_session_slot;
 mod sidebar_shadow;

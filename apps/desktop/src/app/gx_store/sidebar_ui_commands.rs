@@ -32,7 +32,11 @@ impl GhostexGpuiApp {
         let Some(intent) = self.sidebar_command_intent(command) else {
             return false;
         };
-        self.gx_store_apply_sidebar_ui_intent(intent, cx)
+        self.gx_store_apply_sidebar_ui_intent(intent, cx);
+        // Whether the command WAS one of the sidebar's own, not whether it changed anything: the
+        // caller uses it to decide there is nothing left for the runtime to be told
+        // (gx_store/sidebar_runtime_route.rs).
+        true
     }
 
     fn sidebar_command_intent(&mut self, command: &Value) -> Option<SidebarUiIntent> {

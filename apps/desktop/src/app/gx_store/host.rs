@@ -149,6 +149,8 @@ pub(crate) struct GxStoreHost {
     pub(super) added_project: super::added_project::AddedProjectHost,
     /// The last-seen copy of every remote machine: which ones owe a write, and what is unwritten.
     pub(crate) last_seen: super::remote_last_seen::RemoteLastSeenWriter,
+    /// What the fall-through of the sidebar dispatch did with each command.
+    pub(super) runtime_route: super::sidebar_runtime_route::SidebarRuntimeRouteCounters,
     /// The runtime's one-way facts channel, beside the publish it is compared with.
     pub(crate) runtime_facts: super::runtime_facts::SidebarRuntimeFacts,
     /// The collection a project move just created, which the renderer opens its Rename on. Held

@@ -105,7 +105,7 @@ import type {
   GpuiWorkspaceTerminalTitleChangedPayload,
 } from './types-and-protocol';
 import type { GpuiSidebarRuntimeWorkspaceGroupMethods } from './workspace-groups-sync';
-import { gpuiSidebarRuntimeWorkspaceGroupMethods } from './workspace-groups-sync';
+import { gpuiSidebarRuntimeWorkspaceGroupMethods, installGpuiWorkspaceGroupsHandBack } from './workspace-groups-sync';
 import type { GpuiSidebarRuntimeWorktreeMethods } from './worktrees';
 import { gpuiSidebarRuntimeWorktreeMethods } from './worktrees';
 import type { WebviewApi } from '@/packages/core-ui/webview-api';
@@ -772,6 +772,7 @@ export class GpuiSidebarRuntime {
       const message = asGpuiSidebarCommand(payload);
       if (message) void this.handleSidebarMessage(message);
     };
+    installGpuiWorkspaceGroupsHandBack(this);
     gpuiBridge.onWorkspaceTerminalBell = (payload) => {
       void this.handleGpuiWorkspaceTerminalBell(payload);
     };

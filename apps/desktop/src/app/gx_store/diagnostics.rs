@@ -63,7 +63,14 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_ui_summary_written: SidebarUiCounters,
     /// The runtime facts channel's periodic line (`diagnostics_runtime_facts.rs`).
     pub(super) runtime_facts_summary_at: Option<Instant>,
-    pub(super) runtime_facts_summary_written: Option<super::runtime_facts::RuntimeFactsCounters>,
+    #[allow(clippy::type_complexity)]
+    pub(super) runtime_facts_summary_written: Option<(
+        super::runtime_facts::RuntimeFactsCounters,
+        super::sidebar_runtime_route::SidebarRuntimeRouteCounters,
+    )>,
+    /// The budget of `gxStore.sidebarCommandUnroutable`, which repeats for as long as the command
+    /// that has no owner keeps being posted.
+    pub(super) unroutable_command_warnings: u32,
     sidebar_refusal_warnings: u32,
     workspace_groups_records: u32,
     workspace_groups_summary_at: Option<Instant>,

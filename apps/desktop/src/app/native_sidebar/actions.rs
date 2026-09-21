@@ -233,28 +233,26 @@ impl GhostexGpuiApp {
         if self.gx_store_focus_local_row(&command, cx) {
             return;
         }
-        let Some(service) = self.sidebar.clone() else {
+        if self.sidebar.is_none() {
             return;
-        };
+        }
         self.stage_agent_launch_placeholder(&command, cx);
         // The Space a `selectSpace` is LEAVING, read before the intent below moves it: the restore
         // that follows only runs when the selection really changed (gx_store/space_switch.rs).
         let space_switch = self.gx_store_space_switch_before(&command);
         // A command that moves the sidebar's own state (collapse, Space, filters, hidden items,
-        // selection) moves the Rust state here, before it is sent on: the list is rebuilt from it
-        // in the same frame, and the old projection keeps its own copy for the menus it owns until
-        // M4c (gx_store/sidebar_ui_commands.rs).
-        self.gx_store_note_sidebar_command(&command, cx);
+        // selection) moves the Rust state here, and that IS its whole answer: the runtime has no
+        // arm for any of them (gx_store/sidebar_ui_commands.rs).
+        let ui_only = self.gx_store_note_sidebar_command(&command, cx);
         // Close Project is focus-moving work the page used to do on the message's way past: the
         // store names the session the close focuses, from the list it draws
         // (gx_store/sidebar_close_project.rs).
         let command = self.gx_store_add_close_project_successor(command);
         // A sidebar command can change focus in the runtime, so it must not be handled while the runtime still holds an older focus stamp than the store (gx_store/burst.rs).
         self.gx_store_flush_old_runtime_tell(cx);
-        let script = format!("window.ghostexGpui.onNativeSidebarCommand({command}); undefined;");
-        service.update(cx, |surface, _| {
-            surface.execute_app_owned_script(&script);
-        });
+        // What is left is the runtime's, and it goes straight there: the sidebar page that used to
+        // route it is being deleted (gx_store/sidebar_runtime_route.rs).
+        self.gx_store_route_sidebar_command_to_runtime(&command, ui_only, cx);
         // The Space the switch landed on reopens the session it was last left on, from the list the
         // intent above has just rebuilt. It posts the same `focusSession` the page posted, after
         // the page has been told, so the order of the two messages is the one the runtime already

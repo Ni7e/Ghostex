@@ -27,6 +27,7 @@ import {
 } from './constants';
 import type { GpuiWorkspaceSessionGroupsState } from '../workspace-session-groups';
 import type { GpuiSidebarRuntime } from './core';
+import type { NativeSidebarBridge } from '@/packages/shared/native-sidebar';
 import { createGpuiPresentationProjectProjectionMetadata } from './helpers/presentation-projection';
 import {
   createGpuiRemotePresentationGroupId,
@@ -110,6 +111,29 @@ function canonicalWorkspaceGroupsJson(state: GpuiWorkspaceSessionGroupsState): s
         )
       : value
   );
+}
+
+/**
+ * CDXC:Sessions 2026-09-21 WHY:
+ * The app's two scripts for this document (`workspace_groups_hand_back_script` and
+ * `workspace_groups_request_script`, packages/gx-core/src/workspace_groups/sync.rs) call these two
+ * bridge members, and the sidebar PAGE used to install them on its way past. The page is being
+ * deleted and the runtime is the half that still edits the document, so it installs them itself
+ * and drains a document that arrived before it ran.
+ */
+export function installGpuiWorkspaceGroupsHandBack(runtime: GpuiSidebarRuntime): void {
+  const bridge = (window.ghostexGpui = window.ghostexGpui ?? {}) as typeof window.ghostexGpui & NativeSidebarBridge;
+  bridge.applyWorkspaceGroups = (state) => {
+    runtime.applyWorkspaceGroupsFromHost(state);
+  };
+  bridge.requestWorkspaceGroups = () => {
+    runtime.persistWorkspaceGroups();
+  };
+  if (bridge.pendingWorkspaceGroups !== undefined) {
+    const parked = bridge.pendingWorkspaceGroups;
+    delete bridge.pendingWorkspaceGroups;
+    runtime.applyWorkspaceGroupsFromHost(parked);
+  }
 }
 
 export const gpuiSidebarRuntimeWorkspaceGroupMethods = {
