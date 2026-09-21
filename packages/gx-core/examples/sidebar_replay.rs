@@ -52,7 +52,7 @@ fn main() -> ExitCode {
 
     let churned = run_pass("churned inputs", &text, domain_projects.clone(), true);
     let steady = run_pass("steady inputs", &text, domain_projects, false);
-    let last_seen = last_seen_transition(&text);
+    let last_seen = last_seen_transition(&text, &path);
 
     if churned.mismatches == 0 && steady.mismatches == 0 && last_seen {
         ExitCode::SUCCESS
@@ -355,7 +355,11 @@ fn run_pass(
 /// 4. The live SNAPSHOT replaces them whole even though its revision is lower, and the list built
 ///    incrementally across the transition equals one built from scratch afterwards, which is the
 ///    cache question three bugs of this shape have already been found on.
-fn last_seen_transition(frames: &str) -> bool {
+///
+/// It also carries the WRITE half's only checks on real rows: what the store would store for this
+/// machine, against the rows it was given (`stored_round_trip`) and against what `JSON.stringify`
+/// makes of the same rows (`stringify_round_trip`).
+fn last_seen_transition(frames: &str, frames_path: &str) -> bool {
     let Some(stored) = first_snapshot(frames) else {
         println!(
             "\n== last-seen transition ==\nno snapshot frame in the recording, nothing measured"
@@ -388,6 +392,7 @@ fn last_seen_transition(frames: &str) -> bool {
     // row between them on every publish and a field the wire type drops is stripped from the copy
     // the old sidebar still reads.
     let seeded_round_trip = stored_round_trip(&core, &machine, &stored, 9_000);
+    let seeded_stringify = stringify_round_trip(&core, &machine, frames_path, 9_000);
 
     // A live delta and a "current" reply, both at a revision LOWER than the stored one, which is
     // what a daemon that restarted sends. Neither may be believed.
@@ -421,6 +426,7 @@ fn last_seen_transition(frames: &str) -> bool {
         .loaded(&machine)
         .is_some_and(|loaded| !loaded.last_seen && loaded.revision == 12);
     let live_round_trip = stored_round_trip(&core, &machine, &stored, 12);
+    let live_stringify = stringify_round_trip(&core, &machine, frames_path, 12);
     let fresh = SidebarViewModel::build_from_scratch(&core, &inputs, now_ms);
     let same = fresh == *model.view();
 
@@ -428,6 +434,14 @@ fn last_seen_transition(frames: &str) -> bool {
         ("the seed draws rows", seeded_rows > 0),
         ("the seeded copy writes back unchanged", seeded_round_trip),
         ("the live copy writes back unchanged", live_round_trip),
+        (
+            "the seeded copy is what JSON.stringify writes",
+            seeded_stringify,
+        ),
+        (
+            "the live copy is what JSON.stringify writes",
+            live_stringify,
+        ),
         (
             "every seeded group is faded",
             seeded_faded && seeded_rows > 0,
@@ -452,9 +466,66 @@ fn last_seen_transition(frames: &str) -> bool {
     passed
 }
 
+/// Whether what the store would store for this machine is what `JSON.stringify` makes of the same
+/// rows, byte for byte.
+///
+/// The check above cannot see this and that is why this one exists: it puts both sides through the
+/// same Rust writer, so the two writers' agreement on TEXT was never measured and a `sidebarOrder`
+/// of zero was reaching the row as `0.0` where the sidebar writes `0`. The expected side here is
+/// produced by `JSON.stringify` itself, in `tooling/gx-core/last-seen-stringify.ts`.
+///
+/// A run that cannot produce the artefact FAILS. Zero coverage is not a pass: the whole point is
+/// that the previous gate looked green while measuring nothing.
+fn stringify_round_trip(
+    core: &Core,
+    machine: &MachineId,
+    frames_path: &str,
+    revision: i64,
+) -> bool {
+    let script = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tooling/gx-core/last-seen-stringify.ts"
+    );
+    let produced = std::process::Command::new("bun")
+        .args([script, frames_path, &revision.to_string()])
+        .output();
+    let expected = match produced {
+        Ok(output) if output.status.success() => match String::from_utf8(output.stdout) {
+            Ok(text) if !text.is_empty() => text,
+            _ => {
+                println!("  the JSON.stringify artefact is empty or not UTF-8");
+                return false;
+            }
+        },
+        Ok(output) => {
+            println!(
+                "  bun {script} failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            return false;
+        }
+        Err(error) => {
+            println!("  cannot run bun for the JSON.stringify artefact: {error}");
+            return false;
+        }
+    };
+    let Some(written) = core.presentation().machine(machine).and_then(|entry| {
+        entry
+            .to_snapshot()
+            .map(|snapshot| ghostex_gx_core::snapshot_storage_json(&snapshot))
+    }) else {
+        return false;
+    };
+    if expected == written {
+        return true;
+    }
+    report_difference("JSON.stringify", &expected, &written);
+    false
+}
+
 /// Whether what the store would STORE for this machine is what it was given, byte for byte.
 ///
-/// Both sides are put through `sorted_json` because the comparison is about the payload and not
+/// Both sides are put through `json_stringify` because the comparison is about the payload and not
 /// about whichever map `serde_json` was built with; the writer sorts for the same reason. A field
 /// the wire type does not carry, a `null` normalized to a default, a row left out of `Rows` and a
 /// differently ordered array all fail this.
@@ -491,12 +562,17 @@ fn stored_round_trip(core: &Core, machine: &MachineId, stored: &Value, revision:
             )
         });
     }
-    let expected = ghostex_gx_core::sorted_json(&expected).to_string();
+    let expected = ghostex_gx_core::json_stringify(&expected);
     if expected == written {
         return true;
     }
-    // Says WHERE, because "not byte identical" over a 400 KB payload is not a finding anyone can
-    // act on. The first byte that differs plus its surroundings names the field.
+    report_difference("stored copy", &expected, &written);
+    false
+}
+
+/// Says WHERE, because "not byte identical" over a 400 KB payload is not a finding anyone can act
+/// on. The first byte that differs plus its surroundings names the field.
+fn report_difference(label: &str, expected: &str, written: &str) {
     let at = expected
         .bytes()
         .zip(written.bytes())
@@ -513,10 +589,9 @@ fn stored_round_trip(core: &Core, machine: &MachineId, stored: &Value, revision:
         }
         text[start..end].to_string()
     };
-    println!("  stored copy differs at byte {at}");
-    println!("    read  …{}…", window(&expected));
-    println!("    write …{}…", window(&written));
-    false
+    println!("  {label} differs at byte {at}");
+    println!("    read  …{}…", window(expected));
+    println!("    write …{}…", window(written));
 }
 
 /// The first `presentationSnapshot` of the recording, as its raw `snapshot` object.

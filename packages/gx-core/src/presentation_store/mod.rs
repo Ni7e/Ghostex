@@ -10,7 +10,7 @@ mod store;
 
 pub use apply::SnapshotOrigin;
 pub use loaded::LoadedPresentation;
-pub use snapshot_out::{snapshot_storage_json, sorted_json};
+pub use snapshot_out::{json_stringify, snapshot_storage_json};
 pub use store::{
     MachinePresentation, PresentationState, PresentationStore, SideState, SideStateUpdate,
 };

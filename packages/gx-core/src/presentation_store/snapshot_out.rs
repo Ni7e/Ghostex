@@ -25,7 +25,7 @@
 //! packages/gx-core/src/presentation_store/apply.rs (`seed_last_seen`, which reads one back in).
 
 use ghostex_gx_protocol::{PresentationSession, PresentationSnapshot};
-use serde_json::{Map, Value};
+use serde_json::{Number, Value};
 
 use super::store::MachinePresentation;
 
@@ -42,24 +42,185 @@ use super::store::MachinePresentation;
 /// flipping the row and its `updatedAt` on every publish.
 pub fn snapshot_storage_json(snapshot: &PresentationSnapshot) -> String {
     let value = serde_json::to_value(snapshot).unwrap_or(Value::Null);
-    sorted_json(&value).to_string()
+    json_stringify(&value)
 }
 
-/// The same value with every object's keys in byte order, recursively.
-pub fn sorted_json(value: &Value) -> Value {
+/// The value written the way `JSON.stringify` writes it, with every object's keys in byte order.
+///
+/// CDXC:RemoteMachines 2026-09-21 WHY:
+/// `serde_json`'s own `to_string` is NOT `JSON.stringify` and the difference is not cosmetic: it
+/// writes an f64 through `ryu`, so a `sidebarOrder` of zero reaches the row as `0.0` where
+/// `JSON.stringify` writes `0`. That one character is why the "both writers store the same bytes"
+/// claim was false and why every publish rewrote the row instead of being skipped as unchanged (a
+/// real stored row of 43,012 characters came back as 43,048, first difference at a `sidebarOrder`).
+/// So the text is emitted here rather than by `serde_json`, and numbers follow ECMAScript
+/// `Number::toString`, which differs from `ryu` in four places: an integral value has no `.0`,
+/// negative zero prints as `0`, the exponent form starts at 1e21 rather than 1e16 and stops at
+/// 1e-7 rather than 1e-6.
+pub fn json_stringify(value: &Value) -> String {
+    let mut out = String::new();
+    write_value(&mut out, value);
+    out
+}
+
+fn write_value(out: &mut String, value: &Value) {
     match value {
+        Value::Null => out.push_str("null"),
+        Value::Bool(true) => out.push_str("true"),
+        Value::Bool(false) => out.push_str("false"),
+        Value::Number(number) => write_number(out, number),
+        Value::String(text) => write_string(out, text),
+        Value::Array(items) => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write_value(out, item);
+            }
+            out.push(']');
+        }
         Value::Object(map) => {
             let mut keys: Vec<&String> = map.keys().collect();
             keys.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
-            let mut sorted = Map::new();
-            for key in keys {
-                sorted.insert(key.clone(), sorted_json(&map[key]));
+            out.push('{');
+            for (index, key) in keys.into_iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write_string(out, key);
+                out.push(':');
+                write_value(out, &map[key]);
             }
-            Value::Object(sorted)
+            out.push('}');
         }
-        Value::Array(items) => Value::Array(items.iter().map(sorted_json).collect()),
-        other => other.clone(),
     }
+}
+
+/// One number, as `JSON.stringify` writes it.
+///
+/// Every number goes through `f64` on purpose, integers included: the copy this has to match was
+/// produced by `JSON.parse` of the daemon's frame followed by `JSON.stringify`, and `JSON.parse`
+/// has no integer type. Below 2^53 that changes nothing, because an `i64` of that size is exact as
+/// an `f64` and prints as the same digits; above it, printing what JavaScript would print is the
+/// point.
+fn write_number(out: &mut String, number: &Number) {
+    match number.as_f64() {
+        Some(value) => out.push_str(&js_number(value)),
+        // Unreachable without `serde_json`'s `arbitrary_precision`, which nothing here enables.
+        None => out.push_str(&number.to_string()),
+    }
+}
+
+/// ECMAScript `Number::toString` at radix 10 (ECMA-262, "Number::toString"), which is what
+/// `JSON.stringify` emits for a finite number.
+///
+/// CDXC:RemoteMachines 2026-09-21 WHY:
+/// The digits come from `serde_json`'s own formatter (`ryu`) and NOT from Rust's `{}` or `{:e}`,
+/// which was the first cut and was wrong 68 times in 400,044 random values: all three emit the
+/// shortest digits that round-trip, but where two candidates are exactly equidistant `ryu` and V8
+/// both round the last digit to even while Rust's rounds away from zero, so `{:e}` writes
+/// `1658206780088562.3` where JavaScript writes `1658206780088562.2`. What this function adds on
+/// top of `ryu` is only where ECMAScript puts the decimal point.
+fn js_number(value: f64) -> String {
+    // `JSON.stringify` writes a non-finite number as `null`; `serde_json` cannot hold one in a
+    // `Value` at all, so this is the shape of the answer rather than a case that arises.
+    if !value.is_finite() {
+        return "null".to_string();
+    }
+    // Covers negative zero, which ECMAScript prints as `0`.
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    let negative = value < 0.0;
+    let shortest = Number::from_f64(value.abs())
+        .map(|number| number.to_string())
+        .unwrap_or_else(|| value.abs().to_string());
+    let (digits, point) = shortest_parts(&shortest);
+    let digits = digits.as_str();
+    // The spec's `k` and `n`: the value is `digits` (k of them) read as `0.digits * 10^n`.
+    let count = digits.len() as i32;
+    let mut out = String::new();
+    if negative {
+        out.push('-');
+    }
+    if count <= point && point <= 21 {
+        out.push_str(digits);
+        out.extend(std::iter::repeat_n('0', (point - count) as usize));
+    } else if 0 < point && point <= 21 {
+        out.push_str(&digits[..point as usize]);
+        out.push('.');
+        out.push_str(&digits[point as usize..]);
+    } else if -6 < point && point <= 0 {
+        out.push_str("0.");
+        out.extend(std::iter::repeat_n('0', (-point) as usize));
+        out.push_str(digits);
+    } else {
+        out.push_str(&digits[..1]);
+        if count > 1 {
+            out.push('.');
+            out.push_str(&digits[1..]);
+        }
+        out.push('e');
+        out.push(if point > 0 { '+' } else { '-' });
+        out.push_str(&(point - 1).abs().to_string());
+    }
+    out
+}
+
+/// `serde_json`'s rendering of a positive finite f64 read as the spec's `digits` and `n`, where the
+/// value is `0.digits * 10^n`.
+///
+/// Both of that rendering's forms are handled: `123.45`, which always carries a decimal point, and
+/// `1.2345e+21`, whose exponent always carries its sign.
+fn shortest_parts(shortest: &str) -> (String, i32) {
+    let (mantissa, exponent) = match shortest.split_once('e') {
+        Some((mantissa, exponent)) => (mantissa, exponent.parse::<i32>().unwrap_or(0)),
+        None => (shortest, 0),
+    };
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let mut digits = String::with_capacity(whole.len() + fraction.len());
+    digits.push_str(whole);
+    digits.push_str(fraction);
+    let trimmed = digits.trim_start_matches('0');
+    let trailing = trimmed.len() - trimmed.trim_end_matches('0').len();
+    let trimmed = trimmed.trim_end_matches('0');
+    if trimmed.is_empty() {
+        return ("0".to_string(), 1);
+    }
+    // `value = int(trimmed) * 10^(trailing + exponent - fraction.len())`, and the spec writes that
+    // as `s * 10^(n - k)` with `s = int(trimmed)` and `k = trimmed.len()`.
+    let point = trimmed.len() as i32 + trailing as i32 + exponent - fraction.len() as i32;
+    (trimmed.to_string(), point)
+}
+
+/// One string, as `JSON.stringify` writes it.
+///
+/// CDXC:RemoteMachines 2026-09-21 WHY:
+/// The two writers agree here and this spells out why, because "they probably escape the same" is
+/// what the number formatting was assumed to be. Both escape exactly `"`, `\` and the C0 controls,
+/// both spell the five short escapes the same way and both leave everything else alone, the
+/// forward slash and U+2028/U+2029 included (well-formed `JSON.stringify` escapes only LONE
+/// SURROGATES, which a Rust `String` cannot hold: a frame carrying one is refused by the parser
+/// long before this, which is a different answer from JavaScript's but not a different payload).
+fn write_string(out: &mut String, text: &str) {
+    out.push('"');
+    for character in text.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{9}' => out.push_str("\\t"),
+            '\u{a}' => out.push_str("\\n"),
+            '\u{c}' => out.push_str("\\f"),
+            '\u{d}' => out.push_str("\\r"),
+            character if (character as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => out.push(character),
+        }
+    }
+    out.push('"');
 }
 
 impl MachinePresentation {
