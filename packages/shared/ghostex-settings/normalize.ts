@@ -635,7 +635,6 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     sidebarTheme: clampSidebarThemeSetting(readString(source, 'sidebarTheme', DEFAULT_ghostex_SETTINGS.sidebarTheme)),
     sessionChatTheme: normalizeSessionChatTheme(source.sessionChatTheme),
-    sessionChatUseGpui: readBoolean(source, 'sessionChatUseGpui', DEFAULT_ghostex_SETTINGS.sessionChatUseGpui),
     sessionChatFontFamily: readString(
       source,
       'sessionChatFontFamily',
@@ -660,11 +659,6 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       source,
       'sessionChatFileEditPreviews',
       DEFAULT_ghostex_SETTINGS.sessionChatFileEditPreviews
-    ),
-    sessionChatModelPicksSessionOnly: readBoolean(
-      source,
-      'sessionChatModelPicksSessionOnly',
-      DEFAULT_ghostex_SETTINGS.sessionChatModelPicksSessionOnly
     ),
     sessionChatVerboseMode: readBoolean(
       source,

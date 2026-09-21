@@ -593,8 +593,6 @@ export type ghostexSettings = {
   sidebarTheme: SidebarThemeSetting;
   /** Follow the app theme, or override chat with Light, Dark, or System. */
   sessionChatTheme: SessionChatThemeSetting;
-  /** Desktop renderer feature flag, applied when the app starts. */
-  sessionChatUseGpui: boolean;
   /** CSS font-family used by chat messages and the prompt composer. */
   sessionChatFontFamily: string;
   /** Default zoom percentage for the desktop chat interface. */
@@ -617,8 +615,6 @@ export type ghostexSettings = {
    * User: file edits default to a single collapsed row; Chat settings can opt into seven-line previews.
    */
   sessionChatFileEditPreviews: boolean;
-  /** See the CDXC:SessionChat 2026-09-19 decision in session-chat-presentation/model-picker.ts. */
-  sessionChatModelPicksSessionOnly: boolean;
   /**
    * CDXC:Theming 2026-06-15-11:24:
    * Custom chrome colors are scoped to the sidebar and native titlebar only.

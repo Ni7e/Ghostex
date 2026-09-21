@@ -403,8 +403,6 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   /** CDXC:Theming 2026-09-14 DECISION: User: default App theme to System, with Chat and Terminal on Follow app. Existing saved theme selections remain unchanged. */
   sidebarTheme: 'system',
   sessionChatTheme: 'app',
-  /** CDXC:SessionChat 2026-09-19 DECISION: User: make GPUI chat the default on desktop. This supersedes the React default; turning the setting off still selects React chat, and saved choices are kept. */
-  sessionChatUseGpui: true,
   sessionChatFontFamily: '',
   sessionChatZoomPercent: DEFAULT_SESSION_CHAT_ZOOM_PERCENT,
   sessionChatCustomTranscriptWidthEnabled: false,
@@ -412,7 +410,6 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   sessionChatVerboseMode: false,
   sessionChatSimpleMode: false,
   sessionChatFileEditPreviews: false,
-  sessionChatModelPicksSessionOnly: false,
   /**
    * CDXC:Theming 2026-06-15-11:24:
    * Custom sidebar/titlebar colors are scoped to the sidebar and titlebar.

@@ -410,12 +410,6 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
             title: 'Custom Title Command',
           },
           {
-            key: 'sessionChatModelPicksSessionOnly',
-            subtitle:
-              'Apply a model or effort picked in a chat to that session only, without changing the default for new sessions. Off saves every pick as the default. Claude only: other agents always save the default.',
-            title: 'Session-only model picks',
-          },
-          {
             key: 'acceptAll',
             subtitle:
               'Choose whether supported agents ask before editing files or running commands. Per-agent settings can override this default.',
