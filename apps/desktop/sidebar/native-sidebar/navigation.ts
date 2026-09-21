@@ -37,13 +37,6 @@ export function createNativeNavigation(ui: NativeSidebarUiState) {
   const sort: NativeSidebarMenuItem[] = [];
   if (ui.selectedMachineId === 'local')
     sort.push({ ...intent('Show Hidden', 'eye', 'showHidden'), checked: ui.showHidden }, { separator: true });
-  sort.push(
-    {
-      ...intent('Last Active Sorting', 'clock', 'sortLastActivity'),
-      checked: state.hud.activeSessionsSortMode !== 'manual',
-    },
-    { ...intent('Manual Sorting', 'arrows-sort', 'sortManual'), checked: state.hud.activeSessionsSortMode === 'manual' }
-  );
   const catalogs = [state.customSessionTags, ...Object.values(state.remoteCustomSessionTagsByMachineId)];
   for (const item of normalizeSidebarSessionTagListItems(
     settings.sidebarSessionTagListItems,
@@ -64,15 +57,23 @@ export function createNativeNavigation(ui: NativeSidebarUiState) {
         command: { type: 'toggleTagFilter', tag },
       });
   }
+  /**
+   * CDXC:Sidebar 2026-09-21 DECISION:
+   * User: "Remove the manual sorting and last active sorting. I don't care about them right now." The two rows did nothing on desktop. Without them the page can start or end on a separator, or be empty on a remote tab with no tag rows, so those separators are trimmed and an empty page is not drawn.
+   * SEE-ALSO: packages/gx-core/src/sidebar_menu/navigation.rs builds the same page for the GPUI sidebar and must match.
+   */
+  while (sort[0]?.separator) sort.shift();
+  while (sort[sort.length - 1]?.separator) sort.pop();
   const more: NativeSidebarMenuItem[] = [];
   if (ui.selectedMachineId === 'local' || ui.metadata.connections[ui.selectedMachineId]?.state === 'connected')
     more.push(intent('Add Project', 'plus', 'addProject'));
-  more.push({
-    label: 'Sort & Filter',
-    icon: 'filter',
-    presentation: 'page',
-    children: sort.map((item) => ({ ...item, keepOpen: !!item.command })),
-  });
+  if (sort.length)
+    more.push({
+      label: 'Sort & Filter',
+      icon: 'filter',
+      presentation: 'page',
+      children: sort.map((item) => ({ ...item, keepOpen: !!item.command })),
+    });
   if (groups.length)
     more.push(
       intent(

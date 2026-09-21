@@ -6,7 +6,7 @@ use crate::sidebar_view::tags::{
     normalize_tag_list_items, tag_list_item_filter, tag_list_item_label, tag_presentation,
     TagCatalog, TagListItemKind,
 };
-use crate::sidebar_view::{SessionSortMode, SidebarSettings, SidebarUiState, LOCAL_MACHINE_ID};
+use crate::sidebar_view::{SidebarSettings, SidebarUiState, LOCAL_MACHINE_ID};
 
 use super::commands::{message, MenuCommand};
 use super::host::MenuHost;
@@ -44,9 +44,6 @@ pub fn more_menu(input: &MoreMenuInput<'_>) -> Vec<MenuItem> {
         sort.push(intent("Show Hidden", "eye", "showHidden").with_checked(ui.show_hidden));
         sort.push(MenuItem::separator());
     }
-    let manual = input.settings.sort_mode == SessionSortMode::Manual;
-    sort.push(intent("Last Active Sorting", "clock", "sortLastActivity").with_checked(!manual));
-    sort.push(intent("Manual Sorting", "arrows-sort", "sortManual").with_checked(manual));
     for item in normalize_tag_list_items(&input.settings.tag_list_items, Some(input.filter_catalog))
     {
         if !item.visible {
@@ -73,26 +70,42 @@ pub fn more_menu(input: &MoreMenuInput<'_>) -> Vec<MenuItem> {
         );
     }
 
+    /*
+    CDXC:Sidebar 2026-09-21 DECISION:
+    User: "Remove the manual sorting and last active sorting. I don't care about them right now."
+    The two rows did nothing on desktop (the runtime has no handler for the sort mode). Without
+    them the page can start or end on a separator, or be empty on a remote tab with no tag rows,
+    so those separators are trimmed and an empty page is not drawn.
+    SEE-ALSO: apps/desktop/sidebar/native-sidebar/navigation.ts builds the same page and must match.
+    */
+    while sort.first().is_some_and(|item| item.separator) {
+        sort.remove(0);
+    }
+    while sort.last().is_some_and(|item| item.separator) {
+        sort.pop();
+    }
     let mut more: Vec<MenuItem> = Vec::new();
     if is_local || input.host.machine_connected {
         more.push(intent("Add Project", "plus", "addProject"));
     }
-    more.push(
-        MenuItem::submenu(
-            "Sort & Filter",
-            "filter",
-            sort.into_iter()
-                .map(|item| {
-                    let has_command = item.command.is_some();
-                    MenuItem {
-                        keep_open: has_command,
-                        ..item
-                    }
-                })
-                .collect(),
-        )
-        .with_page(),
-    );
+    if !sort.is_empty() {
+        more.push(
+            MenuItem::submenu(
+                "Sort & Filter",
+                "filter",
+                sort.into_iter()
+                    .map(|item| {
+                        let has_command = item.command.is_some();
+                        MenuItem {
+                            keep_open: has_command,
+                            ..item
+                        }
+                    })
+                    .collect(),
+            )
+            .with_page(),
+        );
+    }
     if !input.drawn_project_group_ids.is_empty() {
         let any_expanded = input
             .drawn_project_group_ids
