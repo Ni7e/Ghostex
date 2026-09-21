@@ -1,7 +1,7 @@
 {
   "_readme": "Do not edit blind. docs/important/agent-model-catalog.md explains the schema, how every Ghostex client loads this file from GitHub (with the bundled copy as the offline source), how to publish a change, and how to re-collect models, efforts and fast mode from the agent CLIs' own /model pickers.",
   "schemaVersion": 1,
-  "updatedAt": "2026-09-21",
+  "updatedAt": "2026-09-22",
   "effortLabels": {
     "none": "None",
     "minimal": "Minimal",
@@ -506,11 +506,11 @@
     },
     "grok": {
       "name": "Grok Build",
-      "cliVersion": "1.0.12",
+      "cliVersion": "1.0.40",
       "modelCommand": "/model <pickerLabel> [effort]",
       "effortCommand": null,
       "efforts": ["low", "medium", "high", "xhigh"],
-      "defaultEffort": "medium",
+      "defaultEffort": "high",
       "fastMode": {
         "available": false,
         "command": null,
@@ -518,12 +518,30 @@
       },
       "models": [
         {
-          "value": "grok-4.6",
-          "label": "Grok 4.6",
-          "pickerLabel": "Grok 4.6",
+          "value": "grok-4.7",
+          "label": "Grok 4.7",
+          "pickerLabel": "Grok 4.7",
           "description": "SpaceXAI's latest frontier model",
           "default": true,
           "efforts": ["low", "medium", "high", "xhigh"],
+          "defaultEffort": "high",
+          "fastMode": false
+        },
+        {
+          "value": "grok-4.7-build-fast",
+          "label": "Grok 4.7 Fast",
+          "pickerLabel": "Grok 4.7 Fast",
+          "description": "Fast variant. 2x the price.",
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "defaultEffort": "high",
+          "fastMode": false
+        },
+        {
+          "value": "grok-4.6",
+          "label": "Grok 4.6",
+          "pickerLabel": "Grok 4.6",
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "defaultEffort": "high",
           "fastMode": false
         },
         {
@@ -531,9 +549,11 @@
           "label": "Grok 4.5",
           "pickerLabel": "Grok 4.5",
           "efforts": ["low", "medium", "high"],
+          "defaultEffort": "high",
           "fastMode": false
         }
-      ]
+      ],
+      "notes": "Grok 4.7 Fast is its own model row (id grok-4.7-build-fast, 'Fast variant. 2x the price.'), not a fast-mode toggle; there is no /fast command. The direct form is /model <name> [effort], e.g. /model Grok 4.7 Fast high."
     },
     "antigravity": {
       "name": "Antigravity CLI",
