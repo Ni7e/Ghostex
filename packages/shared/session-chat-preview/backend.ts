@@ -364,6 +364,9 @@ export class ChatPreviewBackend {
       case 'noteWrite':
         this.note = params.value ?? params.text ?? '';
         return true;
+      case 'modelFavorites':
+      case 'modelFavoriteToggle':
+        return [];
       case 'flush':
       case 'deliveries':
       case 'optionWrite':

@@ -32,7 +32,7 @@ import { createModelPickerRequest } from '../session-chat-presentation/model-pic
 import { modelSelectionUnchanged } from './model-selection';
 import { modelPickScope, modelPickerSupportsSessionScope } from '../session-chat-presentation/model-picker';
 import { modelMenuPick, modelMenuProjection } from './model-menu';
-import { toggleModelFavorite } from './model-favorites';
+import { adoptModelFavorites } from './model-favorites';
 import { modelPickerProvider } from '../session-chat-presentation/model-picker-request';
 import type { ModelMenuTabId } from '../session-chat-presentation/model-menu';
 import { adoptAgentModelCatalog } from '../agent-model-catalog-state';
@@ -1028,13 +1028,15 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         modelPicker?.finish(false);
         break;
       case 'modelMenuView':
+        // A null tab is the picker opening: stars set in other sessions since the last open arrive here.
+        if (command.tab === null) adoptModelFavorites(await composer('modelFavorites'));
         modelMenuView = {
           tab: command.tab === undefined ? modelMenuView.tab : command.tab,
           query: typeof command.query === 'string' ? command.query : modelMenuView.query,
         };
         break;
       case 'modelMenuFavorite':
-        toggleModelFavorite(command.key);
+        adoptModelFavorites(await composer('modelFavoriteToggle', { favoriteKey: command.key }));
         break;
       case 'modelMenuPick': {
         const context = chat.modelMenuContext;

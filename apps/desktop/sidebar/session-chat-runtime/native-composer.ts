@@ -22,13 +22,15 @@ import { sessionChatDraftClientId } from '@/packages/shared/session-chat-control
 import { classifyDraftHandoff } from '@/packages/shared/session-chat-controller/draft-handoff';
 import { readStoredSessionChatSummary, writeStoredSessionChatSummary } from '@/packages/core-ui/chat/session-chat-summary-override';
 import { readStoredSessionChatVerbose, writeStoredSessionChatVerbose } from '@/packages/core-ui/chat/session-chat-verbose-override';
+import { modelFavorites, toggleModelFavorite } from '@/packages/shared/session-chat-controller/model-favorites';
 import type { SessionChatDraftVersion, SessionChatDeliveredDraft } from '@/packages/shared/session-chat-queue';
 
 export interface NativeComposerRequest {
-  operation: 'asyncQuestionRead' | 'asyncQuestionWrite' | 'asyncQuestionRetire' | 'contextSave' | 'optionWrite' | 'modelWrite' | 'modelAck' | 'read' | 'write' | 'flush' | 'submitted' | 'park' | 'deliveries' | 'receive' | 'summary' | 'verbose' | 'history' | 'claimReturned' | 'questionRead' | 'questionWrite' | 'questionClear' | 'dismissNotice';
+  operation: 'asyncQuestionRead' | 'asyncQuestionWrite' | 'asyncQuestionRetire' | 'contextSave' | 'optionWrite' | 'modelWrite' | 'modelAck' | 'read' | 'write' | 'flush' | 'submitted' | 'park' | 'deliveries' | 'receive' | 'summary' | 'verbose' | 'history' | 'claimReturned' | 'questionRead' | 'questionWrite' | 'questionClear' | 'dismissNotice' | 'modelFavorites' | 'modelFavoriteToggle';
   agent?: 'claude' | 'codex';
   preferences?: SessionChatContextDetailsPreferences;
   optionKey?: string;
+  favoriteKey?: string;
   optionState?: SessionChatOptionState;
   modelSelection?: ModelSelectionIntent;
   selectionId?: string;
@@ -108,6 +110,13 @@ export async function nativeComposerRequest(sessionKey: string, request: NativeC
       markSessionChatReturnedPromptApplied(request.returnedId);
       await flushClientStorage(['returnedPrompts']);
       return true;
+    }
+    case 'modelFavorites': return modelFavorites();
+    case 'modelFavoriteToggle': {
+      if (!request.favoriteKey) throw new Error('A model is required to star it.');
+      toggleModelFavorite(request.favoriteKey);
+      await flushClientStorage(['modelFavorites']);
+      return modelFavorites();
     }
     case 'history': return listSentSessionChatMessages().map(message => message.content).reverse();
     case 'summary': writeStoredSessionChatSummary(sessionKey, request.enabled === true); return request.enabled === true;
