@@ -31,19 +31,23 @@ pub(super) enum Routed {
 /// The host actions the core emits that nothing performs, and why each is here.
 ///
 /// CDXC:SessionChat 2026-09-22 WHY:
-/// These three are the core asking ITSELF, the way `native-host.ts` called its own helper: the
-/// TypeScript never pushed a request for any of them. `selectOption` is the same shape and is
-/// replayed into the core as a gesture, but these three cannot be: `selectModel` and
-/// `suggestionSend` have no `ActionKind`, and `switchDraftAgentForProvider` needs the agent id the
-/// core did not look up (`native-host.ts` resolves the provider to a draft agent and dispatches
-/// `switchDraftAgent`). They reach `receive_session_chat_host_action`, which has no arm for any of
-/// them and drops them. Counting them by name is how the gap stays visible until family e closes
-/// it; the names are code constants, never a user's data.
-pub(super) const UNPERFORMED_HOST_ACTIONS: &[&str] = &[
-    "selectModel",
-    "suggestionSend",
-    "switchDraftAgentForProvider",
-];
+/// One left, and it is a no-op on the TypeScript side too. `suggestionSend` is the slash picker
+/// saying "the draft is already the whole command, send it instead of completing it", which
+/// `native-host.ts` answers by pushing nothing at all: its arm keeps only a completion that carries
+/// `content`, so `{send: true}` falls out of the switch. The send happens in the VIEW, one step
+/// earlier: `keyboard.rs` reads `suggestions.sendOnEnter` off the snapshot and calls `send` itself
+/// rather than dispatching `suggestionKey`, so the core's inner rule (the same rule, in
+/// `composer/suggestions.rs`) is only reached when the view's snapshot is a turn stale. The host
+/// CANNOT perform it: a send needs the composer field, the draft id and the draft revision, all of
+/// which are the view's. Performing it here would make the Rust brain send where the QuickJS brain
+/// swallows the key, which is a behaviour change the parity window must not make. It stays counted
+/// by name so a rise in `hostActionsDropped` is visible; the name is a code constant, never a
+/// user's data.
+///
+/// `selectModel` and `switchDraftAgentForProvider` left this list on 2026-09-22: core agent 3
+/// resolved both inside the crate (`menus/picker/settle.rs`, `menus/picker/actions.rs`), so the
+/// model pick now goes down the durable outbox lane and the provider switch looks its own agent up.
+pub(super) const UNPERFORMED_HOST_ACTIONS: &[&str] = &["suggestionSend"];
 
 /// Sorts one effect into its performer.
 ///
@@ -150,6 +154,21 @@ pub(super) fn route(effect: Effect) -> Routed {
                 params,
             }))
         }
+        // `{kind: 'returnedPrompt', method: 'restore', params: {text}}`, which is what
+        // `native-host.ts:1179` pushes for `restoreReturned`. The view compares it against its own
+        // composer text before it applies it, so the text crosses and the decision stays the
+        // view's. Before this arm the effect fell through to the wildcard and was counted as
+        // `effectsUnrouted`: a prompt the agent handed back reached no composer.
+        Effect::RestoreReturnedPrompt { text } => {
+            let mut params = Map::new();
+            params.insert("text".into(), Value::String(text));
+            Routed::Renderer(Box::new(HostRequest {
+                id: None,
+                kind: RequestKind::ReturnedPrompt,
+                method: "restore".to_string(),
+                params,
+            }))
+        }
         Effect::MarkdownSaved { path } => {
             let mut params = Map::new();
             params.insert("path".into(), Value::String(path));
@@ -233,7 +252,11 @@ fn dispatched(action: &str, mut params: Map<String, Value>) -> HostRequest {
             params,
         },
         // `receive_chat_image` reads `method == "loaded"` and then `base64Data` and `mediaType`
-        // from `params` itself, where the core nests the whole read answer under `image`.
+        // from `params` itself, where the core nests the whole read answer under `image`
+        // (`transcript/actions.rs`, re-checked 2026-09-22). The nesting is the core's deliberate
+        // shape and the flattening is the view's wire form, so the translation lives here: a read
+        // that failed carries `path` and `error` and no `image`, which is exactly the `failed`
+        // method the view's early return wants.
         "chatImage" => {
             let loaded = params.remove("image").filter(Value::is_object);
             let found = loaded.is_some();

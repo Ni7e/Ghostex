@@ -789,6 +789,7 @@ fn effect_name(effect: &Effect) -> &'static str {
         Effect::Open(_) => "open",
         Effect::Copy { .. } => "copy",
         Effect::Toast { .. } => "toast",
+        Effect::RestoreReturnedPrompt { .. } => "restoreReturnedPrompt",
         Effect::MarkdownSaved { .. } => "markdownSaved",
         Effect::HostAction { .. } => "hostAction",
         _ => "unrouted",
