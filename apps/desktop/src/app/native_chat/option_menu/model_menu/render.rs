@@ -1,7 +1,7 @@
 use super::super::window::ChatOptionMenuPanel;
 use super::style::{
-    BAR_HEIGHT, CARD_RADIUS, ERROR_HEIGHT, ITEM_RADIUS, LIST_HEIGHT, Palette, ROW_GAP,
-    TRAIT_ROW_HEIGHT,
+    BAR_HEIGHT, BUTTON_GAP, CARD_RADIUS, ERROR_HEIGHT, ITEM_RADIUS, LIST_HEIGHT, Palette, ROW_GAP,
+    TRAIT_ROW_HEIGHT, button_lines,
 };
 use crate::app::native_chat::appearance::ChatAppearance;
 use gpui::prelude::FluentBuilder as _;
@@ -278,58 +278,104 @@ impl ChatOptionMenuPanel {
             .p(px(4.0 * scale))
             .flex()
             .flex_col()
-            .gap(px(ROW_GAP * scale));
-        for (index, setting) in traits.iter().enumerate() {
-            let disabled = setting["disabled"] == true || view["disabled"] == true;
-            let label = setting["label"].as_str().unwrap_or_default().to_owned();
-            let lit = open == Some(index) || active == rows + index;
-            tray = tray.child(
-                div()
-                    .id(("model-menu-setting", index))
-                    .role(gpui::Role::MenuItem)
-                    .aria_label(label.clone())
-                    .aria_expanded(open == Some(index))
-                    .flex_shrink_0()
-                    .h(px(TRAIT_ROW_HEIGHT * scale))
-                    .px(px(8.0 * scale))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0 * scale))
-                    .rounded(px(ITEM_RADIUS * scale))
-                    .opacity(if disabled { 0.42 } else { 1.0 })
-                    .when(lit, |row| row.bg(palette.ink(0.11)))
-                    .on_mouse_move(cx.listener(move |panel, _, _, cx| {
-                        if let Some(state) = panel.model_menu.as_mut()
-                            && state.active != rows + index
-                        {
-                            state.active = rows + index;
-                            cx.notify();
-                        }
-                    }))
-                    .on_click(cx.listener(move |panel, _, window, cx| {
-                        panel.open_model_flyout(index, window, cx)
-                    }))
-                    .child(div().flex_1().min_w_0().truncate().child(label))
-                    .child(
-                        div()
-                            .max_w(px(100.0 * scale))
-                            .truncate()
-                            .text_color(palette.muted)
-                            .child(
-                                setting["valueLabel"]
-                                    .as_str()
-                                    .unwrap_or_default()
-                                    .to_owned(),
+            .gap(px(BUTTON_GAP * scale));
+        let per_line = button_lines(traits.len()).1.max(1);
+        for (line, settings) in traits.chunks(per_line).enumerate() {
+            let mut buttons = div().flex().gap(px(BUTTON_GAP * scale));
+            for (offset, setting) in settings.iter().enumerate() {
+                let index = line * per_line + offset;
+                let disabled = setting["disabled"] == true || view["disabled"] == true;
+                let label = setting["label"].as_str().unwrap_or_default().to_owned();
+                let value = setting["valueLabel"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                let icon = match setting["icon"].as_str() {
+                    Some("reasoning") => Some("titlebar/brain.svg"),
+                    Some("context") => Some("titlebar/chart-bar.svg"),
+                    Some("fast") => Some("titlebar/bolt.svg"),
+                    _ => None,
+                };
+                // Fast mode reads as a switch: lit in the pill's marker tone when on, dimmed when off.
+                let fast = setting["icon"] == "fast";
+                let on = fast
+                    && setting["choices"].as_array().is_some_and(|choices| {
+                        choices
+                            .iter()
+                            .any(|choice| choice["selected"] == true && choice["label"] == "On")
+                    });
+                let tone = if on {
+                    palette.on
+                } else if fast {
+                    palette.muted
+                } else {
+                    palette.text
+                };
+                let lit = open == Some(index) || active == rows + index;
+                let tooltip = if value.is_empty() {
+                    label.clone()
+                } else {
+                    format!("{label}: {value}")
+                };
+                buttons = buttons.child(
+                    div()
+                        .id(("model-menu-setting", index))
+                        .role(gpui::Role::MenuItem)
+                        .aria_label(tooltip.clone())
+                        .aria_expanded(open == Some(index))
+                        .flex_1()
+                        .min_w_0()
+                        .h(px(TRAIT_ROW_HEIGHT * scale))
+                        .px(px(6.0 * scale))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(6.0 * scale))
+                        .rounded(px(ITEM_RADIUS * scale))
+                        .text_size(px(12.0 * scale))
+                        .opacity(if disabled { 0.42 } else { 1.0 })
+                        .when(lit, |button| button.bg(palette.ink(0.11)))
+                        .tooltip(move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
+                        })
+                        .on_mouse_move(cx.listener(move |panel, _, _, cx| {
+                            if let Some(state) = panel.model_menu.as_mut()
+                                && state.active != rows + index
+                            {
+                                state.active = rows + index;
+                                cx.notify();
+                            }
+                        }))
+                        .on_click(cx.listener(move |panel, _, window, cx| {
+                            panel.activate_model_button(index, false, window, cx)
+                        }))
+                        // Right-click applies the change to this session only, where the agent can.
+                        .on_mouse_down(
+                            gpui::MouseButton::Right,
+                            cx.listener(move |panel, _, window, cx| {
+                                panel.activate_model_button(index, true, window, cx)
+                            }),
+                        )
+                        .map(|button| match icon {
+                            Some(path) => button.child(
+                                svg()
+                                    .path(path)
+                                    .flex_shrink_0()
+                                    .size(px(14.0 * scale))
+                                    .text_color(if on { palette.on } else { palette.muted })
+                                    .when(fast && !on, |icon| icon.opacity(0.6)),
                             ),
-                    )
-                    .child(
-                        svg()
-                            .path("titlebar/chevron-right.svg")
-                            .flex_shrink_0()
-                            .size(px(12.0 * scale))
-                            .text_color(palette.muted),
-                    ),
-            );
+                            None => button.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_color(palette.muted)
+                                    .child(label.clone()),
+                            ),
+                        })
+                        .child(div().min_w_0().truncate().text_color(tone).child(value)),
+                );
+            }
+            tray = tray.child(buttons);
         }
         Some(tray.into_any_element())
     }

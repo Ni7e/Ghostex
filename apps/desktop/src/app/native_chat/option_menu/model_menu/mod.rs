@@ -1,5 +1,5 @@
 //! The composer's merged model pill opens this picker: agent tabs, a model search, starred rows,
-//! and a footer of settings that open a side list.
+//! and a footer of buttons that flip a setting or open its side list.
 
 mod flyout;
 mod keys;

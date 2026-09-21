@@ -1,7 +1,7 @@
 use super::super::window::ChatOptionMenuPanel;
 use super::style::{
-    BAR_HEIGHT, CARD_RADIUS, ERROR_HEIGHT, FLYOUT_WIDTH, ITEM_RADIUS, LIST_HEIGHT, Palette,
-    ROW_GAP, TRAIT_ROW_HEIGHT,
+    BAR_HEIGHT, BUTTON_GAP, CARD_RADIUS, ERROR_HEIGHT, FLYOUT_WIDTH, ITEM_RADIUS, LIST_HEIGHT,
+    Palette, ROW_GAP, TRAIT_ROW_HEIGHT, button_lines,
 };
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -32,13 +32,39 @@ impl ChatOptionMenuPanel {
             && self.menu.read(cx).windows.len() > self.depth + 1
     }
 
-    /// Opens the footer row's side list, or shuts it when it is the one already open.
-    pub(super) fn open_model_flyout(
+    /// A footer button with at most two values flips to the other one; a longer list opens beside the card.
+    pub(super) fn activate_model_button(
         &mut self,
         index: usize,
+        secondary: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(state) = self.model_menu.as_ref() else {
+            return;
+        };
+        let Some(setting) = state.traits().get(index) else {
+            return;
+        };
+        if !setting["toggle"].is_object() {
+            self.open_model_flyout(index, window, cx);
+            return;
+        }
+        if setting["disabled"] == true || state.view["disabled"] == true {
+            return;
+        }
+        let command = json!({
+            "type": "modelMenuTrait",
+            "id": setting["id"],
+            "value": setting["toggle"]["value"],
+            "exitPlan": setting["toggle"]["exitPlan"],
+            "secondary": secondary,
+        });
+        self.model_menu_send(command, cx);
+    }
+
+    /// Opens the footer button's side list, or shuts it when it is the one already open.
+    fn open_model_flyout(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let depth = self.depth;
         if self.model_flyout_is_open(index, cx) {
             if let Some(state) = self.model_menu.as_mut() {
@@ -69,13 +95,15 @@ impl ChatOptionMenuPanel {
             0.0
         };
         let scale = self.menu.read(cx).appearance.scale;
+        let line = index / button_lines(state.traits().len()).1.max(1);
+        // Beside the card rather than over it, level with the button's line.
         let mut anchor = window.bounds();
         anchor.origin.y += px((1.0
             + BAR_HEIGHT * 2.0
             + error
             + LIST_HEIGHT
             + 5.0
-            + index as f32 * (TRAIT_ROW_HEIGHT + ROW_GAP))
+            + line as f32 * (TRAIT_ROW_HEIGHT + BUTTON_GAP))
             * scale);
         anchor.size.height = px(TRAIT_ROW_HEIGHT * scale);
         self.menu.update(cx, |menu, cx| {

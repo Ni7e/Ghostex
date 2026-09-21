@@ -146,7 +146,7 @@
 }
 
 .ghostex-chat-model-menu-row[aria-disabled='true'],
-.ghostex-chat-model-menu-tray-row[aria-disabled='true'] {
+.ghostex-chat-model-menu-tray-button[aria-disabled='true'] {
   cursor: default;
   opacity: 0.5;
 }
@@ -242,20 +242,70 @@
   font-weight: 400;
 }
 
+/* One row of buttons, each an icon beside its value; the side list of a longer one hangs off this row. */
 .ghostex-chat-model-menu-tray {
+  position: relative;
   display: flex;
   flex: none;
-  flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   padding: 4px;
   border-top: 1px solid var(--menu-hairline);
 }
 
-.ghostex-chat-model-menu-tray-anchor {
-  position: relative;
+.ghostex-chat-model-menu-tray-button {
+  display: flex;
+  height: 30px;
+  min-width: 0;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--foreground) 90%, transparent);
+  cursor: pointer;
+  font-size: 0.75rem;
 }
 
-.ghostex-chat-model-menu-tray-row {
+.ghostex-chat-model-menu-tray-button[data-active] {
+  background: var(--menu-selected);
+  color: var(--foreground);
+}
+
+.ghostex-chat-model-menu-tray-button > svg {
+  flex: none;
+  color: var(--menu-muted);
+}
+
+.ghostex-chat-model-menu-tray-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--menu-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghostex-chat-model-menu-tray-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Fast mode off reads as a dimmed bolt and word; on, the bolt takes the merged pill's fast tint. */
+.ghostex-chat-model-menu-tray-button[data-icon='fast']:not([data-on]) {
+  color: var(--menu-muted);
+}
+
+.ghostex-chat-model-menu-tray-button[data-icon='fast']:not([data-on]) > svg {
+  opacity: 0.6;
+}
+
+.ghostex-chat-model-menu-tray-button[data-on] > svg {
+  color: #f6daa0;
+}
+
+.ghostex-chat-model-menu-flyout-row {
   display: flex;
   height: 30px;
   flex: none;
@@ -267,12 +317,12 @@
   cursor: pointer;
 }
 
-.ghostex-chat-model-menu-tray-row[data-active] {
+.ghostex-chat-model-menu-flyout-row[data-active] {
   background: var(--menu-selected);
   color: var(--foreground);
 }
 
-.ghostex-chat-model-menu-tray-label {
+.ghostex-chat-model-menu-flyout-label {
   min-width: 0;
   flex: 1;
   overflow: hidden;
@@ -280,27 +330,15 @@
   white-space: nowrap;
 }
 
-.ghostex-chat-model-menu-tray-value {
-  max-width: 100px;
-  overflow: hidden;
-  color: var(--menu-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ghostex-chat-model-menu-tray-row > svg {
+.ghostex-chat-model-menu-flyout-row > svg {
   flex: none;
-  color: var(--menu-muted);
-}
-
-.ghostex-chat-model-menu-tray-row[aria-selected='true'] > svg {
   color: var(--foreground);
 }
 
-/* The card opens upwards from the composer, so the side list grows upwards from its row too. */
+/* The card opens upwards from the composer, so the side list grows upwards from the button row too. */
 .ghostex-chat-model-menu-flyout {
   position: absolute;
-  bottom: -4px;
+  bottom: 0;
   left: calc(100% + 10px);
   z-index: 1;
   display: flex;

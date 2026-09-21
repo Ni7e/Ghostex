@@ -1,6 +1,8 @@
 use super::super::super::state::NativeChatView;
 use super::super::window::{ChatOptionMenu, ChatOptionMenuPanel};
-use super::style::{BAR_HEIGHT, CARD_WIDTH, ERROR_HEIGHT, LIST_HEIGHT, ROW_GAP, TRAIT_ROW_HEIGHT};
+use super::style::{
+    BAR_HEIGHT, BUTTON_GAP, CARD_WIDTH, ERROR_HEIGHT, LIST_HEIGHT, TRAIT_ROW_HEIGHT, button_lines,
+};
 use gpui::{
     AppContext as _, Bounds, Context, Entity, Pixels, ScrollStrategy, Subscription,
     UniformListScrollHandle, Window,
@@ -14,7 +16,7 @@ pub(in crate::app::native_chat::option_menu) struct ModelMenuState {
     pub(super) input: Entity<InputState>,
     /// The snapshot's `modelMenu` this panel last drew.
     pub(super) view: Value,
-    /// Model rows first, then the footer rows, as one cursor the arrows walk straight through.
+    /// Model rows first, then the footer buttons, as one cursor the arrows walk straight through.
     pub(super) active: usize,
     pub(super) flyout: Option<usize>,
     pub(super) scroll: UniformListScrollHandle,
@@ -33,7 +35,7 @@ fn live_view(menu: &Entity<ChatOptionMenu>, cx: &gpui::App) -> Value {
 /// is measured before it exists and re-placed when they change.
 fn shape(view: &Value) -> Value {
     json!({
-        "traits": view["traits"].as_array().map_or(0, Vec::len),
+        "lines": button_lines(view["traits"].as_array().map_or(0, Vec::len)).0,
         "error": view["error"].is_string(),
     })
 }
@@ -47,9 +49,9 @@ fn selected_row(view: &Value) -> usize {
 
 /// The card's height without the 14px of padding and border `open_panel_at` adds for a row menu.
 pub(in crate::app::native_chat::option_menu) fn menu_height(marker: &Value) -> f32 {
-    let traits = marker["traits"].as_u64().unwrap_or(0) as f32;
-    let tray = if traits > 0.0 {
-        9.0 + traits * TRAIT_ROW_HEIGHT + (traits - 1.0) * ROW_GAP
+    let lines = marker["lines"].as_u64().unwrap_or(0) as f32;
+    let tray = if lines > 0.0 {
+        9.0 + lines * TRAIT_ROW_HEIGHT + (lines - 1.0) * BUTTON_GAP
     } else {
         0.0
     };
@@ -88,12 +90,17 @@ impl ModelMenuState {
             input
         });
         let subscription =
-            cx.subscribe_in(&input, window, |panel, input, event: &InputEvent, _, cx| {
+            cx.subscribe_in(&input, window, |panel, input, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Focus) {
+                    crate::app::native_chat::focus::reclaim_keyboard_focus(window);
+                }
                 if matches!(event, InputEvent::Change) {
                     let query = input.read(cx).value().to_string();
                     panel.model_menu_send(json!({"type":"modelMenuView","query":query}), cx);
                 }
             });
+        // Typed text reaches a field only through the window's native keyboard owner, which a GPUI focus handle alone does not claim (native_chat/focus.rs); every other chat field reclaims it the same way.
+        crate::app::native_chat::focus::reclaim_keyboard_focus(window);
         input.update(cx, |input, cx| input.focus(window, cx));
         Some(Self {
             input,
@@ -137,7 +144,7 @@ impl ChatOptionMenuPanel {
         }
         let mut marker = shape(&next);
         let current = &self.rows[0]["modelMenu"];
-        if marker["traits"] != current["traits"] || marker["error"] != current["error"] {
+        if marker["lines"] != current["lines"] || marker["error"] != current["error"] {
             marker["reopen"] = true.into();
             let depth = self.depth;
             self.menu.update(cx, |menu, cx| {

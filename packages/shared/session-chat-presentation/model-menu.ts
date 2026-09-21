@@ -13,7 +13,7 @@ import type { ModelPickerProvider } from './model-picker';
 
 /**
  * CDXC:SessionChat 2026-09-21 DECISION:
- * User: the composer's model and effort pills become one pill that opens one picker: agent tabs with a favorites tab first, a model search, rows with a Cmd+number badge and a star, and a footer of rows (Reasoning, Context Window) that open a side list.
+ * User: the composer's model and effort pills become one pill that opens one picker: agent tabs with a favorites tab first, a model search, rows with a Cmd+number badge and a star, and a footer for reasoning, context window and fast mode (see asButton below).
  * React and GPUI both draw what this module decides, so tabs, row order, search ranking, favorites and the footer can never differ between them.
  * SEE-ALSO: packages/core-ui/chat/session-chat-model-menu.tsx, apps/desktop/src/app/native_chat/option_menu/model_menu/, packages/shared/session-chat-controller/model-menu.ts.
  */
@@ -78,6 +78,10 @@ export interface ModelMenuTrait {
   valueLabel: string | null;
   disabled?: boolean;
   choices: readonly ModelMenuTraitChoice[];
+  /** The glyph drawn beside the value: a brain for reasoning, chart bars for the context window, a bolt for fast mode. */
+  icon?: 'reasoning' | 'context' | 'fast';
+  /** Present when the button has at most two values: the one a click moves to. Longer lists open a side list instead. */
+  toggle?: { value: string; exitPlan?: boolean };
 }
 
 export const modelMenuFavoriteKey = (provider: string, value: string) => `${provider}:${value}`;
@@ -234,9 +238,24 @@ export function modelMenuEffortFor(provider: ModelPickerProvider, model: string,
 }
 
 const TRAIT_LABELS: Record<string, string> = { effort: 'Reasoning' };
+const TRAIT_ICONS: Record<string, ModelMenuTrait['icon']> = { effort: 'reasoning', context: 'context', fastMode: 'fast' };
 
 /**
- * The footer rows for the session's current model: reasoning, the context window when the model has
+ * CDXC:SessionChat 2026-09-21 DECISION:
+ * User: Reasoning, Context Window and Fast Mode are three buttons along the bottom of the picker, each an icon beside its value (brain, chart bars, bolt); clicking Fast or the Context Window toggles it, since it usually has only two values.
+ * This supersedes the full-width footer rows that each opened a side list; only a button with more than two values, such as Reasoning, still opens one.
+ */
+function asButton(trait: Omit<ModelMenuTrait, 'icon' | 'toggle'>): ModelMenuTrait {
+  const next = trait.choices.length <= 2 ? trait.choices.find((choice) => !choice.selected) : undefined;
+  return {
+    ...trait,
+    icon: TRAIT_ICONS[trait.id],
+    ...(next ? { toggle: { value: next.value, ...(next.exitPlan ? { exitPlan: true } : {}) } } : {}),
+  };
+}
+
+/**
+ * The footer buttons for the session's current model: reasoning, the context window when the model has
  * two, then every other option the old Options pill listed. Mode stays on its own pill.
  */
 export function modelMenuTraits(
@@ -310,7 +329,7 @@ export function modelMenuTraits(
     const trait = option(descriptor);
     if (trait) traits.push(trait);
   }
-  return traits;
+  return traits.map(asButton);
 }
 
 /** The merged pill: the model's name, then the footer values that are set, as "High · 1M". */

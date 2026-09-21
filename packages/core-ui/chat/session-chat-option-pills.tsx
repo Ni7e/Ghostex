@@ -1122,6 +1122,8 @@ export function SessionChatSessionOptionPills({
       extraRows.push({
         id: 'cursor-context',
         label: 'Context Window',
+        // One choice, so the button hands straight to the CLI's picker instead of opening a list of one.
+        icon: 'context',
         valueLabel: contextWindow,
         disabled,
         choices: [{ value: 'cli', label: 'Change it in the CLI', selected: false, isDefault: false }],

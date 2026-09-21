@@ -68,10 +68,16 @@ impl ChatOptionMenuPanel {
         match key {
             "escape" | "tab" => self.menu.update(cx, |menu, cx| menu.close(None, cx)),
             "up" | "ctrl-p" | "down" | "ctrl-n" if count > 0 => {
-                state.active = if key == "up" || key == "ctrl-p" {
+                let up = key == "up" || key == "ctrl-p";
+                // The footer is one stop on the way round: Left and Right move along its buttons.
+                state.active = if state.active >= rows {
+                    if up && rows > 0 { rows - 1 } else { 0 }
+                } else if up {
                     (state.active + count - 1) % count
+                } else if state.active + 1 < rows {
+                    state.active + 1
                 } else {
-                    (state.active + 1) % count
+                    rows % count
                 };
                 if state.active < rows {
                     state
@@ -84,12 +90,18 @@ impl ChatOptionMenuPanel {
                 if active < rows {
                     self.model_menu_pick(active, key == "shift-enter", cx);
                 } else {
-                    self.open_model_flyout(active - rows, window, cx);
+                    self.activate_model_button(active - rows, key == "shift-enter", window, cx);
                 }
             }
-            "right" if state.active >= rows => {
+            "left" | "right" if state.active >= rows => {
+                let buttons = count - rows;
                 let index = state.active - rows;
-                self.open_model_flyout(index, window, cx);
+                state.active = rows
+                    + if key == "left" {
+                        (index + buttons - 1) % buttons
+                    } else {
+                        (index + 1) % buttons
+                    };
             }
             "left" | "right" => return false,
             _ => {

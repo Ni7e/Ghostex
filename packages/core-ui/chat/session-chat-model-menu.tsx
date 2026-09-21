@@ -1,4 +1,13 @@
-import { IconCheck, IconChevronRight, IconSearch, IconStar, IconStarFilled } from '@tabler/icons-react';
+import {
+  IconBolt,
+  IconBoltFilled,
+  IconBrain,
+  IconChartBar,
+  IconCheck,
+  IconSearch,
+  IconStar,
+  IconStarFilled,
+} from '@tabler/icons-react';
 import {
   useEffect,
   useLayoutEffect,
@@ -35,12 +44,12 @@ import './session-chat-model-menu.css';
 
 /**
  * CDXC:SessionChat 2026-09-21 DECISION:
- * User: the composer's model and effort pills become one pill that opens one picker; a click on a model or a footer choice saves the agent's default, a right-click applies it to this session only, and there is no Also set as default switch.
+ * User: the composer's model and effort pills become one pill that opens one picker; a click on a model or a footer choice saves the agent's default, a right-click applies it to this session only, and there is no Also set as default switch. Reasoning, Context Window and Fast Mode are three buttons along the bottom, an icon beside each value; a button with at most two values toggles on click, a longer one opens a side list.
  * Everything drawn here comes from packages/shared/session-chat-presentation/model-menu.ts, which the GPUI picker draws too; this file owns only the tab, the search text, the keyboard cursor and the open side list.
  * SEE-ALSO: apps/desktop/src/app/native_chat/model_menu/ (the GPUI twin), packages/shared/session-chat-controller/model-menu.ts.
  */
 
-/** A footer row the host adds below the shared ones, such as a draft's agent CLI switcher. */
+/** A footer button the host adds after the shared ones, such as a draft's agent CLI switcher. */
 export interface SessionChatModelMenuExtraRow extends ModelMenuTrait {
   onChoose: (choice: ModelMenuTraitChoice) => void;
 }
@@ -69,6 +78,20 @@ export interface SessionChatModelMenuProps {
   initialTab?: ModelMenuTabId;
   initialFlyout?: number;
   popupClassName?: string;
+}
+
+/** Host rows follow the shared buttons' rule: at most two values toggle, more open the side list. */
+function toggleTarget(tray: ModelMenuTrait): ModelMenuTrait['toggle'] {
+  if (tray.toggle) return tray.toggle;
+  if (!('onChoose' in tray) || tray.choices.length > 2) return undefined;
+  const next = tray.choices.find((choice) => !choice.selected);
+  return next ? { value: next.value } : undefined;
+}
+
+function TraitIcon({ icon, on }: { icon: NonNullable<ModelMenuTrait['icon']>; on: boolean }) {
+  if (icon === 'reasoning') return <IconBrain aria-hidden='true' size={14} stroke={1.8} />;
+  if (icon === 'context') return <IconChartBar aria-hidden='true' size={14} stroke={1.8} />;
+  return on ? <IconBoltFilled aria-hidden='true' size={14} /> : <IconBolt aria-hidden='true' size={14} stroke={1.8} />;
 }
 
 function AgentLogo({ icon, size }: { icon: string; size: number }) {
@@ -107,7 +130,7 @@ export function SessionChatModelMenu({
   const favorites = useSyncExternalStore(subscribeModelFavorites, modelFavorites, modelFavorites);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const trayRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const trayRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef(false);
 
   const projection = useMemo(
@@ -139,7 +162,7 @@ export function SessionChatModelMenu({
   useEffect(() => {
     if (flyoutIndex === undefined) return;
     const frame = window.requestAnimationFrame(() => {
-      const left = flyoutOpensLeft(trayRefs.current[flyoutIndex]?.getBoundingClientRect());
+      const left = flyoutOpensLeft(trayRef.current?.getBoundingClientRect());
       setFlyout((current) => (current && current.left !== left ? { ...current, left } : current));
     });
     return () => window.cancelAnimationFrame(frame);
@@ -148,7 +171,7 @@ export function SessionChatModelMenu({
   const openFlyout = (index: number) => {
     const tray = trays[index];
     if (!tray || tray.disabled || projection.disabled) return;
-    const bounds = trayRefs.current[index]?.getBoundingClientRect();
+    const bounds = trayRef.current?.getBoundingClientRect();
     setFlyout({
       index,
       active: Math.max(
@@ -163,6 +186,19 @@ export function SessionChatModelMenu({
   const pickRow = (row: ModelMenuRow | undefined, secondary: boolean) => {
     if (!row || projection.disabled) return;
     onPickRow(row, secondary);
+  };
+  /** A two-value button applies its other value in place; a longer one opens its side list. */
+  const activateTray = (index: number, secondary: boolean) => {
+    const tray = trays[index];
+    if (!tray || tray.disabled || projection.disabled) return;
+    const target = toggleTarget(tray);
+    if (!target) {
+      if (flyout?.index === index) setFlyout(null);
+      else openFlyout(index);
+      return;
+    }
+    const choice = tray.choices.find((entry) => entry.value === target.value);
+    pickChoice(index, choice ? { ...choice, exitPlan: target.exitPlan ?? choice.exitPlan } : undefined, secondary);
   };
   const pickChoice = (index: number, choice: ModelMenuTraitChoice | undefined, secondary: boolean) => {
     const tray = trays[index];
@@ -191,11 +227,17 @@ export function SessionChatModelMenu({
     if (event.metaKey && /^[1-9]$/.test(key)) {
       pickRow(rows[Number(key) - 1], event.shiftKey);
     } else if (down || up) {
-      setActive((current) => step(current, down ? 1 : -1, count));
-    } else if (key === 'ArrowRight' && active >= rows.length) {
-      openFlyout(active - rows.length);
+      // The buttons are one row: Down from the last model lands on the first, and Up leaves them for the list.
+      setActive((current) => {
+        if (current >= rows.length) return down ? 0 : Math.max(rows.length - 1, 0);
+        if (down && current === rows.length - 1 && trays.length > 0) return rows.length;
+        if (up && current === 0 && trays.length > 0) return rows.length;
+        return step(current, down ? 1 : -1, rows.length);
+      });
+    } else if ((key === 'ArrowRight' || key === 'ArrowLeft') && active >= rows.length) {
+      setActive(rows.length + step(active - rows.length, key === 'ArrowRight' ? 1 : -1, trays.length));
     } else if (key === 'Enter') {
-      if (active >= rows.length) openFlyout(active - rows.length);
+      if (active >= rows.length) activateTray(active - rows.length, event.shiftKey);
       else pickRow(rows[active], event.shiftKey);
     } else if (key === 'Escape') {
       returnFocus.current = true;
@@ -376,64 +418,73 @@ export function SessionChatModelMenu({
           ))}
         </div>
         {trays.length > 0 ? (
-          <div className='ghostex-chat-model-menu-tray'>
+          <div className='ghostex-chat-model-menu-tray' ref={trayRef}>
             {trays.map((tray, index) => {
               const opened = flyout?.index === index;
               const disabled = projection.disabled || tray.disabled === true;
+              const toggles = toggleTarget(tray) !== undefined;
+              const on = tray.icon === 'fast' && tray.valueLabel === 'On';
+              const scoped = !('onChoose' in tray);
               return (
                 <div
-                  className='ghostex-chat-model-menu-tray-anchor'
+                  aria-disabled={disabled || undefined}
+                  aria-expanded={toggles ? undefined : opened}
+                  aria-haspopup={toggles ? undefined : 'listbox'}
+                  aria-label={`${tray.label}${tray.valueLabel ? `: ${tray.valueLabel}` : ''}`}
+                  aria-pressed={tray.icon === 'fast' ? on : undefined}
+                  className='ghostex-chat-model-menu-tray-button'
+                  data-active={opened || active === rows.length + index ? '' : undefined}
+                  data-icon={tray.icon}
+                  data-on={on ? '' : undefined}
                   key={tray.id}
-                  ref={(node) => {
-                    trayRefs.current[index] = node;
-                  }}
+                  onClick={() => activateTray(index, false)}
+                  onContextMenu={(event) => secondaryClick(event, () => activateTray(index, true))}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onMouseMove={() => setActive(rows.length + index)}
+                  role='button'
+                  title={[
+                    `${tray.label}${tray.valueLabel ? `: ${tray.valueLabel}` : ''}`,
+                    scoped ? projection.scopeHint : null,
+                  ]
+                    .filter(Boolean)
+                    .join('\n')}
                 >
-                  <div
-                    aria-disabled={disabled || undefined}
-                    aria-expanded={opened}
-                    aria-haspopup='listbox'
-                    className='ghostex-chat-model-menu-tray-row'
-                    data-active={opened || active === rows.length + index ? '' : undefined}
-                    onClick={() => (opened ? setFlyout(null) : openFlyout(index))}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onMouseMove={() => setActive(rows.length + index)}
-                    role='button'
-                  >
+                  {tray.icon ? (
+                    <TraitIcon icon={tray.icon} on={on} />
+                  ) : (
                     <span className='ghostex-chat-model-menu-tray-label'>{tray.label}</span>
-                    <span className='ghostex-chat-model-menu-tray-value'>{tray.valueLabel}</span>
-                    <IconChevronRight aria-hidden='true' size={12} stroke={2} />
-                  </div>
-                  {opened ? (
-                    <div
-                      className='ghostex-chat-model-menu-flyout'
-                      data-side={flyout.left ? 'left' : 'right'}
-                      role='listbox'
-                    >
-                      <div className='ghostex-chat-model-menu-flyout-heading'>{tray.label}</div>
-                      <div className='ghostex-chat-model-menu-flyout-choices'>
-                        {tray.choices.map((choice, choiceIndex) => (
-                          <div
-                            aria-selected={choice.selected}
-                            className='ghostex-chat-model-menu-tray-row'
-                            data-active={choiceIndex === flyout.active ? '' : undefined}
-                            key={`${choice.value}:${choice.label}`}
-                            onClick={() => pickChoice(index, choice, false)}
-                            onContextMenu={(event) => secondaryClick(event, () => pickChoice(index, choice, true))}
-                            onMouseMove={() => setFlyout({ ...flyout, active: choiceIndex })}
-                            role='option'
-                            title={'onChoose' in tray ? undefined : projection.scopeHint}
-                          >
-                            <span className='ghostex-chat-model-menu-tray-label'>{choice.label}</span>
-                            {choice.isDefault ? <span className='ghostex-chat-model-menu-default'>Default</span> : null}
-                            {choice.selected ? <IconCheck aria-hidden='true' size={14} stroke={2} /> : null}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
+                  )}
+                  <span className='ghostex-chat-model-menu-tray-value'>
+                    {tray.icon === 'fast' ? 'Fast' : tray.valueLabel}
+                  </span>
                 </div>
               );
             })}
+            {flyout && trays[flyout.index] ? (
+              <div className='ghostex-chat-model-menu-flyout' data-side={flyout.left ? 'left' : 'right'} role='listbox'>
+                <div className='ghostex-chat-model-menu-flyout-heading'>{trays[flyout.index]!.label}</div>
+                <div className='ghostex-chat-model-menu-flyout-choices'>
+                  {trays[flyout.index]!.choices.map((choice, choiceIndex) => (
+                    <div
+                      aria-selected={choice.selected}
+                      className='ghostex-chat-model-menu-flyout-row'
+                      data-active={choiceIndex === flyout.active ? '' : undefined}
+                      key={`${choice.value}:${choice.label}`}
+                      onClick={() => pickChoice(flyout.index, choice, false)}
+                      onContextMenu={(event) => secondaryClick(event, () => pickChoice(flyout.index, choice, true))}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onMouseMove={() => setFlyout({ ...flyout, active: choiceIndex })}
+                      role='option'
+                      title={'onChoose' in trays[flyout.index]! ? undefined : projection.scopeHint}
+                    >
+                      <span className='ghostex-chat-model-menu-flyout-label'>{choice.label}</span>
+                      {choice.isDefault ? <span className='ghostex-chat-model-menu-default'>Default</span> : null}
+                      {choice.selected ? <IconCheck aria-hidden='true' size={14} stroke={2} /> : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </PopoverContent>

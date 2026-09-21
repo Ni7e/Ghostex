@@ -10,6 +10,22 @@ pub(super) const BAR_HEIGHT: f32 = 40.0;
 pub(super) const LIST_HEIGHT: f32 = 216.0;
 pub(super) const TRAIT_ROW_HEIGHT: f32 = 30.0;
 pub(super) const ROW_GAP: f32 = 2.0;
+pub(super) const BUTTON_GAP: f32 = 4.0;
+/// Past this many, the footer's buttons wrap onto another line rather than squeeze their values.
+const BUTTONS_PER_LINE: usize = 4;
+
+/// How many lines the footer's buttons take, and how many sit on each.
+pub(super) fn button_lines(buttons: usize) -> (usize, usize) {
+    let lines = buttons.div_ceil(BUTTONS_PER_LINE);
+    (
+        lines,
+        if lines == 0 {
+            0
+        } else {
+            buttons.div_ceil(lines)
+        },
+    )
+}
 pub(super) const ERROR_HEIGHT: f32 = 58.0;
 
 /// The picker's tones, from the same two surfaces the chat's other menus use.
@@ -20,6 +36,8 @@ pub(super) struct Palette {
     pub(super) border: Hsla,
     pub(super) accent: Hsla,
     pub(super) star: Hsla,
+    /// The tone the merged pill's fast marker uses, for a footer button that is switched on.
+    pub(super) on: Hsla,
     ink: Hsla,
 }
 
@@ -35,6 +53,7 @@ impl Palette {
             border: ink.opacity(0.12),
             accent: appearance.control_primary,
             star: rgb(if light { 0xd97706 } else { 0xfbbf24 }).into(),
+            on: appearance.primary,
             ink,
         }
     }

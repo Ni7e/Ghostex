@@ -18,6 +18,7 @@ function ModelMenuStory({
   error,
   otherAgents,
   open,
+  fast,
 }: {
   theme: 'light' | 'dark';
   tab?: ModelMenuTabId;
@@ -25,13 +26,15 @@ function ModelMenuStory({
   error: boolean;
   otherAgents: boolean;
   open: boolean;
+  fast: boolean;
 }) {
   const [state, setState] = useState<SessionChatOptionState>({
     model: { value: 'opus[1m]', source: 'detected' },
     effort: { value: 'high', source: 'detected' },
+    ...(fast ? { fastMode: { value: 'on', source: 'detected' as const } } : {}),
   });
   const [log, setLog] = useState(
-    'Click a model to save it as the default; right-click applies it to this session only.'
+    'Click a model to save it as the default; right-click applies it to this session only. The context window and fast buttons toggle; reasoning opens a list.'
   );
   useEffect(() => {
     const previous = document.body.dataset.sessionChatTheme;
@@ -112,7 +115,7 @@ export default {
   title: 'Chat/Model Menu',
   component: ModelMenuStory,
   parameters: { layout: 'fullscreen' },
-  args: { theme: 'dark', error: false, otherAgents: true, open: true },
+  args: { theme: 'dark', error: false, otherAgents: true, open: true, fast: false },
   argTypes: { theme: { control: 'inline-radio', options: ['light', 'dark'] } },
 } satisfies Meta<typeof ModelMenuStory>;
 type Story = StoryObj<typeof ModelMenuStory>;
@@ -120,6 +123,7 @@ export const Dark: Story = {};
 export const Light: Story = { args: { theme: 'light' } };
 export const Favorites: Story = { args: { tab: 'favorites' } };
 export const ReasoningOpen: Story = { args: { flyout: 0 } };
+export const FastOn: Story = { args: { fast: true } };
 export const NotApplied: Story = { args: { error: true } };
 export const PillOnly: Story = { args: { open: false } };
 export const OwnAgentOnly: Story = { args: { otherAgents: false } };
