@@ -87,6 +87,7 @@ pub(crate) struct SidebarRemoteHost {
         SidebarRemoteCounters,
         [u64; 7],
         super::sidebar_remote_focus::SidebarRemoteFocusCounters,
+        super::sidebar_state_actions::SidebarStateActionCounters,
     )>,
 }
 
@@ -305,9 +306,11 @@ impl GhostexGpuiApp {
             self.gx_store.sidebar_open.sort_rows_declined,
         ];
         let focus = self.gx_store_remote_focus_counters();
+        // Delayed Send, the launcher's run and Hide Machine (gx_store/sidebar_state_actions.rs).
+        let state = self.gx_store.sidebar_open.state;
         let host = &mut self.gx_store.sidebar_remote;
         let now = (host.counters, local);
-        if host.summary_written == Some((now.0, now.1, focus))
+        if host.summary_written == Some((now.0, now.1, focus, state))
             || host
                 .summary_at
                 .is_some_and(|at| at.elapsed() < REMOTE_SUMMARY_INTERVAL)
@@ -319,7 +322,7 @@ impl GhostexGpuiApp {
             return;
         }
         host.summary_records += 1;
-        host.summary_written = Some((now.0, now.1, focus));
+        host.summary_written = Some((now.0, now.1, focus, state));
         let [
             reloads_stopped,
             paced_legs_waited,
@@ -343,6 +346,7 @@ impl GhostexGpuiApp {
                     "sortRows": sort_rows,
                     "sortRowsDeclined": sort_rows_declined,
                 },
+                "state": super::diagnostics_open::state_counters_json(&state),
             }),
         );
     }

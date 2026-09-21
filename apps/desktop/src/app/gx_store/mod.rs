@@ -18,7 +18,8 @@
 //! and fork), `sidebar_flags.rs` the four that are one call with different fields,
 //! `sidebar_modals.rs` the two that only open a dialog, `sidebar_open.rs` the family whose whole
 //! answer is an app-modal-host message (the More menu's rows, a machine's Configure, the Space
-//! editor, a project's Add Worktree and History), and `sidebar_snooze.rs` the two that read
+//! editor, a project's Add Worktree and History), `sidebar_state_actions.rs` a row's Delayed Send,
+//! the agent launcher's run and a machine tab's Hide Machine, and `sidebar_snooze.rs` the two that read
 //! the clock and the local calendar, `sidebar_reload.rs` Full Reload and Split Right,
 //! `sidebar_bulk.rs` the plural payloads and the renderer's
 //! batch envelope, `sidebar_remote.rs` every per-session action of a row on a remote machine,
@@ -66,6 +67,7 @@ mod sidebar_shadow;
 mod sidebar_shadow_compare;
 mod sidebar_snapshot;
 mod sidebar_snooze;
+mod sidebar_state_actions;
 mod sidebar_ui;
 mod sidebar_ui_commands;
 mod sidebar_ui_paths;

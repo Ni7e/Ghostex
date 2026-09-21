@@ -1645,9 +1645,9 @@ impl GxStoreDiagnostics {
                             .and_then(serde_json::Value::as_str)
                             .unwrap_or("?")
                     ),
-                    ghostex_gx_core::ActionEffect::StartLocalGxserver => {
-                        "startLocalGxserver".to_string()
-                    }
+                    // Every other effect by its NAME only (a settings patch or a launch message is
+                    // the user's). Line-neutral: this file is over its ceiling.
+                    other => other.call_name().to_string(),
                 }))
             })
             .collect();

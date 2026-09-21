@@ -50,6 +50,9 @@ pub(crate) struct SidebarOpenCounters {
     pub(crate) sort_rows_declined: u64,
     /// Commands the store owns but did not answer because the renderer is not drawing its list.
     pub(crate) declined_source: u64,
+    /// Delayed Send, the agent launcher's run and Hide Machine, which the host asks first
+    /// (gx_store/sidebar_state_actions.rs).
+    pub(crate) state: super::sidebar_state_actions::SidebarStateActionCounters,
 }
 
 impl GhostexGpuiApp {
@@ -60,6 +63,11 @@ impl GhostexGpuiApp {
         command: &Value,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        // A row's Delayed Send, the launcher's run and Hide Machine are answered first: the last
+        // two share this family's command types and are not opens.
+        if self.gx_store_run_sidebar_state_action(command, cx) {
+            return true;
+        }
         // The TOP level, not `command.message`: see the note at the top of this file.
         if !owns_open_command(command) {
             return false;

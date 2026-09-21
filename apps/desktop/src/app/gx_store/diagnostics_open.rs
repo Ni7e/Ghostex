@@ -19,6 +19,7 @@ use super::diagnostics::{
     GxStoreDiagnostics, MAX_SIDEBAR_ACTION_RECORDS, log_text, record, routine_logging_enabled,
 };
 use super::sidebar_open::SidebarOpenCounters;
+use super::sidebar_state_actions::SidebarStateActionCounters;
 
 impl GxStoreDiagnostics {
     /// One line per answered command: which one, what it did, and the run's totals.
@@ -65,4 +66,58 @@ impl GxStoreDiagnostics {
             }),
         );
     }
+
+    /// One line per answered Delayed Send, launcher run or Hide Machine: the call's NAME and the
+    /// modal's, never the payload, which carries a session's title, an agent choice or a
+    /// machine's host. The totals ride the periodic `gxStore.sidebarActions.summary` as well.
+    pub(super) fn sidebar_state_action_ran(
+        &mut self,
+        kind: &str,
+        plan: &SidebarActionPlan,
+        plan_us: u64,
+        counters: SidebarStateActionCounters,
+    ) {
+        if self.sidebar_lifecycle_records >= MAX_SIDEBAR_ACTION_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_lifecycle_records += 1;
+        let call = plan
+            .effects
+            .first()
+            .map(|effect| match effect {
+                ActionEffect::OpenAppModal { payload } => payload
+                    .get("modal")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|modal| format!("openAppModal={modal}"))
+                    .unwrap_or_else(|| "openAppModal".to_string()),
+                other => other.call_name().to_string(),
+            })
+            .unwrap_or_else(|| "none".to_string());
+        record(
+            "gxStore.sidebarOpen",
+            json!({
+                "command": log_text(kind),
+                "call": log_text(call),
+                "effects": plan.effects.len(),
+                "planUs": plan_us,
+                "state": state_counters_json(&counters),
+            }),
+        );
+    }
+}
+
+/// The state counters as both records carry them: 8 keys, at depth 2.
+pub(super) fn state_counters_json(counters: &SidebarStateActionCounters) -> serde_json::Value {
+    json!({
+        "delayedSends": counters.delayed_sends,
+        "delayedSendsDeclinedRow": counters.delayed_sends_declined_row,
+        "agentRuns": counters.agent_runs,
+        "configureAgents": counters.configure_agents,
+        "agentNothing": counters.agent_nothing,
+        "agentRunsWithoutRuntime": counters.agent_runs_without_runtime,
+        "machineHides": counters.machine_hides,
+        "declinedSource": counters.declined_source,
+    })
 }
