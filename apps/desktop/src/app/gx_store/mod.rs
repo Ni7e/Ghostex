@@ -30,7 +30,9 @@
 //! key, its debounced push and the guard that refuses the daemon's echo while one is outstanding;
 //! `project_docs.rs` the PROJECT moves (reorder, into and out of a collection, Space membership)
 //! and the two documents they write, on the generic `client_document.rs` host that owns the stored
-//! key, the debounced push and the echo funnel for any client-owned document;
+//! key, the debounced push and the echo funnel for any client-owned document, with
+//! `collection_menu.rs` holding the three Project Group menu items that write the same collections
+//! document (Rename, a colour, Ungroup) and `diagnostics_project_docs.rs` their record lines;
 //! `sidebar_ui_paths.rs` holds the three routes into the sidebar's own state that are NOT
 //! sidebar commands (the per-Space session memory, the Space-editor delete, and the project slot
 //! hotkey), and `sidebar_slot_jump.rs` the rest of that hotkey's jump, its focus and its reveal;
@@ -38,8 +40,10 @@
 
 mod burst;
 mod client_document;
+mod collection_menu;
 mod diagnostics;
 mod diagnostics_open;
+mod diagnostics_project_docs;
 mod diagnostics_remote_last_seen;
 mod effects;
 mod host;

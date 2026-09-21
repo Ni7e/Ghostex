@@ -89,6 +89,10 @@ pub(crate) struct GxStoreDiagnostics {
     workspace_groups_read_warnings: u32,
     workspace_groups_write_warnings: u32,
     workspace_groups_refusal_warnings: u32,
+    /// The budget of the lines in `diagnostics_project_docs.rs`, apart from
+    /// `client_document_records` so a busy launch cannot silence the proof that a Project Group
+    /// menu item, a Space editor result or a Space switch ran at all.
+    pub(super) project_doc_edit_records: u32,
     sidebar_never_settled_records: u32,
     sidebar_scratch_records: u32,
     sidebar_slow_update_records: u32,

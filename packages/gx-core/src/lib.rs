@@ -54,10 +54,12 @@ pub use crate::project_docs::{
     apply_space_row_reorder, can_drop_project_with_worktrees, collections_hand_back_script,
     collections_request_script, create_collection, move_members_to_space,
     move_projects_to_collection, move_projects_with_worktrees, order_projects_with_worktrees,
-    reorder_collection_projects, reorder_spaces, spaces_hand_back_script, toggle_space_member,
-    CollectionsDocument, DropPosition, ProjectOrderItem, SpaceMemberKind, SpacesDocument,
+    owns_collection_menu_command, plan_collection_menu_edit, reorder_collection_projects,
+    reorder_spaces, spaces_hand_back_script, toggle_space_member, CollectionsDocument,
+    DropPosition, ProjectOrderItem, SpaceMemberKind, SpacesDocument,
     COLLECTIONS_HAND_OFF_MESSAGE_TYPE, COLLECTIONS_SCRIPT_PLACEHOLDER, COLLECTIONS_SYNC_DELAY_MS,
-    COLLECTIONS_SYNC_RETRY_DELAY_MS, SPACES_HAND_OFF_MESSAGE_TYPE, SPACES_SCRIPT_PLACEHOLDER,
+    COLLECTIONS_SYNC_RETRY_DELAY_MS, COLLECTION_MENU_COMMAND_TYPE,
+    COLLECTION_MENU_DOCUMENT_ACTIONS, SPACES_HAND_OFF_MESSAGE_TYPE, SPACES_SCRIPT_PLACEHOLDER,
     SPACES_SYNC_DELAY_MS, SPACES_SYNC_RETRY_DELAY_MS,
 };
 pub use crate::presentation_store::{

@@ -188,6 +188,12 @@ impl GhostexGpuiApp {
         if self.gx_store_run_project_move(&command, cx) {
             return;
         }
+        // A Project Group's Rename, colour and Ungroup write the same collections document without
+        // being moves, so they are answered beside them and go no further: the old runtime would
+        // otherwise write and push the document a second time (gx_store/collection_menu.rs).
+        if self.gx_store_run_collection_menu_edit(&command, cx) {
+            return;
+        }
         // The bulk menu, a collection's lifecycle items and a project's Sleep, Wake and Close
         // resolve their set here and fan out into the per-session actions above, paced when the
         // action is a sleep (gx_store/sidebar_bulk.rs).
