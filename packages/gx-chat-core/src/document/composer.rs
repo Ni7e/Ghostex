@@ -33,8 +33,12 @@ pub struct ComposerOverflow {
 pub struct ComposerChrome {
     pub note_presence: bool,
     pub note_pressed: bool,
-    /// The count on the stash button, or `null` when nothing is stashed.
-    pub stash_badge: Option<i64>,
+    /// The count on the stash button as text, or `null` when nothing is stashed.
+    ///
+    /// A string, not a number: `native-composer-chrome.ts` writes `String(Math.min(count, 9))` and
+    /// `apps/desktop/src/app/native_chat/composer.rs` reads it with `as_str`, so a numeric value
+    /// would silently draw no badge at all.
+    pub stash_badge: Option<String>,
     pub summary_pressed: bool,
 }
 

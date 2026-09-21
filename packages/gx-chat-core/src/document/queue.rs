@@ -36,17 +36,31 @@ pub struct QueueCapabilities {
 #[serde(rename_all = "camelCase")]
 pub struct QueuedPrompt {
     pub id: String,
+    /// A normal send held during startup, which is drawn in the transcript rather than above the
+    /// composer.
+    ///
+    /// CDXC:SessionChat 2026-09-11 DECISION:
+    /// Normal sends held during startup appear only in the transcript, including after reopening
+    /// or switching devices. Explicitly queued prompts stay above the composer.
+    #[serde(default, skip_serializing_if = "Tri::is_absent")]
+    pub startup_send: Tri<bool>,
     pub text: String,
-    /// `queued`, `sending`, `failed`, `delivered`.
+    /// `queued`, `sending`, `failed`.
     pub state: String,
+    /// Set only when `state` is `failed`: why the delivery attempt failed.
+    ///
+    /// Spelled `errorMessage`, which is the wire name `session-chat-queue.ts` defines and the name
+    /// `apps/desktop/src/app/native_chat/queue.rs` reads.
+    #[serde(default, skip_serializing_if = "Tri::is_absent")]
+    pub error_message: Tri<String>,
     pub created_at: String,
     pub updated_at: String,
     /// The single line the row shows, projected so both renderers clip identically.
+    #[serde(default)]
     pub preview: String,
     /// The row is mid-flight, so its controls are held.
+    #[serde(default)]
     pub busy: bool,
-    #[serde(default, skip_serializing_if = "Tri::is_absent")]
-    pub error: Tri<String>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, Value>,
 }
