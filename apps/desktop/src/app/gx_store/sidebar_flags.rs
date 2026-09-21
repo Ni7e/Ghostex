@@ -56,7 +56,7 @@ impl GhostexGpuiApp {
         if !owns_flags_message(message) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             if message
                 .get("type")
                 .and_then(Value::as_str)

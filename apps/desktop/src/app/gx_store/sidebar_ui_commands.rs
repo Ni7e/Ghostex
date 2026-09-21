@@ -177,25 +177,14 @@ impl GhostexGpuiApp {
 impl GhostexGpuiApp {
     /// Every project group the machine draws, the Chats collection left out.
     fn sidebar_drawn_project_group_ids(&self) -> Vec<String> {
-        match self.gx_store_sidebar_draws_store_list() {
-            true => self
-                .gx_store
-                .sidebar_list
-                .view()
-                .groups
-                .iter()
-                .filter(|group| group.core.group_id != ghostex_gx_core::CHATS_GROUP_ID)
-                .map(|group| group.core.group_id.clone())
-                .collect(),
-            false => self
-                .native_sidebar
-                .snapshot
-                .iter()
-                .flat_map(|snapshot| snapshot.groups.iter())
-                .filter(|group| !group.is_chat_collection)
-                .map(|group| group.group_id.clone())
-                .collect(),
-        }
+        self.gx_store
+            .sidebar_list
+            .view()
+            .groups
+            .iter()
+            .filter(|group| group.core.group_id != ghostex_gx_core::CHATS_GROUP_ID)
+            .map(|group| group.core.group_id.clone())
+            .collect()
     }
 
     /// The `<section key>:<collection id>` a collection's own state is stored under.
@@ -207,11 +196,11 @@ impl GhostexGpuiApp {
     /// TypeScript's `if (!collection) return` does.
     ///
     /// CDXC:Sidebar 2026-09-21 WHY:
-    /// "One the sidebar knows" is asked of the list that is DRAWN, which is the store's own list
-    /// once it draws one. It used to be asked of the old page's projection in both positions of the
-    /// switch, and that projection is about to stop being published: with no publish every
-    /// collection would answer `None` here and collapse, hide, select and Collapse Projects would
-    /// silently stop on every one of them.
+    /// "One the sidebar knows" is asked of the store's own list, which since M4d part 2 step 6 is
+    /// the only list there is. It used to be asked of the old page's projection, and that
+    /// projection is about to stop being published: reading it would make every collection answer
+    /// `None` here and collapse, hide, select and Collapse Projects would silently stop on every
+    /// one of them.
     fn sidebar_collection_storage_id(&self, collection_id: &str) -> Option<String> {
         let state = self.gx_store.sidebar_ui.state();
         let storage_id = format!("{}:{}", state.section_key(), collection_id);
@@ -232,118 +221,53 @@ impl GhostexGpuiApp {
 
     /// The drawn collection's group ids, or `None` when no drawn collection carries that id.
     fn sidebar_drawn_collection(&self, collection_id: &str) -> Option<Vec<String>> {
-        match self.gx_store_sidebar_draws_store_list() {
-            true => self
-                .gx_store
-                .sidebar_list
-                .view()
-                .collections
-                .iter()
-                .find(|collection| collection.collection_id == collection_id)
-                .map(|collection| collection.group_ids.clone()),
-            false => self
-                .native_sidebar
-                .projection
-                .iter()
-                .flat_map(|snapshot| snapshot.collections.iter())
-                .find(|collection| collection.collection_id == collection_id)
-                .map(|collection| collection.group_ids.clone()),
-        }
+        self.gx_store
+            .sidebar_list
+            .view()
+            .collections
+            .iter()
+            .find(|collection| collection.collection_id == collection_id)
+            .map(|collection| collection.group_ids.clone())
     }
 
     fn sidebar_collection_session_ids(&self, collection_id: &str) -> Vec<String> {
         let group_ids = self.sidebar_collection_group_ids(collection_id);
-        match self.gx_store_sidebar_draws_store_list() {
-            true => self
-                .gx_store
-                .sidebar_list
-                .view()
-                .groups
-                .iter()
-                .filter(|group| group_ids.iter().any(|id| *id == group.core.group_id))
-                .flat_map(|group| group.core.sessions.iter())
-                .map(|session| session.row.sidebar_session_id.clone())
-                .collect(),
-            false => self
-                .native_sidebar
-                .snapshot
-                .iter()
-                .flat_map(|snapshot| snapshot.groups.iter())
-                .filter(|group| group_ids.iter().any(|id| *id == group.group_id))
-                .flat_map(|group| group.sessions.iter())
-                .map(|session| session.session_id.clone())
-                .collect(),
-        }
+        self.gx_store
+            .sidebar_list
+            .view()
+            .groups
+            .iter()
+            .filter(|group| group_ids.iter().any(|id| *id == group.core.group_id))
+            .flat_map(|group| group.core.sessions.iter())
+            .map(|session| session.row.sidebar_session_id.clone())
+            .collect()
     }
 
     /// The rows the list actually draws, in order: what a shift-click range is measured in.
     fn sidebar_rendered_session_ids(&self) -> Vec<String> {
-        match self.gx_store_sidebar_draws_store_list() {
-            true => {
-                let view = self.gx_store.sidebar_list.view();
-                view.order
+        let view = self.gx_store.sidebar_list.view();
+        view.order
+            .iter()
+            .flat_map(|item| match item.kind {
+                ghostex_gx_core::OrderKind::Project => vec![item.id.clone()],
+                ghostex_gx_core::OrderKind::Collection => view
+                    .collections
                     .iter()
-                    .flat_map(|item| match item.kind {
-                        ghostex_gx_core::OrderKind::Project => vec![item.id.clone()],
-                        ghostex_gx_core::OrderKind::Collection => view
-                            .collections
-                            .iter()
-                            .find(|collection| {
-                                collection.collection_id == item.id && !collection.collapsed
-                            })
-                            .map(|collection| collection.group_ids.clone())
-                            .unwrap_or_default(),
-                    })
-                    .filter_map(|group_id| view.group(&group_id))
-                    .filter(|group| !group.core.collapsed)
-                    .flat_map(|group| {
-                        group
-                            .core
-                            .sections
-                            .iter()
-                            .filter(|section| !section.collapsed)
-                            .flat_map(|section| section.session_ids.iter().cloned())
-                    })
-                    .collect()
-            }
-            false => {
-                let Some(snapshot) = self.native_sidebar.snapshot.as_ref() else {
-                    return Vec::new();
-                };
-                snapshot
-                    .order
+                    .find(|collection| collection.collection_id == item.id && !collection.collapsed)
+                    .map(|collection| collection.group_ids.clone())
+                    .unwrap_or_default(),
+            })
+            .filter_map(|group_id| view.group(&group_id))
+            .filter(|group| !group.core.collapsed)
+            .flat_map(|group| {
+                group
+                    .core
+                    .sections
                     .iter()
-                    .flat_map(|item| {
-                        if item.kind == "project" {
-                            vec![item.id.clone()]
-                        } else {
-                            snapshot
-                                .collections
-                                .iter()
-                                .find(|collection| {
-                                    collection.collection_id == item.id && !collection.collapsed
-                                })
-                                .map(|collection| collection.group_ids.clone())
-                                .unwrap_or_default()
-                        }
-                    })
-                    .filter_map(|group_id| {
-                        snapshot
-                            .groups
-                            .iter()
-                            .find(|group| group.group_id == group_id)
-                    })
-                    .filter(|group| !group.collapsed)
-                    .flat_map(|group| {
-                        group
-                            .sections
-                            .iter()
-                            .filter(|section| !section.collapsed)
-                            .flat_map(|section| section.session_ids.iter().cloned())
-                    })
-                    .collect()
-            }
-        }
+                    .filter(|section| !section.collapsed)
+                    .flat_map(|section| section.session_ids.iter().cloned())
+            })
+            .collect()
     }
 
     fn sidebar_focused_row_id(&self) -> Option<String> {

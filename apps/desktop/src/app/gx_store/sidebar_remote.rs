@@ -120,7 +120,7 @@ impl GhostexGpuiApp {
         if !owns_remote_session_message(message) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_remote.counters.declined_source += 1;
             return false;
         }

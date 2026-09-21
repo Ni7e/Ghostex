@@ -101,6 +101,16 @@ impl GhostexGpuiApp {
         command: Value,
         cx: &mut gpui::Context<Self>,
     ) {
+        // CDXC:Sidebar 2026-09-21 WHY:
+        // The list is not ready yet (the launch window: the sidebar's own state has not been read
+        // back, or the runtime has not posted the HUD), so the renderer is drawing the loading
+        // skeleton and every id in this command names a row of a list nobody has seen. Dropped
+        // here, once and counted, rather than let through: the planners below would each decline
+        // it and the fall-through would then hand a command nobody can perform to the runtime.
+        if !self.gx_store_sidebar_list_ready() {
+            self.gx_store_drop_sidebar_command_before_ready(&command);
+            return;
+        }
         // A row's context menu is built for the row the user opened, and since M4c the store
         // builds it: the panel is filled in this frame instead of after a round trip through the
         // old runtime (gx_store/sidebar_menus.rs).

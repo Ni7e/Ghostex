@@ -90,7 +90,7 @@ impl GhostexGpuiApp {
     /// something unrelated redrew the list. The read is two indexed rows on an open connection and
     /// happens at most once a second, only while the store's list is the one on screen.
     pub(crate) fn gx_store_poll_menu_host(&mut self, cx: &mut gpui::Context<Self>) {
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             return;
         }
         let generation = self.gx_store_menu_host_generation();
@@ -137,7 +137,7 @@ impl GhostexGpuiApp {
         command: &Value,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        if command["type"] != "sessionMenu" || !self.gx_store_sidebar_draws_store_list() {
+        if command["type"] != "sessionMenu" || !self.gx_store_sidebar_list_ready() {
             return false;
         }
         let Some(session_id) = command["sessionId"].as_str().map(str::to_string) else {

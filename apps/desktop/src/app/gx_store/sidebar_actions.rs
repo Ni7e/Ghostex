@@ -58,12 +58,12 @@ impl GhostexGpuiApp {
         let Some(message) = command.get("message") else {
             return false;
         };
-        // The store's answer is only the right one while the store's list is the one on screen.
-        // With the old projection drawn, its own state is what the row was built from, and the two
-        // could resolve a stale id differently; the old runtime keeps the whole payload then. The
-        // decline is counted by name rather than by planning and throwing the plan away, so a run
-        // with the switch off costs this comparison and nothing else.
-        if !self.gx_store_sidebar_draws_store_list() {
+        // Only while the list is ready: in the launch window the ids in this payload name rows of
+        // a list nobody has drawn. Most commands never get here (the dispatch drops them at the
+        // door), but the planners have callers of their own, so the gate stays. The decline is
+        // counted by name rather than by planning and throwing the plan away, so a run in the
+        // launch window costs this comparison and nothing else.
+        if !self.gx_store_sidebar_list_ready() {
             if message
                 .get("type")
                 .and_then(Value::as_str)

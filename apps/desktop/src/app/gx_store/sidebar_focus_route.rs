@@ -28,8 +28,8 @@
 //!
 //! **Counters** ride `gxStore.sidebarActions.summary` as `localFocus`: `focuses`, `browserRows`,
 //! `modalsClosed`, `pageTold`, `declinedSource`. A run in which the user clicked a row and
-//! `focuses` is zero means the click never reached here; `declinedSource` moving means the old page
-//! drew the list and routed the click itself.
+//! `focuses` is zero means the click never reached here; `declinedSource` moving means a click
+//! arrived before the list was ready, which is the launch window and nothing else.
 //!
 //! SEE-ALSO: apps/desktop/sidebar/native-sidebar/selection.ts (`selectNativeSidebarSession`),
 //! apps/desktop/sidebar/gxserver-runtime/core.ts (`onSidebarCommand`),
@@ -70,7 +70,7 @@ impl GhostexGpuiApp {
         let Some(session_id) = local_focus_session_id(command) else {
             return false;
         };
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.local_focus_route.declined_source += 1;
             return false;
         }

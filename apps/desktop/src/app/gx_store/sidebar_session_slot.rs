@@ -6,7 +6,7 @@
 //! `runNativeSidebarHotkey` resolved the Nth row from the page's own in-memory copy of the sidebar
 //! and selected and revealed it. With the store's list drawn, the row is the Nth row of THAT list
 //! (gx-core `session_slot_plan`), so what the user sees is what cmd+N means, and the message is no
-//! longer sent. With the switch off it still is, because the old page is then the list on screen.
+//! longer sent at all: the store's list is the only list since M4d part 2 step 6.
 //!
 //! **Where each effect ends, read rather than assumed.** The press is a row click plus a reveal,
 //! exactly as `runNativeSidebarHotkey` made it (`selectNativeSidebarSession`, then
@@ -75,7 +75,7 @@ impl GhostexGpuiApp {
         slot_number: u8,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.session_slot.counters.declined_source += 1;
             return false;
         }

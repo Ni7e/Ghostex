@@ -67,7 +67,7 @@ impl GhostexGpuiApp {
         if !owns_snooze_action(command) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_snooze.declined_source += 1;
             return false;
         }
@@ -118,7 +118,7 @@ impl GhostexGpuiApp {
         if !owns_snooze_message(message) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_snooze.declined_source += 1;
             return false;
         }

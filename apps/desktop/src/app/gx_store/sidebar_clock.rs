@@ -46,6 +46,12 @@ impl GhostexGpuiApp {
     }
 
     fn gx_store_sidebar_clock_tick(&mut self, cx: &mut gpui::Context<Self>) {
+        // The machine tabs: the settings say which machines exist and the connect states say how
+        // they are doing, so a tab the sidebar no longer offers falls back to this computer here.
+        // It rode the publish until M4d part 2 step 6 and reuses its own answer for a second, so
+        // this tick is the same cadence it already had; the connect funnel and the store's
+        // bootstrap still force it.
+        self.gx_store_sync_remote_clients(false, cx);
         self.gx_store_refresh_armed_actions(cx);
         // The one cadence that notices a Keep Awake armed from the titlebar or an agent launched
         // from another surface (gx_store/sidebar_menus.rs).

@@ -45,10 +45,10 @@ pub(crate) struct SidebarOpenCounters {
     /// path ends in `handleUnsupportedSidebarMessage` (gx-core `sidebar_actions/sort.rs`). Counted
     /// apart from `nothing` so a click on either row is visible in the run.
     pub(crate) sort_rows: u64,
-    /// Sort-row clicks that went to the old runtime because the renderer is not drawing the
-    /// store's list. Also inside `declined_source`.
+    /// Sort-row clicks dropped because the list was not ready yet. Also inside `declined_source`.
     pub(crate) sort_rows_declined: u64,
-    /// Commands the store owns but did not answer because the renderer is not drawing its list.
+    /// Commands the store owns but did not answer because the list was not ready yet (the launch
+    /// window: the sidebar's own state or the HUD had not landed).
     pub(crate) declined_source: u64,
     /// Delayed Send, the agent launcher's run and Hide Machine, which the host asks first
     /// (gx_store/sidebar_state_actions.rs).
@@ -77,7 +77,7 @@ impl GhostexGpuiApp {
                 .get("action")
                 .and_then(Value::as_str)
                 .is_some_and(|action| SORT_ACTIONS.contains(&action));
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_open.declined_source += 1;
             if sort_row {
                 self.gx_store.sidebar_open.sort_rows_declined += 1;

@@ -107,8 +107,22 @@ impl GxStoreDiagnostics {
                     "uiOnly": route.ui_only,
                     // Above zero means a command has no owner on either side any more.
                     "unroutable": route.unroutable,
+                    // Dropped at the door because the list was not ready yet (the launch window).
+                    "beforeReady": route.before_ready,
                 },
             }),
+        );
+    }
+
+    /// A command that arrived before the list was ready. The TYPE only, which is a fixed word from
+    /// the renderer's own closed set, never the payload.
+    pub(super) fn sidebar_command_before_ready(&mut self, kind: Option<&str>) {
+        if !routine_logging_enabled() {
+            return;
+        }
+        record(
+            "gxStore.sidebarCommandBeforeReady",
+            json!({ "type": log_text(kind.unwrap_or("none")) }),
         );
     }
 

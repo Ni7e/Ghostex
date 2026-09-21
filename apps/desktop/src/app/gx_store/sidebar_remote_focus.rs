@@ -148,7 +148,7 @@ impl GhostexGpuiApp {
             .is_some();
         // The store's answer is only the right one while the store's list is the one on screen:
         // with the old projection drawn, its own state is what the row was built from.
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             if remote_row {
                 self.gx_store.sidebar_remote_focus.counters.declined_source += 1;
             }

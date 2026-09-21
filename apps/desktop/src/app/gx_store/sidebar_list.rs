@@ -1,13 +1,15 @@
-//! The Rust sidebar list inside the app: built from the store and the sidebar's own state, kept up
-//! to date, and drawn when the renderer is switched to it.
+//! The sidebar list inside the app: built from the store and the sidebar's own state, kept up to
+//! date, and the only list the renderer draws.
 //!
-//! CDXC:Sidebar 2026-09-20 DECISION:
+//! CDXC:Sidebar 2026-09-21 DECISION:
 //! User: the desktop app stops running product logic in QuickJS; one Rust state store owns it, and
 //! every interaction is a local state change plus one redraw. The list is derived here rather than
 //! projected in QuickJS and posted over a bridge. It is rebuilt only when the store, the sidebar's
 //! own state, the settings or the clock deadline of a row moved, never per frame, and an update
-//! with nothing changed does no work at all. Which list the renderer draws is the
-//! `sidebarListSource` setting, so the two can be compared in one running app.
+//! with nothing changed does no work at all. This supersedes the 2026-09-20 note that the
+//! `sidebarListSource` setting chose between two lists: M4d part 2 step 6 deleted the setting and
+//! the other list. A settings file that still holds the key is ignored, because the normalizer
+//! drops what it does not know.
 
 use std::time::{Duration, Instant};
 
@@ -51,16 +53,6 @@ pub(crate) struct SidebarCarryKey {
     reveal_request_id: Option<u64>,
 }
 
-/// Which list the renderer draws.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum SidebarListSource {
-    /// The snapshot the TypeScript projection publishes, as before this milestone.
-    #[default]
-    Projection,
-    /// The list derived from the Rust store.
-    Store,
-}
-
 /// What the newest update was handed, in the shape a log line needs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct LastUpdate {
@@ -101,6 +93,9 @@ pub(crate) struct SidebarListCounters {
     /// Installs made because a value the list carries from outside the view model moved (the HUD,
     /// the two requests, the two hotkey labels), rather than because the list itself did.
     pub(crate) installs_from_carry: u64,
+    /// The loading skeleton, drawn while the sidebar's own state or the HUD has not landed. One per
+    /// launch is expected; a second one means the list went back to not being ready.
+    pub(crate) loading_installs: u64,
     pub(crate) deadline_wakes: u64,
     /// Rows whose drawn time had really moved, summed over every wake, and the most any one wake
     /// moved. A wake per second with one row each is a row in its first minute; a wake per second
@@ -137,10 +132,6 @@ pub(crate) struct SidebarList {
     built: bool,
     /// The sidebar state generation the newest update read.
     last_ui_generation: u64,
-    /// The newest "which list is drawn" verdict and when it was taken. Asking costs a stat of the
-    /// settings file and a clone of its map under a global lock, and several callers ask per
-    /// publish. Held in a cell because the readers are `&self`.
-    source: std::cell::Cell<Option<(Instant, SidebarListSource)>>,
     /// Whether the diagnostic scenario is on, on the same one-second gate and for the same reason:
     /// asking takes the settings lock, and the per-update CPU clock below is only read while
     /// someone is measuring.
@@ -155,6 +146,9 @@ pub(crate) struct SidebarList {
     installed_carry: Option<(SidebarCarryKey, u64)>,
     /// Whether the once-a-second tick is running (started once, at the store's bootstrap).
     pub(super) clock_started: bool,
+    /// Whether the loading skeleton is what the renderer is drawing, so it is installed once and
+    /// not rebuilt on every update of the launch window.
+    loading_installed: bool,
     snapshot_cache: SnapshotCache,
     inputs_cache: InputsCache,
     /// The inputs the newest view was built from, so the shadow compares the same moment. Kept
@@ -181,12 +175,12 @@ impl Default for SidebarList {
             last_focus: None,
             built: false,
             last_ui_generation: 0,
-            source: std::cell::Cell::new(None),
             measuring: std::cell::Cell::new(None),
             deadline_booked: None,
             deadline_kind: "none",
             installed_carry: None,
             clock_started: false,
+            loading_installed: false,
             snapshot_cache: SnapshotCache::default(),
             inputs_cache: InputsCache::default(),
             last_inputs: SidebarInputs::default(),
@@ -328,46 +322,6 @@ impl SidebarList {
 }
 
 impl GhostexGpuiApp {
-    /// Which list the renderer draws.
-    ///
-    /// `GHOSTEX_SIDEBAR_LIST_SOURCE` decides it for the whole run when it is set. Otherwise the
-    /// saved settings do, and moving the value there moves the list in a running app, because the
-    /// settings file is re-read whenever it changes on disk. The setting has no row in Settings and
-    /// is not a product choice: the two lists exist side by side only until the old projection is
-    /// deleted. The normalizer drops keys it does not know, so a settings write by the app takes
-    /// the key with it; the environment variable is the one that survives that.
-    pub(crate) fn gx_store_sidebar_list_source(&self) -> SidebarListSource {
-        // The store's list is only drawn once the sidebar's own state has been read; before that
-        // it would show every project expanded and no hidden item hidden.
-        if !self.gx_store.sidebar_ui.restored() {
-            return SidebarListSource::Projection;
-        }
-        let cached = self.gx_store.sidebar_list.source.get();
-        if let Some((taken_at, source)) = cached {
-            if taken_at.elapsed() < SETTINGS_MAX_AGE {
-                return source;
-            }
-        }
-        let chosen = match std::env::var("GHOSTEX_SIDEBAR_LIST_SOURCE") {
-            Ok(value) if !value.trim().is_empty() => value.trim().to_lowercase(),
-            _ => crate::shared_settings::shared_sidebar_settings_snapshot()
-                .object()
-                .get("sidebarListSource")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_lowercase(),
-        };
-        let source = match chosen.as_str() {
-            "store" => SidebarListSource::Store,
-            _ => SidebarListSource::Projection,
-        };
-        self.gx_store
-            .sidebar_list
-            .source
-            .set(Some((Instant::now(), source)));
-        source
-    }
-
     /// A publish arrived while the store's list was drawn.
     pub(crate) fn gx_store_note_sidebar_publish_seen(&mut self) {
         self.gx_store.sidebar_list.counters.publishes_seen += 1;
@@ -400,12 +354,23 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// Whether the renderer draws the store's list right now. A machine tab the view model cannot
-    /// build keeps the old projection even with the switch on, which since M4d is a remote machine
-    /// the host has no client for and no rows from.
-    pub(crate) fn gx_store_sidebar_draws_store_list(&self) -> bool {
-        self.gx_store_sidebar_list_source() == SidebarListSource::Store
-            && self.gx_store.sidebar_list.view().supported
+    /// Whether the drawn list is the real one, so a command that names a row has something to name
+    /// and an install is worth making.
+    ///
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// False only in the first instants of a launch, and for exactly two reasons: the sidebar's own
+    /// state (collapse, Space, filters, hidden items) has not been read back from client storage
+    /// yet, so the real list would open every project and hide nothing and then snap; and the
+    /// runtime has not posted the HUD yet, so the agent launcher, the Saved Actions and every
+    /// `hud.settings.*` the renderer reads would be empty. Until both land the renderer draws the
+    /// loading skeleton (`gx_store_install_loading_sidebar_list`) and `dispatch_native_sidebar_ui`
+    /// drops what arrives, counted rather than routed to nobody.
+    ///
+    /// A machine tab the host does not feed (no client, no last-seen copy) is NOT one of them any
+    /// more: its list is empty because that machine really has no rows, and an empty list with its
+    /// own empty state is the honest answer. Before step 6 that case kept the old projection's copy.
+    pub(crate) fn gx_store_sidebar_list_ready(&self) -> bool {
+        self.gx_store.sidebar_ui.restored() && self.gx_store.runtime_facts.hud.is_some()
     }
 
     /// The sidebar's own state moved. The list is rebuilt at once, because a click must show in
@@ -569,14 +534,21 @@ impl GhostexGpuiApp {
             cx.notify();
         }
         self.gx_store_book_sidebar_deadline(cx);
-        // Everything the session changed while this app was not the writer is still owed, so the
-        // switch moving to the store's list writes it rather than waiting for the next click.
+        // Everything the session changed while this app was not the writer is still owed, so a
+        // state restored mid-run writes it rather than waiting for the next click.
         self.gx_store_write_owed_sidebar_ui_state(cx);
+        // The focused row's Space memory and the section follow, which ran on every publish until
+        // step 6. Here instead, and after the rebuild for the same reason: whether the focused row
+        // is DRAWN is the question that decides whether it builds anything, and the answer must be
+        // this update's list. Nothing happens unless the focused row really changed
+        // (`take_followed_session`), so every other path through here pays one comparison.
+        self.gx_store_follow_active_session_space(cx);
         // The list itself moved, or a value it carries from outside the view model did (the HUD
         // the runtime posts, the rename or reveal request, the two hotkey labels). Before step 3
         // the second half was a publish's job; now every one of those arrives on a path that ends
         // here, so this is the one gate.
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
+            self.gx_store_install_loading_sidebar_list(cx);
             return;
         }
         let carry_moved = self
@@ -592,6 +564,52 @@ impl GhostexGpuiApp {
             self.gx_store.sidebar_list.counters.installs_from_carry += 1;
         }
         self.gx_store_install_sidebar_list(cx);
+    }
+
+    /// Draws the loading skeleton while the list is not ready yet.
+    ///
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// Before step 6 this window drew the old projection's list. With that gone the choice is
+    /// between the real list built on a default sidebar state (every project open, nothing hidden,
+    /// snapping to the user's own state a moment later) and saying "still loading", and the
+    /// renderer already draws a skeleton for an empty order with `loading` set
+    /// (`native_sidebar/empty.rs`). It is installed once rather than per update, and it is replaced
+    /// by the real list the moment both inputs land. A client-storage read that never succeeds
+    /// leaves it standing, which is what `gxStore.sidebarUi` `readFailures` and the
+    /// `sidebarUiReadUnavailable` record are for.
+    fn gx_store_install_loading_sidebar_list(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.gx_store.sidebar_list.loading_installed {
+            return;
+        }
+        self.gx_store.sidebar_list.loading_installed = true;
+        let view = self.gx_store.sidebar_list.view();
+        let snapshot = crate::app::native_sidebar::model::NativeSidebarSnapshot {
+            version: 1,
+            revision: 0,
+            scroll_scope: view.scroll_scope.clone(),
+            rename_request: None,
+            reveal_request: None,
+            ready: false,
+            empty_state: serde_json::json!({
+                "loading": true,
+                "error": false,
+                "canAddProject": false,
+                "copy": Value::Null,
+            }),
+            hud: Value::Null,
+            groups: Vec::new(),
+            selected_machine_id: view.selected_machine_id.clone(),
+            machines: Vec::new(),
+            spaces: Vec::new(),
+            spaces_enabled: false,
+            collections: Vec::new(),
+            order: Vec::new(),
+            more_menu: Value::Null,
+            search_shortcut: None,
+            commands_shortcut: None,
+        };
+        self.gx_store.sidebar_list.counters.loading_installs += 1;
+        self.install_native_sidebar_snapshot(std::sync::Arc::new(snapshot), cx);
     }
 
     /// Drops ticked tag filters the Sort & Filter menu no longer offers, the way the old
@@ -644,20 +662,13 @@ impl GhostexGpuiApp {
             .retain_selected_sessions(|session_id| drawn.contains(session_id))
     }
 
-    /// Replaces the list the renderer draws with the one derived from the store.
+    /// Replaces the list the renderer draws with the one derived from the store. Needs no publish:
+    /// the caller has already asked `gx_store_sidebar_list_ready`, which is the whole precondition.
     pub(crate) fn gx_store_install_sidebar_list(&mut self, cx: &mut gpui::Context<Self>) {
-        if self.native_sidebar.projection.is_none() {
-            // Nothing has been published yet. Step 6 is what gives this state a Rust answer; until
-            // then the renderer keeps drawing nothing, as it does today before the first publish.
-            return;
-        }
         let Some(hud) = self.gx_store.runtime_facts.hud.clone() else {
-            // The runtime has not posted the HUD yet, so the agent launcher, the Saved Actions and
-            // every `hud.settings.*` the renderer reads would be empty. The service seeds the
-            // store's HUD before the runtime is even built (`sidebar/service/start.ts`), so this is
-            // the first instants of a launch and nothing is on screen to be wrong.
             return;
         };
+        self.gx_store.sidebar_list.loading_installed = false;
         // The menu host reads two client-storage values behind a one-second cache, so it is taken
         // before the list is borrowed rather than inside the build.
         //
@@ -770,7 +781,7 @@ impl GhostexGpuiApp {
         // because the order and the sections it moves are the list's, not the labels'.
         let show_relative_time = self.gx_store.sidebar_list.show_relative_time();
         let label_deadline = self
-            .gx_store_sidebar_draws_store_list()
+            .gx_store_sidebar_list_ready()
             .then(|| {
                 self.gx_store
                     .sidebar_list
@@ -814,7 +825,7 @@ impl GhostexGpuiApp {
                 // above may have found nothing. Only the rows whose time actually moved need the
                 // list rebuilt, and on a long list the earliest deadline usually belongs to one
                 // row while every other row reads exactly as it did.
-                if this.gx_store_sidebar_draws_store_list() {
+                if this.gx_store_sidebar_list_ready() {
                     // How many rows a wake actually moved is what tells a rate of one a second
                     // apart: one row ticking is a countdown or a fresh row doing its job, and a
                     // wake that moved none is a booking that should not have been made.

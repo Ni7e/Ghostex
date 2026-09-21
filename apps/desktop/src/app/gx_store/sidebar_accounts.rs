@@ -103,7 +103,7 @@ impl GhostexGpuiApp {
         if !SidebarAccountMenus::owns_command(command) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_accounts.counters.declined_source += 1;
             return false;
         }

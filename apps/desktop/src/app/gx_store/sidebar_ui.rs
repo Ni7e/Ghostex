@@ -2,11 +2,12 @@
 //! written back on a debounce.
 //!
 //! CDXC:Sidebar 2026-09-21 WHY:
-//! The state moves whatever the list source is, and since M5 piece 7c so does the WRITE: the
-//! sidebar page no longer writes any of the three keys, so gating the write on the switch would
-//! leave a build with the switch off with no writer at all. The switch decides which list is drawn
-//! and which app performs an action, nothing about who owns this state. Supersedes the 2026-09-20
-//! note, which gated the write to keep exactly one writer while the page was still the other one.
+//! This app is the ONLY writer of the three keys. The write used to be gated on the store's list
+//! being the drawn one, to keep exactly one writer while the TypeScript sidebar was still a blind
+//! whole-object writer of the same keys; M5 piece 7c deleted those writes and M4d part 2 step 6
+//! deleted the switch, so the only precondition left is that the READ has landed. Writing before
+//! it would measure the difference against an empty state and erase what the user has. Supersedes
+//! the 2026-09-20 note.
 
 use std::time::{Duration, Instant};
 
@@ -398,23 +399,6 @@ impl GhostexGpuiApp {
         true
     }
 
-    /// Whether this app writes the sidebar's own state at all: it does, and the sidebar page does
-    /// not, in either position of the list-source switch.
-    ///
-    /// CDXC:Sidebar 2026-09-21 WHY:
-    /// The write used to be gated on the store's list being the drawn one, so that a build with the
-    /// switch off had exactly one writer while the TypeScript sidebar was still a blind
-    /// whole-object writer of the same keys. M5 piece 7c deleted those writes, which turns the gate
-    /// into the opposite hazard: with the switch off NOBODY would write and a restart would lose
-    /// every collapse, Space and hidden item of the session. The switch now decides only which list
-    /// is drawn and which app performs an action; the state, its three non-command routes and the
-    /// write run either way. Supersedes the 2026-09-20 note on this function.
-    pub(crate) fn gx_store_sidebar_ui_writes(&self) -> bool {
-        // The read still has to have landed: writing before it would measure the difference
-        // against an empty state. `gx_store_schedule_sidebar_ui_write` checks that.
-        true
-    }
-
     /// Reports the values a bound refused and OWES each of them again.
     ///
     /// CDXC:Sidebar 2026-09-21 WHY:
@@ -445,8 +429,8 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// Books a write for anything still owed, which is what a session that ran with the switch off
-    /// and then turned it on has.
+    /// Books a write for anything still owed, which is what a session whose read landed after its
+    /// first clicks has.
     pub(super) fn gx_store_write_owed_sidebar_ui_state(&mut self, cx: &mut gpui::Context<Self>) {
         if self.gx_store.sidebar_ui.store_pending().is_empty() {
             return;
@@ -456,11 +440,6 @@ impl GhostexGpuiApp {
 
     /// Books one write for everything the intents since the last one changed.
     fn gx_store_schedule_sidebar_ui_write(&mut self, cx: &mut gpui::Context<Self>) {
-        // The change stays owed while this is off, so turning the switch on writes everything the
-        // session accumulated rather than only what happens after it.
-        if !self.gx_store_sidebar_ui_writes() {
-            return;
-        }
         let ui = &mut self.gx_store.sidebar_ui;
         // Nothing is written before the read landed: the difference would be measured against an
         // empty state and would erase what the user has.
@@ -472,10 +451,6 @@ impl GhostexGpuiApp {
             cx.background_executor().timer(WRITE_DEBOUNCE).await;
             let Ok(Some((write, base, owed))) = this.update(cx, |this, _| {
                 this.gx_store.sidebar_ui.write_scheduled = false;
-                // The switch can move inside the debounce; the owed change simply stays owed.
-                if !this.gx_store_sidebar_ui_writes() {
-                    return None;
-                }
                 let (write, base, owed) = this.gx_store.sidebar_ui.take_write();
                 (!write.is_empty()).then_some((write, base, owed))
             }) else {
@@ -540,7 +515,7 @@ impl GhostexGpuiApp {
     /// last four hundred milliseconds of clicks never reach the database: the task that would have
     /// written them dies with the app.
     pub(crate) fn gx_store_flush_sidebar_ui_write(&mut self) {
-        if !self.gx_store_sidebar_ui_writes() || !self.gx_store.sidebar_ui.restored() {
+        if !self.gx_store.sidebar_ui.restored() {
             return;
         }
         let (write, base, owed) = self.gx_store.sidebar_ui.take_write();

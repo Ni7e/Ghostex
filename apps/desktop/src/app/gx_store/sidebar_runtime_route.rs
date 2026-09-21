@@ -29,9 +29,24 @@ pub(crate) struct SidebarRuntimeRouteCounters {
     pub(super) ui_only: u64,
     /// Anything else: nothing owns it on either side any more.
     pub(super) unroutable: u64,
+    /// Commands dropped at the door because the list was not ready yet (M4d part 2 step 6). Zero
+    /// on an ordinary run; above zero means something reached the sidebar in the first instants of
+    /// a launch, before either the sidebar's own state or the HUD had landed.
+    pub(super) before_ready: u64,
 }
 
 impl GhostexGpuiApp {
+    /// A command that arrived while the renderer was drawing the loading skeleton. Counted and
+    /// dropped: the ids in it name rows of a list that has not been built, and the runtime cannot
+    /// perform the half of it the store owns.
+    pub(crate) fn gx_store_drop_sidebar_command_before_ready(&mut self, command: &Value) {
+        self.gx_store.runtime_route.before_ready += 1;
+        if self.gx_store.runtime_route.before_ready <= 4 {
+            self.gx_store
+                .diagnostics
+                .sidebar_command_before_ready(command.get("type").and_then(Value::as_str));
+        }
+    }
     /// Sends a command the store did not answer to the runtime, or counts why it did not.
     pub(crate) fn gx_store_route_sidebar_command_to_runtime(
         &mut self,

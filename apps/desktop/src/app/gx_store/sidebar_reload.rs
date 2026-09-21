@@ -39,7 +39,7 @@ impl GhostexGpuiApp {
         if !owns_reload_message(message) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_lifecycle.declined_source += 1;
             return false;
         }
@@ -107,7 +107,7 @@ impl GhostexGpuiApp {
         if !owns_reload_set_message(message) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_lifecycle.declined_source += 1;
             return false;
         }
@@ -180,7 +180,7 @@ impl GhostexGpuiApp {
         if !owns_split_message(message) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_lifecycle.declined_source += 1;
             return false;
         }

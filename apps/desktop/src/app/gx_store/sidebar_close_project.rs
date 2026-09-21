@@ -11,8 +11,8 @@
 //! (gx-core `sidebar_view/close_successor.rs`), and the page is told not to compute a second one:
 //! `controller.ts` now forwards a message that already carries the field.
 //!
-//! **Only while the store's list is drawn.** With the switch off the user is looking at the page's
-//! list, so the page's own answer is the right one and nothing is added here.
+//! **Only while the list is ready.** In the launch window there is no drawn list to take a
+//! successor from, and `dispatch_native_sidebar_ui` drops the command before it gets here.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_view/close_successor.rs,
 //! packages/core-ui/sidebar-app/close-project-successor.ts,
@@ -45,7 +45,7 @@ impl GhostexGpuiApp {
         let Some(group_id) = close_project_group_id(&command) else {
             return command;
         };
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.close_project.declined_source += 1;
             return command;
         }

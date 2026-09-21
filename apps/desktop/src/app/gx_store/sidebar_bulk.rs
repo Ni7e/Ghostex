@@ -73,7 +73,7 @@ impl GhostexGpuiApp {
         if !owns_batch_command(command) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_bulk.declined_source += 1;
             return false;
         }
@@ -119,7 +119,7 @@ impl GhostexGpuiApp {
         if !owns_bulk_message(message) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_bulk.declined_source += 1;
             return false;
         }
@@ -205,7 +205,7 @@ impl GhostexGpuiApp {
         waits_for_each: bool,
         cx: &mut gpui::Context<Self>,
     ) -> Option<PacedLeg> {
-        if waits_for_each && self.gx_store_sidebar_draws_store_list() {
+        if waits_for_each && self.gx_store_sidebar_list_ready() {
             if owns_remote_session_message(&message) {
                 if let Some(task) = self.gx_store_start_remote(&message, cx) {
                     self.gx_store.sidebar_bulk.paced_legs_waited += 1;

@@ -5,8 +5,8 @@
 //! resolved the slot against its own projection, posted the row's `focusSession` and asked for a
 //! reveal that came back one publish later. With the store's list drawn, the whole jump is planned
 //! by gx-core (`project_slot_plan`, then `reveal_plan` against the list the plan's own changes
-//! rebuilt) and performed here in the key's frame, and the message is no longer sent. With the
-//! switch off it still is, because the old page is then the list the user sees.
+//! rebuilt) and performed here in the key's frame, and the message is no longer sent at all: the
+//! store's list is the only list since M4d part 2 step 6.
 //!
 //! **Where each effect ends, read rather than assumed.** The FOCUS ends where a row click's ends,
 //! because it is one: the row click's `selectSession` (which the old page turns into the runtime's
@@ -18,7 +18,7 @@
 //! (`gx_store_reveal_walk_row`). A slot never names a remote project (gx-core
 //! `sidebar_view/slot_hotkey.rs`), so the remote focus path is never reached from here.
 //!
-//! **The old page's copy of the sidebar state** is not drawn with the switch on, but it is still
+//! **The old page's copy of the sidebar state** is not drawn any more, but it is still
 //! read: the page resolves cmd+1..9 (`focusSessionSlot`) against the list it builds from it. So
 //! every intent the jump and its reveal applied is handed to it as a `sidebarUiMirror` message,
 //! the value each touched key now holds (gx-core `sidebar_ui_mirror_changes`), which the page sets
@@ -88,13 +88,13 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         let started = Instant::now();
-        let draws_store_list = self.gx_store_sidebar_draws_store_list();
-        // With the switch off the old page does the jump on its own copy, so nothing is mirrored.
+        let draws_store_list = self.gx_store_sidebar_list_ready();
+        // Nothing is mirrored while the list is not ready: the jump is not performed either.
         if draws_store_list {
             self.gx_store.sidebar_ui.mirror = Some(Vec::new());
         }
-        // The state half runs in either position of the switch: this app is the only writer of the
-        // collapse key.
+        // The state half runs even then: this app is the only writer of the collapse key, so a
+        // jump whose focus and reveal are dropped must still store what it moved.
         let plan = self.gx_store_note_project_slot_hotkey(slot_number, cx);
         let plan_us = started.elapsed().as_micros() as u64;
         if !draws_store_list {

@@ -22,9 +22,9 @@ pub(crate) struct NativeSidebarState {
     /// A frame profile found snapshot and session deep copies dominating the UI thread during redraws.
     /// Share immutable snapshots with row callbacks; incoming patches and clock updates use copy-on-write mutation.
     pub(crate) snapshot: Option<Arc<NativeSidebarSnapshot>>,
-    /// The newest list the TypeScript projection published. The same value as `snapshot` while the
-    /// renderer draws that projection; the source of the menus, the HUD and the machine tabs while
-    /// it draws the store's list instead (gx_store/sidebar_snapshot.rs).
+    /// The newest list the TypeScript projection published. Nothing the renderer draws reads it
+    /// since M4d part 2 step 6, and it is never installed: it is kept so the shadow can keep
+    /// comparing the two lists until the page's publisher is deleted (gx_store/sidebar_shadow.rs).
     pub(crate) projection: Option<Arc<NativeSidebarSnapshot>>,
     /// The docked sidebar's cached view, created on its first draw (native_sidebar/host.rs).
     pub(crate) host: Option<gpui::Entity<super::host::NativeSidebarHost>>,
@@ -114,21 +114,14 @@ impl GhostexGpuiApp {
                 // The values the store's list still borrows moved with this publish, and the
                 // comparison reads it; both run whichever list is drawn.
                 self.gx_store_sidebar_projection_published(cx);
-                let published = self
-                    .native_sidebar
-                    .projection
-                    .clone()
-                    .expect("assigned above");
-                if self.gx_store_sidebar_draws_store_list() {
-                    // Since M4d part 2 step 3 a publish carries NOTHING the store's list reads: its
-                    // rows, menus and machine tabs are the view model's, and the HUD, the two
-                    // requests and the two hotkey labels have Rust owners
-                    // (`gx_store_sidebar_carry_key`). The count is what says the old page is still
-                    // projecting at all.
-                    self.gx_store_note_sidebar_publish_seen();
-                } else {
-                    self.install_native_sidebar_snapshot(published, cx);
-                }
+                // Since M4d part 2 step 3 a publish carries NOTHING the store's list reads: its
+                // rows, menus and machine tabs are the view model's, and the HUD, the two requests
+                // and the two hotkey labels have Rust owners (`gx_store_sidebar_carry_key`). Since
+                // step 6 it is not INSTALLED either, in any state: while the store's list is not
+                // ready the renderer draws the loading skeleton
+                // (`gx_store_install_loading_sidebar_list`), not this. The count is what says the
+                // old page is still projecting at all.
+                self.gx_store_note_sidebar_publish_seen();
             }
             NativeSidebarUpdate::Flash {
                 version: 1,
@@ -158,10 +151,11 @@ impl GhostexGpuiApp {
                 // facts channel and the presentation on the sidebar's own tick
                 // (gx_store/sidebar_clock.rs), so `row.armed_actions` is no longer read.
                 //
-                // The clock rows' own labels are the old projection's. The store's list formats its
-                // own against the host clock and books its own wake, so they are applied to the
-                // projection and reach the screen only while it is what is drawn.
-                let drawn_is_projection = !self.gx_store_sidebar_draws_store_list();
+                // The clock rows' own labels are the old projection's. They are applied to this
+                // app's copy of that projection so the shadow keeps comparing the list the page
+                // really holds; they reach no screen, because the store's list formats its own
+                // against the host clock and books its own wake, and nothing installs the
+                // projection any more.
                 let Some(snapshot) = self.native_sidebar.projection.as_mut() else {
                     return;
                 };
@@ -192,9 +186,6 @@ impl GhostexGpuiApp {
                                 .unwrap_or_default(),
                         );
                     }
-                }
-                if drawn_is_projection {
-                    self.native_sidebar.snapshot = self.native_sidebar.projection.clone();
                 }
             }
             _ => return,

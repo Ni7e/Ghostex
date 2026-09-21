@@ -51,7 +51,7 @@ impl GhostexGpuiApp {
         if !owns_modal_message(command) {
             return false;
         }
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !self.gx_store_sidebar_list_ready() {
             self.gx_store.sidebar_modals.declined_source += 1;
             return false;
         }

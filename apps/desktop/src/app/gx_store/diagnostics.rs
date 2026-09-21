@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::host::GxStoreCounters;
 use super::shadow_diff::{ShadowCounters, ShadowDiff, ShadowMismatch};
-use super::sidebar_list::{LastUpdate, SidebarListCounters, SidebarListSource};
+use super::sidebar_list::{LastUpdate, SidebarListCounters};
 use super::sidebar_scratch_compare::ScratchDifference;
 use super::sidebar_shadow::SidebarShadowCounters;
 use super::sidebar_shadow_compare::{FieldDiff, MAX_IDS_PER_RECORD, SidebarMismatch};
@@ -502,7 +502,7 @@ impl GxStoreDiagnostics {
         &mut self,
         counters: &SidebarShadowCounters,
         list: &SidebarListCounters,
-        source: SidebarListSource,
+        ready: bool,
         deadline_kind: &'static str,
         pending: bool,
         groups: usize,
@@ -526,10 +526,9 @@ impl GxStoreDiagnostics {
         record(
             "gxStore.sidebarShadow.summary",
             json!({
-                "source": match source {
-                    SidebarListSource::Store => "store",
-                    SidebarListSource::Projection => "projection",
-                },
+                // The list is the only one there is since step 6; this says whether it is the REAL
+                // one or the loading skeleton the launch window draws.
+                "ready": ready,
                 "publishes": counters.publishes,
                 "comparisons": counters.comparisons,
                 // What was compared ON a remote machine's tab. `skipped.remote` at zero is not the
@@ -596,11 +595,11 @@ impl GxStoreDiagnostics {
                     "viewChanges": list.view_changes,
                     "installs": list.installs,
                     "installsSkipped": list.installs_skipped,
-                    // Publishes accepted while the store's list was drawn, and the ones that moved
-                    // a value the list still takes from a publish. Before M4c the two were equal,
-                    // because the list carried that publish's menus.
+                    // Publishes the old page still makes, which the list no longer reads anything
+                    // from: the count is what says that page is alive at all.
                     "publishesSeen": list.publishes_seen,
                     "installsFromCarry": list.installs_from_carry,
+                    "loadingInstalls": list.loading_installs,
                     "deadlineWakes": list.deadline_wakes,
                     "wakeRowsMoved": list.wake_rows_moved,
                     "wakeRowsMovedMax": list.wake_rows_moved_max,

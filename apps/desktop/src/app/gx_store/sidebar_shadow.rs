@@ -160,25 +160,24 @@ impl SidebarShadow {
 }
 
 impl GhostexGpuiApp {
-    /// The old projection published a list. Its values the Rust list still borrows moved with it,
-    /// so the list is brought up to date, and one coalesced comparison is booked.
+    /// The old projection published a list, which nothing the sidebar draws reads any more. All
+    /// that is left on this path is the comparison of the runtime's facts channel with the publish
+    /// it replaced, and the coalesced shadow comparison.
+    ///
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// Two pieces of product behaviour used to hang off this publish and no longer do (M4d part 2
+    /// step 6). The machine-tab reconcile is on the sidebar's own once-a-second tick
+    /// (`sidebar_clock.rs`), which is exactly the cadence the publish gave it, because
+    /// `gx_store_sync_remote_clients` reuses its answer for a second anyway; its other two callers
+    /// are the connect funnel and the store's bootstrap. The Space follow and the per-Space memory
+    /// are at the end of `gx_store_update_sidebar_list`, which covers every way focus can move
+    /// rather than only the ones a publish happened to follow.
     pub(crate) fn gx_store_sidebar_projection_published(&mut self, cx: &mut gpui::Context<Self>) {
-        // The machine tabs are the store's own now: the settings say which machines exist and the
-        // connect states say how they are doing, so a tab the sidebar no longer offers falls back
-        // to this computer here. Answered from a one-second cache unless a connect moved.
-        self.gx_store_sync_remote_clients(false, cx);
-        // The mirrored inputs (the HUD's sort mode and Recent Projects, the git numbers, the two
-        // armed timers) come from this payload, so the list is rebuilt whether or not anyone is
-        // comparing.
-        self.gx_store_sidebar_state_changed(cx);
-        // The same values now also arrive on the runtime's own channel; this step only measures
-        // the two against each other (gx_store/runtime_facts.rs).
+        // The channel is what the list reads; this compares the two while the publish still exists
+        // (gx_store/runtime_facts.rs).
         if let Some(published) = self.native_sidebar.projection.clone() {
             self.gx_store_compare_sidebar_runtime_facts(&published);
         }
-        // After the rebuild, so the drawn list it reads is this publish's rather than the last
-        // one's: whether the focused row is drawn is the question that decides whether it builds.
-        self.gx_store_follow_active_session_space(cx);
         if !self.gx_store.sidebar_shadow.enabled() {
             return;
         }
@@ -220,7 +219,7 @@ impl GhostexGpuiApp {
     /// The memory is what a Space switch restores the focus to when `sidebarSpaceSwitchBehavior` is
     /// `restore`, and it is written whatever the follow setting says: the two are asked as one
     /// question so the unfiltered list is built at most once per focus change.
-    fn gx_store_follow_active_session_space(&mut self, cx: &mut gpui::Context<Self>) {
+    pub(super) fn gx_store_follow_active_session_space(&mut self, cx: &mut gpui::Context<Self>) {
         let focused = self
             .gx_store
             .core
@@ -463,7 +462,7 @@ impl GhostexGpuiApp {
                     .sum::<usize>(),
             )
         };
-        let source = self.gx_store_sidebar_list_source();
+        let ready = self.gx_store_sidebar_list_ready();
         let deadline_kind = self.gx_store.sidebar_list.deadline_kind;
         let phases = self.gx_store.sidebar_list.install_phases();
         let remote = self.gx_store.remote.counters;
@@ -471,7 +470,7 @@ impl GhostexGpuiApp {
         self.gx_store.diagnostics.sidebar_summary(
             &counters,
             &list,
-            source,
+            ready,
             deadline_kind,
             pending,
             groups,
