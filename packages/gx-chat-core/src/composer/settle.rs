@@ -35,6 +35,32 @@ fn settle_note_read(
     Some(Vec::new())
 }
 
+/// `attachPaths`'s `try`/`finally`: the imported references go to the composer, and the read is
+/// counted back down whether it succeeded or refused.
+///
+/// The refusal itself lands on `operationError` through the dispatcher, which is what the
+/// TypeScript's `catch` around the whole arm does.
+fn settle_attachment_import(
+    state: &mut ChatState,
+    request_id: u64,
+    outcome: &RpcOutcome,
+) -> Option<Vec<Effect>> {
+    let at = state
+        .composer
+        .attachment_imports
+        .iter()
+        .position(|pending| *pending == request_id)?;
+    state.composer.attachment_imports.remove(at);
+    state.composer.pending_attachments = state.composer.pending_attachments.saturating_sub(1);
+    let RpcOutcome::Ok { result } = outcome else {
+        return Some(Vec::new());
+    };
+    Some(vec![Effect::HostAction {
+        action: "attachmentReferences".to_string(),
+        params: Box::new(serde_json::json!({ "paths": result.clone() })),
+    }])
+}
+
 /// `composer('claimReturned')`: the prompt reaches the composer only the first time its id is seen.
 ///
 /// The applied-id list is one record for the whole app, so the claim is a read, a membership test
@@ -88,7 +114,9 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
                     .or_else(|| {
                         crate::composer::send::settle_queue_mutation(state, *request_id, outcome)
                     });
-            let claimed = claimed.or_else(|| settle_note_read(state, *request_id, outcome));
+            let claimed = claimed
+                .or_else(|| settle_note_read(state, *request_id, outcome))
+                .or_else(|| settle_attachment_import(state, *request_id, outcome));
             match claimed {
                 Some(round) => effects.extend(round),
                 None => settle_catalog(state, *request_id, outcome.as_ref()),

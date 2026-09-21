@@ -51,6 +51,9 @@ pub struct ComposerState {
     pub scroll: ComposerScrollGesture,
     /// Attachment reads the host has started but not finished.
     pub pending_attachments: u32,
+    /// The `importNativeAttachments` reads in flight, so their answers reach this family and the
+    /// `finally` that counts them back down runs exactly once each.
+    pub attachment_imports: Vec<u64>,
     /// How many image references the draft currently holds, which is what the thumbnails draw.
     pub draft_attachment_count: u32,
     /// A draft offered from another client, or `None`.

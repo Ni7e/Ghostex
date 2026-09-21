@@ -41,6 +41,7 @@ pub enum ChatRpcMethod {
     SaveSessionAgentNote,
     ListStashedPrompts,
     SaveStashedPrompt,
+    ImportNativeAttachments,
     RunProjectDocsAction,
     /// A method this build does not know; kept verbatim.
     Other(String),
@@ -74,6 +75,7 @@ impl ChatRpcMethod {
             Self::SaveSessionAgentNote => "saveSessionAgentNote",
             Self::ListStashedPrompts => "listStashedPrompts",
             Self::SaveStashedPrompt => "saveStashedPrompt",
+            Self::ImportNativeAttachments => "importNativeAttachments",
             Self::RunProjectDocsAction => "runProjectDocsAction",
             Self::Other(name) => name.as_str(),
         }
@@ -106,6 +108,7 @@ impl ChatRpcMethod {
             "saveSessionAgentNote" => Self::SaveSessionAgentNote,
             "listStashedPrompts" => Self::ListStashedPrompts,
             "saveStashedPrompt" => Self::SaveStashedPrompt,
+            "importNativeAttachments" => Self::ImportNativeAttachments,
             "runProjectDocsAction" => Self::RunProjectDocsAction,
             other => Self::Other(other.to_string()),
         }

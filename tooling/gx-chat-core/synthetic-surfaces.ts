@@ -318,7 +318,7 @@ async function main(): Promise<number> {
         await act({ type: 'composerExpand', editor: true });
         await act({
           type: 'measureContextStatus',
-          widths: { totalInputTokens: 120, totalOutputTokens: 140, contextLeft: 110 },
+          widths: [120, 140, 110],
           available: 260,
           separator: 12,
         });
@@ -328,7 +328,7 @@ async function main(): Promise<number> {
       label: 'typing, the slash picker, the @ picker and history recall',
       run: async () => {
         await act({ type: 'editDraft', text: 'Look at ', draftVersion: null });
-        await act({ type: 'composerSelection', start: 8, end: 8 });
+        await act({ type: 'composerSelection', text: 'Look at ', caret: 8 });
         await act({ type: 'editDraft', text: 'Look at @', draftVersion: null });
         await act({ type: 'suggestionHighlight', index: 0 });
         await act({ type: 'suggestionKey', key: 'down' });
@@ -343,7 +343,7 @@ async function main(): Promise<number> {
         await act({ type: 'appendToDraft', text: ' and this too', draft: '' });
         await act({ type: 'saveDraft', content: 'a saved draft', draftVersion: null });
         await act({ type: 'refreshComposerChrome' });
-        await act({ type: 'openComposerReference', label: 'README.md', kind: 'file' });
+        await act({ type: 'openComposerReference', href: 'README.md#L12' });
       },
     },
     {

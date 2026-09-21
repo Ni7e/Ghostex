@@ -80,6 +80,7 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             state.composer.pending_attachments += 1;
             Vec::new()
         }
+        ActionKind::AttachPaths => attach_paths(state, action),
         ActionKind::AttachmentsFinished => attachments_finished(state, action),
         ActionKind::InsertAttachments => insert_attachments(action),
         ActionKind::RemoveAttachment => {
@@ -568,6 +569,23 @@ fn apply_returned(action: &UserAction) -> Vec<Effect> {
         content,
         caret: None,
         from_history: false,
+    }]
+}
+
+/// `attachPaths`: the host picked files, so gxserver copies them in and hands back the references.
+///
+/// The arm counts the read, publishes so the composer spins at once, and resumes on the answer.
+/// `settle_attachment_import` is its `try`/`finally`.
+fn attach_paths(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
+    state.composer.pending_attachments += 1;
+    // `publish(chat)` before the await: the spinner shows on this turn.
+    state.core.request_publish();
+    let request_id = state.core.allocate_request_id();
+    state.composer.attachment_imports.push(request_id);
+    vec![Effect::SendRpc {
+        request_id,
+        method: ChatRpcMethod::ImportNativeAttachments,
+        params: Box::new(json!({ "paths": action.param("paths").cloned().unwrap_or(Value::Null) })),
     }]
 }
 
