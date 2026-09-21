@@ -13,6 +13,11 @@ pub struct NoteState {
     pub saved: String,
     pub edited: bool,
     pub loading: bool,
+    /// The `readSessionAgentNote` in flight, so its answer can be routed back.
+    ///
+    /// `toggleNote` awaits the read in a `try`/`finally`: whatever it answers, the sheet stops
+    /// loading. Without an id the answer reached nobody and the sheet span forever.
+    pub read_request: Option<u64>,
 }
 
 impl NoteState {

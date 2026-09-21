@@ -14,6 +14,27 @@ use crate::event::{ComposerBootRead, Event};
 use crate::state::{ChatContext, ChatState};
 use crate::wire::{ChatRpcMethod, RpcOutcome};
 
+/// `toggleNote`'s read: the body fills the sheet, and the `finally` stops it spinning either way.
+fn settle_note_read(
+    state: &mut ChatState,
+    request_id: u64,
+    outcome: &RpcOutcome,
+) -> Option<Vec<Effect>> {
+    if state.composer.note.read_request != Some(request_id) {
+        return None;
+    }
+    state.composer.note.read_request = None;
+    if let RpcOutcome::Ok { result } = outcome {
+        let note = result.get("note").and_then(Value::as_str).unwrap_or("");
+        state.composer.note.saved = note.trim().to_string();
+        if !state.composer.note.edited {
+            state.composer.note.value = note.to_string();
+        }
+    }
+    state.composer.note.loading = false;
+    Some(Vec::new())
+}
+
 /// `composer('claimReturned')`: the prompt reaches the composer only the first time its id is seen.
 ///
 /// The applied-id list is one record for the whole app, so the claim is a read, a membership test
@@ -67,6 +88,7 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
                     .or_else(|| {
                         crate::composer::send::settle_queue_mutation(state, *request_id, outcome)
                     });
+            let claimed = claimed.or_else(|| settle_note_read(state, *request_id, outcome));
             match claimed {
                 Some(round) => effects.extend(round),
                 None => settle_catalog(state, *request_id, outcome.as_ref()),

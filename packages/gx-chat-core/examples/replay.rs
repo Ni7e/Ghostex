@@ -172,6 +172,19 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
             "in" => {
                 inputs += 1;
                 if outcome.applied == 0 {
+                    // `GX_CHAT_REFUSALS=1` names the records this build did not model, by number
+                    // and by kind. A refusal is where the two brains stop being comparable, so
+                    // finding the first one is the first thing to do when a recording's count
+                    // drops; the record's arguments are never printed.
+                    if std::env::var("GX_CHAT_REFUSALS").is_ok() {
+                        let number = record.get("n").and_then(Value::as_u64).unwrap_or_default();
+                        let kind = args
+                            .first()
+                            .and_then(|first| first.get("type").or_else(|| first.get("kind")))
+                            .and_then(Value::as_str)
+                            .unwrap_or("");
+                        eprintln!("refused n={number} method={method} kind={kind}");
+                    }
                     refused += 1;
                 }
             }

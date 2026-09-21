@@ -727,8 +727,12 @@ fn toggle_note(state: &mut ChatState) -> Vec<Effect> {
     state.composer.note.open = true;
     state.composer.note.loading = true;
     state.composer.note.edited = false;
+    // `publish(chat)` before the await: the sheet opens and spins on this turn.
+    state.core.request_publish();
+    let request_id = state.core.allocate_request_id();
+    state.composer.note.read_request = Some(request_id);
     vec![Effect::SendRpc {
-        request_id: 0,
+        request_id,
         method: ChatRpcMethod::ReadSessionAgentNote,
         params: Box::new(json!({})),
     }]
@@ -736,11 +740,14 @@ fn toggle_note(state: &mut ChatState) -> Vec<Effect> {
 
 fn save_note(state: &mut ChatState) -> Vec<Effect> {
     match state.composer.note.begin_flush() {
-        Some((_, next)) => vec![Effect::SendRpc {
-            request_id: 0,
-            method: ChatRpcMethod::SaveSessionAgentNote,
-            params: Box::new(json!({ "note": next })),
-        }],
+        Some((_, next)) => {
+            let request_id = state.core.allocate_request_id();
+            vec![Effect::SendRpc {
+                request_id,
+                method: ChatRpcMethod::SaveSessionAgentNote,
+                params: Box::new(json!({ "note": next })),
+            }]
+        }
         None => Vec::new(),
     }
 }

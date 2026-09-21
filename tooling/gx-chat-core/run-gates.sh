@@ -14,7 +14,10 @@
 #     deserializes and reserializes to the same value.
 #  3. The full replay, on every recording under /tmp/gx-chat: the TypeScript brain and the Rust
 #     core are fed the same inputs and their document sequences are diffed line by line.
-#  4. The per-family checks that cover ground no recording reaches (`transcript_check`'s 58
+#  4. `coverage.ts`: which of the core's 120 user actions, four frame types and seven broker kinds
+#     no recording reaches. Informational, because it grades the RECORDINGS rather than the core,
+#     but a gate that never opens a surface is grading nothing there.
+#  5. The per-family checks that cover ground no recording reaches (`transcript_check`'s 58
 #     projection cases, `extras_parity`'s invented table, `extras_check`'s wiring, `e1_check`,
 #     `questions_check`, `question_exchange_check`, `composer_check`).
 #
@@ -77,7 +80,7 @@ run() {
 }
 
 if [ "$regenerate" = "1" ]; then
-  for generator in synthetic-recording synthetic-c synthetic-e1 synthetic-send synthetic-composer synthetic-b extras-parity; do
+  for generator in synthetic-recording synthetic-c synthetic-e1 synthetic-send synthetic-surfaces synthetic-composer synthetic-b extras-parity; do
     run "generate $generator" bun "$root/tooling/gx-chat-core/$generator.ts"
   done
   run "generate samples" bun "$root/tooling/gx-chat-core/sample-document.ts"
@@ -127,11 +130,19 @@ for recording in "$recordings"/*.jsonl; do
       grep '^matched' | awk '{print $2}')"
     counter="$(bun "$root/tooling/gx-chat-core/replay-diff.ts" "$name" --keys revision --limit 0 2>&1 |
       grep '^matched' | awk '{print $2}')"
-    record "counters $name" "info" "nextWakeMs $wake, revision $counter"
+    # `nextWakeMs` is a real gate: the two brains arm the same deadlines, so it must match. Only
+    # `revision` stays informational, because several arms publish two or three times between two
+    # drains and no document can show a publish that happened between them.
+    record "counters $name" "$([ "${wake%%/*}" = "${wake##*/}" ] && echo ok || echo FAIL)" \
+      "nextWakeMs $wake, revision $counter (informational)"
     [ "$status" = "FAIL" ] && printf '%s\n' "$diff_output" | sed -n '5,20p' | sed 's/^/    /'
   fi
 done
 shopt -u nullglob
+
+# --- what the recordings never reach ---------------------------------------
+coverage="$(bun "$root/tooling/gx-chat-core/coverage.ts" 2>&1 | grep 'exercised$' | tr '\n' ' ')"
+record "coverage" "info" "${coverage:-not measured}"
 
 # --- the per-family checks the recordings cannot reach ---------------------
 run "transcript_check" cargo run --release --quiet --example transcript_check
