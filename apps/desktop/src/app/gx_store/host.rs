@@ -9,7 +9,7 @@ use ghostex_gx_core::{ConnectionPhase, ConnectionUpdate, Core, Event, MachineId}
 
 use super::diagnostics::GxStoreDiagnostics;
 use super::layout_persist::LayoutPersist;
-use super::local_focus::LocalFocus;
+use super::local_focus::{DrawnFocus, LocalFocus};
 use super::shadow_diff::{ObservedFocus, ShadowDiff};
 use super::sidebar_list::SidebarList;
 use super::sidebar_shadow::SidebarShadow;
@@ -295,8 +295,10 @@ impl GxStoreHost {
     fn note_observed_focus(&mut self, observed: ObservedFocus) {
         match observed {
             ObservedFocus::Stale => {}
-            ObservedFocus::Local => self.local_focus.foreign_focus = false,
-            ObservedFocus::Foreign => self.local_focus.foreign_focus = true,
+            ObservedFocus::Local => self.local_focus.drawn_focus = DrawnFocus::Store,
+            // The publish is the answer to whatever the store could not place, so from here the
+            // old runtime's own projection owns the highlight again.
+            ObservedFocus::Foreign => self.local_focus.drawn_focus = DrawnFocus::Foreign,
         }
     }
 

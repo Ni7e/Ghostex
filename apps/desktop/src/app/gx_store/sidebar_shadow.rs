@@ -93,7 +93,11 @@ pub(crate) struct SidebarShadowCounters {
     /// projection goes stale in. The store is the newer of the two there; see
     /// `STALE_PUBLISH_FIELDS`.
     pub(crate) stale_fields_only: u64,
-    /// Confirmed differences in which every differing field is accounted for by one of the three
+    /// Confirmed differences made up entirely of the two headers' active-group marks, which is
+    /// declared difference 54: the store lights the user-made group the focused session sits in
+    /// where the old projection lights its project. Climbing only while such a session has focus.
+    pub(crate) subgroup_header_only: u64,
+    /// Confirmed differences in which every differing field is accounted for by one of the four
     /// rules, in whatever mix. `mismatches` minus this is the milestone's gate: it is what is
     /// left once the old side standing still, a timestamp moving on its own and a value the old
     /// side has not caught up with are all taken out.
@@ -317,13 +321,14 @@ impl GhostexGpuiApp {
             }
         }
         let is_remote = selected != LOCAL_MACHINE_ID;
-        if self.gx_store.local_focus.foreign_focus {
-            // The old runtime's focus is on a row the store cannot place (the quick automations
-            // row, a session not streamed yet, a machine the store holds no rows for): the store
-            // keeps its last focus while the projection has moved off it, so the focus flags
-            // disagree by design and the record is not one question. A remote session the store
-            // holds is NOT this case since remote focus part 2 step 2: its focus is the store's,
-            // and all six focus-derived fields are compared on every tab.
+        if self.gx_store.local_focus.drawn_focus.store_rows_unfocused() {
+            // The focus is on a row the store cannot place (the quick automations row, a session
+            // not streamed yet, a machine the store holds no rows for), whether the old runtime
+            // accepted it or the store's own selection named it: the store keeps its last focus
+            // while the projection has moved off it, so the focus flags disagree by design and
+            // the record is not one question. A remote session the store holds is NOT this case
+            // since remote focus part 2 step 2: its focus is the store's, and all six
+            // focus-derived fields are compared on every tab.
             self.gx_store.sidebar_shadow.counters.skipped_foreign_focus += 1;
             self.gx_store.sidebar_shadow.pending = None;
             return;
@@ -385,6 +390,9 @@ impl GhostexGpuiApp {
                     }
                     if difference.only_stale_fields {
                         shadow.counters.stale_fields_only += 1;
+                    }
+                    if difference.only_subgroup_header_fields {
+                        shadow.counters.subgroup_header_only += 1;
                     }
                     if difference.only_explained_fields {
                         shadow.counters.explained_only += 1;

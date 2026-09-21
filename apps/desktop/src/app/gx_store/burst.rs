@@ -318,7 +318,7 @@ impl GhostexGpuiApp {
         let local_focus = &mut self.gx_store.local_focus;
         if local_focus.confirmed_stamp >= told.stamp
             || local_focus.pending_tell.is_some()
-            || local_focus.foreign_focus
+            || local_focus.drawn_focus.store_rows_unfocused()
             || remote_focus
         {
             return;

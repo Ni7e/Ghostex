@@ -558,6 +558,7 @@ impl GxStoreDiagnostics {
                     "frozenFieldsOnly": counters.frozen_fields_only,
                     "timingFieldsOnly": counters.timing_fields_only,
                     "staleFieldsOnly": counters.stale_fields_only,
+                    "subgroupHeaderOnly": counters.subgroup_header_only,
                 },
                 "scratch": {
                     "checks": counters.scratch_checks,

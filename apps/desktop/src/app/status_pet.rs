@@ -809,13 +809,16 @@ impl GhostexGpuiApp {
         // The sidebar runtime handles messages in order: a local selection it has not heard of
         // yet must not arrive after the remote one that followed it.
         self.gx_store_flush_old_runtime_tell(cx);
+        // Without the service nothing is taken, the same rule the local tell is guarded by
+        // (gx_store/burst.rs): the store's focus may not move to a row whose message carrying the
+        // stamp is never sent, or every publish of the launch window reads as stale.
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
         // The store's core focus takes the remote row now (after the flush, whose tell carries the
         // stamp from before it), and the stamp it returns rides on the tab selection so the
         // runtime's answering publish echoes it.
         let focus_stamp = self.gx_store_select_remote_session(project_id, session_id, cx);
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
         let mut visible_session_ids = self.gpui_sidebar_visible_local_session_ids();
         if !visible_session_ids
             .iter()

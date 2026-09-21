@@ -123,6 +123,9 @@ pub(super) struct SidebarMismatch {
     /// Every difference in this record is a value only the store holds, in a field the old
     /// projection can hold a stale absence of for the whole run.
     pub(super) only_stale_fields: bool,
+    /// Every difference in this record is the active-group mark of the two headers declared
+    /// difference 54 moves it between, so it is that difference rather than a new one.
+    pub(super) only_subgroup_header_fields: bool,
     /// Every difference in this record is explained by one of the three rules above, whichever
     /// mix of them it takes.
     ///
@@ -203,6 +206,40 @@ const TIMING_FIELDS: [&str; 1] = ["lastInteractionAt"];
 /// unlisted field is enough to defeat, so the hole is narrow; it is named here rather than left
 /// for the next reader to find.
 const STALE_PUBLISH_FIELDS: [&str; 2] = ["projectContext.discoveredIconDataUrl", "faviconDataUrl"];
+
+/// The group fields the active-group mark reaches: the header's own flag, and the section flag
+/// `containsActiveSession`, which `project_session_sections` derives from it.
+const ACTIVE_GROUP_FIELDS: [&str; 2] = ["isActive", "sections"];
+
+/// The two headers declared difference 54 moves the active mark between, when this record is one
+/// of its shape: the user-made group the store marks active, and the project group of that same
+/// project the old projection marks active. `None` for every other pair, which is every record
+/// this rule must not touch.
+///
+/// CDXC:Sidebar 2026-09-21 WHY:
+/// Difference 54 is a live shape, not a rare one: the store's active group is the group the FOCUSED SESSION sits in (`group_of_session`), and the old runtime's is the project's own group, so every moment a session of a user-made group has focus the two lists disagree about which header is lit and the comparison mismatched for as long as that focus lasted. Classifying it keeps `unexplained` meaning what it says. It is deliberately narrow: only a project group and a user-made group OF THAT PROJECT, only while each side marks its own one active, and only those two headers' fields. Anything else in the record, including the rows' own focus marks, is still reported, because a highlight that landed on the wrong ROW is the shape a real defect in this port takes.
+fn subgroup_header_pair(
+    snapshot: &NativeSidebarSnapshot,
+    view: &SidebarView,
+) -> Option<(String, String)> {
+    let store_active = view
+        .groups
+        .iter()
+        .find(|group| group.core.is_active)
+        .map(|group| group.core.group_id.as_str())?;
+    let old_active = snapshot
+        .groups
+        .iter()
+        .find(|group| group.is_active)
+        .map(|group| group.group_id.as_str())?;
+    let ghostex_gx_core::ActiveGroup::Subgroup { project, .. } =
+        ghostex_gx_core::ActiveGroup::parse_sidebar_group_id(store_active)?
+    else {
+        return None;
+    };
+    (ghostex_gx_core::ActiveGroup::Project(project).to_sidebar_group_id() == old_active)
+        .then(|| (store_active.to_string(), old_active.to_string()))
+}
 
 impl SidebarMismatch {
     /// Every differing field of the record, once, by NAME and never by value.
@@ -344,14 +381,37 @@ pub(super) fn compare(
                 && field.store_has_value
                 && !field.old_has_value)
     };
+    // The fourth rule needs the group the field belongs to, so it is asked per group rather than
+    // per field, and never of a row.
+    let header_pair = subgroup_header_pair(snapshot, view);
+    let subgroup_header = |group_id: &str, field: &FieldDiff| {
+        header_pair
+            .as_ref()
+            .is_some_and(|(store_group, old_group)| {
+                group_id == store_group || group_id == old_group
+            })
+            && ACTIVE_GROUP_FIELDS.contains(&field.name)
+    };
+    let group_fields_explained = mismatch.groups.iter().all(|(group_id, fields)| {
+        fields
+            .iter()
+            .all(|field| explained(field) || subgroup_header(group_id, field))
+    });
     mismatch.only_explained_fields = !structural
         && (!mismatch.groups.is_empty() || !mismatch.sessions.is_empty())
+        && group_fields_explained
+        && mismatch
+            .sessions
+            .iter()
+            .flat_map(|(_, fields)| fields)
+            .all(explained);
+    mismatch.only_subgroup_header_fields = !structural
+        && !mismatch.groups.is_empty()
+        && mismatch.sessions.is_empty()
         && mismatch
             .groups
             .iter()
-            .chain(&mismatch.sessions)
-            .flat_map(|(_, fields)| fields)
-            .all(explained);
+            .all(|(group_id, fields)| fields.iter().all(|field| subgroup_header(group_id, field)));
     mismatch.only_stale_fields = !structural
         && (!mismatch.groups.is_empty() || !mismatch.sessions.is_empty())
         && mismatch
