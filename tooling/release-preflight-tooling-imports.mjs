@@ -176,8 +176,15 @@ function collectSpecifiers(source) {
   return specifiers;
 }
 
+/*
+ CDXC:Release 2026-09-21 WHY:
+ `@/` is the repo-root path alias from tsconfig.json (`@/packages/...`,
+ `@/apps/...`), not an npm scope, so it resolves to repo files and has no
+ package.json entry to declare. The tooling/gx-core parity gates import through it.
+*/
 function packageRoot(specifier) {
   if (
+    specifier.startsWith('@/') ||
     specifier.startsWith('.') ||
     specifier.startsWith('/') ||
     specifier.startsWith('#') ||
