@@ -171,9 +171,8 @@ pub fn boundaried_transcript(state: &ChatState, catalog: &[String]) -> Vec<ChatM
 
 /// The whole composed list the renderer sees.
 ///
-/// Two contributors are not folded in yet and are named where they belong below: the app-command
-/// rows and the terminal status and tool rows. Both are additive tails; neither changes the order
-/// of anything already here.
+/// Everything with no authoritative record yet rides in the tail, in the order `controller.ts`
+/// builds it; the head is the transcript with the archived local commands reconciled into it.
 pub fn compose(
     state: &ChatState,
     catalog: &[String],
