@@ -38,11 +38,6 @@ pub fn settle(
 ) -> Vec<Effect> {
     let mut effects = Vec::new();
     match event {
-        Event::ModelCatalogChanged { catalog } => {
-            if let Ok(parsed) = serde_json::from_value(catalog.clone()) {
-                state.pickers.catalog = parsed;
-            }
-        }
         Event::ContextPreferencesChanged {
             provider,
             preferences,

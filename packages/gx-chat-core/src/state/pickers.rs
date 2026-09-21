@@ -12,8 +12,8 @@
 
 use serde_json::Value;
 
+use crate::menus::catalog::AgentModelCatalog;
 use crate::menus::context::{ContextDetailsAgent, ContextDetailsPreferences, ContextEditorState};
-use crate::menus::picker::catalog::AgentModelCatalog;
 use crate::menus::picker::model_menu::ModelMenuCatalogs;
 use crate::menus::picker::projection::model_menu_projection;
 use crate::menus::picker::{
@@ -31,8 +31,6 @@ pub struct PickersState {
     pub model_menu_context: Option<ModelMenuContext>,
     /// Every provider's model lineup, as e1's session option catalog answers it.
     pub catalogs: ModelMenuCatalogs,
-    /// The published agent model catalog the host pushes in.
-    pub catalog: AgentModelCatalog,
     /// The full model picker window, or `None` when it is closed.
     pub model_picker: Option<ModelPickerState>,
     /// The merged model pill's menu: which tab is open and what was typed into its search.
@@ -65,14 +63,19 @@ impl PickersState {
         self.model_selection.desired()
     }
 
-    /// `modelMenuProjection(context, modelMenuView)`.
-    pub fn model_menu_projection(&self, menu: &ModelMenuContext) -> Value {
+    /// `modelMenuProjection(context, modelMenuView)`. The agent model catalog is family e1's
+    /// (`ChatState::menus::model_catalog`), so the caller hands it over.
+    pub fn model_menu_projection(
+        &self,
+        menu: &ModelMenuContext,
+        catalog: &AgentModelCatalog,
+    ) -> Value {
         model_menu_projection(
             menu,
             &self.model_menu_view,
             &self.catalogs,
             &self.model_favorites,
-            &self.catalog,
+            catalog,
         )
     }
 

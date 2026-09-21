@@ -4,7 +4,7 @@
 //! difference is the request id: the TypeScript called `crypto.randomUUID()`, and the core has no
 //! random source, so the host supplies the id with the action that opens the picker.
 
-use crate::menus::picker::catalog::{agent_model_catalog_effort_label, AgentModelCatalog};
+use crate::menus::catalog::AgentModelCatalog;
 use crate::menus::picker::model_picker::{
     EffortChoice, ModelPickerModel, ModelPickerProvider, ModelPickerRequest,
 };
@@ -105,7 +105,7 @@ pub fn create_model_picker_request(
     selected_effort: Option<&str>,
     request_id: String,
 ) -> Option<ModelPickerRequest> {
-    let agent = catalog.agent(provider.as_str())?;
+    let agent = catalog.agents.get(provider.as_str())?;
     let order = model_order(provider);
     // CDXC:SessionChat 2026-09-09 DECISION: User: keep only the selected models in the quick
     // picker, exclude Cursor Composer too, and retain every other model under Legacy in the
@@ -140,7 +140,7 @@ pub fn create_model_picker_request(
                 .iter()
                 .map(|value| EffortChoice {
                     value: value.clone(),
-                    label: agent_model_catalog_effort_label(catalog, value),
+                    label: catalog.effort_label(value),
                 })
                 .collect(),
             default_effort: model
@@ -154,7 +154,7 @@ pub fn create_model_picker_request(
     let catalog_default = agent
         .models
         .iter()
-        .find(|model| model.default == Some(true))
+        .find(|model| model.default)
         .map(|model| model.value.as_str());
     let model = models
         .iter()
@@ -184,7 +184,7 @@ pub fn create_model_picker_request(
         .iter()
         .map(|value| EffortChoice {
             value: value.clone(),
-            label: agent_model_catalog_effort_label(catalog, value),
+            label: catalog.effort_label(value),
         })
         .collect();
     Some(ModelPickerRequest {

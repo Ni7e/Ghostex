@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::menus::picker::catalog::{agent_model_catalog_effort_label, AgentModelCatalog};
+use crate::menus::catalog::AgentModelCatalog;
 use crate::menus::picker::model_menu::{model_menu_entry_for, ModelMenuEntries};
 
 /// One choice of an option, flattened out of `rows.sections`.
@@ -231,9 +231,7 @@ fn option(
             id: descriptor.id.clone(),
             label,
             value_label: match (descriptor.id.as_str(), current.as_deref()) {
-                ("effort", Some(current)) => {
-                    Some(agent_model_catalog_effort_label(catalog, current))
-                }
+                ("effort", Some(current)) => Some(catalog.effort_label(current)),
                 _ => descriptor.value_label.clone(),
             },
             disabled: None,

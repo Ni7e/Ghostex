@@ -31,7 +31,7 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
         None => Tri::Null,
     };
     into.model_menu = match pickers.model_menu_context.as_ref() {
-        Some(menu) => Tri::Value(pickers.model_menu_projection(menu)),
+        Some(menu) => Tri::Value(pickers.model_menu_projection(menu, &state.menus.model_catalog)),
         None => Tri::Null,
     };
     into.model_picker = match pickers.model_picker.as_ref() {

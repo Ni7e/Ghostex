@@ -10,7 +10,6 @@
 pub mod actions;
 pub mod agents;
 pub mod artwork;
-pub mod catalog;
 pub mod document;
 pub mod favorites;
 pub mod feedback;

@@ -6,7 +6,7 @@
 
 use serde_json::{json, Value};
 
-use crate::menus::picker::catalog::AgentModelCatalog;
+use crate::menus::catalog::AgentModelCatalog;
 use crate::menus::picker::model_menu::{
     model_menu_empty_text, model_menu_entries, model_menu_opening_tab, model_menu_pick_value,
     model_menu_rows, model_menu_tabs, ModelMenuCatalogs, ModelMenuCurrent, ModelMenuRow,

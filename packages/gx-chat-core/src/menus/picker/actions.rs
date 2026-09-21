@@ -168,7 +168,7 @@ fn toggle_model_picker(state: &mut ChatState, action: &UserAction, now: f64) -> 
         .unwrap_or_default()
         .to_string();
     let Some(request) = create_model_picker_request(
-        &state.pickers.catalog,
+        &state.menus.model_catalog,
         provider,
         model.as_deref(),
         effort.as_deref(),
