@@ -176,6 +176,11 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
 /// because a wheel over a modal transcript is not a composer gesture; `ExtrasState` does not carry
 /// that flag yet.
 fn scroll(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
+    // The subagent transcript is modal: a wheel over it is not a composer gesture
+    // (`native-host.ts`, the first thing `action` checks).
+    if crate::extras::subagent::is_open(&state.extras.subagent) {
+        return Vec::new();
+    }
     let now = context.now_ms;
     let composer = &mut state.composer;
     if now - composer.scroll.last_event_at > COMPOSER_SCROLL_RESET_MS {

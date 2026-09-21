@@ -481,9 +481,7 @@ impl Core {
         };
         // Nothing publishes before the composer boot read answers, the same way `startController`
         // is only called from `composer('read')`'s `.then(...)`.
-        core.drive(Event::ComposerBootRead(Box::new(
-            ghostex_gx_chat_core::ComposerBootRead::default(),
-        )));
+        core.drive(Event::ComposerBootRead(Box::default()));
         core
     }
 
