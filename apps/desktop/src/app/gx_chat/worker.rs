@@ -553,6 +553,27 @@ fn perform(
                 value,
             });
         }
+        // One host operation that reads several records and answers once. The COUNT of round trips
+        // is part of the contract, not an optimisation, so the batch stays one answer.
+        Effect::ReadStorageBatch { keys } => {
+            let records = keys
+                .into_iter()
+                .map(|storage_key| {
+                    let value = match storage::read(&storage_key, now_ms) {
+                        Ok(value) => value,
+                        Err(_) => {
+                            world.counters.storage_refused += 1;
+                            None
+                        }
+                    };
+                    ghostex_gx_chat_core::StorageRecord {
+                        key: storage_key,
+                        value,
+                    }
+                })
+                .collect();
+            answers.push(Event::StorageBatchLoaded { records });
+        }
         Effect::WriteStorage {
             key: storage_key,
             value,
@@ -571,6 +592,22 @@ fn perform(
                 key: storage_key,
                 error,
             });
+        }
+        // One outcome for the whole batch, because the host operation it stands for is one call.
+        // The writes go out in the order given and the first refusal names the failure.
+        Effect::WriteStorageBatch { writes } => {
+            let mut keys = Vec::with_capacity(writes.len());
+            let mut error = None;
+            for write in writes {
+                if let Err(reason) =
+                    write_storage(world, key, session_key, &write.key, &write.value, now_ms)
+                {
+                    world.counters.storage_refused += 1;
+                    error.get_or_insert_with(|| reason.to_string());
+                }
+                keys.push(write.key);
+            }
+            answers.push(Event::StorageBatchWritten { keys, error });
         }
         // `composer('flush')` is `flushDraftSaves(sessionKey)`: every stored write this door makes
         // is already on disk when it returns, so what is left to wait for is the outbox, and the
@@ -741,8 +778,10 @@ fn effect_name(effect: &Effect) -> &'static str {
         Effect::Unsubscribe => "unsubscribe",
         Effect::Reconnect => "reconnect",
         Effect::ReadStorage { .. } => "readStorage",
+        Effect::ReadStorageBatch { .. } => "readStorageBatch",
         Effect::ReadComposerBoot { .. } => "readComposerBoot",
         Effect::WriteStorage { .. } => "writeStorage",
+        Effect::WriteStorageBatch { .. } => "writeStorageBatch",
         Effect::FlushStorage { .. } => "flushStorage",
         Effect::SetTimer { .. } => "setTimer",
         Effect::SetComposerText { .. } => "setComposerText",

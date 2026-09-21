@@ -52,7 +52,9 @@ pub(super) const UNPERFORMED_HOST_ACTIONS: &[&str] = &[
 pub(super) fn route(effect: Effect) -> Routed {
     match effect {
         Effect::ReadStorage { .. }
+        | Effect::ReadStorageBatch { .. }
         | Effect::WriteStorage { .. }
+        | Effect::WriteStorageBatch { .. }
         | Effect::ReadComposerBoot { .. }
         | Effect::FlushStorage { .. }
         | Effect::SetTimer { .. } => Routed::Host(effect),
