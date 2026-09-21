@@ -23,6 +23,7 @@
 //! one line to a barrel here.
 
 mod action;
+pub mod bridge;
 pub mod composer;
 mod core;
 mod dispatch;
