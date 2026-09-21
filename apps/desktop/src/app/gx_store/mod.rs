@@ -16,7 +16,8 @@
 //! `sidebar_actions.rs` performs what a menu row, hover button or header button does, and
 //! `sidebar_lifecycle.rs` the ones with a daemon round trip in the middle (sleep, wake, close
 //! and fork), `sidebar_flags.rs` the four that are one call with different fields,
-//! `sidebar_modals.rs` the two that only open a dialog, `sidebar_open.rs` the family whose whole
+//! `sidebar_modals.rs` the two that only open a dialog,
+//! `sidebar_accounts.rs` the two account pages (the agent launcher's and a row's Switch Account), `sidebar_open.rs` the family whose whole
 //! answer is an app-modal-host message (the More menu's rows, a machine's Configure, the Space
 //! editor, a project's Add Worktree and History), `sidebar_state_actions.rs` a row's Delayed Send,
 //! the agent launcher's run and a machine tab's Hide Machine, and `sidebar_snooze.rs` the two that read
@@ -49,6 +50,7 @@ mod remote_clients;
 mod remote_last_seen;
 mod session_walk;
 mod shadow_diff;
+mod sidebar_accounts;
 mod sidebar_actions;
 mod sidebar_bulk;
 mod sidebar_drag;

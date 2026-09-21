@@ -140,20 +140,8 @@ impl GhostexGpuiApp {
                 items,
                 close,
             } => {
-                let Some(menu) = self.native_sidebar.menu.as_mut() else {
-                    return;
-                };
-                let Some((owner, index)) = &menu.account_panel else {
-                    return;
-                };
-                if *owner != owner_id {
-                    return;
-                }
-                if close {
-                    self.dismiss_native_sidebar_menu(cx);
-                } else if let Some(panel) = menu.panels.get_mut(*index) {
-                    panel.replace_items(items);
-                }
+                // One body with the store's own account pages (gx_store/sidebar_accounts.rs).
+                self.apply_native_sidebar_menu_page(&owner_id, items, close, cx);
             }
             NativeSidebarUpdate::Clock { version: 1, rows } => {
                 for row in &rows {

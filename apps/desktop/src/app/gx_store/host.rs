@@ -109,6 +109,8 @@ pub(crate) struct GxStoreHost {
     pub(super) sidebar_flags: super::sidebar_flags::SidebarFlagsCounters,
     pub(super) sidebar_modals: super::sidebar_modals::SidebarModalCounters,
     pub(super) sidebar_open: super::sidebar_open::SidebarOpenCounters,
+    /// The two account pages' state and counters.
+    pub(super) sidebar_accounts: super::sidebar_accounts::SidebarAccountsHost,
     pub(super) sidebar_snooze: super::sidebar_snooze::SidebarSnoozeCounters,
     pub(super) sidebar_bulk: super::sidebar_bulk::SidebarBulkCounters,
     pub(super) sidebar_drag: super::sidebar_drag::SidebarDragCounters,

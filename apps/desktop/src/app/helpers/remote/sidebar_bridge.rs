@@ -125,6 +125,9 @@ pub(crate) fn gpui_remote_sidebar_request_path_allowed(path: &str) -> bool {
             | "/api/updateWorkspaceSessionGroups"
             | "/api/switchSessionAgent"
             | "/api/saveSessionAgentNote"
+            // The account pages' list, a row's account list and a pick; shaped both ways in
+            // `sidebar_bridge_writes.rs`.
+            | "/api/agentAccounts"
             | "/api/runGitAction"
             | "/api/runGitHubAction"
             | "/api/runBeadsAction"
@@ -155,6 +158,7 @@ pub(crate) fn gpui_remote_sidebar_request_params(
         "/api/updateWorkspaceSessionGroups" => gpui_remote_sidebar_workspace_groups_params(params),
         "/api/switchSessionAgent" => gpui_remote_sidebar_switch_session_agent_params(params),
         "/api/saveSessionAgentNote" => gpui_remote_sidebar_session_note_params(params),
+        "/api/agentAccounts" => gpui_remote_sidebar_agent_accounts_params(params),
         "/api/closeProjectToRecent"
         | "/api/restoreRecentProject"
         | "/api/removeRecentProject"
@@ -945,6 +949,7 @@ pub(crate) fn gpui_remote_sidebar_response_payload(
         "/api/exportSessionTranscript" => {
             gpui_remote_sidebar_export_session_transcript_response_payload(result)
         }
+        "/api/agentAccounts" => gpui_remote_sidebar_agent_accounts_response_payload(result),
         _ => serde_json::Value::Null,
     }
 }

@@ -107,6 +107,11 @@ impl GhostexGpuiApp {
         if self.gx_store_answer_session_menu(&command, cx) {
             return;
         }
+        // The launcher's account pages and a row's Switch Account flyout call the daemon from here
+        // and fill the panel the menu already opened (gx_store/sidebar_accounts.rs).
+        if self.gx_store_run_sidebar_accounts(&command, cx) {
+            return;
+        }
         // A row on a REMOTE machine: its sleep, wake, close, fork, flags, snooze and Full Reload
         // are calls down that machine's tunnel, sent through the same function the old runtime's
         // bridge message reaches, and nothing local moves (gx_store/sidebar_remote.rs).

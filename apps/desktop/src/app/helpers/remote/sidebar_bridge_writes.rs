@@ -307,3 +307,66 @@ pub(crate) fn gpui_remote_sidebar_session_note_params(
     shaped["note"] = serde_json::Value::String(note);
     Some(shaped)
 }
+
+/// The longest account id a pick may name. The daemon's ids are short slugs.
+const GPUI_REMOTE_SIDEBAR_MAX_ACCOUNT_ID_CHARS: usize = 128;
+
+/// `/api/agentAccounts` for the sidebar's account pages, and only its three read-or-pick
+/// operations: the launcher's `list`, a row's `session`, and a row's `select`.
+///
+/// CDXC:RemoteMachines 2026-09-21 WHY:
+/// The account pages are the store's now (gx_store/sidebar_accounts.rs) and their remote calls go
+/// through the one shared function, whose allowlist never carried this path: the old runtime sent
+/// both pages down a machine's tunnel and every one of them failed at this boundary, so a remote
+/// project's launcher never showed its accounts and a remote row's Switch Account always showed
+/// the failure. The endpoint also sets up, edits and removes accounts, which a sidebar menu never
+/// does, so every other operation is refused here, as is any field beyond the ones these three
+/// read. `/api/agentAccounts` is already `RemoteAllowed` in `server/src/protocol.rs`.
+pub(crate) fn gpui_remote_sidebar_agent_accounts_params(
+    params: serde_json::Value,
+) -> Option<serde_json::Value> {
+    let operation = params.get("operation")?.as_str()?;
+    let refresh = match params.get("refresh") {
+        None => None,
+        Some(serde_json::Value::Bool(refresh)) => Some(*refresh),
+        Some(_) => return None,
+    };
+    let mut shaped = match operation {
+        "list" => serde_json::json!({}),
+        "session" => gpui_remote_sidebar_session_lifecycle_params(params.clone(), None)?,
+        "select" => {
+            let account_id = params
+                .get("accountId")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|value| {
+                    bounded_label(value, GPUI_REMOTE_SIDEBAR_MAX_ACCOUNT_ID_CHARS)
+                        .filter(|trimmed| *trimmed == value && !value.contains(['/', '\\']))
+                })?
+                .to_string();
+            let mut shaped = gpui_remote_sidebar_session_lifecycle_params(params.clone(), None)?;
+            shaped["accountId"] = serde_json::Value::String(account_id);
+            // A pick never refreshes.
+            if refresh.is_some() {
+                return None;
+            }
+            shaped
+        }
+        _ => return None,
+    };
+    shaped["operation"] = serde_json::Value::String(operation.to_string());
+    if let Some(refresh) = refresh {
+        shaped["refresh"] = serde_json::Value::Bool(refresh);
+    }
+    Some(shaped)
+}
+
+/// The machine's account list cut to what the account pages read (gx-core's `AccountsState`),
+/// so nothing else of the answer reaches the old runtime or the store. An answer that is not an
+/// account list becomes `null`, which the pages read as a failed call.
+pub(crate) fn gpui_remote_sidebar_agent_accounts_response_payload(
+    result: serde_json::Value,
+) -> serde_json::Value {
+    ghostex_gx_core::AccountsState::from_json(&result)
+        .map(|state| state.to_json())
+        .unwrap_or(serde_json::Value::Null)
+}

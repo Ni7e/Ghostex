@@ -88,6 +88,7 @@ pub(crate) struct SidebarRemoteHost {
         [u64; 7],
         super::sidebar_remote_focus::SidebarRemoteFocusCounters,
         super::sidebar_state_actions::SidebarStateActionCounters,
+        super::sidebar_accounts::SidebarAccountCounters,
     )>,
 }
 
@@ -291,6 +292,10 @@ impl GhostexGpuiApp {
     /// request waited for this one's answer), and the set reloads (`reloadSets`, `reloadSetRows`,
     /// `reloadSetsStopped`). The first two used to be impossible, so a non-zero value is the proof
     /// the new wait is real.
+    ///
+    /// `accounts` carries the two account pages (gx_store/sidebar_accounts.rs): the commands, the
+    /// calls on each machine, the answers, the ones a newer command overtook, and the pages,
+    /// closes, launches and switch progress they produced. Counts only: no account data.
     pub(super) fn gx_store_sidebar_actions_summary(&mut self) {
         let lifecycle = self.gx_store.sidebar_lifecycle;
         let local = [
@@ -308,9 +313,11 @@ impl GhostexGpuiApp {
         let focus = self.gx_store_remote_focus_counters();
         // Delayed Send, the launcher's run and Hide Machine (gx_store/sidebar_state_actions.rs).
         let state = self.gx_store.sidebar_open.state;
+        // The two account pages (gx_store/sidebar_accounts.rs).
+        let accounts = self.gx_store.sidebar_accounts.counters;
         let host = &mut self.gx_store.sidebar_remote;
         let now = (host.counters, local);
-        if host.summary_written == Some((now.0, now.1, focus, state))
+        if host.summary_written == Some((now.0, now.1, focus, state, accounts))
             || host
                 .summary_at
                 .is_some_and(|at| at.elapsed() < REMOTE_SUMMARY_INTERVAL)
@@ -322,7 +329,7 @@ impl GhostexGpuiApp {
             return;
         }
         host.summary_records += 1;
-        host.summary_written = Some((now.0, now.1, focus, state));
+        host.summary_written = Some((now.0, now.1, focus, state, accounts));
         let [
             reloads_stopped,
             paced_legs_waited,
@@ -347,6 +354,7 @@ impl GhostexGpuiApp {
                     "sortRowsDeclined": sort_rows_declined,
                 },
                 "state": super::diagnostics_open::state_counters_json(&state),
+                "accounts": super::sidebar_accounts::account_counters_json(&accounts),
             }),
         );
     }
