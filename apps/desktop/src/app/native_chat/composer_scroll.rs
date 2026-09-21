@@ -35,6 +35,7 @@ impl NativeChatView {
     ) -> AnyElement {
         let chat = cx.weak_entity();
         let p = super::appearance::ChatAppearance::current(&self.snapshot);
+        let scale = p.scale;
         div()
             .relative()
             .flex()
@@ -92,6 +93,14 @@ impl NativeChatView {
                                         -chat.list.scroll_px_offset_for_scrollbar().y.as_f32();
                                     let maximum = chat.list.max_offset_for_scrollbar().y.as_f32();
                                     let end_distance = (maximum - offset).max(0.0);
+                                    // CDXC:SessionChat 2026-09-21 WHY: An upward wheel that leaves the list inside the band the collapsed box would only fill with the held inset is not a collapse gesture. Collapsing there uncovers no rows, and with the box expanding again 10px from the end it let a small up and down wobble at the edge flip the box on every reversal.
+                                    if delta > 0.0
+                                        && !chat.composer_collapsed()
+                                        && end_distance + delta
+                                            < chat.composer_animation.collapse_travel(scale)
+                                    {
+                                        return;
+                                    }
                                     chat.invoke(
                                         json!({"type":"composerScroll", "delta":delta,
                             "distanceToEnd":end_distance,

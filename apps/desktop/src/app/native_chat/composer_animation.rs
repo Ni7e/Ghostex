@@ -192,6 +192,17 @@ impl ComposerAnimation {
         }
     }
 
+    /// How much taller the expanded box is than the collapsed one: the rows a collapse uncovers.
+    /// Before the first collapse has been measured the collapsed height comes from the shared metrics.
+    pub(super) fn collapse_travel(&self, scale: f32) -> f32 {
+        let collapsed = if self.collapsed_natural > 0.0 {
+            self.collapsed_natural
+        } else {
+            (METRICS.collapsed_height_px + METRICS.collapsed_padding_block_px * 2.0) * scale + 2.0
+        };
+        (self.expanded_natural - collapsed).max(0.0)
+    }
+
     fn transcript_inset(&self, painted: f32) -> f32 {
         (self.expanded_natural - painted).max(0.0)
     }
