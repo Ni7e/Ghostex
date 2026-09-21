@@ -24,12 +24,18 @@
 //! So there is no runtime copy of the open any more, and nothing to drop: the echo marker, the
 //! page-entry duplicate check and the three counters that measured the copy are gone together.
 //!
+//! **The highlight is the store's own** (remote focus part 2 step 2). The open's tab selection
+//! reaches `dispatch_gpui_workspace_tab_session_selected`, whose remote branch hands the row to the
+//! core's focus (`gx_store_select_remote_session` in local_focus.rs) in the click's frame, so the
+//! row draws focused with the pane rather than one publish later, and the runtime is sent the
+//! store's stamp so its answering publish is not judged stale.
+//!
 //! **`keepView` is planned from the group the RUNTIME holds, not from the core's focus.** The
-//! core's focus stays on this computer while a remote row has focus, and the runtime's
-//! `activeGroupId` is still the one definition of the active project (a group header's attach and a
-//! lifecycle replacement move it). The host tracks it (`RuntimeActiveGroup` in gx-core): every
-//! remote tab selection it sends the runtime (the open's callback), every tell, and every focus
-//! state the runtime publishes.
+//! core names the user-made group a row sits in where the runtime names the project's own group,
+//! and the runtime's `activeGroupId` still moves on paths the store only sees in its publish (a
+//! group attach from navigation history or a Space restore, a lifecycle replacement). The host
+//! tracks it (`RuntimeActiveGroup` in gx-core): every remote tab selection it sends the runtime
+//! (the open's callback), every tell, and every focus state the runtime publishes.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_actions/remote_focus.rs,
 //! apps/desktop/src/app/native_sidebar/actions.rs, apps/desktop/src/app/remote_conn/native_action.rs
@@ -68,7 +74,8 @@ pub(crate) struct SidebarRemoteFocusCounters {
     /// Attention acknowledgements sent to the old runtime, one per answered click while it runs.
     pub(crate) acknowledgements: u64,
     /// Remote tab selections sent to the old runtime, from any sender (the store's opens and a
-    /// slow attach landing). Each one moves the remote focus marks.
+    /// slow attach landing). Each one moves the remote focus marks: once per click on a row whose
+    /// tab exists, and for a row that needs an attach once in the click and once when it lands.
     pub(crate) tab_selections: u64,
     /// An answered click whose open sent no tab selection: the open was refused (no tunnel, no SSH
     /// settings, a toast said so) or no runtime runs, and the marks did not move.
@@ -82,6 +89,12 @@ pub(crate) struct SidebarRemoteFocusCounters {
     /// practice a machine that is offline or has not streamed yet. Local and browser rows, and ids
     /// that do not parse as remote, are not counted.
     pub(crate) handed_back: u64,
+    /// Remote selections the store's core focus took (`gx_store_select_remote_session`), from any
+    /// sender: one per tab selection sent, so it follows `tab_selections`.
+    pub(crate) core_focus: u64,
+    /// Of those, the ones naming a row the machine does not list, which the core refused and the
+    /// runtime's publish decides.
+    pub(crate) core_unplaced: u64,
 }
 
 /// The counters, the tracked runtime group and the log budget.
@@ -95,6 +108,14 @@ pub(crate) struct SidebarRemoteFocusHost {
 }
 
 impl SidebarRemoteFocusHost {
+    /// The core's focus took a remote selection, or refused a row it does not hold.
+    pub(super) fn note_core_selection(&mut self, placed: bool) {
+        self.counters.core_focus += 1;
+        if !placed {
+            self.counters.core_unplaced += 1;
+        }
+    }
+
     /// The old runtime published its focus state. Every parsed publish comes through here.
     pub(super) fn observe_runtime_publish(&mut self, echo: &GpuiGxserverPresentationFocusEcho) {
         self.runtime_group.observe_publish(
@@ -326,7 +347,7 @@ fn remote_focus_message(command: &Value) -> Option<Value> {
     }
 }
 
-/// The ten keys both records carry, well under the sanitizer's 32-entry cap at depth 2. Counts
+/// The twelve keys both records carry, well under the sanitizer's 32-entry cap at depth 2. Counts
 /// only: no id, title or path.
 pub(super) fn remote_focus_counters_json(counters: &SidebarRemoteFocusCounters) -> Value {
     json!({
@@ -340,5 +361,7 @@ pub(super) fn remote_focus_counters_json(counters: &SidebarRemoteFocusCounters) 
         "pageTold": counters.page_told,
         "declinedSource": counters.declined_source,
         "handedBack": counters.handed_back,
+        "coreFocus": counters.core_focus,
+        "coreUnplaced": counters.core_unplaced,
     })
 }

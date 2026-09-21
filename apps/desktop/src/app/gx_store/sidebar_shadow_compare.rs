@@ -266,35 +266,10 @@ impl SidebarMismatch {
     }
 }
 
-/// Whether the focus-derived values of this list are two answers to one question.
-///
-/// CDXC:Sidebar 2026-09-20 WHY:
-/// On a REMOTE machine's tab they are not. The store owns this computer's focus and nothing else
-/// until M5, so a remote row's focused and visible marks are carried from the publish (declared
-/// difference 16) and everything derived from them (the active group, a section's, a Space's and a
-/// collection's "contains the active session") is the core's local focus rather than that
-/// machine's. The first cut of this gate threw the WHOLE record away whenever the old runtime's
-/// focus was foreign, which is the normal state the moment the user touches a remote tab: it made
-/// `skippedRemote` able to reach zero while the number of real remote comparisons stayed at zero
-/// too. Six fields are left out by name instead, and `comparisonsRemote` counts what is left.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum FocusComparable {
-    Yes,
-    /// Carried from the publish, so comparing them would compare a value with itself.
-    No,
-}
-
-impl FocusComparable {
-    fn compare(self) -> bool {
-        self == Self::Yes
-    }
-}
-
 /// Compares the two lists. `None` when they say the same thing.
 pub(super) fn compare(
     snapshot: &NativeSidebarSnapshot,
     view: &SidebarView,
-    focus: FocusComparable,
     fed_machines: &HashSet<&str>,
 ) -> Option<SidebarMismatch> {
     let mut mismatch = SidebarMismatch {
@@ -302,7 +277,7 @@ pub(super) fn compare(
         store_group_count: view.groups.len(),
         ..SidebarMismatch::default()
     };
-    compare_top_level(snapshot, view, focus, fed_machines, &mut mismatch);
+    compare_top_level(snapshot, view, fed_machines, &mut mismatch);
 
     let store_groups: HashMap<&str, &GroupView> = view
         .groups
@@ -312,7 +287,7 @@ pub(super) fn compare(
     for group in &snapshot.groups {
         match store_groups.get(group.group_id.as_str()) {
             None => mismatch.only_old_groups.push(group.group_id.clone()),
-            Some(store) => compare_group(group, store, focus, &mut mismatch),
+            Some(store) => compare_group(group, store, &mut mismatch),
         }
     }
     for group in &view.groups {
@@ -396,7 +371,6 @@ pub(super) fn compare(
 fn compare_top_level(
     snapshot: &NativeSidebarSnapshot,
     view: &SidebarView,
-    focus: FocusComparable,
     fed_machines: &HashSet<&str>,
     mismatch: &mut SidebarMismatch,
 ) {
@@ -438,8 +412,7 @@ fn compare_top_level(
                         && old.icon == store.icon
                         && old.color == store.color
                         && old.selected == store.selected
-                        && (!focus.compare()
-                            || old.contains_active_session == store.contains_active_session)
+                        && old.contains_active_session == store.contains_active_session
                         && old.working_count == store.working_count
                         && old.attention_count == store.attention_count
                 }),
@@ -459,8 +432,7 @@ fn compare_top_level(
                         && old.color == store.color
                         && old.group_ids == store.group_ids
                         && old.collapsed == store.collapsed
-                        && (!focus.compare()
-                            || old.contains_active_session == store.contains_active_session)
+                        && old.contains_active_session == store.contains_active_session
                         && old.working_count == store.working_count
                         && old.attention_count == store.attention_count
                         && old.awake_count as usize == store.awake_count
@@ -530,12 +502,7 @@ fn compare_top_level(
     );
 }
 
-fn compare_group(
-    old: &NativeSidebarGroup,
-    store: &GroupView,
-    focus: FocusComparable,
-    mismatch: &mut SidebarMismatch,
-) {
+fn compare_group(old: &NativeSidebarGroup, store: &GroupView, mismatch: &mut SidebarMismatch) {
     let core = &store.core;
     let mut fields: Vec<FieldDiff> = Vec::new();
     note!(fields, "title", old.title == core.title);
@@ -545,11 +512,7 @@ fn compare_group(
         old.title_tooltip == core.title_tooltip
     );
     note!(fields, "storageId", old.storage_id == core.storage_id);
-    note!(
-        fields,
-        "isActive",
-        !focus.compare() || old.is_active == core.is_active
-    );
+    note!(fields, "isActive", old.is_active == core.is_active);
     note!(fields, "collapsed", old.collapsed == core.collapsed);
     note!(fields, "expanded", old.expanded == core.expanded);
     note!(
@@ -622,7 +585,7 @@ fn compare_group(
     note!(
         fields,
         "sections",
-        sections_equal(&old.sections, &core.sections, focus)
+        sections_equal(&old.sections, &core.sections)
     );
     let old_order: Vec<&str> = old
         .sessions
@@ -660,7 +623,7 @@ fn compare_group(
     for session in &old.sessions {
         match store_sessions.get(session.session_id.as_str()) {
             None => mismatch.only_old_sessions.push(session.session_id.clone()),
-            Some(store) => compare_session(session, store, focus, mismatch),
+            Some(store) => compare_session(session, store, mismatch),
         }
     }
     for session in &core.sessions {
@@ -746,18 +709,13 @@ fn compare_project_context(old: Option<&Value>, store: &GroupView, fields: &mut 
     );
 }
 
-fn sections_equal(
-    old: &[NativeSidebarSection],
-    store: &[SectionView],
-    focus: FocusComparable,
-) -> bool {
+fn sections_equal(old: &[NativeSidebarSection], store: &[SectionView]) -> bool {
     old.len() == store.len()
         && old.iter().zip(store).all(|(old, store)| {
             old.id == store.id.as_str()
                 && old.collapsed == store.collapsed
                 && old.count == store.count
-                && (!focus.compare()
-                    || old.contains_active_session == store.contains_active_session)
+                && old.contains_active_session == store.contains_active_session
                 && old.working_count == store.working_count
                 && old.attention_count == store.attention_count
                 && old.question_count == store.question_count
@@ -768,7 +726,6 @@ fn sections_equal(
 fn compare_session(
     old: &NativeSidebarSession,
     store: &SessionView,
-    focus: FocusComparable,
     mismatch: &mut SidebarMismatch,
 ) {
     let row = &store.row;
@@ -813,16 +770,8 @@ fn compare_session(
         old.session_kind.is_some(),
         row.session_kind.is_some()
     );
-    note!(
-        fields,
-        "isFocused",
-        !focus.compare() || old.is_focused == store.is_focused
-    );
-    note!(
-        fields,
-        "isVisible",
-        !focus.compare() || old.is_visible == store.is_visible
-    );
+    note!(fields, "isFocused", old.is_focused == store.is_focused);
+    note!(fields, "isVisible", old.is_visible == store.is_visible);
     note!(fields, "isPinned", old.is_pinned == row.is_pinned);
     note!(fields, "isParked", old.is_parked == row.is_parked);
     note!(fields, "isDraft", old.is_draft == row.is_draft);

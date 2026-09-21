@@ -15,9 +15,9 @@
 //!
 //! M4d moved the machine tabs, their connection state and their counts, a group's `isStale` and
 //! its remote machine context into the view model, so a remote machine's list is drawn from the
-//! store exactly as this computer's is. The one exception is named at `remote_row_focus`: the two
-//! marks a REMOTE row draws from focus, because the store owns this computer's focus and nothing
-//! else until M5.
+//! store exactly as this computer's is. Since remote focus part 2 step 2 that includes the two
+//! marks a remote row draws from focus: the store's core focus owns the remote row, so the carry
+//! from the publish (`remote_row_focus`) is gone.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -274,17 +274,6 @@ pub(super) fn carry_fingerprint(published: &NativeSidebarSnapshot) -> u64 {
             Some(context) => hash_json(context, &mut hasher),
             None => 0u8.hash(&mut hasher),
         }
-        // The focus marks of a remote machine's rows, which the list still carries (see
-        // `remote_row_focus`). Nothing is hashed while this computer's tab is selected, because a
-        // publish then carries no remote group at all.
-        if group.remote_machine_context.is_none() {
-            continue;
-        }
-        for session in &group.sessions {
-            session.session_id.hash(&mut hasher);
-            session.is_focused.hash(&mut hasher);
-            session.is_visible.hash(&mut hasher);
-        }
     }
     hasher.finish()
 }
@@ -401,7 +390,7 @@ pub(super) fn snapshot_from_view(
                 .iter()
                 .map(|session| {
                     used.insert(session.row.sidebar_session_id.clone());
-                    let focus = remote_row_focus(group, session, published);
+                    let focus = (session.is_focused, session.is_visible);
                     session_element(group, session, focus, menus, cache, now_ms)
                 })
                 .collect();
@@ -787,31 +776,6 @@ fn collection_menu(
 /// Which row of a remote machine is focused, and which are on screen.
 ///
 /// CDXC:FocusRouting 2026-09-20 WHY:
-/// The store owns this computer's focus and nothing else: a focus payload naming a remote session
-/// is deliberately not mirrored into the core, because the core's active group is what the
-/// workspace reads for its own tabs and it has no remote counterpart until the session lifecycle
-/// milestone. So the two marks a row draws from focus are the only values of a REMOTE row still
-/// carried from the old projection's newest publish, by row id, and a remote row the projection
-/// has not published draws unfocused for the one frame it takes. Every other value of that row,
-/// and every value of a local row, is the store's.
-fn remote_row_focus(
-    group: &GroupView,
-    session: &SessionView,
-    published: Option<&NativeSidebarGroup>,
-) -> (bool, bool) {
-    if group.core.remote_machine.is_none() {
-        return (session.is_focused, session.is_visible);
-    }
-    published
-        .and_then(|group| {
-            group
-                .sessions
-                .iter()
-                .find(|old| old.session_id == session.row.sidebar_session_id)
-        })
-        .map_or((false, false), |old| (old.is_focused, old.is_visible))
-}
-
 fn session_element(
     group: &GroupView,
     session: &SessionView,

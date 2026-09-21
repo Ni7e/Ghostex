@@ -121,7 +121,9 @@ impl GhostexGpuiApp {
             } else {
                 placement
             };
-        if self.focus_existing_gpui_remote_attach_terminal(&key, cx) {
+        // The marks moved above, in this same frame, for this same key, so the tab's focus below
+        // must not send the runtime a second, identical tab selection.
+        if self.focus_existing_gpui_remote_attach_terminal(&key, true, cx) {
             return;
         }
         let prepare_reference = reference.clone();
@@ -221,9 +223,13 @@ impl GhostexGpuiApp {
         self.pending_keep_view_remote_focus.remove(key)
     }
 
+    /// Selects the live tab of a remote session, when it has one. `marks_moved` says the caller
+    /// already moved the sidebar focus to this session in this frame
+    /// (`begin_gpui_remote_attach_terminal_open`), so it is not sent again.
     pub(crate) fn focus_existing_gpui_remote_attach_terminal(
         &mut self,
         key: &GpuiRemoteAttachSessionKey,
+        marks_moved: bool,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         let Some(session_id) = self.remote_attach_sessions.get(key).copied() else {
@@ -284,7 +290,9 @@ impl GhostexGpuiApp {
         }
         self.scroll_workspace_pane_active_tab(pane_id);
         self.persist_shell_layout_state();
-        self.set_sidebar_gxserver_remote_attach_focus_state(key, cx);
+        if !marks_moved {
+            self.set_sidebar_gxserver_remote_attach_focus_state(key, cx);
+        }
         self.reconcile_preferred_agents_chat_launch_intents(cx);
         cx.notify();
         true
@@ -364,7 +372,7 @@ impl GhostexGpuiApp {
         let tab_agent_icon = projected_tab_session
             .and_then(|session| session.agent_icon)
             .or(plan.agent_icon);
-        if self.focus_existing_gpui_remote_attach_terminal(&key, cx) {
+        if self.focus_existing_gpui_remote_attach_terminal(&key, false, cx) {
             return;
         }
         #[cfg(target_os = "macos")]

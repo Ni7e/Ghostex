@@ -6,8 +6,7 @@
 use std::time::{Duration, Instant};
 
 use ghostex_gx_core::{
-    Event, IgnoredReason, Intent, Loadable, MachineId, ProjectKey, SessionKey,
-    default_group_for_project,
+    Event, IgnoredReason, Intent, Loadable, ProjectKey, SessionKey, default_group_for_project,
 };
 
 use super::host::{GxStoreHost, now_ms};
@@ -22,6 +21,9 @@ use crate::support_logs;
 
 /// Sidebar row ids of local sessions start with this (`SessionKey::to_sidebar_session_id`).
 const LOCAL_SESSION_ROW_PREFIX: &str = "combined-session:";
+/// And those of remote sessions with this (`remote:<machine>:session:<project>:<session>`); no
+/// other row the sidebar draws does.
+const REMOTE_SESSION_ROW_PREFIX: &str = "remote:";
 
 /// A local selection the old runtime has not been told about yet.
 #[derive(Clone, Debug)]
@@ -100,10 +102,12 @@ pub(crate) struct LocalFocus {
     pub(super) restored: bool,
     /// Newest stamp the old runtime echoed in a focus payload.
     pub(super) confirmed_stamp: u64,
-    /// The old runtime's newest accepted focus names something the store does not own the focus of
-    /// (a remote session, the quick automations row). Local rows then draw unfocused and the
-    /// sidebar snapshot's own flag owns the highlight, which for a remote row is the mark the list
-    /// carries from the publish (`remote_row_focus`). Cleared by every local selection.
+    /// The old runtime's newest accepted focus names a row the store cannot place: the quick
+    /// automations row, a session the store does not hold yet, or a session of a remote machine the
+    /// store holds no rows for. Session rows then draw unfocused and the sidebar snapshot's own flag
+    /// owns the highlight. A remote session the store holds is NOT foreign: the store owns its
+    /// focus (`gx_store_select_remote_session`, and the mirror in shadow_diff.rs). Cleared by every
+    /// selection the store makes.
     pub(super) foreign_focus: bool,
     /// Row id of the store's focused session, and of its visible sessions, so a row compares two
     /// strings per frame instead of decoding its id.
@@ -253,18 +257,17 @@ impl GxStoreHost {
                 .is_some_and(|told| told.key == *key && told.stamp == focus.local_stamp)
     }
 
-    /// Rebuilds the row ids the sidebar compares against. Returns `true` when they changed.
+    /// Rebuilds the row ids the sidebar compares against. Returns `true` when they changed. A
+    /// remote session's row id is its machine-scoped id, so one cache serves every machine's rows.
     pub(super) fn refresh_row_focus_cache(&mut self) -> bool {
         let focus = self.core.focus();
         let focused = focus
             .focused_session
             .as_ref()
-            .filter(|session| session.machine.is_local())
             .map(SessionKey::to_sidebar_session_id);
         let visible = focus
             .visible_sessions
             .iter()
-            .filter(|session| session.machine.is_local())
             .map(SessionKey::to_sidebar_session_id)
             .collect::<Vec<_>>();
         let changed = self.local_focus.focused_row_id != focused
@@ -278,32 +281,32 @@ impl GxStoreHost {
 
     /// Seeds the core's focus from the persisted focus state, once, before any frame is applied.
     /// The file names a local session by its raw id, so the project comes from the file's active
-    /// project; a remote focus is left to the old path, which owns remote machines.
+    /// project; a remote session is named by its machine-scoped id, which carries its project.
+    /// A session that does not belong to the active project the file names is not seeded: the
+    /// file is then not one focus, and the old runtime's first publish decides.
     pub(super) fn restore_focus_once(&mut self, persisted: &GpuiGxserverPresentationFocusState) {
         if std::mem::replace(&mut self.local_focus.restored, true) {
             return;
         }
-        let project = persisted
+        let Some(project) = persisted
             .active_project_id
             .as_deref()
-            .and_then(ProjectKey::parse_workspace_project_id);
-        let remote_session = persisted
-            .focused_session_id
-            .as_deref()
-            .is_some_and(|id| SessionKey::parse_remote_scoped_session_id(id).is_some());
-        let Some(project) = project.filter(|project| project.machine.is_local()) else {
-            self.local_focus.foreign_focus = project_is_remote(persisted) || remote_session;
+            .and_then(ProjectKey::parse_workspace_project_id)
+        else {
             return;
         };
-        if remote_session {
-            self.local_focus.foreign_focus = true;
-            return;
-        }
+        let session = match persisted.focused_session_id.as_deref() {
+            None => None,
+            Some(session_id) => match SessionKey::parse_remote_scoped_session_id(session_id) {
+                Some(remote) if remote.project_key() == project => Some(remote),
+                Some(_) => return,
+                None if project.machine.is_local() => {
+                    Some(SessionKey::local(project.project_id.as_str(), session_id))
+                }
+                None => return,
+            },
+        };
         let mut focus = self.core.focus().clone();
-        let session = persisted
-            .focused_session_id
-            .as_deref()
-            .map(|session_id| SessionKey::local(project.project_id.as_str(), session_id));
         focus.active_group = Some(default_group_for_project(
             self.core.presentation(),
             &project,
@@ -338,33 +341,25 @@ impl GxStoreHost {
             // not running.
             return true;
         }
-        // The active group is the store's own only while the store owns that machine's focus,
-        // which it does for this computer. A remote project's group is derived instead, from the
-        // project the old runtime named.
+        // The store owns the focus of every machine it holds rows for, so its active group is the
+        // one to judge by whenever it belongs to the project the old runtime named. A group of
+        // another project (the runtime is ahead of or behind the store) falls back to the
+        // project's own default group, as it always did.
         let group = self
             .core
             .focus()
             .active_group
             .clone()
-            .filter(|_| project.machine.is_local())
             .filter(|group| match group {
                 ghostex_gx_core::ActiveGroup::Project(owner) => *owner == project,
                 ghostex_gx_core::ActiveGroup::Subgroup { project: owner, .. } => *owner == project,
                 ghostex_gx_core::ActiveGroup::Chats(machine) => {
-                    *machine == MachineId::Local && store.is_chat_project(&project)
+                    *machine == project.machine && store.is_chat_project(&project)
                 }
             })
             .unwrap_or_else(|| default_group_for_project(store, &project));
         matches!(store.tab_sessions(&group), Loadable::Loaded(tabs) if tabs.is_empty())
     }
-}
-
-fn project_is_remote(state: &GpuiGxserverPresentationFocusState) -> bool {
-    state
-        .active_project_id
-        .as_deref()
-        .and_then(ProjectKey::parse_workspace_project_id)
-        .is_some_and(|project| !project.machine.is_local())
 }
 
 impl GhostexGpuiApp {
@@ -552,11 +547,49 @@ impl GhostexGpuiApp {
         (reveal, ask)
     }
 
-    /// A remote session was selected in the workspace. Remote machines are not in the store, so
-    /// the selection itself keeps the old path; the store only stops drawing its last local
-    /// session as focused. Callers repaint themselves.
-    pub(crate) fn gx_store_note_remote_selection(&mut self) {
-        self.gx_store.local_focus.foreign_focus = true;
+    /// A remote session was selected in the workspace: the store's own open of a remote row, a
+    /// click on a remote tab, or a remote attach that lands. The core's focus takes it here, in
+    /// the frame of the selection, so the row highlights at once; the old runtime is told through
+    /// the tab selection the caller sends next, carrying the stamp this returns, so the focus
+    /// state it publishes in answer is not judged stale. `None` for a pair that does not name one
+    /// remote session of one remote project, which the runtime refuses too.
+    ///
+    /// CDXC:FocusRouting 2026-09-21 WHY:
+    /// Remote focus part 2 step 2: the store's core focus owns the remote row, so its highlight is drawn from Rust's own focus in the click's frame rather than carried from the runtime's publish one hop later (`remote_row_focus`, deleted). The runtime still moves its own marks from the same tab selection, which is what its tab lists and `keepView` read; the store mirrors any remote focus the runtime makes on its own (shadow_diff.rs).
+    pub(crate) fn gx_store_select_remote_session(
+        &mut self,
+        scoped_project_id: &str,
+        scoped_session_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<u64> {
+        let session = SessionKey::parse_remote_scoped_session_id(scoped_session_id)?;
+        if ProjectKey::parse_workspace_project_id(scoped_project_id) != Some(session.project_key())
+        {
+            return None;
+        }
+        let output = self.gx_store.core.handle(
+            Event::Intent(Intent::FocusSession {
+                session,
+                // The runtime's remote focus shows the session alone
+                // (`setRemotePresentationSessionFocus`), which is the core's rule for a remote
+                // session without a reported set.
+                visible: None,
+            }),
+            now_ms(),
+        );
+        let placed = output.changes.ignored != Some(IgnoredReason::UnknownTarget);
+        // A row the machine does not list yet (created a moment ago) keeps the old rule until the
+        // runtime's publish places it: no session row of the store is drawn focused meanwhile.
+        self.gx_store.local_focus.foreign_focus = !placed;
+        self.gx_store.run_effects(output.effects);
+        self.gx_store
+            .sidebar_remote_focus
+            .note_core_selection(placed);
+        if self.gx_store.refresh_row_focus_cache() {
+            cx.notify();
+        }
+        self.gx_store_sidebar_focus_moved(cx);
+        Some(self.gx_store.core.focus().local_stamp)
     }
 
     /// The store keys of the sessions that own a rendered pane, the selected one included: the
@@ -618,11 +651,12 @@ impl GhostexGpuiApp {
 
     /// Whether a native sidebar row draws focused and with the visible fill.
     ///
-    /// A local session row reads the store, unless a browser tab owns focus. A browser row keeps
-    /// the snapshot's flags while the shell's focus is on the browser (browser tabs are host
-    /// state, not sessions). Any other row (a remote session, the quick automations
-    /// row) reads the snapshot only while the old runtime's accepted focus is such a row, so a
-    /// local selection never shows two focused rows while the old runtime catches up.
+    /// A session row of any machine reads the store, unless a browser tab owns focus or the old
+    /// runtime focused a row the store cannot place (`foreign_focus`). A browser row keeps the
+    /// snapshot's flags while the shell's focus is on the browser (browser tabs are host state,
+    /// not sessions). Any other row (the quick automations row) reads the snapshot only while the
+    /// old runtime's accepted focus is such a row, so a selection never shows two focused rows
+    /// while the old runtime catches up.
     pub(crate) fn gx_store_sidebar_row_focus(
         &self,
         row_id: &str,
@@ -644,29 +678,34 @@ impl GhostexGpuiApp {
                 snapshot_visible,
             );
         }
+        let local_row = row_id.starts_with(LOCAL_SESSION_ROW_PREFIX);
+        let remote_row = row_id.starts_with(REMOTE_SESSION_ROW_PREFIX);
+        let session_row = local_row || remote_row;
         if local_focus.snapshot_browser_focus && browser_holds_shell_focus {
             // One focused row: the browser tab's, which the snapshot already draws.
-            let visible =
-                if row_id.starts_with(LOCAL_SESSION_ROW_PREFIX) && !local_focus.foreign_focus {
-                    local_focus
-                        .visible_row_ids
-                        .iter()
-                        .any(|visible| visible == row_id)
-                } else {
-                    snapshot_visible
-                };
+            let visible = if session_row && !local_focus.foreign_focus {
+                local_focus
+                    .visible_row_ids
+                    .iter()
+                    .any(|visible| visible == row_id)
+            } else {
+                snapshot_visible
+            };
             return (false, visible);
         }
-        if !row_id.starts_with(LOCAL_SESSION_ROW_PREFIX) {
+        if !session_row {
             return (
                 snapshot_focused && local_focus.foreign_focus,
                 snapshot_visible,
             );
         }
         if local_focus.foreign_focus {
-            // The store does not own the focus of whatever this is (a remote session, the quick
-            // automations row), so its visible set is the last local one.
-            return (false, snapshot_visible);
+            // The store cannot place what the old runtime focused (the quick automations row, a
+            // session it does not hold yet, a row of a machine it holds no rows for), so a local
+            // row is not focused and its visible set is the last one the store held. A remote
+            // row keeps the snapshot's marks: the one such row the old runtime focused is drawn
+            // from its own projection.
+            return (snapshot_focused && remote_row, snapshot_visible);
         }
         let focused = local_focus.focused_row_id.as_deref() == Some(row_id);
         let visible = local_focus

@@ -36,9 +36,13 @@ impl GxStoreHost {
                 }
                 // Kept newest per project and handed to the old runtime with the next tell: the
                 // record lives in its client storage (`projectLastSession`) until storage moves
-                // to Rust, and a second writer would leave its cache stale.
+                // to Rust, and a second writer would leave its cache stale. A remote session is
+                // remembered by the runtime itself when the tab selection moves its marks
+                // (`setRemotePresentationSessionFocus`), under ids a tell cannot carry.
                 Effect::RememberProjectSession { session, .. } => {
-                    self.local_focus.remember(session);
+                    if session.machine.is_local() {
+                        self.local_focus.remember(session);
+                    }
                 }
                 // M4 (sidebar from the store): read `/api/readSidebarHud` in the background.
                 Effect::RefetchSidebarHud { .. } => {}

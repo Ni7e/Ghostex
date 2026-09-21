@@ -12,8 +12,8 @@
 //! exactly as `runNativeSidebarHotkey` made it (`selectNativeSidebarSession`, then
 //! `requestReveal`), so it goes through the slot jump's `gx_store_focus_and_reveal_slot_row`: the
 //! row click's `selectSession` (for a LOCAL row the runtime's `focusSession` through the page, for
-//! a REMOTE row the store's remote open in `sidebar_remote_focus.rs` and the command sent on, the
-//! same two things a click on that row does), the click's in-process reaction
+//! a REMOTE row the store's remote click in `sidebar_remote_focus.rs`, which is all a click on that
+//! row does), the click's in-process reaction
 //! (`react_to_native_sidebar_session_click`, ending in `gx_store_select_local_session`), then
 //! `gx_store_apply_sidebar_reveal` and the walk's scroll. The page's copy of the sidebar state is
 //! handed the changes as a `sidebarUiMirror`, as the slot jump does, never a reveal request.

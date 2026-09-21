@@ -791,7 +791,7 @@ impl GhostexGpuiApp {
         siblings keep the visible tier and hidden tabs lose it immediately.
 
         CDXC:FocusRouting 2026-09-19 WHY:
-        Focus is owned by the Rust store (the user decision is recorded in gx_store/local_focus.rs). A local session's selection changes the store at once and reaches the sidebar runtime once per burst, about 120 ms after the last selection, with the store's focus stamp (gx_store/local_focus.rs, gx_store/burst.rs). This supersedes the immediate callback of 2026-06-26 for local sessions; every rule above about what the callback carries still holds. Remote sessions are not in the store yet and keep the immediate callback.
+        Focus is owned by the Rust store (the user decision is recorded in gx_store/local_focus.rs). A local session's selection changes the store at once and reaches the sidebar runtime once per burst, about 120 ms after the last selection, with the store's focus stamp (gx_store/local_focus.rs, gx_store/burst.rs). This supersedes the immediate callback of 2026-06-26 for local sessions; every rule above about what the callback carries still holds. Remote sessions keep the immediate callback, and since 2026-09-21 the store's focus takes them first and the callback carries the store's stamp (gx_store_select_remote_session in gx_store/local_focus.rs).
         */
         if !gpui_status_bridge_id_allowed(project_id) || !gpui_status_bridge_id_allowed(session_id)
         {
@@ -809,7 +809,10 @@ impl GhostexGpuiApp {
         // The sidebar runtime handles messages in order: a local selection it has not heard of
         // yet must not arrive after the remote one that followed it.
         self.gx_store_flush_old_runtime_tell(cx);
-        self.gx_store_note_remote_selection();
+        // The store's core focus takes the remote row now (after the flush, whose tell carries the
+        // stamp from before it), and the stamp it returns rides on the tab selection so the
+        // runtime's answering publish echoes it.
+        let focus_stamp = self.gx_store_select_remote_session(project_id, session_id, cx);
         let Some(sidebar) = self.sidebar.clone() else {
             return false;
         };
@@ -832,6 +835,9 @@ impl GhostexGpuiApp {
         }
         if local_runtime_missing {
             message["localRuntimeMissing"] = serde_json::Value::Bool(true);
+        }
+        if let Some(focus_stamp) = focus_stamp {
+            message["focusStamp"] = serde_json::Value::from(focus_stamp);
         }
         let script = gpui_workspace_tab_session_selected_script(&message);
         // The runtime's active group moves with this script, which `keepView` for the next remote
