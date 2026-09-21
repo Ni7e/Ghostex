@@ -20,14 +20,19 @@ impl GhostexGpuiApp {
             self.floating_reveal.want.sidebar = true;
             self.update_sidebar_reveal(true, false, cx);
         }
+        let request_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("current time is after the Unix epoch")
+            .as_micros() as u64;
+        // This reveal is this app's own, so the runtime never posts it on the facts channel and
+        // the comparison must not read the publish that carries it as a reveal the channel lost
+        // (gx_store/runtime_facts.rs).
+        self.gx_store_note_local_sidebar_reveal(request_id);
         self.dispatch_gpui_sidebar_host_message(
             serde_json::json!({
                 "type": "revealSidebarSession",
                 "sessionId": session_id,
-                "requestId": std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .expect("current time is after the Unix epoch")
-                    .as_micros() as u64,
+                "requestId": request_id,
             }),
             cx,
         );

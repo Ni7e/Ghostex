@@ -85,6 +85,7 @@ import type {
 } from '@/packages/shared/session-grid-contract';
 import { DEFAULT_TERMINAL_SESSION_TITLE, GRID_COLUMN_COUNT } from '@/packages/shared/session-grid-contract';
 import { createDefaultSidebarGitState } from '@/packages/shared/sidebar-git';
+import { postGpuiSidebarRuntimeFactsHud, postGpuiSidebarRuntimeFactsRows } from './sidebar-runtime-facts';
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -193,6 +194,8 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       this.postSidebarProjectionPatchMessages(previousGroups, groups, previousHud);
     }
     this.latestGroups = groups;
+    postGpuiSidebarRuntimeFactsHud();
+    postGpuiSidebarRuntimeFactsRows(this);
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
@@ -295,6 +298,8 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     });
     this.messageSource.postMessage(this.createHydrateMessage(this.latestGroups, this.latestHud));
     this.hasHydrated = true;
+    postGpuiSidebarRuntimeFactsHud();
+    postGpuiSidebarRuntimeFactsRows(this);
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
@@ -343,6 +348,8 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       this.postSidebarProjectionPatchMessages(previousGroups, groups, previousHud);
     }
     this.latestGroups = groups;
+    postGpuiSidebarRuntimeFactsHud();
+    postGpuiSidebarRuntimeFactsRows(this);
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
@@ -445,6 +452,7 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       revision: ++this.revision,
       type: 'sidebarHudChanged',
     });
+    postGpuiSidebarRuntimeFactsHud();
   },
 
   postActiveProjectContext(this: GpuiSidebarRuntime, attempt = 0): void {

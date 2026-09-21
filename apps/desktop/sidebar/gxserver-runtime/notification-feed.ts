@@ -27,6 +27,7 @@ import type {
   NotificationFeedState,
   NotificationFeedUpdateParams,
 } from '@/packages/shared/notification-feed/notification-feed-contract';
+import { postGpuiSidebarRuntimeFactsReveal } from './sidebar-runtime-facts';
 
 let notificationRevealRequestId = Date.now();
 
@@ -156,11 +157,13 @@ export const gpuiSidebarRuntimeNotificationFeedMethods = {
       createGxserverPresentationProjectSessionId(item.projectId, item.sessionId);
     await this.updateNotificationFeed({ action: 'markRead', notificationId: item.id });
     void this.focusSession(sidebarSessionId, { sessionId: sidebarSessionId, type: 'focusSession' });
+    const requestId = ++notificationRevealRequestId;
     this.messageSource.postMessage({
-      requestId: ++notificationRevealRequestId,
+      requestId,
       sessionId: sidebarSessionId,
       type: 'revealSidebarSession',
     });
+    postGpuiSidebarRuntimeFactsReveal(sidebarSessionId, requestId);
   },
 
   async jumpToLatestUnreadNotification(this: GpuiSidebarRuntime): Promise<void> {

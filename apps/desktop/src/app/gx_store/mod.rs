@@ -42,6 +42,10 @@
 //! `sidebar_ui_paths.rs` holds the three routes into the sidebar's own state that are NOT
 //! sidebar commands (the per-Space session memory, the Space-editor delete, and the project slot
 //! hotkey), and `sidebar_slot_jump.rs` the rest of that hotkey's jump, its focus and its reveal;
+//! `runtime_facts.rs` ingests the runtime's one-way channel of the facts the list still borrows
+//! from the old projection (the HUD, a project's git numbers, the two armed timers and a reveal
+//! request) and compares it with the publish, with `diagnostics_runtime_facts.rs` writing its
+//! periodic line;
 //! `diagnostics.rs` writes the log lines.
 
 mod added_project;
@@ -52,6 +56,7 @@ mod diagnostics;
 mod diagnostics_open;
 mod diagnostics_project_docs;
 mod diagnostics_remote_last_seen;
+mod diagnostics_runtime_facts;
 mod effects;
 mod host;
 mod layout_persist;
@@ -60,6 +65,7 @@ mod project_docs;
 mod records_storage;
 mod remote_clients;
 mod remote_project_docs;
+mod runtime_facts;
 mod remote_last_seen;
 mod session_walk;
 mod shadow_diff;

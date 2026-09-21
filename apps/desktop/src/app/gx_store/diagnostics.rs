@@ -39,7 +39,7 @@ const SANITIZER_MAX_DEPTH: usize = 4;
 /// Unconditional warning lines one app run may write. A daemon that keeps producing a bad row
 /// must not be able to fill the disk through this path.
 const MAX_WARNING_LINES: u32 = 40;
-const SHADOW_SUMMARY_INTERVAL: Duration = Duration::from_secs(60);
+pub(super) const SHADOW_SUMMARY_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Log lines of the store, all in the `native.sidebar.refresh` support log.
 ///
@@ -61,6 +61,9 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_summary_written: SidebarShadowCounters,
     sidebar_ui_summary_considered_at: Option<Instant>,
     sidebar_ui_summary_written: SidebarUiCounters,
+    /// The runtime facts channel's periodic line (`diagnostics_runtime_facts.rs`).
+    pub(super) runtime_facts_summary_at: Option<Instant>,
+    pub(super) runtime_facts_summary_written: Option<super::runtime_facts::RuntimeFactsCounters>,
     sidebar_refusal_warnings: u32,
     workspace_groups_records: u32,
     workspace_groups_summary_at: Option<Instant>,

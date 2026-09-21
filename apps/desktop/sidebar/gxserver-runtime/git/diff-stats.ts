@@ -27,6 +27,7 @@ import {
   resolveSidebarProjectDiffStats,
 } from '@/packages/shared/project-diff-stats';
 import type { SidebarSessionGroup } from '@/packages/shared/session-grid-contract';
+import { postGpuiSidebarRuntimeFactsRows } from '../sidebar-runtime-facts';
 
 export const gpuiSidebarRuntimeGitDiffStatsMethods = {
   /**
@@ -356,5 +357,6 @@ export const gpuiSidebarRuntimeGitDiffStatsMethods = {
       revision: ++this.revision,
       type: 'sidebarGroupsChanged',
     });
+    postGpuiSidebarRuntimeFactsRows(this);
   },
 };

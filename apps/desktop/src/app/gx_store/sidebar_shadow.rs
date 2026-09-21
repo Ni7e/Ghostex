@@ -171,6 +171,11 @@ impl GhostexGpuiApp {
         // armed timers) come from this payload, so the list is rebuilt whether or not anyone is
         // comparing.
         self.gx_store_sidebar_state_changed(cx);
+        // The same values now also arrive on the runtime's own channel; this step only measures
+        // the two against each other (gx_store/runtime_facts.rs).
+        if let Some(published) = self.native_sidebar.projection.clone() {
+            self.gx_store_compare_sidebar_runtime_facts(&published);
+        }
         // After the rebuild, so the drawn list it reads is this publish's rather than the last
         // one's: whether the focused row is drawn is the question that decides whether it builds.
         self.gx_store_follow_active_session_space(cx);
@@ -477,6 +482,12 @@ impl GhostexGpuiApp {
         );
         let ui = self.gx_store.sidebar_ui.counters;
         self.gx_store.diagnostics.sidebar_ui_summary(&ui);
+        // The runtime facts channel rides the same periodic path, and for the same reason: its
+        // zeros are what says it is alive and agreeing (gx_store/diagnostics_runtime_facts.rs).
+        let runtime_facts = self.gx_store.runtime_facts.counters;
+        self.gx_store
+            .diagnostics
+            .runtime_facts_summary(runtime_facts);
         // The workspace session groups counters ride this path too, because it is the one that is
         // proved to reach the log in a quiet run: everything through `record()` is silent until the
         // shared settings snapshot is warm, and the two places this used to be emitted from (a push

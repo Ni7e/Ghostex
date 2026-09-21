@@ -14,6 +14,7 @@ import {
   createGxserverPresentationProjectSessionId,
   createGxserverPresentationSessionsByProjectFromGroups,
 } from '@/packages/shared/gxserver-presentation-sidebar-projection';
+import { postGpuiSidebarRuntimeFactsReveal } from './sidebar-runtime-facts';
 
 const clientStorage = storageScope(["projectLastSession"]);
 
@@ -43,11 +44,13 @@ export function rememberGpuiProjectSession(runtime: GpuiSidebarRuntime, projectI
   }
   if (pendingReveals.get(runtime) === scopedProjectId) {
     pendingReveals.delete(runtime);
+    const requestId = ++revealRequestId;
     runtime.messageSource.postMessage({
-      requestId: ++revealRequestId,
+      requestId,
       sessionId: sidebarSessionId,
       type: 'revealSidebarSession',
     });
+    postGpuiSidebarRuntimeFactsReveal(sidebarSessionId, requestId);
   }
 }
 
