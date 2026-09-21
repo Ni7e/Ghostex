@@ -202,18 +202,6 @@ fn set_entry(entries: &mut Vec<(String, String)>, key: String, value: String) {
     }
 }
 
-/// Every machine the store holds a loaded presentation for, in the order the tabs list them.
-///
-/// The project moves are refused when this answers more than one, and the reason is at the
-/// refusal in `project_move.rs` rather than here.
-pub(crate) fn loaded_machines(core: &Core) -> Vec<MachineId> {
-    core.presentation()
-        .machines()
-        .filter(|(_, entry)| entry.loaded().is_some())
-        .map(|(machine, _)| machine.clone())
-        .collect()
-}
-
 /// One machine's `groupOrder`, rebuilt from the projection's own inputs.
 pub(crate) fn project_section(
     core: &Core,

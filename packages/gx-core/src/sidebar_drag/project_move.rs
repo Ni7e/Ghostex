@@ -32,7 +32,7 @@ use crate::project_docs::{
 };
 use crate::sidebar_view::{SidebarInputs, OTHER_SPACE_ID};
 
-use super::project_inventory::{loaded_machines, project_section, ProjectSection};
+use super::project_inventory::{project_section, ProjectSection};
 
 /// The payload types this file answers.
 pub const PROJECT_MOVE_COMMAND_TYPES: &[&str] = &[
@@ -160,15 +160,21 @@ pub fn owns_project_move_command(command: &Value) -> bool {
 ///
 /// - **The machine tab is not this computer's.** Every arm reads `ui.selectedMachineId`, and a
 ///   remote edit is `updateRemoteSidebarProjectCollections` / `updateRemoteSidebarSpaces`, a direct
-///   call down that machine's tunnel with no debounce and no guard, which this app cannot reach.
-/// - **More than one machine has loaded rows.** `runNativeProjectDrop` splices into
-///   `state.groupOrder`, which spans EVERY machine, and posts the whole list; the store builds one
-///   machine's order because that is all the list holds (declared difference 17). With a second
-///   machine's groups in it the two sides would post different lists, and `syncWorkspaceGroupOrder`
-///   refuses a mixed list outright, so the store must not guess which half it is. Every machine is
-///   disabled today, so nothing exercises this.
+///   call down that machine's tunnel with no debounce and no guard, which this store does not make
+///   yet.
 /// - **The payload is malformed.** A missing id or an unknown `position` would make a port guess an
 ///   order the app never posts.
+///
+/// CDXC:Projects 2026-09-21 WHY:
+/// A remote machine being CONNECTED is not a refusal, although it was one until the user enabled a
+/// remote machine and it started refusing every project drag on this computer's tab. The
+/// TypeScript splices into `state.groupOrder`, which holds every machine's groups, and posts that
+/// whole list; its own `syncWorkspaceGroupOrder` then returns without writing when the ids name more
+/// than one machine, so with any remote machine drawn a local reorder moved the row for one frame
+/// and saved nothing (the Project Group membership half of the same gesture still landed). The
+/// order here is built from THIS computer's section only (`project_section`), so it is the list the
+/// TypeScript posts when no other machine is drawn, which is the order the user dragged into.
+/// Declared difference 36.
 pub fn plan_project_move(
     core: &Core,
     inputs: &SidebarInputs,
@@ -181,10 +187,6 @@ pub fn plan_project_move(
         return None;
     }
     if inputs.ui.selected_machine_id != crate::sidebar_view::LOCAL_MACHINE_ID {
-        return None;
-    }
-    let machines = loaded_machines(core);
-    if machines.iter().any(|machine| !machine.is_local()) {
         return None;
     }
     let section = project_section(core, inputs, &MachineId::Local)?;

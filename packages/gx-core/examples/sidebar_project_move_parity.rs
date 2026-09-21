@@ -65,8 +65,12 @@ fn main() -> ExitCode {
     let mut space_edits = 0usize;
     let mut order_writes = 0usize;
     let mut empties = 0usize;
+    let mut remote_loaded_orders = 0usize;
     for (variant, inputs) in variants() {
-        let core = build_core();
+        let core = match variant {
+            "remoteLoaded" => build_core_with_remote_machine(),
+            _ => build_core(),
+        };
         let stored = sidebar_project_group_order(&core, &inputs).unwrap_or_default();
         let drawn = drawn_order(&core, &inputs);
         for command in commands() {
@@ -90,7 +94,12 @@ fn main() -> ExitCode {
                         }
                     }
                     Some("editSpaces") => space_edits += 1,
-                    Some("groupOrder") => order_writes += 1,
+                    Some("groupOrder") => {
+                        order_writes += 1;
+                        if variant == "remoteLoaded" {
+                            remote_loaded_orders += 1;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -132,6 +141,9 @@ fn main() -> ExitCode {
         ("refusals", refusals),
         ("handOffs", hand_offs),
         ("collectionsEmptied", empties),
+        // A local drag with a remote machine connected writes its order: the refusal this replaced
+        // handed every one of them to a TypeScript path that saves no order at all then.
+        ("remoteLoadedOrders", remote_loaded_orders),
     ]
     .iter()
     .filter(|(_, value)| *value == 0)
@@ -413,12 +425,17 @@ fn variants() -> Vec<(&'static str, SidebarInputs)> {
     // because it is a property of the whole gesture and not of one payload.
     let mut remote_tab = inputs(true);
     remote_tab.ui.selected_machine_id = "remote-ab12".to_string();
+    // THIS computer's tab with a remote machine CONNECTED, which is the user's configuration since
+    // they enabled one. Its own store (`build_core_with_remote_machine`); the TypeScript half runs it
+    // as a local tab with Spaces on, so a clean run says the connected machine changes nothing about
+    // a local drag and the answer is the one the TypeScript gave while no remote machine was drawn.
     vec![
         ("spacesOn", inputs(true)),
         ("spacesOff", inputs(false)),
         ("tagFiltered", tag_filtered),
         ("spaceFiltered", space_filtered),
         ("remoteTab", remote_tab),
+        ("remoteLoaded", inputs(true)),
     ]
 }
 
@@ -564,6 +581,35 @@ fn build_core() -> Core {
             NOW_MS,
         );
     }
+    core
+}
+
+/// The same store with a remote machine connected and holding two projects of its own.
+fn build_core_with_remote_machine() -> Core {
+    let mut core = build_core();
+    let ids = ["R00", "R01"];
+    core.handle_raw_frame(
+        MachineId::Remote("remote-ab12".to_string()),
+        &json!({
+            "type": "presentationSnapshot",
+            "protocolVersion": ghostex_gx_core::protocol::GXSERVER_PROTOCOL_VERSION,
+            "serverId": "remote",
+            "revision": 1,
+            "snapshot": {
+                "revision": 1,
+                "generatedAt": "2026-09-21T00:00:00.000Z",
+                "projects": ids.iter().map(|id| project(id)).collect::<Vec<_>>(),
+                "groups": ids.iter().map(|id| group(id)).collect::<Vec<_>>(),
+                "sessions": ids
+                    .iter()
+                    .flat_map(|id| ["A", "B", "C"].map(|session_id| session(id, session_id, false)))
+                    .collect::<Vec<_>>(),
+            },
+        })
+        .to_string(),
+        NOW_MS,
+    )
+    .expect("the remote frame parses");
     core
 }
 
