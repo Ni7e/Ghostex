@@ -25,7 +25,11 @@ pub fn image_source_path_from_text(text: &str) -> Option<&str> {
 }
 
 fn leading_space(value: &str) -> usize {
-    value.chars().take_while(|character| is_js_space(*character)).map(char::len_utf8).sum()
+    value
+        .chars()
+        .take_while(|character| is_js_space(*character))
+        .map(char::len_utf8)
+        .sum()
 }
 
 /// `^\[Image #\d+\](?:\s+|$)`.
@@ -111,8 +115,11 @@ pub fn normalize_image_transcript_messages(messages: &[ChatMessage]) -> Vec<Chat
         if merges {
             let next = next.expect("a merge implies a following message");
             let mut folded = next.clone();
-            let mut blocks =
-                vec![ChatBlock::ImageRef { path: image_path, url: None, alt: None }];
+            let mut blocks = vec![ChatBlock::ImageRef {
+                path: image_path,
+                url: None,
+                alt: None,
+            }];
             blocks.extend(strip_first_image_prompt_marker(&next.blocks));
             folded.blocks = blocks;
             normalized.push(folded);
@@ -122,7 +129,11 @@ pub fn normalize_image_transcript_messages(messages: &[ChatMessage]) -> Vec<Chat
 
         let mut row = message.clone();
         row.blocks = match image_path {
-            Some(path) => vec![ChatBlock::ImageRef { path: Some(path), url: None, alt: None }],
+            Some(path) => vec![ChatBlock::ImageRef {
+                path: Some(path),
+                url: None,
+                alt: None,
+            }],
             None => strip_first_image_prompt_marker(&message.blocks),
         };
         normalized.push(row);

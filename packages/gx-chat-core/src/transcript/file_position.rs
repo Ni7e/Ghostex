@@ -47,7 +47,11 @@ fn match_suffix(rest: &str) -> Option<Suffix> {
     let line = first.parse().ok()?;
     let tail = &rest[first.len()..];
     if tail.is_empty() {
-        return Some(Suffix { line, end_line: None, column: None });
+        return Some(Suffix {
+            line,
+            end_line: None,
+            column: None,
+        });
     }
     let separator = tail.as_bytes()[0];
     if separator != b'-' && separator != b':' {
@@ -59,9 +63,17 @@ fn match_suffix(rest: &str) -> Option<Suffix> {
     }
     let number = second.parse().ok()?;
     Some(if separator == b'-' {
-        Suffix { line, end_line: Some(number), column: None }
+        Suffix {
+            line,
+            end_line: Some(number),
+            column: None,
+        }
     } else {
-        Suffix { line, end_line: None, column: Some(number) }
+        Suffix {
+            line,
+            end_line: None,
+            column: Some(number),
+        }
     })
 }
 

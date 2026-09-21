@@ -28,11 +28,11 @@ pub fn rows(state: &ChatState, context: &ChatContext) -> Vec<TranscriptItem> {
 ///
 /// The open set is reported by `Event::Measured(Measurement::OpenRowDetails)`, so only the rows on
 /// screen ever build their diff lines or tool output.
-pub fn row_details(state: &ChatState, _context: &ChatContext) -> RowDetails {
+pub fn row_details(state: &ChatState, context: &ChatContext) -> RowDetails {
     let mut details = RowDetails::new();
     for open in &state.transcript_view.open_rows {
         if let Some(detail) =
-            presentation::row_detail(state, &open.kind, &open.message_id, open.index)
+            presentation::row_detail(state, context, &open.kind, &open.message_id, open.index)
         {
             details.insert(open.key.clone(), detail);
         }
@@ -63,14 +63,27 @@ pub fn advance(state: &mut ChatState, context: &ChatContext) -> bool {
         return false;
     }
     let view = &mut state.transcript_view;
-    let batch_start = view.backfill.len().saturating_sub(crate::state::BACKFILL_BATCH);
+    let batch_start = view
+        .backfill
+        .len()
+        .saturating_sub(crate::state::BACKFILL_BATCH);
     let batch: Vec<String> = view.backfill.split_off(batch_start);
     let sources: Vec<_> = batch
         .iter()
-        .filter_map(|id| state.messages.composed.iter().find(|message| message.id == *id).cloned())
+        .filter_map(|id| {
+            state
+                .messages
+                .composed
+                .iter()
+                .find(|message| message.id == *id)
+                .cloned()
+        })
         .collect();
     for message in sources {
-        state.transcript_view.projected.insert(message.id.clone(), message);
+        state
+            .transcript_view
+            .projected
+            .insert(message.id.clone(), message);
     }
     state.transcript_view.backfill_revision += 1;
     refresh(state, context);

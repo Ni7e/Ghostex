@@ -76,7 +76,10 @@ fn is_hostname_tld(label: &str) -> bool {
 /// `^\d+(?:\.\d+)+$`.
 fn is_dotted_number(segment: &str) -> bool {
     let parts: Vec<&str> = segment.split('.').collect();
-    parts.len() > 1 && parts.iter().all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+    parts.len() > 1
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// `example.com`, `localhost`, `127.0.0.1`, `1.2.3`: a host or a version.
@@ -92,9 +95,9 @@ fn looks_like_host_or_version(segment: &str) -> bool {
 /// `^[A-Za-z0-9._+@~-]+$`.
 fn is_path_segment(segment: &str) -> bool {
     !segment.is_empty()
-        && segment
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'@' | b'~' | b'-'))
+        && segment.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'@' | b'~' | b'-')
+        })
 }
 
 /// `\.[A-Za-z][A-Za-z0-9_+-]*$`: a file type starts with a letter. `.ts`, `.rs`, `.zshrc` are
@@ -104,8 +107,13 @@ fn has_letter_extension(basename: &str) -> bool {
         return false;
     };
     let extension = &basename[dot + 1..];
-    extension.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
-        && extension.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-'))
+    extension
+        .as_bytes()
+        .first()
+        .is_some_and(u8::is_ascii_alphabetic)
+        && extension
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-'))
 }
 
 /// One resolved file reference.
@@ -132,7 +140,10 @@ fn resolve_file_path_reference(text: &str, require_path_evidence: bool) -> Optio
         return None;
     }
     // Whitespace or a backtick means this span holds more than one token.
-    if trimmed.chars().any(|character| is_js_space(character) || character == '`') {
+    if trimmed
+        .chars()
+        .any(|character| is_js_space(character) || character == '`')
+    {
         return None;
     }
 
@@ -144,37 +155,45 @@ fn resolve_file_path_reference(text: &str, require_path_evidence: bool) -> Optio
     let windows = is_windows_path(path);
     // Backslashes only separate directories on a path that announced itself as a Windows path;
     // anywhere else a backslash is an escape, and the segment check below rejects it.
-    let normalized = if windows { path.replace('\\', "/") } else { path.to_string() };
+    let normalized = if windows {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    };
     // The drive letter and the UNC leader carry a colon and a doubled slash that no segment may
     // contain, so they are peeled off before the segment check.
-    let body = if windows {
-        let bytes = normalized.as_bytes();
-        if bytes.first().is_some_and(u8::is_ascii_alphabetic) && bytes.get(1) == Some(&b':') {
-            normalized[2..].to_string()
-        } else if normalized.starts_with("//") {
-            normalized[2..].to_string()
-        } else {
-            normalized.clone()
-        }
+    let bytes = normalized.as_bytes();
+    let drive = bytes.first().is_some_and(u8::is_ascii_alphabetic) && bytes.get(1) == Some(&b':');
+    let body = if windows && (drive || normalized.starts_with("//")) {
+        normalized[2..].to_string()
     } else {
         normalized.clone()
     };
 
-    let segments: Vec<&str> = body.split('/').filter(|segment| !segment.is_empty()).collect();
+    let segments: Vec<&str> = body
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
     let basename = (*segments.last()?).to_string();
     if segments.iter().any(|segment| !is_path_segment(segment)) {
         return None;
     }
 
-    let announces_itself =
-        windows || normalized.starts_with('/') || normalized.starts_with("~/") || normalized.starts_with("./")
-            || normalized.starts_with("../");
+    let announces_itself = windows
+        || normalized.starts_with('/')
+        || normalized.starts_with("~/")
+        || normalized.starts_with("./")
+        || normalized.starts_with("../");
     let has_separator = announces_itself || segments.len() > 1;
     if require_path_evidence && !has_separator && position.is_none() {
         return None;
     }
 
-    if !announces_itself && segments.first().is_some_and(|first| looks_like_host_or_version(first)) {
+    if !announces_itself
+        && segments
+            .first()
+            .is_some_and(|first| looks_like_host_or_version(first))
+    {
         return None;
     }
 
@@ -182,7 +201,11 @@ fn resolve_file_path_reference(text: &str, require_path_evidence: bool) -> Optio
         return None;
     }
 
-    Some(FilePathRef { basename, path: path.to_string(), position })
+    Some(FilePathRef {
+        basename,
+        path: path.to_string(),
+        position,
+    })
 }
 
 /// Decides whether one inline-code span is a file reference.
@@ -201,17 +224,21 @@ pub fn resolve_fence_title_file_path(title: &str) -> Option<FilePathRef> {
 
 fn markdown_extensions() -> &'static HashSet<&'static str> {
     static SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
-    SET.get_or_init(|| ["markdown", "md", "mdown", "mdx", "mkdn", "rst"].into_iter().collect())
+    SET.get_or_init(|| {
+        ["markdown", "md", "mdown", "mdx", "mkdn", "rst"]
+            .into_iter()
+            .collect()
+    })
 }
 
 fn code_extensions() -> &'static HashSet<&'static str> {
     static SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
     SET.get_or_init(|| {
         [
-            "bash", "c", "cc", "cjs", "cpp", "cs", "css", "dart", "ex", "exs", "fish", "go", "gradle", "h",
-            "hpp", "hs", "html", "java", "js", "json", "jsonc", "jsx", "kt", "kts", "lua", "m", "mjs", "mm",
-            "php", "pl", "py", "rb", "rs", "scala", "scss", "sh", "sql", "svelte", "swift", "toml", "ts",
-            "tsx", "vue", "xml", "yaml", "yml", "zig", "zsh",
+            "bash", "c", "cc", "cjs", "cpp", "cs", "css", "dart", "ex", "exs", "fish", "go",
+            "gradle", "h", "hpp", "hs", "html", "java", "js", "json", "jsonc", "jsx", "kt", "kts",
+            "lua", "m", "mjs", "mm", "php", "pl", "py", "rb", "rs", "scala", "scss", "sh", "sql",
+            "svelte", "swift", "toml", "ts", "tsx", "vue", "xml", "yaml", "yml", "zig", "zsh",
         ]
         .into_iter()
         .collect()
@@ -257,7 +284,11 @@ fn fence_title_attribute(meta: &str) -> Option<&str> {
                 }
             }
         }
-        let bare: usize = value.chars().take_while(|character| !is_js_space(*character)).map(char::len_utf8).sum();
+        let bare: usize = value
+            .chars()
+            .take_while(|character| !is_js_space(*character))
+            .map(char::len_utf8)
+            .sum();
         if bare > 0 {
             return Some(&value[..bare]);
         }
@@ -269,7 +300,10 @@ fn fence_title_attribute(meta: &str) -> Option<&str> {
 fn is_fence_filename_token(token: &str) -> bool {
     let is_word = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
     let bytes = token.as_bytes();
-    if !bytes.first().is_some_and(|byte| is_word(*byte) || *byte == b'@') {
+    if !bytes
+        .first()
+        .is_some_and(|byte| is_word(*byte) || *byte == b'@')
+    {
         return false;
     }
     let Some(dot) = token.rfind('.') else {
@@ -279,7 +313,9 @@ fn is_fence_filename_token(token: &str) -> bool {
     if extension.is_empty() || !extension.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
         return false;
     }
-    token[..dot].bytes().all(|byte| is_word(byte) || matches!(byte, b'@' | b'.' | b'/' | b'-'))
+    token[..dot]
+        .bytes()
+        .all(|byte| is_word(byte) || matches!(byte, b'@' | b'.' | b'/' | b'-'))
 }
 
 /// The filename this fence names, or `None` when it names none.
@@ -292,7 +328,8 @@ pub fn fence_title(meta: Option<&str>) -> Option<&str> {
     if let Some(named) = fence_title_attribute(meta) {
         return Some(named);
     }
-    meta.split(is_js_space).find(|token| is_fence_filename_token(token))
+    meta.split(is_js_space)
+        .find(|token| is_fence_filename_token(token))
 }
 
 /// One path found in ordinary prose.
@@ -323,8 +360,11 @@ fn next_prose_token(text: &str, from: usize) -> Option<(usize, usize)> {
         return None;
     }
     // The quoted-mention alternative comes first and wins wherever it matches.
-    let leading: usize =
-        text[start..].chars().take_while(|character| "([{'\"<".contains(*character)).map(char::len_utf8).sum();
+    let leading: usize = text[start..]
+        .chars()
+        .take_while(|character| "([{'\"<".contains(*character))
+        .map(char::len_utf8)
+        .sum();
     if text[start + leading..].starts_with("@\"") {
         let body_start = start + leading + 2;
         let mut at = body_start;
@@ -345,8 +385,11 @@ fn next_prose_token(text: &str, from: usize) -> Option<(usize, usize)> {
             at = close + 1;
         }
     }
-    let run: usize =
-        text[start..].chars().take_while(|character| !is_js_space(*character)).map(char::len_utf8).sum();
+    let run: usize = text[start..]
+        .chars()
+        .take_while(|character| !is_js_space(*character))
+        .map(char::len_utf8)
+        .sum();
     Some((start, start + run))
 }
 
@@ -362,8 +405,11 @@ pub fn bare_file_paths(text: &str) -> Vec<BareFilePath> {
     while let Some((token_start, token_end)) = next_prose_token(text, cursor) {
         cursor = token_end.max(token_start + 1);
         let raw_token = &text[token_start..token_end];
-        let leading: usize =
-            raw_token.chars().take_while(|character| "([{'\"<".contains(*character)).map(char::len_utf8).sum();
+        let leading: usize = raw_token
+            .chars()
+            .take_while(|character| "([{'\"<".contains(*character))
+            .map(char::len_utf8)
+            .sum();
         let without_leading = &raw_token[leading..];
         let quoted_mention = without_leading.starts_with("@\"") && without_leading.ends_with('"');
         let mut trailing = if quoted_mention {
@@ -380,7 +426,9 @@ pub fn bare_file_paths(text: &str) -> Vec<BareFilePath> {
             // Keep closing delimiters owned by the filename, such as @report(final).pdf or
             // @reports/(final).
             while trailing > 0 {
-                let closing = without_leading[without_leading.len() - trailing..].chars().next();
+                let closing = without_leading[without_leading.len() - trailing..]
+                    .chars()
+                    .next();
                 let opening = match closing {
                     Some(')') => Some('('),
                     Some(']') => Some('['),
@@ -405,14 +453,21 @@ pub fn bare_file_paths(text: &str) -> Vec<BareFilePath> {
         } else {
             ""
         };
-        let reference =
-            if mention_path.is_empty() { resolve_inline_code_file_path(candidate) } else { None };
+        let reference = if mention_path.is_empty() {
+            resolve_inline_code_file_path(candidate)
+        } else {
+            None
+        };
         if !mention_path.is_empty() || reference.is_some() {
             let start = token_start + leading;
             found.push(BareFilePath {
                 start,
                 end: start + candidate.len(),
-                path: if mention_path.is_empty() { candidate.to_string() } else { mention_path.to_string() },
+                path: if mention_path.is_empty() {
+                    candidate.to_string()
+                } else {
+                    mention_path.to_string()
+                },
                 mention: !mention_path.is_empty(),
             });
         }

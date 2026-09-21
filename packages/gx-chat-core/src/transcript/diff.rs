@@ -30,7 +30,10 @@ pub struct DiffLine {
 
 impl DiffLine {
     pub fn new(kind: DiffKind, text: impl Into<String>) -> Self {
-        Self { kind, text: text.into() }
+        Self {
+            kind,
+            text: text.into(),
+        }
     }
 }
 
@@ -47,8 +50,11 @@ fn to_lines(value: Option<&str>, max_lines: usize) -> (Vec<String>, bool) {
     // `String.prototype.split` with a limit stops filling the array; it does not join the rest.
     let lines: Vec<&str> = clipped.split('\n').take(max_lines + 1).collect();
     let truncated = utf16_len(value) > MAX_DIFF_CHARS || lines.len() > max_lines;
-    let mut bounded: Vec<String> =
-        lines.into_iter().take(max_lines).map(str::to_string).collect();
+    let mut bounded: Vec<String> = lines
+        .into_iter()
+        .take(max_lines)
+        .map(str::to_string)
+        .collect();
     if !truncated && bounded.last().is_some_and(String::is_empty) {
         bounded.pop();
     }
@@ -68,7 +74,10 @@ fn string_field<'a>(record: &'a Value, keys: &[&str]) -> Option<&'a str> {
 
 /// The tool names whose arguments already hold the before and after of an edit.
 pub fn is_edit_tool_name(name: &str) -> bool {
-    matches!(name, "Edit" | "MultiEdit" | "Write" | "str_replace" | "apply_patch")
+    matches!(
+        name,
+        "Edit" | "MultiEdit" | "Write" | "str_replace" | "apply_patch"
+    )
 }
 
 /// The diff a tool call's own arguments describe, before any result comes back.
@@ -77,18 +86,34 @@ pub fn diff_from_tool_call(name: &str, input: &Value, max_lines: usize) -> Optio
         return None;
     }
     let old_value = string_field(input, &["old_string", "oldString", "old"]);
-    let new_value = string_field(input, &["new_string", "newString", "new", "content", "file_text"]);
+    let new_value = string_field(
+        input,
+        &["new_string", "newString", "new", "content", "file_text"],
+    );
     let (old_lines, old_truncated) = to_lines(old_value, max_lines);
     let (new_lines, new_truncated) = to_lines(new_value, max_lines);
     if old_lines.is_empty() && new_lines.is_empty() {
         return None;
     }
-    let path = input.get("file_path").or_else(|| input.get("path")).and_then(Value::as_str);
+    let path = input
+        .get("file_path")
+        .or_else(|| input.get("path"))
+        .and_then(Value::as_str);
     // ALL dels first, then ALL adds.
-    let mut combined: Vec<DiffLine> =
-        path.map(|path| DiffLine::new(DiffKind::Meta, path)).into_iter().collect();
-    combined.extend(old_lines.into_iter().map(|text| DiffLine::new(DiffKind::Del, text)));
-    combined.extend(new_lines.into_iter().map(|text| DiffLine::new(DiffKind::Add, text)));
+    let mut combined: Vec<DiffLine> = path
+        .map(|path| DiffLine::new(DiffKind::Meta, path))
+        .into_iter()
+        .collect();
+    combined.extend(
+        old_lines
+            .into_iter()
+            .map(|text| DiffLine::new(DiffKind::Del, text)),
+    );
+    combined.extend(
+        new_lines
+            .into_iter()
+            .map(|text| DiffLine::new(DiffKind::Add, text)),
+    );
     let truncated = old_truncated || new_truncated || combined.len() > max_lines;
     if truncated {
         combined.truncate(max_lines - 1);
@@ -172,8 +197,17 @@ pub fn diff_from_text(text: &str, max_lines: usize) -> Option<Vec<DiffLine>> {
             old_remaining = 0;
             new_remaining = 0;
         }
-        let meta = ["diff --git ", "index ", "--- ", "+++ "].iter().any(|prefix| line.starts_with(prefix));
-        lines.push(DiffLine::new(if meta { DiffKind::Meta } else { DiffKind::Context }, line));
+        let meta = ["diff --git ", "index ", "--- ", "+++ "]
+            .iter()
+            .any(|prefix| line.starts_with(prefix));
+        lines.push(DiffLine::new(
+            if meta {
+                DiffKind::Meta
+            } else {
+                DiffKind::Context
+            },
+            line,
+        ));
     }
     if !has_changes {
         return None;

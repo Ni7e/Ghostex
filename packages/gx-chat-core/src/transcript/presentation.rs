@@ -30,7 +30,9 @@ use crate::transcript::simple::{simple_edit_label, tool_count_label};
 use crate::transcript::system_cards::classify_system_card;
 use crate::transcript::tool_fold::{pair_tool_blocks, split_blocks, ToolPair};
 use crate::transcript::tool_rows::tool_run_shows_all_rows;
-use crate::transcript::transcript::{completed_chat_work, project_chat_transcript, TranscriptProjection};
+use crate::transcript::transcript::{
+    completed_chat_work, project_chat_transcript, TranscriptProjection,
+};
 use crate::transcript::transcript_rows::{file_rows, tool_detail, tool_fold, tool_rows};
 use crate::transcript::turns::{partition_completed_work, worked_duration_label, RenderItem};
 
@@ -47,9 +49,11 @@ fn image_blocks(blocks: &[&ChatBlock]) -> Vec<ImageRef> {
         .iter()
         .copied()
         .filter_map(|block| match block {
-            ChatBlock::ImageRef { path, url, alt } => {
-                Some(ImageRef { path: path.clone(), url: url.clone(), alt: alt.clone() })
-            }
+            ChatBlock::ImageRef { path, url, alt } => Some(ImageRef {
+                path: path.clone(),
+                url: url.clone(),
+                alt: alt.clone(),
+            }),
             _ => None,
         })
         .collect()
@@ -94,13 +98,20 @@ pub fn project_message(
     let images = image_blocks(&prose);
     let body = js_trim(&prose_markdown(&message.blocks)).to_string();
     let is_user = message.role == ChatRole::User;
-    let displayed_body = if is_user { normalize_user_message_markdown(&body) } else { body.clone() };
+    let displayed_body = if is_user {
+        normalize_user_message_markdown(&body)
+    } else {
+        body.clone()
+    };
     let agent_message = parse_agent_message(&body);
     let (remaining, changes) = split_file_changes(tools);
     let tool_pairs = pair_tool_blocks(remaining);
     let copy_text = if is_user {
-        let blocks: Vec<&ChatBlock> =
-            prose.iter().copied().filter(|block| matches!(block, ChatBlock::ImageRef { .. })).collect();
+        let blocks: Vec<&ChatBlock> = prose
+            .iter()
+            .copied()
+            .filter(|block| matches!(block, ChatBlock::ImageRef { .. }))
+            .collect();
         user_turn_copy_markdown(&displayed_body, &blocks)
     } else {
         body.clone()
@@ -113,7 +124,10 @@ pub fn project_message(
     let reasoning = split_reasoning_headline(&body);
     let questions: Vec<Value> = {
         let (_, all_tools) = split_blocks(&message.blocks);
-        pair_tool_blocks(all_tools).iter().filter_map(answered_question_exchange).collect()
+        pair_tool_blocks(all_tools)
+            .iter()
+            .filter_map(answered_question_exchange)
+            .collect()
     };
     let mut changed_paths: Vec<&str> = Vec::new();
     for change in &changes {
@@ -131,7 +145,10 @@ pub fn project_message(
     );
     projected.insert("actionContent".to_string(), message_action_content(&body));
     projected.insert("time".to_string(), message_time(message.timestamp, context));
-    projected.insert("markdownReferences".to_string(), Value::Array(markdown_references(&native_body)));
+    projected.insert(
+        "markdownReferences".to_string(),
+        Value::Array(markdown_references(&native_body)),
+    );
     projected.insert(
         "reasoning".to_string(),
         serde_json::json!({ "headline": reasoning.headline, "body": reasoning.body }),
@@ -174,8 +191,14 @@ pub fn project_message(
     projected.insert(
         "systemCard".to_string(),
         match system_card {
-            Value::Object(mut card) if card.get("kind") == Some(&Value::String("agent-message".into())) => {
-                let body = card.get("body").and_then(Value::as_str).unwrap_or_default().to_string();
+            Value::Object(mut card)
+                if card.get("kind") == Some(&Value::String("agent-message".into())) =>
+            {
+                let body = card
+                    .get("body")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
                 card.insert("markdown".to_string(), native_markdown(&body, false).into());
                 Value::Object(card)
             }
@@ -186,7 +209,10 @@ pub fn project_message(
         "files".to_string(),
         Value::Array(file_rows(&changes, &message.id, working_directory)),
     );
-    projected.insert("simpleFileLabel".to_string(), simple_edit_label(changed_paths.len()).into());
+    projected.insert(
+        "simpleFileLabel".to_string(),
+        simple_edit_label(changed_paths.len()).into(),
+    );
     /* React counts only the work rows for this label: an answered question is conversation, so its
     card sits outside the group and is not one of the "N tool calls". */
     let call_rows = rows
@@ -196,13 +222,23 @@ pub fn project_message(
                 && row.get("exchange") != Some(&Value::Bool(true))
         })
         .count();
-    projected.insert("simpleToolLabel".to_string(), tool_count_label(call_rows).into());
+    projected.insert(
+        "simpleToolLabel".to_string(),
+        tool_count_label(call_rows).into(),
+    );
     projected.insert("tools".to_string(), Value::Array(rows));
     projected.insert("toolFold".to_string(), tool_fold(&tool_pairs));
-    projected.insert("toolsShowAllRows".to_string(), tool_run_shows_all_rows(!body.is_empty()).into());
+    projected.insert(
+        "toolsShowAllRows".to_string(),
+        tool_run_shows_all_rows(!body.is_empty()).into(),
+    );
     projected.insert(
         "terminalTool".to_string(),
-        if is_terminal_tool_message(message) { terminal_tool_activity(message) } else { Value::Null },
+        if is_terminal_tool_message(message) {
+            terminal_tool_activity(message)
+        } else {
+            Value::Null
+        },
     );
     Value::Object(projected)
 }
@@ -279,9 +315,11 @@ impl Builder<'_> {
 
 fn message_id(item: &TranscriptItem) -> String {
     match item {
-        TranscriptItem::Message { message } => {
-            message.get("id").and_then(Value::as_str).unwrap_or_default().to_string()
-        }
+        TranscriptItem::Message { message } => message
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
         TranscriptItem::Summary { id, .. } | TranscriptItem::CompletedWork { id, .. } => id.clone(),
         TranscriptItem::Unknown(_) => String::new(),
     }
@@ -293,7 +331,11 @@ pub fn build(state: &ChatState, context: &ChatContext) -> Projection {
     let projection: TranscriptProjection =
         project_chat_transcript(&state.messages.composed, is_working(state), &[]);
     let summary = view.summary_mode;
-    let length = if summary { projection.summary_turns.len() } else { projection.items.len() };
+    let length = if summary {
+        projection.summary_turns.len()
+    } else {
+        projection.items.len()
+    };
     let mut builder = Builder {
         view,
         context,
@@ -351,8 +393,11 @@ pub fn build(state: &ChatState, context: &ChatContext) -> Projection {
                 let sources: Vec<&ChatMessage> =
                     work.iter().chain(turn.final_message.iter()).collect();
                 for message in sources {
-                    if let Value::Array(rows) =
-                        builder.message_or_placeholder(message, eager).get("files").cloned().unwrap_or(Value::Null)
+                    if let Value::Array(rows) = builder
+                        .message_or_placeholder(message, eager)
+                        .get("files")
+                        .cloned()
+                        .unwrap_or(Value::Null)
                     {
                         files.extend(rows);
                     }
@@ -386,7 +431,10 @@ pub fn build(state: &ChatState, context: &ChatContext) -> Projection {
                             .as_ref()
                             .and_then(|message| message.timestamp)
                             .or_else(|| {
-                                turn.user.deferred_work.as_ref().and_then(|deferred| deferred.completed_at)
+                                turn.user
+                                    .deferred_work
+                                    .as_ref()
+                                    .and_then(|deferred| deferred.completed_at)
                             }),
                     ),
                     files,
@@ -405,7 +453,11 @@ pub fn build(state: &ChatState, context: &ChatContext) -> Projection {
                     questions: work
                         .iter()
                         .flat_map(|row| {
-                            match builder.message_or_placeholder(row, eager).get("questions").cloned() {
+                            match builder
+                                .message_or_placeholder(row, eager)
+                                .get("questions")
+                                .cloned()
+                            {
                                 Some(Value::Array(rows)) => rows,
                                 _ => Vec::new(),
                             }
@@ -425,25 +477,54 @@ pub fn build(state: &ChatState, context: &ChatContext) -> Projection {
     };
 
     let _ = message_id;
-    Projection { items, final_ids: projection.final_ids, backfill: builder.backfill }
+    Projection {
+        items,
+        final_ids: projection.final_ids,
+        backfill: builder.backfill,
+    }
 }
 
 /// What an open row shows, read from the message the row was projected from: a tool's arguments and
 /// result, or a file card's diff.
-pub fn row_detail(state: &ChatState, kind: &str, message_id: &str, index: usize) -> Option<Value> {
-    let source = state
-        .messages
-        .composed
-        .iter()
-        .find(|message| message.id == message_id)
-        .or_else(|| {
-            state
-                .transcript_view
-                .deferred
-                .values()
-                .flatten()
-                .find(|message| message.id == message_id)
-        })?;
+/// The rows a detail can be asked for: the folded transcript, plus each completed turn's own work
+/// list, which is folded separately.
+///
+/// The TypeScript reads this out of its projection cache, which is keyed by the id of whatever was
+/// projected. Folding merges a tool-only message INTO the assistant turn above it, so the blocks a
+/// row's index points at are the anchor's merged blocks, not the raw message's. Rebuilding the same
+/// two lists is how that is reproduced without a cache.
+fn detail_sources(state: &ChatState, _context: &ChatContext) -> Vec<ChatMessage> {
+    let projection = project_chat_transcript(&state.messages.composed, is_working(state), &[]);
+    let mut sources = projection.rendered.clone();
+    for item in &projection.items {
+        if let RenderItem::CompletedWork(turn) = item {
+            let work = completed_chat_work(
+                turn,
+                state
+                    .transcript_view
+                    .deferred
+                    .get(&turn.user.id)
+                    .map(Vec::as_slice),
+            );
+            for message in work {
+                if !sources.iter().any(|seen| seen.id == message.id) {
+                    sources.push(message);
+                }
+            }
+        }
+    }
+    sources
+}
+
+pub fn row_detail(
+    state: &ChatState,
+    context: &ChatContext,
+    kind: &str,
+    message_id: &str,
+    index: usize,
+) -> Option<Value> {
+    let sources = detail_sources(state, context);
+    let source = sources.iter().find(|message| message.id == message_id)?;
     let (files, tools) = message_tool_rows(source);
     if kind == "file" {
         let change = files.get(index)?;

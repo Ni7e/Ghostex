@@ -55,7 +55,9 @@ pub fn tool_glyph(name: &str) -> &'static str {
 
 pub fn is_command_tool(name: &str) -> bool {
     let normalized = ascii_lower(name);
-    ["exec", "command", "shell", "terminal", "bash"].iter().any(|needle| normalized.contains(needle))
+    ["exec", "command", "shell", "terminal", "bash"]
+        .iter()
+        .any(|needle| normalized.contains(needle))
 }
 
 /// The compact text beside a tool row's name.
@@ -72,8 +74,13 @@ pub fn tool_preview(pair: &ToolPair<'_>) -> String {
     if !input.is_empty() {
         return input;
     }
-    let first_line =
-        js_trim(pair.result_output().unwrap_or_default().split('\n').next().unwrap_or_default());
+    let first_line = js_trim(
+        pair.result_output()
+            .unwrap_or_default()
+            .split('\n')
+            .next()
+            .unwrap_or_default(),
+    );
     truncate_tool_preview(first_line, TOOL_RESULT_PREVIEW_LENGTH)
 }
 
@@ -89,7 +96,10 @@ pub fn tool_run_shows_all_rows(has_prose: bool) -> bool {
 pub const TOOL_FOLD_EXPANDED_LABEL: &str = "Show fewer tool calls";
 
 pub fn tool_fold_label(hidden_count: usize) -> String {
-    format!("+{hidden_count} previous tool {}", if hidden_count == 1 { "call" } else { "calls" })
+    format!(
+        "+{hidden_count} previous tool {}",
+        if hidden_count == 1 { "call" } else { "calls" }
+    )
 }
 
 /// An answered question is conversation, not work: its card never folds behind the toggle. The fold

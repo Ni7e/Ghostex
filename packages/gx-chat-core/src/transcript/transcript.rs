@@ -10,8 +10,8 @@ use crate::transcript::local_command::normalize_local_command_messages;
 use crate::transcript::noise::{drop_hidden_messages, suppressed_turn_label};
 use crate::transcript::tool_fold::fold_tool_messages;
 use crate::transcript::turns::{
-    completed_work_render_items, final_assistant_message_ids, summary_mode_turns, CompletedWorkTurn,
-    RenderItem, SummaryModeTurn,
+    completed_work_render_items, final_assistant_message_ids, summary_mode_turns,
+    CompletedWorkTurn, RenderItem, SummaryModeTurn,
 };
 
 pub fn normalize_chat_transcript(messages: &[ChatMessage]) -> Vec<ChatMessage> {
@@ -22,14 +22,22 @@ pub fn normalize_chat_transcript(messages: &[ChatMessage]) -> Vec<ChatMessage> {
 }
 
 pub fn fold_chat_transcript(messages: &[ChatMessage]) -> Vec<ChatMessage> {
-    fold_tool_messages(messages, &|message| suppressed_turn_label(message).is_some())
+    fold_tool_messages(messages, &|message| {
+        suppressed_turn_label(message).is_some()
+    })
 }
 
 /// A completed turn's work, with the rows a deferred read brought back merged in.
-pub fn completed_chat_work(turn: &CompletedWorkTurn, deferred: Option<&[ChatMessage]>) -> Vec<ChatMessage> {
+pub fn completed_chat_work(
+    turn: &CompletedWorkTurn,
+    deferred: Option<&[ChatMessage]>,
+) -> Vec<ChatMessage> {
     let rows = match deferred {
         Some(deferred) => {
-            let final_id = turn.final_message.as_ref().map(|message| message.id.as_str());
+            let final_id = turn
+                .final_message
+                .as_ref()
+                .map(|message| message.id.as_str());
             let filtered: Vec<ChatMessage> = deferred
                 .iter()
                 .filter(|message| Some(message.id.as_str()) != final_id)

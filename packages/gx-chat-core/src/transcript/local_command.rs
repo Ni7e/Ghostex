@@ -18,7 +18,9 @@ const CODEX_LOCAL_COMMAND_INPUT: &str = "<bash-input data-ghostex-escaped=\"html
 const CODEX_LOCAL_COMMAND_OUTPUT: &str = "<bash-stdout data-ghostex-escaped=\"html\">";
 
 pub fn decode_escaped_markup(text: &str) -> String {
-    text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
 }
 
 fn text_block(block: Option<&ChatBlock>) -> Option<&str> {

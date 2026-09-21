@@ -15,7 +15,8 @@ const HERMES_CLARIFY_MAX_CHOICES: usize = 4;
 
 const RESULT_PREFIXES: [&str; 2] = ["The user answered: ", "Your questions have been answered: "];
 /// Substring-matched so the exact closing-sentence wording cannot break it.
-const RESULT_SUFFIX_MARKERS: [&str; 2] = ["\". Read the answers carefully", "\". You can now continue"];
+const RESULT_SUFFIX_MARKERS: [&str; 2] =
+    ["\". Read the answers carefully", "\". You can now continue"];
 const DISMISSED_PREFIX: &str = "[User dismissed";
 
 /// Pi's `cursor_ask_question` result envelope.
@@ -33,14 +34,22 @@ const OMP_TIMEOUT_SUFFIX: &str = " (auto-selected after timeout)";
 
 /// The tool name with everything but letters and digits removed, lowercased.
 fn normalized_tool_name(name: &str) -> String {
-    name.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_ascii_lowercase()
+    name.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect::<String>()
+        .to_ascii_lowercase()
 }
 
 /// Upstream `isAskUserQuestionTool` mirror (`server/src/session_chat.rs`).
 pub fn is_question_tool_name(name: &str) -> bool {
     matches!(
         normalized_tool_name(name).as_str(),
-        "askuserquestion" | "askquestion" | "requestuserinput" | "cursoraskquestion" | "clarify" | "ask"
+        "askuserquestion"
+            | "askquestion"
+            | "requestuserinput"
+            | "cursoraskquestion"
+            | "clarify"
+            | "ask"
     )
 }
 
@@ -109,7 +118,9 @@ fn parse_questions_with_ids(input: &Value, tool_name: &str) -> Option<Vec<Parsed
         // Hermes tolerates bare-string batch entries (["Q1?", "Q2?"]).
         let record: Value = match raw {
             Value::Object(_) => raw.clone(),
-            Value::String(text) if !js_trim(text).is_empty() => json!({ "question": js_trim(text) }),
+            Value::String(text) if !js_trim(text).is_empty() => {
+                json!({ "question": js_trim(text) })
+            }
             _ => continue,
         };
         let text = record
@@ -149,7 +160,13 @@ fn parse_questions_with_ids(input: &Value, tool_name: &str) -> Option<Vec<Parsed
         }
         let labels: Vec<String> = options
             .iter()
-            .map(|option| option.get("label").and_then(Value::as_str).unwrap_or_default().to_string())
+            .map(|option| {
+                option
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            })
             .collect();
         value.insert("options".to_string(), Value::Array(options));
         let id = record
@@ -157,7 +174,12 @@ fn parse_questions_with_ids(input: &Value, tool_name: &str) -> Option<Vec<Parsed
             .and_then(Value::as_str)
             .filter(|id| !id.is_empty())
             .map(str::to_string);
-        questions.push(ParsedQuestion { id, value: Value::Object(value), text, labels });
+        questions.push(ParsedQuestion {
+            id,
+            value: Value::Object(value),
+            text,
+            labels,
+        });
     }
     (!questions.is_empty()).then_some(questions)
 }
@@ -172,7 +194,11 @@ struct Answer {
 
 impl Answer {
     fn dismissed() -> Self {
-        Self { selected: Vec::new(), other: None, dismissed: true }
+        Self {
+            selected: Vec::new(),
+            other: None,
+            dismissed: true,
+        }
     }
 
     fn value(&self) -> Value {
@@ -314,18 +340,27 @@ fn parse_omp_single_answer(question: &ParsedQuestion, trimmed: &str) -> Option<A
 fn parse_omp_answer_value(question: &ParsedQuestion, raw: &str) -> Answer {
     let (note, text) = strip_omp_decorations(raw);
     if text == "(cancelled)" {
-        return Answer { selected: Vec::new(), other: note, dismissed: true };
+        return Answer {
+            selected: Vec::new(),
+            other: note,
+            dismissed: true,
+        };
     }
     if text.len() >= 2 && text.starts_with('"') && text.ends_with('"') {
         let custom = &text[1..text.len() - 1];
-        let joined = [Some(custom.to_string()), note].into_iter().flatten().collect::<Vec<_>>().join("\n");
+        let joined = [Some(custom.to_string()), note]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n");
         return Answer {
             selected: Vec::new(),
             other: (!joined.is_empty()).then_some(joined),
             dismissed: false,
         };
     }
-    let list_body = (text.starts_with('[') && text.ends_with(']')).then(|| &text[1..text.len() - 1]);
+    let list_body =
+        (text.starts_with('[') && text.ends_with(']')).then(|| &text[1..text.len() - 1]);
     let matched = match_answer_to_options(question, list_body.unwrap_or(text));
     let other: Vec<String> = [matched.other, note].into_iter().flatten().collect();
     Answer {
@@ -335,7 +370,10 @@ fn parse_omp_answer_value(question: &ParsedQuestion, raw: &str) -> Answer {
     }
 }
 
-fn parse_omp_multi_answers(entries: &[ParsedQuestion], trimmed: &str) -> Option<Vec<Option<Answer>>> {
+fn parse_omp_multi_answers(
+    entries: &[ParsedQuestion],
+    trimmed: &str,
+) -> Option<Vec<Option<Answer>>> {
     let body = trimmed.strip_prefix(OMP_MULTI_HEADER)?;
     // Locate each question's `\n<id>: ` marker in order; custom inputs are quoted but not escaped,
     // so marker slicing is the only reliable read.
@@ -366,7 +404,11 @@ fn parse_omp_multi_answers(entries: &[ParsedQuestion], trimmed: &str) -> Option<
     Some(answers)
 }
 
-fn hermes_response_to_answer(question: &ParsedQuestion, response: Option<&Value>, timed_out: bool) -> Answer {
+fn hermes_response_to_answer(
+    question: &ParsedQuestion,
+    response: Option<&Value>,
+    timed_out: bool,
+) -> Answer {
     if let Some(Value::Array(items)) = response {
         let mut selected: Vec<usize> = Vec::new();
         let mut extras: Vec<String> = Vec::new();
@@ -390,9 +432,16 @@ fn hermes_response_to_answer(question: &ParsedQuestion, response: Option<&Value>
             dismissed: false,
         };
     }
-    let text = response.and_then(Value::as_str).map(js_trim).unwrap_or_default();
+    let text = response
+        .and_then(Value::as_str)
+        .map(js_trim)
+        .unwrap_or_default();
     if text.is_empty() {
-        return Answer { selected: Vec::new(), other: None, dismissed: timed_out };
+        return Answer {
+            selected: Vec::new(),
+            other: None,
+            dismissed: timed_out,
+        };
     }
     match_answer_to_options(question, text)
 }
@@ -410,8 +459,11 @@ fn parse_hermes_answers(entries: &[ParsedQuestion], trimmed: &str) -> Option<Vec
             let (Some(question), Some(row)) = (entries.get(index), row.as_object()) else {
                 continue;
             };
-            answers[index] =
-                Some(hermes_response_to_answer(question, row.get("user_response"), timed_out));
+            answers[index] = Some(hermes_response_to_answer(
+                question,
+                row.get("user_response"),
+                timed_out,
+            ));
         }
         return answers.iter().any(Option::is_some).then_some(answers);
     }
@@ -427,7 +479,9 @@ fn parse_hermes_answers(entries: &[ParsedQuestion], trimmed: &str) -> Option<Vec
 
 /// `"…"` body between the known prefix and the closing sentence.
 fn strip_answer_envelope(output: &str) -> Option<&str> {
-    let prefix = RESULT_PREFIXES.into_iter().find(|candidate| output.starts_with(candidate))?;
+    let prefix = RESULT_PREFIXES
+        .into_iter()
+        .find(|candidate| output.starts_with(candidate))?;
     let mut body = &output[prefix.len()..];
     for marker in RESULT_SUFFIX_MARKERS {
         if let Some(at) = body.rfind(marker) {

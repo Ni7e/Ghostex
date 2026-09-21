@@ -9,8 +9,13 @@ use serde_json::{Map, Value};
 use crate::transcript::jsstr::{ascii_lower, js_trim};
 use crate::transcript::tool_fold::ToolPair;
 
-const SUBAGENT_TOOL_NAMES: [&str; 5] =
-    ["spawn_agent", "agent", "task", "send_message", "followup_task"];
+const SUBAGENT_TOOL_NAMES: [&str; 5] = [
+    "spawn_agent",
+    "agent",
+    "task",
+    "send_message",
+    "followup_task",
+];
 
 /// A value that is an object, or a JSON string that parses into one.
 fn record(value: Option<&Value>) -> Option<Value> {
@@ -49,7 +54,9 @@ fn agent_id_in_output(output: &str) -> Option<String> {
             .sum();
         let id: String = rest[space..]
             .chars()
-            .take_while(|character| character.is_ascii_alphanumeric() || *character == '_' || *character == '-')
+            .take_while(|character| {
+                character.is_ascii_alphanumeric() || *character == '_' || *character == '-'
+            })
             .collect();
         if !id.is_empty() {
             return Some(id);
@@ -66,19 +73,28 @@ pub fn tool_subagent(pair: &ToolPair<'_>, agent_path: &str) -> Option<Value> {
         return None;
     }
     let input = record(pair.call_input());
-    let output = record(pair.result_output().map(|text| Value::String(text.to_string())).as_ref());
+    let output = record(
+        pair.result_output()
+            .map(|text| Value::String(text.to_string()))
+            .as_ref(),
+    );
     let mut target = Map::new();
     if tool == "send_message" || tool == "followup_task" {
         let id = text(input.as_ref(), "id");
         let selector_source = text(input.as_ref(), "target").or_else(|| id.clone())?;
-        let selector = if selector_source.starts_with('/') || Some(&selector_source) == id.as_ref() {
+        let selector = if selector_source.starts_with('/') || Some(&selector_source) == id.as_ref()
+        {
             selector_source.clone()
         } else {
             format!("{agent_path}/{selector_source}")
         };
         target.insert(
             "name".to_string(),
-            selector_source.split('/').next_back().unwrap_or(&selector_source).into(),
+            selector_source
+                .split('/')
+                .next_back()
+                .unwrap_or(&selector_source)
+                .into(),
         );
         target.insert("selector".to_string(), selector.into());
         return Some(Value::Object(target));

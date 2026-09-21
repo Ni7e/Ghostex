@@ -19,7 +19,12 @@ const PREVIEW_LINE_LIMIT: usize = 3;
 fn prompt_preview(prompt: &str) -> String {
     let trimmed = crate::transcript::jsstr::js_trim_end(prompt);
     let lines = crate::transcript::jsstr::split_newlines(trimmed);
-    let head = lines.iter().take(PREVIEW_LINE_LIMIT).copied().collect::<Vec<_>>().join("\n");
+    let head = lines
+        .iter()
+        .take(PREVIEW_LINE_LIMIT)
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n");
     if lines.len() > PREVIEW_LINE_LIMIT {
         format!("{head}\n\u{2026}")
     } else {
@@ -76,8 +81,8 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
     the rewind into that same pane. A preview backend answers no rewind route at all, which is why
     the Chat Lab offers the action in neither chat.
     */
-    into.rewind_available =
-        state.core.preview_settings.is_none() && agent_supports_rewind(state.session.agent.as_deref());
+    into.rewind_available = state.core.preview_settings.is_none()
+        && agent_supports_rewind(state.session.agent.as_deref());
     into.rewind = match &view.rewind {
         Some(request) => Tri::Value(rewind_projection(request)),
         None => Tri::Null,

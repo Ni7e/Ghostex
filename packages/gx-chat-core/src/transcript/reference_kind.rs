@@ -42,7 +42,18 @@ fn is_image_path(path: &str) -> bool {
     };
     matches!(
         ascii_lower(&without_query[dot + 1..]).as_str(),
-        "avif" | "bmp" | "gif" | "heic" | "heif" | "ico" | "jpg" | "jpeg" | "png" | "svg" | "tif" | "tiff"
+        "avif"
+            | "bmp"
+            | "gif"
+            | "heic"
+            | "heif"
+            | "ico"
+            | "jpg"
+            | "jpeg"
+            | "png"
+            | "svg"
+            | "tif"
+            | "tiff"
             | "webp"
     )
 }
@@ -53,13 +64,21 @@ fn has_file_extension(basename: &str) -> bool {
         return false;
     };
     let extension = &basename[dot + 1..];
-    extension.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
-        && extension.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-'))
+    extension
+        .as_bytes()
+        .first()
+        .is_some_and(u8::is_ascii_alphabetic)
+        && extension
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-'))
 }
 
 /// `^(?:Image|File|Folder) #\d+$`.
 fn numbered_label(label: &str, word: &str) -> bool {
-    let Some(rest) = label.strip_prefix(word).and_then(|rest| rest.strip_prefix(" #")) else {
+    let Some(rest) = label
+        .strip_prefix(word)
+        .and_then(|rest| rest.strip_prefix(" #"))
+    else {
         return false;
     };
     !rest.is_empty() && rest.bytes().all(|byte| byte.is_ascii_digit())
@@ -112,7 +131,9 @@ fn mentions_folder(label: &str) -> bool {
 /// `:\d+(?::\d+)?$` removed.
 fn without_position(path: &str) -> &str {
     let digits_before = |end: usize| -> Option<usize> {
-        let start = path[..end].rfind(|character: char| !character.is_ascii_digit()).map_or(0, |at| at + 1);
+        let start = path[..end]
+            .rfind(|character: char| !character.is_ascii_digit())
+            .map_or(0, |at| at + 1);
         (start < end).then_some(start)
     };
     if let Some(start) = digits_before(path.len()) {

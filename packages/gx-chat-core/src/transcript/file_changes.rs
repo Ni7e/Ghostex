@@ -22,7 +22,13 @@ pub struct FileChange<'a> {
 
 impl FileChange<'_> {
     pub fn result_is_error(&self) -> bool {
-        matches!(self.result, Some(ChatBlock::ToolResult { is_error: Some(true), .. }))
+        matches!(
+            self.result,
+            Some(ChatBlock::ToolResult {
+                is_error: Some(true),
+                ..
+            })
+        )
     }
 
     pub fn result_output(&self) -> &str {
@@ -38,7 +44,10 @@ fn code_lines(text: &str, kind: DiffKind) -> Vec<DiffLine> {
     if lines.last() == Some(&"") {
         lines.pop();
     }
-    lines.into_iter().map(|line| DiffLine::new(kind, line)).collect()
+    lines
+        .into_iter()
+        .map(|line| DiffLine::new(kind, line))
+        .collect()
 }
 
 /// The changes a Codex-style `*** Begin Patch` body describes.
@@ -75,7 +84,9 @@ fn patch_changes<'a>(patch: &str) -> Vec<FileChange<'a>> {
             }
             continue;
         }
-        let current = changes.last_mut().expect("an open patch has a current file");
+        let current = changes
+            .last_mut()
+            .expect("an open patch has a current file");
         if let Some(path) = line.strip_prefix("*** Move to: ") {
             current.path = path.to_string();
         } else if line.starts_with(['+', '-', ' ']) {
@@ -112,14 +123,22 @@ fn embedded_apply_patch_literals(source: &str) -> Vec<&str> {
             continue;
         }
         let mut index = cursor;
-        while source[index..].chars().next().is_some_and(crate::transcript::jsstr::is_js_space) {
+        while source[index..]
+            .chars()
+            .next()
+            .is_some_and(crate::transcript::jsstr::is_js_space)
+        {
             index += source[index..].chars().next().map_or(0, char::len_utf8);
         }
         let Some(literal) = json_string_literal(source, index) else {
             continue;
         };
         let mut after = index + literal.len();
-        while source[after..].chars().next().is_some_and(crate::transcript::jsstr::is_js_space) {
+        while source[after..]
+            .chars()
+            .next()
+            .is_some_and(crate::transcript::jsstr::is_js_space)
+        {
             after += source[after..].chars().next().map_or(0, char::len_utf8);
         }
         if source[after..].starts_with(')') {
@@ -193,7 +212,10 @@ fn file_changes<'a>(name: &str, input: &Value) -> Vec<FileChange<'a>> {
     if kind == "apply_patch" {
         let patch = match &input {
             Value::String(text) => Some(text.clone()),
-            Value::Object(entries) => entries.get("patch").and_then(Value::as_str).map(str::to_string),
+            Value::Object(entries) => entries
+                .get("patch")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             _ => None,
         };
         return patch.map(|patch| patch_changes(&patch)).unwrap_or_default();
@@ -212,7 +234,11 @@ fn file_changes<'a>(name: &str, input: &Value) -> Vec<FileChange<'a>> {
         }
         return Vec::new();
     }
-    if !matches!(kind.as_str(), "write" | "edit" | "multiedit" | "str_replace") || !input.is_object() {
+    if !matches!(
+        kind.as_str(),
+        "write" | "edit" | "multiedit" | "str_replace"
+    ) || !input.is_object()
+    {
         return Vec::new();
     }
     let Some(path) = tool_file_path(&input) else {
@@ -260,8 +286,14 @@ pub fn split_file_changes<'a>(
         };
         // Deliberately case-sensitive, unlike the classification above: the TypeScript retains a
         // raw `exec` wrapper's activity without lowercasing the name first.
-        let is_exec = pair.call_name().and_then(|name| name.split('.').next_back()) == Some("exec");
-        changes.extend(files.iter().cloned().map(|file| FileChange { result: pair.result, ..file }));
+        let is_exec = pair
+            .call_name()
+            .and_then(|name| name.split('.').next_back())
+            == Some("exec");
+        changes.extend(files.iter().cloned().map(|file| FileChange {
+            result: pair.result,
+            ..file
+        }));
         // An exec wrapper can also run unrelated commands, so retain its raw activity.
         if files.is_empty() || is_exec {
             if let Some(call) = pair.call {

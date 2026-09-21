@@ -5,7 +5,9 @@
 use serde_json::{Map, Value};
 
 use crate::transcript::json_text::{stringify, stringify_pretty};
-use crate::transcript::jsstr::{collapse_whitespace, js_trim, js_trim_end, split_newlines, utf16_len, utf16_take};
+use crate::transcript::jsstr::{
+    collapse_whitespace, js_trim, js_trim_end, split_newlines, utf16_len, utf16_take,
+};
 
 pub const MAX_PREVIEW_LENGTH: usize = 80;
 pub const MAX_PREVIEW_STRING_INPUT: usize = 160;
@@ -31,7 +33,10 @@ fn bounded_preview_value(value: &Value, depth: usize) -> Value {
     match value {
         Value::String(text) => {
             if utf16_len(text) > MAX_PREVIEW_STRING_INPUT {
-                Value::String(format!("{}\u{2026}", utf16_take(text, MAX_PREVIEW_STRING_INPUT)))
+                Value::String(format!(
+                    "{}\u{2026}",
+                    utf16_take(text, MAX_PREVIEW_STRING_INPUT)
+                ))
             } else {
                 value.clone()
             }
@@ -59,7 +64,10 @@ fn bounded_preview_value(value: &Value, depth: usize) -> Value {
                 out.insert(key.clone(), bounded_preview_value(item, depth + 1));
             }
             if entries.len() > MAX_PREVIEW_COLLECTION_ITEMS {
-                out.insert("\u{2026}".to_string(), Value::String("\u{2026}".to_string()));
+                out.insert(
+                    "\u{2026}".to_string(),
+                    Value::String("\u{2026}".to_string()),
+                );
             }
             Value::Object(out)
         }
@@ -155,14 +163,22 @@ fn embedded_command_literal(input: &str) -> Option<&str> {
             continue;
         };
         let mut at = start + head;
-        while input[at..].chars().next().is_some_and(crate::transcript::jsstr::is_js_space) {
+        while input[at..]
+            .chars()
+            .next()
+            .is_some_and(crate::transcript::jsstr::is_js_space)
+        {
             at += input[at..].chars().next().map_or(0, char::len_utf8);
         }
         if bytes.get(at) != Some(&b':') {
             continue;
         }
         at += 1;
-        while input[at..].chars().next().is_some_and(crate::transcript::jsstr::is_js_space) {
+        while input[at..]
+            .chars()
+            .next()
+            .is_some_and(crate::transcript::jsstr::is_js_space)
+        {
             at += input[at..].chars().next().map_or(0, char::len_utf8);
         }
         if let Some(literal) = json_string_literal(input, at) {
@@ -210,9 +226,17 @@ fn command_text(input: &Value) -> String {
 /// First three non-empty command lines, flattened into the compact tool row.
 pub fn summarize_command_input(input: &Value) -> String {
     let text = command_text(input);
-    let lines: Vec<&str> =
-        split_newlines(&text).into_iter().map(js_trim).filter(|line| !line.is_empty()).collect();
-    let preview = lines.iter().take(MAX_COMMAND_PREVIEW_LINES).copied().collect::<Vec<_>>().join(" ");
+    let lines: Vec<&str> = split_newlines(&text)
+        .into_iter()
+        .map(js_trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let preview = lines
+        .iter()
+        .take(MAX_COMMAND_PREVIEW_LINES)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
     if lines.len() > MAX_COMMAND_PREVIEW_LINES {
         format!("{preview}\u{2026}")
     } else {

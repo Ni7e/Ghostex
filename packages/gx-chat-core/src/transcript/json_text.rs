@@ -32,11 +32,10 @@ fn write_string(out: &mut String, value: &str) {
 /// A number as JavaScript prints it: no trailing `.0` on a whole value.
 fn write_number(out: &mut String, value: &serde_json::Number) {
     if let Some(float) = value.as_f64() {
-        if value.as_i64().is_none() && value.as_u64().is_none() {
-            if float.fract() == 0.0 && float.abs() < 1e21 {
-                out.push_str(&format!("{float:.0}"));
-                return;
-            }
+        let whole = value.as_i64().is_some() || value.as_u64().is_some();
+        if !whole && float.fract() == 0.0 && float.abs() < 1e21 {
+            out.push_str(&format!("{float:.0}"));
+            return;
         }
     }
     out.push_str(&value.to_string());

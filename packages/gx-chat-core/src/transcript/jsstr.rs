@@ -84,7 +84,10 @@ pub fn split_newlines(value: &str) -> Vec<&str> {
 /// `text.split(/\s+/)` for a string that has already been trimmed, which is how every caller uses
 /// it: a leading run of whitespace would otherwise produce a leading empty token.
 pub fn split_whitespace_tokens(value: &str) -> Vec<&str> {
-    value.split(is_js_space).filter(|part| !part.is_empty()).collect()
+    value
+        .split(is_js_space)
+        .filter(|part| !part.is_empty())
+        .collect()
 }
 
 /// The last segment after either separator, as `path.split(/[\\/]/).at(-1)` reads it.

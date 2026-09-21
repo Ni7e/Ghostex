@@ -14,8 +14,11 @@ pub struct AgentMessage {
 /// `^Message from (\S+)\n\n([\s\S]*)$`.
 pub fn parse_agent_message(text: &str) -> Option<AgentMessage> {
     let rest = text.strip_prefix("Message from ")?;
-    let sender_len: usize =
-        rest.chars().take_while(|character| !is_js_space(*character)).map(char::len_utf8).sum();
+    let sender_len: usize = rest
+        .chars()
+        .take_while(|character| !is_js_space(*character))
+        .map(char::len_utf8)
+        .sum();
     if sender_len == 0 || !rest[sender_len..].starts_with("\n\n") {
         return None;
     }
@@ -40,7 +43,10 @@ pub struct InterAgentMessage {
 
 /// `^([A-Za-z ]+): (.*)$` against one line.
 fn header_field(line: &str) -> Option<(&str, &str)> {
-    let name_len = line.bytes().take_while(|byte| byte.is_ascii_alphabetic() || *byte == b' ').count();
+    let name_len = line
+        .bytes()
+        .take_while(|byte| byte.is_ascii_alphabetic() || *byte == b' ')
+        .count();
     if name_len == 0 || !line[name_len..].starts_with(": ") {
         return None;
     }
@@ -98,5 +104,10 @@ pub fn parse_inter_agent_message(text: &str) -> Option<InterAgentMessage> {
 
 /// `/root/windows_support` is addressed as `windows_support` by the agents themselves.
 pub fn agent_display_name(sender: &str) -> String {
-    sender.split('/').filter(|segment| !segment.is_empty()).next_back().unwrap_or(sender).to_string()
+    sender
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .next_back()
+        .unwrap_or(sender)
+        .to_string()
 }

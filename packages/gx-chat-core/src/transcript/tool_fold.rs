@@ -41,16 +41,24 @@ impl<'a> ToolPair<'a> {
 
     /// Whether the result reported a failure.
     pub fn result_is_error(&self) -> bool {
-        matches!(self.result, Some(ChatBlock::ToolResult { is_error: Some(true), .. }))
+        matches!(
+            self.result,
+            Some(ChatBlock::ToolResult {
+                is_error: Some(true),
+                ..
+            })
+        )
     }
 }
 
 pub fn is_tool_only_message(message: &ChatMessage) -> bool {
     !message.blocks.is_empty()
-        && message
-            .blocks
-            .iter()
-            .all(|block| matches!(block, ChatBlock::ToolCall { .. } | ChatBlock::ToolResult { .. }))
+        && message.blocks.iter().all(|block| {
+            matches!(
+                block,
+                ChatBlock::ToolCall { .. } | ChatBlock::ToolResult { .. }
+            )
+        })
 }
 
 /// Folds consecutive tool-only messages INTO their preceding assistant or reasoning turn.
@@ -72,7 +80,10 @@ pub fn fold_tool_messages(
         }
         let anchor_role = anchor_index.map(|index| output[index].role.clone());
         if is_tool_only_message(message)
-            && matches!(anchor_role, Some(ChatRole::Assistant) | Some(ChatRole::Reasoning))
+            && matches!(
+                anchor_role,
+                Some(ChatRole::Assistant) | Some(ChatRole::Reasoning)
+            )
         {
             let index = anchor_index.expect("an anchor role implies an anchor index");
             output[index].blocks.extend(message.blocks.iter().cloned());
@@ -96,11 +107,17 @@ pub fn pair_tool_blocks<'a>(blocks: impl IntoIterator<Item = &'a ChatBlock>) -> 
         match block {
             ChatBlock::ToolCall { .. } => {
                 call_slots.push(pairs.len());
-                pairs.push(ToolPair { call: Some(block), result: None });
+                pairs.push(ToolPair {
+                    call: Some(block),
+                    result: None,
+                });
             }
             ChatBlock::ToolResult { .. } => match call_slots.get(result_ordinal) {
                 // Orphan result.
-                None => pairs.push(ToolPair { call: None, result: Some(block) }),
+                None => pairs.push(ToolPair {
+                    call: None,
+                    result: Some(block),
+                }),
                 Some(slot) => {
                     let slot = *slot;
                     result_ordinal += 1;
@@ -118,7 +135,10 @@ pub fn split_blocks(blocks: &[ChatBlock]) -> (Vec<&ChatBlock>, Vec<&ChatBlock>) 
     let mut prose = Vec::new();
     let mut tools = Vec::new();
     for block in blocks {
-        if matches!(block, ChatBlock::ToolCall { .. } | ChatBlock::ToolResult { .. }) {
+        if matches!(
+            block,
+            ChatBlock::ToolCall { .. } | ChatBlock::ToolResult { .. }
+        ) {
             tools.push(block);
         } else {
             prose.push(block);

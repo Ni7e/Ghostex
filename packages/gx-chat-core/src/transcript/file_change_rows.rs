@@ -24,12 +24,22 @@ fn is_windows_root(directory: &str) -> bool {
 }
 
 fn normalize(value: &str, windows: bool) -> String {
-    let swapped = if windows { value.replace('\\', "/") } else { value.to_string() };
+    let swapped = if windows {
+        value.replace('\\', "/")
+    } else {
+        value.to_string()
+    };
     swapped.trim_end_matches('/').to_string()
 }
 
 fn relative_to(normalized_path: &str, root: &str, windows: bool) -> Option<String> {
-    let comparable = |value: &str| if windows { value.to_lowercase() } else { value.to_string() };
+    let comparable = |value: &str| {
+        if windows {
+            value.to_lowercase()
+        } else {
+            value.to_string()
+        }
+    };
     if comparable(normalized_path).starts_with(&format!("{}/", comparable(root))) {
         return Some(normalized_path[root.len() + 1..].to_string());
     }
@@ -117,7 +127,11 @@ pub fn file_change_counts(lines: &[DiffLine]) -> FileChangeCounts {
 
 /// A card with previews on already shows everything it has, so it only opens when there is more
 /// than the preview or when the write itself failed.
-pub fn file_change_expandable(counts: FileChangeCounts, preview_enabled: bool, failed: bool) -> bool {
+pub fn file_change_expandable(
+    counts: FileChangeCounts,
+    preview_enabled: bool,
+    failed: bool,
+) -> bool {
     !preview_enabled || counts.code > FILE_CHANGE_PREVIEW_LINES || failed
 }
 
@@ -142,7 +156,11 @@ pub fn file_change_path_parts(
         Some(index) => &display_path[index + 1..],
         None => display_path.as_str(),
     };
-    let filename = if last.is_empty() { display_path.clone() } else { last.to_string() };
+    let filename = if last.is_empty() {
+        display_path.clone()
+    } else {
+        last.to_string()
+    };
     let parent = display_path[..display_path.len().saturating_sub(filename.len())].to_string();
     let parent = match budget {
         Some(budget) if utf16_len(&parent) > budget => {
@@ -150,7 +168,10 @@ pub fn file_change_path_parts(
             let mut kept = parent.as_str();
             let mut dropped = 0;
             while dropped < keep {
-                let character = kept.chars().next().expect("a shortened parent is non-empty");
+                let character = kept
+                    .chars()
+                    .next()
+                    .expect("a shortened parent is non-empty");
                 dropped += character.len_utf16();
                 kept = &kept[character.len_utf8()..];
             }
@@ -158,5 +179,9 @@ pub fn file_change_path_parts(
         }
         _ => parent,
     };
-    FileChangePathParts { display_path, parent, filename }
+    FileChangePathParts {
+        display_path,
+        parent,
+        filename,
+    }
 }

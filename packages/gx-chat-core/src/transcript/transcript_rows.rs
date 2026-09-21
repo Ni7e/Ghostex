@@ -45,7 +45,10 @@ pub fn tool_rows(pairs: &[ToolPair<'_>], agent_path: &str) -> Vec<Value> {
                 Some(Value::Object(mut target)) => {
                     // `self` is a selector pointing back at the conversation being read: React
                     // renders it as plain text rather than a link, and so does the GPUI heading chip.
-                    let selector = target.get("selector").and_then(Value::as_str).unwrap_or_default();
+                    let selector = target
+                        .get("selector")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
                     let is_self = is_subagent_self(selector, agent_path);
                     target.insert("self".to_string(), is_self.into());
                     Value::Object(target)
@@ -59,9 +62,18 @@ pub fn tool_rows(pairs: &[ToolPair<'_>], agent_path: &str) -> Vec<Value> {
             // the exchange card instead of a tool row, so the raw `AskUserQuestion` row never shows
             // above it. Inside a disclosure or a turn's work fold the card is hoisted out and the
             // row does stay.
-            row.insert("exchange".to_string(), answered_question_exchange(pair).is_some().into());
-            row.insert("name".to_string(), pair.call_name().unwrap_or("Result").into());
-            row.insert("glyph".to_string(), tool_glyph(pair.call_name().unwrap_or_default()).into());
+            row.insert(
+                "exchange".to_string(),
+                answered_question_exchange(pair).is_some().into(),
+            );
+            row.insert(
+                "name".to_string(),
+                pair.call_name().unwrap_or("Result").into(),
+            );
+            row.insert(
+                "glyph".to_string(),
+                tool_glyph(pair.call_name().unwrap_or_default()).into(),
+            );
             row.insert("preview".to_string(), tool_preview(pair).into());
             row.insert("failed".to_string(), pair.result_is_error().into());
             row.insert("hasDetail".to_string(), has_detail.into());
@@ -72,8 +84,10 @@ pub fn tool_rows(pairs: &[ToolPair<'_>], agent_path: &str) -> Vec<Value> {
 }
 
 pub fn tool_fold(pairs: &[ToolPair<'_>]) -> Value {
-    let exchanges: Vec<bool> =
-        pairs.iter().map(|pair| answered_question_exchange(pair).is_some()).collect();
+    let exchanges: Vec<bool> = pairs
+        .iter()
+        .map(|pair| answered_question_exchange(pair).is_some())
+        .collect();
     tool_run_fold(&exchanges)
 }
 

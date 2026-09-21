@@ -24,7 +24,9 @@ pub struct ImageRef {
 /// machine file name.
 fn is_pasted_image_name(segment: &str) -> bool {
     let lower = ascii_lower(segment);
-    lower.starts_with("ghostex-paste-") && lower.ends_with(".png") && lower.len() > "ghostex-paste-.png".len()
+    lower.starts_with("ghostex-paste-")
+        && lower.ends_with(".png")
+        && lower.len() > "ghostex-paste-.png".len()
 }
 
 pub fn is_pasted_image_path(path: Option<&str>) -> bool {
@@ -39,7 +41,11 @@ pub fn image_label(block: &ImageRef) -> String {
     if let Some(path) = block.path.as_deref() {
         return last_path_segment(path).to_string();
     }
-    block.alt.clone().or_else(|| block.url.clone()).unwrap_or_else(|| "Image".to_string())
+    block
+        .alt
+        .clone()
+        .or_else(|| block.url.clone())
+        .unwrap_or_else(|| "Image".to_string())
 }
 
 /// `/\.[a-z0-9]{2,5}$/i`: a plausible file extension at the end of a segment.
@@ -86,7 +92,12 @@ fn download_file_name(label: &str, path: &str, url: &str) -> String {
 /// already carries them inline, `read` is a path on the session's machine that only
 /// `readSessionChatImage` can open, and `none` is a block with neither, which stays a named chip.
 pub fn image_source(block: &ImageRef) -> Value {
-    Value::Object(image_source_pairs(block, None).into_iter().map(|(key, value)| (key.to_string(), value)).collect())
+    Value::Object(
+        image_source_pairs(block, None)
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
+    )
 }
 
 /// The same source, as an ordered key list.
@@ -94,7 +105,10 @@ pub fn image_source(block: &ImageRef) -> Value {
 /// The native Markdown marks serialize this INTO the Markdown string, where the key order is part
 /// of the text the renderer parses back, so it cannot go through a sorted map.
 /// `label_override` is React's own stand-in text, which the inline-image mark substitutes.
-pub fn image_source_pairs(block: &ImageRef, label_override: Option<&str>) -> Vec<(&'static str, Value)> {
+pub fn image_source_pairs(
+    block: &ImageRef,
+    label_override: Option<&str>,
+) -> Vec<(&'static str, Value)> {
     let url = block.url.clone().unwrap_or_default();
     let path = block.path.clone().unwrap_or_default();
     let alt = block.alt.clone().unwrap_or_default();
@@ -112,8 +126,24 @@ pub fn image_source_pairs(block: &ImageRef, label_override: Option<&str>) -> Vec
     let file_name = download_file_name(&label, &path, &url);
     vec![
         ("transport", transport.into()),
-        ("path", if transport == "read" { path.as_str() } else { "" }.into()),
-        ("url", if transport == "url" || transport == "data" { url.as_str() } else { "" }.into()),
+        (
+            "path",
+            if transport == "read" {
+                path.as_str()
+            } else {
+                ""
+            }
+            .into(),
+        ),
+        (
+            "url",
+            if transport == "url" || transport == "data" {
+                url.as_str()
+            } else {
+                ""
+            }
+            .into(),
+        ),
         ("alt", alt.into()),
         ("label", label_override.unwrap_or(&label).into()),
         // A data URL is bytes rather than a location, so it offers nothing to copy.

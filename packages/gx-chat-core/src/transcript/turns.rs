@@ -33,8 +33,8 @@ pub struct SummaryModeTurn {
 /// One entry of the verbose transcript.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenderItem {
-    Message(ChatMessage),
-    CompletedWork(CompletedWorkTurn),
+    Message(Box<ChatMessage>),
+    CompletedWork(Box<CompletedWorkTurn>),
 }
 
 fn has_text_content(message: &ChatMessage) -> bool {
@@ -94,7 +94,10 @@ pub fn summary_mode_turns(
 
 pub fn is_visible_assistant_artifact(message: &ChatMessage) -> bool {
     message.role == ChatRole::Assistant
-        && message.blocks.iter().any(|block| matches!(block, ChatBlock::ImageRef { .. }))
+        && message
+            .blocks
+            .iter()
+            .any(|block| matches!(block, ChatBlock::ImageRef { .. }))
 }
 
 /// Splits a completed turn's work into the rows that stay visible and the rows that collapse.
@@ -119,7 +122,10 @@ pub fn partition_completed_work(messages: &[ChatMessage]) -> (Vec<ChatMessage>, 
 /// starts a new response, so none of them may settle the one in flight. Falls back to 0 when no
 /// such prompt exists (stitched scroll-back that opens mid-conversation).
 fn active_response_start_index(messages: &[ChatMessage]) -> usize {
-    messages.iter().rposition(is_accepted_user_prompt).unwrap_or(0)
+    messages
+        .iter()
+        .rposition(is_accepted_user_prompt)
+        .unwrap_or(0)
 }
 
 /// One copy affordance per response: the last assistant text before the next user turn.
@@ -128,8 +134,11 @@ fn active_response_start_index(messages: &[ChatMessage]) -> usize {
 pub fn final_assistant_message_ids(messages: &[ChatMessage], is_working: bool) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
     let mut final_assistant_id: Option<String> = None;
-    let active_start =
-        if is_working { active_response_start_index(messages) } else { messages.len() };
+    let active_start = if is_working {
+        active_response_start_index(messages)
+    } else {
+        messages.len()
+    };
 
     for (index, message) in messages.iter().enumerate() {
         // A harness-injected turn (a background-task notification, local command output, a message
@@ -184,13 +193,16 @@ pub fn completed_work_render_items(
 ) -> Vec<RenderItem> {
     let mut items = Vec::new();
     let raw_index = |id: &str| raw_messages.iter().position(|message| message.id == id);
-    let active_start =
-        if is_working { active_response_start_index(messages) } else { messages.len() };
+    let active_start = if is_working {
+        active_response_start_index(messages)
+    } else {
+        messages.len()
+    };
     let mut index = 0;
     while index < messages.len() {
         let message = &messages[index];
         if message.role != ChatRole::User {
-            items.push(RenderItem::Message(message.clone()));
+            items.push(RenderItem::Message(Box::new(message.clone())));
             index += 1;
             continue;
         }
@@ -198,22 +210,24 @@ pub fn completed_work_render_items(
         let mut next_user_index = index + 1;
         while next_user_index < messages.len()
             && (messages[next_user_index].role != ChatRole::User
-                || (message.deferred_work.is_some() && messages[next_user_index].byte_offset.is_none()))
+                || (message.deferred_work.is_some()
+                    && messages[next_user_index].byte_offset.is_none()))
         {
             next_user_index += 1;
         }
         let turn_messages = &messages[index + 1..next_user_index];
         let final_index = turn_messages.iter().rposition(has_agent_response_content);
-        let interacted_inline_diff =
-            turn_messages.iter().any(|row| interacted_message_ids.contains(&row.id));
+        let interacted_inline_diff = turn_messages
+            .iter()
+            .any(|row| interacted_message_ids.contains(&row.id));
         let interacted_grouped_diff = interacted_message_ids.contains(&message.id);
         if (message.deferred_work.is_none() && final_index.is_none())
             || (index >= active_start && !interacted_grouped_diff)
             || interacted_inline_diff
         {
-            items.push(RenderItem::Message(message.clone()));
+            items.push(RenderItem::Message(Box::new(message.clone())));
             for turn_message in turn_messages {
-                items.push(RenderItem::Message(turn_message.clone()));
+                items.push(RenderItem::Message(Box::new(turn_message.clone())));
             }
             index = next_user_index;
             continue;
@@ -226,8 +240,8 @@ pub fn completed_work_render_items(
             .and_then(|next| raw_index(&next.id))
             .unwrap_or(raw_messages.len());
         let final_id = final_message.as_ref().map(|row| row.id.clone());
-        items.push(RenderItem::Message(message.clone()));
-        items.push(RenderItem::CompletedWork(CompletedWorkTurn {
+        items.push(RenderItem::Message(Box::new(message.clone())));
+        items.push(RenderItem::CompletedWork(Box::new(CompletedWorkTurn {
             user: message.clone(),
             work: raw_messages[(raw_start + 1).min(raw_end)..raw_end]
                 .iter()
@@ -235,7 +249,7 @@ pub fn completed_work_render_items(
                 .cloned()
                 .collect(),
             final_message,
-        }));
+        })));
         index = next_user_index;
     }
     items

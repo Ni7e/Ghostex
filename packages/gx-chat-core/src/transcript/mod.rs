@@ -42,4 +42,4 @@ pub mod turns;
 
 pub use crate::transcript::actions::handle;
 pub use crate::transcript::document::document;
-pub use crate::transcript::rows::{row_details, rows};
+pub use crate::transcript::rows::{advance, refresh, row_details, rows};

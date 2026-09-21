@@ -45,8 +45,11 @@ pub const NATIVE_IMAGE_OPEN: &str = "\u{e000}image:";
 /// What the native code-block header shows, as JSON on the fence's info string.
 fn fence_header(info: &str) -> Option<String> {
     let trimmed = js_trim(info);
-    let language_len: usize =
-        trimmed.chars().take_while(|character| !is_js_space(*character)).map(char::len_utf8).sum();
+    let language_len: usize = trimmed
+        .chars()
+        .take_while(|character| !is_js_space(*character))
+        .map(char::len_utf8)
+        .sum();
     let meta = js_trim(&trimmed[language_len..]);
     let title = fence_title(if meta.is_empty() { None } else { Some(meta) })?;
     let separator = title.rfind(['/', '\\']).map_or(0, |at| at + 1);
@@ -58,7 +61,12 @@ fn fence_header(info: &str) -> Option<String> {
     if let Some(reference) = reference {
         entries.push((
             "href",
-            format!("{}{}", reference.path, file_position_suffix(reference.position.as_ref())).into(),
+            format!(
+                "{}{}",
+                reference.path,
+                file_position_suffix(reference.position.as_ref())
+            )
+            .into(),
         ));
     }
     Some(format!("{NATIVE_MARK}{}", stringify_pairs(&entries)))
@@ -73,16 +81,30 @@ fn fence_header(info: &str) -> Option<String> {
 fn image_mark(href: &str, fallback: &str, alt: &str) -> String {
     let destination = js_trim(href);
     let lower = ascii_lower(destination);
-    let block = if lower.starts_with("http:") || lower.starts_with("https:") || lower.starts_with("data:") {
-        ImageRef { path: None, url: Some(destination.to_string()), alt: Some(alt.to_string()) }
+    let block = if lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("data:")
+    {
+        ImageRef {
+            path: None,
+            url: Some(destination.to_string()),
+            alt: Some(alt.to_string()),
+        }
     } else {
         // Markdown destinations arrive percent-encoded; a machine path needs the literal characters
         // back. Malformed escapes: the raw destination is the best reading of it.
         let path = decode_uri(destination).unwrap_or_else(|| destination.to_string());
-        ImageRef { path: Some(path), url: None, alt: Some(alt.to_string()) }
+        ImageRef {
+            path: Some(path),
+            url: None,
+            alt: Some(alt.to_string()),
+        }
     };
     let source = image_source_pairs(&block, Some(fallback));
-    format!("{NATIVE_IMAGE_OPEN}{}{NATIVE_MARK}", stringify_pairs(&source))
+    format!(
+        "{NATIVE_IMAGE_OPEN}{}{NATIVE_MARK}",
+        stringify_pairs(&source)
+    )
 }
 
 /// `` `[^`\r\n]*` `` spans on one line, as byte ranges.
@@ -136,19 +158,39 @@ fn inline_image_at(line: &str, start: usize) -> Option<(bool, &str, &str, usize)
     if href_end == href_start {
         return None;
     }
-    Some((bang, &rest[label_start..label_end], &rest[href_start..href_end], href_end + 1))
+    Some((
+        bang,
+        &rest[label_start..label_end],
+        &rest[href_start..href_end],
+        href_end + 1,
+    ))
 }
 
 /// `\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$` on a destination with its query and
 /// hash cut off.
 fn names_a_picture(href: &str) -> bool {
-    let without_query = js_trim(href).split(['?', '#']).next().unwrap_or_default().to_string();
+    let without_query = js_trim(href)
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .to_string();
     let Some(dot) = without_query.rfind('.') else {
         return false;
     };
     matches!(
         ascii_lower(&without_query[dot + 1..]).as_str(),
-        "avif" | "bmp" | "gif" | "heic" | "heif" | "ico" | "jpg" | "jpeg" | "png" | "svg" | "tif" | "tiff"
+        "avif"
+            | "bmp"
+            | "gif"
+            | "heic"
+            | "heif"
+            | "ico"
+            | "jpg"
+            | "jpeg"
+            | "png"
+            | "svg"
+            | "tif"
+            | "tiff"
             | "webp"
     )
 }
@@ -201,8 +243,8 @@ fn leading_indent(line: &str, max: usize) -> Option<usize> {
     (spaces <= max).then_some(spaces)
 }
 
-/// `^( {0,3})(`{3,}|~{3,})(.*)$`.
-fn fence_open(line: &str) -> Option<(u8, usize, &str)> {
+/// The indent and fence run a line opens with, and whatever follows it.
+fn fence_run(line: &str) -> Option<(u8, usize, &str)> {
     let indent = leading_indent(line, 3)?;
     let rest = &line[indent..];
     let character = rest.as_bytes().first().copied()?;
@@ -213,9 +255,20 @@ fn fence_open(line: &str) -> Option<(u8, usize, &str)> {
     (run >= 3).then(|| (character, run, &rest[run..]))
 }
 
-/// `^ {0,3}(`{3,}|~{3,})\s*$`.
+/// `^( {0,3})(`{3,}|~{3,})(.*)$`.
+///
+/// `.` does not match a line terminator and `$` without the `m` flag only matches the end of the
+/// string, so an info string carrying a stray carriage return fails the match entirely and the line
+/// is NOT treated as a fence opener. A CRLF transcript therefore gets no code-block headers, which
+/// is what the shipped rules do and what this reproduces.
+fn fence_open(line: &str) -> Option<(u8, usize, &str)> {
+    let (character, run, rest) = fence_run(line)?;
+    (!rest.contains(['\r', '\n', '\u{2028}', '\u{2029}'])).then_some((character, run, rest))
+}
+
+/// `^ {0,3}(`{3,}|~{3,})\s*$`, where `\s` does match a carriage return.
 fn fence_close(line: &str) -> Option<(u8, usize)> {
-    let (character, run, rest) = fence_open(line)?;
+    let (character, run, rest) = fence_run(line)?;
     js_trim(rest).is_empty().then_some((character, run))
 }
 
@@ -277,7 +330,11 @@ fn is_table_delimiter(line: &str) -> bool {
     if bytes.get(at) == Some(&b'|') {
         at += 1;
     }
-    let spaces = |at: &mut usize| while bytes.get(*at) == Some(&b' ') { *at += 1 };
+    let spaces = |at: &mut usize| {
+        while bytes.get(*at) == Some(&b' ') {
+            *at += 1
+        }
+    };
     // `(?: *:?-+:? *\|)+`
     let mut cells = 0;
     loop {
@@ -364,7 +421,11 @@ fn mark_blocks(markdown: &str) -> String {
         if !is_quote_line(line) {
             // A table is marked rather than rewritten: the native renderer draws its toolbar around
             // the section and copies these very lines.
-            if line.contains('|') && lines.get(index + 1).is_some_and(|next| is_table_delimiter(next)) {
+            if line.contains('|')
+                && lines
+                    .get(index + 1)
+                    .is_some_and(|next| is_table_delimiter(next))
+            {
                 let mut last = index + 1;
                 while last + 1 < lines.len() && lines[last + 1].contains('|') {
                     last += 1;
@@ -383,7 +444,10 @@ fn mark_blocks(markdown: &str) -> String {
         while end + 1 < lines.len() && is_quote_line(lines[end + 1]) {
             end += 1;
         }
-        let body: Vec<&str> = lines[index..=end].iter().map(|line| strip_quote_marker(line)).collect();
+        let body: Vec<&str> = lines[index..=end]
+            .iter()
+            .map(|line| strip_quote_marker(line))
+            .collect();
         let Some(marker) = body.first().and_then(|line| alert_marker(line)) else {
             result.extend(lines[index..=end].iter().map(|line| (*line).to_string()));
             index = end + 1;
@@ -404,9 +468,16 @@ fn mark_blocks(markdown: &str) -> String {
 /// The path travels unchanged: escaping is undone by the parser, so the href and the label the pill
 /// is looked up by are the literal path again.
 fn file_link(path: &str, label: &str) -> String {
-    let destination = if path.chars().any(|character| is_js_space(character) || character == '(' || character == ')')
+    let destination = if path
+        .chars()
+        .any(|character| is_js_space(character) || character == '(' || character == ')')
     {
-        format!("<{}>", path.replace('\\', "\\\\").replace('<', "\\<").replace('>', "\\>"))
+        format!(
+            "<{}>",
+            path.replace('\\', "\\\\")
+                .replace('<', "\\<")
+                .replace('>', "\\>")
+        )
     } else {
         path.to_string()
     };
@@ -433,7 +504,9 @@ fn composer_image_references(markdown: &str) -> Vec<(usize, usize)> {
             continue;
         }
         let href = &rest[digits + 2..];
-        let Some(close) = href.char_indices().find(|(_, character)| matches!(character, ')' | '\r' | '\n'))
+        let Some(close) = href
+            .char_indices()
+            .find(|(_, character)| matches!(character, ')' | '\r' | '\n'))
         else {
             continue;
         };
@@ -461,13 +534,18 @@ fn collect_edits(
     edits: &mut Vec<Edit>,
 ) {
     for node in nodes {
-        if matches!(node, Node::Link(_) | Node::LinkReference(_) | Node::Definition(_)) {
+        if matches!(
+            node,
+            Node::Link(_) | Node::LinkReference(_) | Node::Definition(_)
+        ) {
             continue;
         }
         if matches!(node, Node::Code(_) | Node::Html(_)) {
             continue;
         }
-        let span = node.position().map(|position| (position.start.offset, position.end.offset));
+        let span = node
+            .position()
+            .map(|position| (position.start.offset, position.end.offset));
         if let Node::InlineCode(code) = node {
             let Some((start, end)) = span else {
                 continue;
@@ -475,11 +553,18 @@ fn collect_edits(
             let Some(reference) = resolve_inline_code_file_path(&code.value) else {
                 continue;
             };
-            let target =
-                format!("{}{}", reference.path, file_position_suffix(reference.position.as_ref()));
+            let target = format!(
+                "{}{}",
+                reference.path,
+                file_position_suffix(reference.position.as_ref())
+            );
             // The whole span including its backticks becomes the link, so the pill reads as the
             // path React's chip shows rather than as quoted code.
-            edits.push(Edit { start, end, text: file_link(&target, &target) });
+            edits.push(Edit {
+                start,
+                end,
+                text: file_link(&target, &target),
+            });
             continue;
         }
         if let Some(children) = node.children() {
@@ -487,10 +572,20 @@ fn collect_edits(
             // blockquote past offset 60 tests the empty string. Reproduced rather than corrected.
             let quoted_alert = matches!(node, Node::Blockquote(_)) && {
                 let start = span.map_or(0, |(start, _)| start);
-                let head = if start >= 60 { "" } else { &markdown[start..60.min(markdown.len())] };
+                let head = if start >= 60 {
+                    ""
+                } else {
+                    &markdown[start..60.min(markdown.len())]
+                };
                 is_quoted_alert(head)
             };
-            collect_edits(children, bare && !quoted_alert, markdown, image_references, edits);
+            collect_edits(
+                children,
+                bare && !quoted_alert,
+                markdown,
+                image_references,
+                edits,
+            );
             continue;
         }
         let Some((start, end)) = span else {
@@ -505,12 +600,19 @@ fn collect_edits(
         for found in bare_file_paths(source) {
             let from = start + found.start;
             let to = start + found.end;
-            if image_references.iter().any(|(reference_start, reference_end)| {
-                from < *reference_end && to > *reference_start
-            }) {
+            if image_references
+                .iter()
+                .any(|(reference_start, reference_end)| {
+                    from < *reference_end && to > *reference_start
+                })
+            {
                 continue;
             }
-            edits.push(Edit { start: from, end: to, text: file_link(&found.path, &found.path) });
+            edits.push(Edit {
+                start: from,
+                end: to,
+                text: file_link(&found.path, &found.path),
+            });
         }
     }
 }
@@ -526,10 +628,20 @@ fn link_file_references(markdown: &str, bare_paths: bool) -> String {
     let Ok(tree) = markdown::to_mdast(markdown, &ParseOptions::default()) else {
         return markdown.to_string();
     };
-    let image_references = if bare_paths { composer_image_references(markdown) } else { Vec::new() };
+    let image_references = if bare_paths {
+        composer_image_references(markdown)
+    } else {
+        Vec::new()
+    };
     let mut edits: Vec<Edit> = Vec::new();
     let children = tree.children().map(Vec::as_slice).unwrap_or_default();
-    collect_edits(children, bare_paths, markdown, &image_references, &mut edits);
+    collect_edits(
+        children,
+        bare_paths,
+        markdown,
+        &image_references,
+        &mut edits,
+    );
     // Applied from the back so an earlier edit's offsets stay valid.
     edits.sort_by(|left, right| right.start.cmp(&left.start));
     let mut result = markdown.to_string();
@@ -537,7 +649,12 @@ fn link_file_references(markdown: &str, bare_paths: bool) -> String {
         if edit.start > result.len() || edit.end > result.len() {
             continue;
         }
-        result = format!("{}{}{}", &result[..edit.start], edit.text, &result[edit.end..]);
+        result = format!(
+            "{}{}{}",
+            &result[..edit.start],
+            edit.text,
+            &result[edit.end..]
+        );
     }
     result
 }
@@ -594,11 +711,14 @@ fn has_image_evidence(markdown: &str) -> bool {
         let start = cursor + at + 2;
         cursor = start;
         let rest = &markdown[start..];
-        let bounded: String = rest.chars().take_while(|character| !matches!(character, ')' | '\r' | '\n')).collect();
+        let bounded: String = rest
+            .chars()
+            .take_while(|character| !matches!(character, ')' | '\r' | '\n'))
+            .collect();
         let lower = ascii_lower(&bounded);
         if [
-            ".avif", ".bmp", ".gif", ".heic", ".heif", ".ico", ".jpg", ".jpeg", ".png", ".svg", ".tif",
-            ".tiff", ".webp",
+            ".avif", ".bmp", ".gif", ".heic", ".heif", ".ico", ".jpg", ".jpeg", ".png", ".svg",
+            ".tif", ".tiff", ".webp",
         ]
         .iter()
         .any(|extension| lower.contains(extension))
@@ -629,8 +749,11 @@ pub fn native_markdown(markdown: &str, bare_paths: bool) -> String {
     if !paths_wanted && !blocks_wanted {
         return markdown.to_string();
     }
-    let linked =
-        if paths_wanted { link_file_references(markdown, bare_wanted) } else { markdown.to_string() };
+    let linked = if paths_wanted {
+        link_file_references(markdown, bare_wanted)
+    } else {
+        markdown.to_string()
+    };
     if blocks_wanted {
         mark_blocks(&linked)
     } else {

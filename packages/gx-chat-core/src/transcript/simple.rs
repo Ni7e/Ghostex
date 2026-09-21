@@ -4,7 +4,10 @@
 
 /// "Edited 3 files", the label a folded turn's file changes carry.
 pub fn simple_edit_label(count: usize) -> String {
-    format!("Edited {count} {}", if count == 1 { "file" } else { "files" })
+    format!(
+        "Edited {count} {}",
+        if count == 1 { "file" } else { "files" }
+    )
 }
 
 /// "3 tool calls", or "Tool output" when the group has no call of its own.

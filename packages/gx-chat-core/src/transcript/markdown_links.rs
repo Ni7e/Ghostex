@@ -21,7 +21,15 @@ pub fn markdown_link(href: &str, label: &str) -> Option<Value> {
         let mut entry = Map::new();
         entry.insert("href".to_string(), href.into());
         entry.insert("sourceLabel".to_string(), label.into());
-        entry.insert("label".to_string(), if label.is_empty() { url.as_str() } else { label }.into());
+        entry.insert(
+            "label".to_string(),
+            if label.is_empty() {
+                url.as_str()
+            } else {
+                label
+            }
+            .into(),
+        );
         entry.insert("title".to_string(), url.into());
         entry.insert("kind".to_string(), "url".into());
         return Some(Value::Object(entry));
@@ -37,7 +45,11 @@ pub fn markdown_reference(href: &str, label: &str) -> Option<Value> {
     let position = file_position_from_href(href);
     let suffix = file_position_suffix(position.as_ref());
     let trimmed = js_trim(label);
-    let source_label = if trimmed.is_empty() { path.as_str() } else { trimmed };
+    let source_label = if trimmed.is_empty() {
+        path.as_str()
+    } else {
+        trimmed
+    };
     let mut entry = Map::new();
     entry.insert("href".to_string(), href.into());
     entry.insert("sourceLabel".to_string(), label.into());
@@ -51,7 +63,10 @@ pub fn markdown_reference(href: &str, label: &str) -> Option<Value> {
         .into(),
     );
     entry.insert("title".to_string(), format!("{path}{suffix}").into());
-    entry.insert("kind".to_string(), reference_kind(source_label, &path).into());
+    entry.insert(
+        "kind".to_string(),
+        reference_kind(source_label, &path).into(),
+    );
     entry.insert("path".to_string(), path.into());
     // `position` is `undefined` when there is none, which `JSON.stringify` drops.
     if let Some(position) = position {
@@ -210,7 +225,10 @@ pub fn markdown_references(markdown: &str) -> Vec<Value> {
     let mut definitions: Vec<(String, String)> = Vec::new();
     walk(children, &mut |node| {
         if let Node::Definition(definition) = node {
-            if !definitions.iter().any(|(key, _)| *key == definition.identifier) {
+            if !definitions
+                .iter()
+                .any(|(key, _)| *key == definition.identifier)
+            {
                 definitions.push((definition.identifier.clone(), definition.url.clone()));
             }
         }

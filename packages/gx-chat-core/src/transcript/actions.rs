@@ -20,7 +20,10 @@ fn param<'a>(action: &'a UserAction, key: &str) -> Option<&'a Value> {
 }
 
 fn text(action: &UserAction, key: &str) -> String {
-    param(action, key).and_then(Value::as_str).unwrap_or_default().to_string()
+    param(action, key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// The open rows the renderer reports, in the order it reports them.
@@ -30,9 +33,21 @@ fn open_rows(action: &UserAction) -> Vec<OpenRow> {
     };
     rows.iter()
         .map(|row| OpenRow {
-            key: row.get("key").and_then(Value::as_str).unwrap_or_default().to_string(),
-            kind: row.get("kind").and_then(Value::as_str).unwrap_or_default().to_string(),
-            message_id: row.get("messageId").and_then(Value::as_str).unwrap_or_default().to_string(),
+            key: row
+                .get("key")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            kind: row
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            message_id: row
+                .get("messageId")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
             index: row.get("index").and_then(Value::as_u64).unwrap_or_default() as usize,
         })
         .collect()
@@ -43,7 +58,9 @@ fn position_effect(href: &str, path: String) -> Effect {
     Effect::Open(OpenTarget::File {
         path,
         line: position.map(|position| position.line as u32),
-        column: position.and_then(|position| position.column).map(|column| column as u32),
+        column: position
+            .and_then(|position| position.column)
+            .map(|column| column as u32),
     })
 }
 
@@ -77,10 +94,13 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             // The failure belongs to the row that asked for it, not to the composer's error bar, so
             // it never reaches the outer handler.
             let id = text(action, "id");
-            state
-                .transcript_view
-                .deferred_work
-                .insert(id, crate::document::DeferredWorkRow { loading: true, error: ghostex_gx_protocol::Tri::Absent });
+            state.transcript_view.deferred_work.insert(
+                id,
+                crate::document::DeferredWorkRow {
+                    loading: true,
+                    error: ghostex_gx_protocol::Tri::Absent,
+                },
+            );
             state.transcript_view.detail_revision += 1;
             vec![Effect::SendRpc {
                 request_id: 0,
@@ -98,7 +118,11 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             Vec::new()
         }
         ActionKind::RewindCancel => {
-            let busy = state.transcript_view.rewind.as_ref().is_some_and(|request| request.busy);
+            let busy = state
+                .transcript_view
+                .rewind
+                .as_ref()
+                .is_some_and(|request| request.busy);
             if !busy {
                 state.transcript_view.rewind = None;
             }
@@ -123,12 +147,19 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
         ActionKind::SavePrompt => {
             let message_id = text(action, "messageId");
             let prompt = text(action, "prompt");
-            let saving = state.transcript_view.saved_prompts.get(&message_id).map(String::as_str)
+            let saving = state
+                .transcript_view
+                .saved_prompts
+                .get(&message_id)
+                .map(String::as_str)
                 == Some("saving");
             if saving || js_trim(&prompt).is_empty() {
                 return Vec::new();
             }
-            state.transcript_view.saved_prompts.insert(message_id, "saving".to_string());
+            state
+                .transcript_view
+                .saved_prompts
+                .insert(message_id, "saving".to_string());
             vec![Effect::SendRpc {
                 request_id: 0,
                 method: ChatRpcMethod::SaveStashedPrompt,

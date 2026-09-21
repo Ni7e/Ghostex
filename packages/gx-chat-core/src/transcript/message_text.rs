@@ -23,7 +23,9 @@ fn strip_fences(value: &str) -> String {
     let mut cursor = 0;
     while let Some(found) = value[cursor..].find("```") {
         let open = cursor + found;
-        let line_end = value[open + 3..].find('\n').map_or(value.len(), |at| open + 3 + at);
+        let line_end = value[open + 3..]
+            .find('\n')
+            .map_or(value.len(), |at| open + 3 + at);
         let mut matched = None;
         let mut info_end = line_end;
         'info: loop {
@@ -68,7 +70,11 @@ fn strip_links(value: &str) -> String {
     while cursor < value.len() {
         let rest = &value[cursor..];
         let image = rest.starts_with("![");
-        let bracket = if image { 2 } else { usize::from(rest.starts_with('[')) };
+        let bracket = if image {
+            2
+        } else {
+            usize::from(rest.starts_with('['))
+        };
         if bracket == 0 {
             let step = rest.chars().next().map_or(1, char::len_utf8);
             out.push_str(&rest[..step]);
@@ -86,7 +92,9 @@ fn strip_links(value: &str) -> String {
         let after_label = bracket + label.len() + 1;
         // `[^\]]*` for an image, `[^\]]+` for a link: an empty link label is not a match.
         let destination = if (image || !label.is_empty()) && rest[after_label..].starts_with('(') {
-            rest[after_label + 1..].find(')').map(|at| &rest[after_label + 1..after_label + 1 + at])
+            rest[after_label + 1..]
+                .find(')')
+                .map(|at| &rest[after_label + 1..after_label + 1 + at])
         } else {
             None
         };
@@ -149,15 +157,20 @@ fn block_marker_len(value: &str, start: usize) -> Option<usize> {
     indents.reverse();
     for indent in indents {
         let mut after = indent;
-        let hashes = value[indent..].bytes().take_while(|byte| *byte == b'#').count().min(6);
+        let hashes = value[indent..]
+            .bytes()
+            .take_while(|byte| *byte == b'#')
+            .count()
+            .min(6);
         if hashes > 0 {
             after = indent + hashes;
-        } else if bytes.get(indent) == Some(&b'>') {
-            after = indent + 1;
-        } else if matches!(bytes.get(indent), Some(b'-' | b'+' | b'*')) {
+        } else if matches!(bytes.get(indent), Some(b'>' | b'-' | b'+' | b'*')) {
             after = indent + 1;
         } else {
-            let digits = value[indent..].bytes().take_while(u8::is_ascii_digit).count();
+            let digits = value[indent..]
+                .bytes()
+                .take_while(u8::is_ascii_digit)
+                .count();
             if digits > 0 && matches!(bytes.get(indent + digits), Some(b'.' | b')')) {
                 after = indent + digits + 1;
             }
@@ -165,8 +178,11 @@ fn block_marker_len(value: &str, start: usize) -> Option<usize> {
         if after == indent {
             continue;
         }
-        let spaces: usize =
-            value[after..].chars().take_while(|character| is_js_space(*character)).map(char::len_utf8).sum();
+        let spaces: usize = value[after..]
+            .chars()
+            .take_while(|character| is_js_space(*character))
+            .map(char::len_utf8)
+            .sum();
         if spaces > 0 {
             return Some(after + spaces - start);
         }
@@ -255,8 +271,8 @@ fn strip_escapes(value: &str) -> String {
     let mut cursor = 0;
     while cursor < value.len() {
         let rest = &value[cursor..];
-        if rest.starts_with('\\') {
-            if let Some(escaped) = rest[1..].chars().next() {
+        if let Some(after) = rest.strip_prefix('\\') {
+            if let Some(escaped) = after.chars().next() {
                 if "\\`*_[]{}()#+-.!>".contains(escaped) {
                     out.push(escaped);
                     cursor += 1 + escaped.len_utf8();
@@ -310,7 +326,11 @@ fn non_hoistable_reasoning_line(line: &str) -> bool {
     // `\s{0,3}` is greedy but every continuation below starts with a non-space, so only the
     // longest indent can match and no backtracking is observable.
     let rest = &line[at..];
-    if rest.starts_with('>') || rest.starts_with('|') || rest.starts_with("```") || rest.starts_with("~~~") {
+    if rest.starts_with('>')
+        || rest.starts_with('|')
+        || rest.starts_with("```")
+        || rest.starts_with("~~~")
+    {
         return true;
     }
     let bullet = rest.starts_with(['-', '+', '*']);
@@ -338,7 +358,10 @@ fn split_paragraphs(value: &str) -> Vec<&str> {
         while matches!(bytes.get(after), Some(b' ' | b'\t')) {
             after += 1;
         }
-        let newlines = value[after..].bytes().take_while(|byte| *byte == b'\n').count();
+        let newlines = value[after..]
+            .bytes()
+            .take_while(|byte| *byte == b'\n')
+            .count();
         if newlines == 0 {
             at += 1;
             continue;
@@ -395,7 +418,10 @@ pub struct ReasoningSplit {
 /// chevron folds the tool calls rather than the thought.
 pub fn split_reasoning_headline(markdown: &str) -> ReasoningSplit {
     let lines = split_newlines(markdown);
-    let split = lines.iter().position(|line| non_hoistable_reasoning_line(line)).unwrap_or(lines.len());
+    let split = lines
+        .iter()
+        .position(|line| non_hoistable_reasoning_line(line))
+        .unwrap_or(lines.len());
     let leading = lines[..split].join("\n");
     let headline = split_paragraphs(&plain_reasoning_text(&leading))
         .into_iter()
@@ -404,9 +430,15 @@ pub fn split_reasoning_headline(markdown: &str) -> ReasoningSplit {
         .collect::<Vec<_>>()
         .join("\n\n");
     if headline.is_empty() {
-        return ReasoningSplit { headline: plain_reasoning_teaser(markdown), body: markdown.to_string() };
+        return ReasoningSplit {
+            headline: plain_reasoning_teaser(markdown),
+            body: markdown.to_string(),
+        };
     }
-    ReasoningSplit { headline, body: js_trim(&lines[split..].join("\n")).to_string() }
+    ReasoningSplit {
+        headline,
+        body: js_trim(&lines[split..].join("\n")).to_string(),
+    }
 }
 
 /// `markdown.split(/\r?\n[\t ]*---[\t ]*(?:\r?\n|$)/)`.
@@ -420,7 +452,11 @@ fn split_user_turn_separator(markdown: &str) -> Vec<&str> {
             at += 1;
             continue;
         }
-        let opening = if at > 0 && bytes[at - 1] == b'\r' { at - 1 } else { at };
+        let opening = if at > 0 && bytes[at - 1] == b'\r' {
+            at - 1
+        } else {
+            at
+        };
         let mut cursor = at + 1;
         while matches!(bytes.get(cursor), Some(b' ' | b'\t')) {
             cursor += 1;
@@ -453,7 +489,10 @@ fn split_user_turn_separator(markdown: &str) -> Vec<&str> {
 
 /// A user turn whose repeated `---` sections collapse back into what the reader actually wrote.
 pub fn normalize_user_message_markdown(markdown: &str) -> String {
-    let parts: Vec<&str> = split_user_turn_separator(markdown).into_iter().map(js_trim).collect();
+    let parts: Vec<&str> = split_user_turn_separator(markdown)
+        .into_iter()
+        .map(js_trim)
+        .collect();
     if parts.len() == 1 {
         return markdown.to_string();
     }
@@ -462,12 +501,18 @@ pub fn normalize_user_message_markdown(markdown: &str) -> String {
         if part.is_empty() {
             continue;
         }
-        match visible.iter().position(|candidate| candidate.starts_with(part)) {
+        match visible
+            .iter()
+            .position(|candidate| candidate.starts_with(part))
+        {
             None => visible.push(part.to_string()),
             Some(index) => {
                 let remainder = js_trim_start(&visible[index][part.len()..]).to_string();
-                visible[index] =
-                    if remainder.is_empty() { part.to_string() } else { format!("{part}\n\n{remainder}") };
+                visible[index] = if remainder.is_empty() {
+                    part.to_string()
+                } else {
+                    format!("{part}\n\n{remainder}")
+                };
             }
         }
     }

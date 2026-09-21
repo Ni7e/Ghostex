@@ -49,7 +49,8 @@ fn sort_rank(message: &ChatMessage) -> u8 {
     if message.id.starts_with(TERMINAL_TOOL_ID_PREFIX) {
         return 2;
     }
-    if message.id.starts_with(PENDING_ID_PREFIX) || message.id.starts_with(LAUNCH_PENDING_ID_PREFIX) {
+    if message.id.starts_with(PENDING_ID_PREFIX) || message.id.starts_with(LAUNCH_PENDING_ID_PREFIX)
+    {
         return 3;
     }
     0
@@ -107,7 +108,9 @@ const ESCAPED_MARKUP_ATTRIBUTE: &str = "data-ghostex-escaped=\"html\"";
 
 /// Family b's own file, re-exported here so the envelope parser can reach it without a cycle.
 pub fn decode_escaped_markup(text: &str) -> String {
-    text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
 }
 
 /// `<tag( attributes)?>body</tag>`, the first match, returning the attributes and the body.
@@ -150,7 +153,10 @@ pub fn parse_command_envelope(text: &str) -> Option<CommandEnvelope> {
     let args = tagged_body(trimmed, "command-args")
         .map(|(attributes, body)| decode(js_trim(body), attributes))
         .unwrap_or_default();
-    Some(CommandEnvelope { name: decode(name, name_attributes), args })
+    Some(CommandEnvelope {
+        name: decode(name, name_attributes),
+        args,
+    })
 }
 
 /// Family e, `agentModelCatalogEffortLabel`, with an empty catalog.
@@ -204,7 +210,9 @@ pub fn terminal_tool_activity(message: &ChatMessage) -> serde_json::Value {
     activity.insert("label".to_string(), label.into());
     activity.insert(
         "detectedAt".to_string(),
-        message.id[TERMINAL_TOOL_ID_PREFIX.len()..].to_string().into(),
+        message.id[TERMINAL_TOOL_ID_PREFIX.len()..]
+            .to_string()
+            .into(),
     );
     if !detail.is_empty() {
         activity.insert("detail".to_string(), detail.into());
