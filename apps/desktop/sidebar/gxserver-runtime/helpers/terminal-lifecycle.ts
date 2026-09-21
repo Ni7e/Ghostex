@@ -35,6 +35,7 @@ import { gpuiStatusPetActivationSessionIdAllowed } from './status-indicators';
 import { parseGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import type { GxserverSessionTransitionResult } from '@/packages/shared/gxserver-protocol';
 import { sessionChatHandoffDraft } from '@/packages/shared/session-chat-file-references';
+import { modelPickerProvider } from '@/packages/shared/session-chat-presentation/model-picker-request';
 
 export function gpuiWorkspaceTerminalTitleCommandForAgent(agentId: string): 'name' | 'rename' | 'title' {
   const normalizedAgentId = agentId.trim().toLowerCase();
@@ -98,7 +99,9 @@ export function normalizeGpuiWorkspaceTerminalRuntimeAction(
   }
   const record = value as Record<string, unknown>;
   if (
-    Object.keys(record).some((key) => !['action', 'agentId', 'projectId', 'sessionId', 'type', 'version'].includes(key))
+    Object.keys(record).some(
+      (key) => !['action', 'agentId', 'projectId', 'sessionId', 'target', 'type', 'version'].includes(key)
+    )
   ) {
     return undefined;
   }
@@ -119,6 +122,7 @@ export function normalizeGpuiWorkspaceTerminalRuntimeAction(
     record.action === 'exportTranscript' ||
     record.action === 'forkSession' ||
     record.action === 'fullReloadSession' ||
+    record.action === 'handoffToModel' ||
     record.action === 'openSessionNote' ||
     record.action === 'sleepSession' ||
     record.action === 'switchSessionAgent'
@@ -143,6 +147,18 @@ export function normalizeGpuiWorkspaceTerminalRuntimeAction(
     return { action, agentId, projectId, sessionId };
   }
   if (record.agentId !== undefined) {
+    return undefined;
+  }
+  if (action === 'handoffToModel') {
+    const target = record.target as Record<string, unknown> | null | undefined;
+    const provider = typeof target?.provider === 'string' ? modelPickerProvider(target.provider) : undefined;
+    const model = normalizeNonEmptyString(target?.model)?.trim();
+    if (!provider || provider !== target?.provider || !model || typeof target?.effort !== 'string') {
+      return undefined;
+    }
+    return { action, projectId, sessionId, target: { provider, model, effort: target.effort.trim() } };
+  }
+  if (record.target !== undefined) {
     return undefined;
   }
   return { action, projectId, sessionId };

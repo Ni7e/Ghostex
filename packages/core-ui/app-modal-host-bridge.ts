@@ -161,6 +161,8 @@ export type OpenAppModalMessage =
       modal: 'exportTranscriptResult';
       path?: string;
       requestId: string;
+      /** The agent the chat model picker is handing over to: selected on open, with the dialog on Handoff. */
+      targetAgentId?: string;
       type: 'open';
     }
   | {

@@ -254,6 +254,7 @@ type AppModalHostMessage =
       /** CDXC:TranscriptExport 2026-08-20: see ExportTranscriptResultModalState. */
       canReveal?: boolean;
       path?: string;
+      targetAgentId?: string;
       closeAfterDoneActive?: boolean;
       delayedSendDeadlineAt?: string;
       delayedSendRemainingLabel?: string;
@@ -534,6 +535,7 @@ type ExportTranscriptResultModalState = {
   canReveal: boolean;
   requestId?: string;
   stage: ExportTranscriptModalStage;
+  targetAgentId?: string;
 };
 
 type RemoteGxserverInstallState = {
@@ -2979,6 +2981,7 @@ function AppModalHost() {
           closeModal();
         }}
         stage={exportTranscriptResult?.stage ?? { stage: 'options' }}
+        targetAgentId={exportTranscriptResult?.targetAgentId}
       />
       <AgentConfigModal
         draft={config.agentDraft ?? createEmptyAgentDraft()}
@@ -3343,7 +3346,11 @@ function useModalStateFromNative() {
               typeof message.path === 'string' && message.path.trim()
                 ? { agentId, canReveal, path: message.path, stage: 'done' }
                 : { stage: 'options' };
-            return { agentId, canReveal, requestId, stage };
+            const targetAgentId =
+              typeof message.targetAgentId === 'string' && message.targetAgentId.trim()
+                ? message.targetAgentId
+                : undefined;
+            return { agentId, canReveal, requestId, stage, targetAgentId };
           });
           setUpdateAvailable(
             message.modal === 'updateAvailable' &&

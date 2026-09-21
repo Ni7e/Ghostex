@@ -340,6 +340,10 @@ export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
       await this.exportSessionTranscript(sessionId);
       return;
     }
+    if (request.action === 'handoffToModel') {
+      await this.exportSessionTranscript(sessionId, request.target);
+      return;
+    }
     if (request.action === 'openSessionNote') {
       this.openSessionNoteEditor(sessionId);
       return;

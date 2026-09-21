@@ -113,6 +113,8 @@ export interface GpuiSidebarRuntimeSessionCreateMethods {
     agent: SidebarAgentButton,
     prompt: string,
     options?: {
+      agentEffort?: string;
+      agentModel?: string;
       draft?: boolean;
       errorMessage?: string;
       firstUserInputDraft?: string;
@@ -126,7 +128,13 @@ export interface GpuiSidebarRuntimeSessionCreateMethods {
     agentId: string,
     prompt: string,
     title: string,
-    options?: { draft?: boolean; firstUserInputDraft?: string; preferredInterface?: PreferredAgentInterface }
+    options?: {
+      agentEffort?: string;
+      agentModel?: string;
+      draft?: boolean;
+      firstUserInputDraft?: string;
+      preferredInterface?: PreferredAgentInterface;
+    }
   ): Promise<void>;
 }
 
@@ -1082,6 +1090,9 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     agent: SidebarAgentButton,
     prompt: string,
     options: {
+      /** Launch flags for the new session alone; gxserver accepts them for Claude and Codex agents only. */
+      agentEffort?: string;
+      agentModel?: string;
       draft?: boolean;
       errorMessage?: string;
       firstUserInputDraft?: string;
@@ -1102,7 +1113,9 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
         zmxName?: string;
       };
     }>('/api/createAgentSession', {
+      ...(options.agentEffort ? { agentEffort: options.agentEffort } : {}),
       agentId: agent.agentId,
+      ...(options.agentModel ? { agentModel: options.agentModel } : {}),
       /*
       CDXC:Drafts 2026-09-02:
       A promptless launch (Handoff / Export) is a draft exactly like a sidebar
@@ -1159,13 +1172,21 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     agentId: string,
     prompt: string,
     title: string,
-    options: { draft?: boolean; firstUserInputDraft?: string; preferredInterface?: PreferredAgentInterface } = {}
+    options: {
+      agentEffort?: string;
+      agentModel?: string;
+      draft?: boolean;
+      firstUserInputDraft?: string;
+      preferredInterface?: PreferredAgentInterface;
+    } = {}
   ): Promise<void> {
     const response = await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(
       remoteScope.machineId,
       '/api/createAgentSession',
       {
+        ...(options.agentEffort ? { agentEffort: options.agentEffort } : {}),
         agentId,
+        ...(options.agentModel ? { agentModel: options.agentModel } : {}),
         // CDXC:Drafts 2026-09-02: same draft rule as the local helper.
         ...(options.draft && !normalizeNonEmptyString(prompt) ? { draft: true } : {}),
         projectId: remoteScope.projectId,

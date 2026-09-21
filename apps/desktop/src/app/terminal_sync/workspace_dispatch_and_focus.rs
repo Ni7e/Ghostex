@@ -278,6 +278,38 @@ impl GhostexGpuiApp {
         )
     }
 
+    /// The chat model picker chose another agent's model. It takes the Handoff / Export route, carrying the target so the sidebar runtime opens the dialog with that agent selected.
+    /// SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/export-transcript.ts (`exportSessionTranscript`), apps/desktop/sidebar/gxserver-runtime/helpers/terminal-lifecycle.ts (the payload's field allowlist).
+    pub(crate) fn dispatch_gpui_workspace_terminal_handoff_to_model(
+        &mut self,
+        shell_session_id: TerminalSessionId,
+        provider: &str,
+        model: &str,
+        effort: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(key) = self
+            .local_workspace_session_mappings
+            .iter()
+            .find_map(|(key, mapped)| (*mapped == shell_session_id).then(|| key.clone()))
+        else {
+            return false;
+        };
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let message = serde_json::json!({
+            "action": "handoffToModel",
+            "projectId": key.project_id,
+            "sessionId": key.session_id,
+            "target": { "provider": provider, "model": model, "effort": effort },
+            "type": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION,
+        });
+        let script = gpui_workspace_terminal_runtime_action_script(&message);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
     fn dispatch_gpui_workspace_session_key_runtime_action_with_agent(
         &mut self,
         action: &str,

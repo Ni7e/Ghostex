@@ -8,11 +8,12 @@ import { createGpuiSidebarSettings } from './helpers/bootstrap';
 import { normalizeNonEmptyString } from './helpers/records';
 import { parseGpuiRemotePresentationSessionId } from './helpers/remote-presentation';
 import { createExportedTranscriptMentionDraft } from './helpers/terminal-lifecycle';
-import type { GpuiExportTranscriptRequestContext } from './types-and-protocol';
+import type { GpuiHandoffModelTarget } from './types-and-protocol';
 import { openAppModal, postAppModalHostMessage } from '@/packages/core-ui/app-modal-host-bridge';
 import { resolveEffectivePreferredAgentInterface } from '@/packages/shared/ghostex-settings';
 import { parseGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import type { GxserverExportSessionTranscriptResult } from '@/packages/shared/gxserver-protocol';
+import { modelPickerProvider } from '@/packages/shared/session-chat-presentation/model-picker-request';
 import { createAgentSessionDefaultTitle } from '@/packages/shared/session-grid-contract';
 import type { SidebarAgentButton } from '@/packages/shared/sidebar-agents';
 
@@ -26,7 +27,8 @@ reports as a circular base type. `gpuiSidebarRuntimeExportTranscriptMethodsShape
 at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeExportTranscriptMethods {
-  exportSessionTranscript(sessionId: string): Promise<void>;
+  exportSessionTranscript(sessionId: string, handoffTarget?: GpuiHandoffModelTarget): Promise<void>;
+  resolveHandoffTargetAgentId(target: GpuiHandoffModelTarget | undefined): string | undefined;
   runExportSessionTranscriptForDialog(options: {
     includeCommands: boolean;
     includePatches: boolean;
@@ -46,9 +48,19 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
   the dialog is about — local or remote, exactly like Fork — and parks that
   context here, because the dialog is a separate child window with no gxserver
   client of its own.
+
+  CDXC:TranscriptExport 2026-09-21 DECISION:
+  User: "if I am in a Claude session and I select a Codex one, then we should just automatically show the handover modal. The user can select what to hand over to, but in the handover modal, we need to select the one that we are going towards. Once we open that session, we need to set the model automatically for the user."
+  The chat model picker's pick of another agent's model arrives as `handoffTarget`. It is parked with the request, the dialog opens on Handoff with that agent selected, and the follow-up session launches on the model when the user keeps an agent of that family. Every open replaces the parked request, so a plain Handoff / Export never inherits an earlier target.
+  SEE-ALSO: packages/core-ui/export-transcript-result-modal.tsx and apps/desktop/src/app/window/export_transcript_modal.rs (`targetAgentId`), server/src/agents/launch_plan.rs (`agentModel` / `agentEffort`, Claude and Codex only).
   */
-  async exportSessionTranscript(this: GpuiSidebarRuntime, sessionId: string): Promise<void> {
+  async exportSessionTranscript(
+    this: GpuiSidebarRuntime,
+    sessionId: string,
+    handoffTarget?: GpuiHandoffModelTarget
+  ): Promise<void> {
     const requestId = `export-transcript-${globalThis.crypto.randomUUID()}`;
+    const targetAgentId = this.resolveHandoffTargetAgentId(handoffTarget);
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     if (remoteSession) {
       const sourceSession = this.remotePresentations
@@ -63,6 +75,7 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
         requestId,
         sessionId: remoteSession.sessionId,
         sessionTitle: sourceSession?.displayTitle || sourceSession?.title || 'Session',
+        ...(handoffTarget ? { handoffTarget } : {}),
       };
       openAppModal({
         // A remote export lives on the remote machine's disk, so this host has
@@ -71,6 +84,7 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
         canReveal: false,
         modal: 'exportTranscriptResult',
         requestId,
+        ...(targetAgentId ? { targetAgentId } : {}),
         type: 'open',
       });
       return;
@@ -93,14 +107,31 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
       requestId,
       sessionId: reference.sessionId,
       sessionTitle: sourceSession.displayTitle || sourceSession.title,
+      ...(handoffTarget ? { handoffTarget } : {}),
     };
     openAppModal({
       ...(agentId ? { agentId } : {}),
       canReveal: true,
       modal: 'exportTranscriptResult',
       requestId,
+      ...(targetAgentId ? { targetAgentId } : {}),
       type: 'open',
     });
+  },
+
+  /** The first configured agent the user can launch whose logo belongs to the picked model's family. */
+  resolveHandoffTargetAgentId(
+    this: GpuiSidebarRuntime,
+    target: GpuiHandoffModelTarget | undefined
+  ): string | undefined {
+    if (!target) {
+      return undefined;
+    }
+    const agents = (this.sidebarHud?.agents ?? []) as readonly SidebarAgentButton[];
+    return agents.find(
+      (candidate) =>
+        normalizeNonEmptyString(candidate.command) && modelPickerProvider(candidate.icon) === target.provider
+    )?.agentId;
   },
 
   /*
@@ -159,6 +190,7 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
         projectId: request.projectId,
         requestId: request.requestId,
         sessionTitle: request.sessionTitle,
+        ...(request.handoffTarget ? { handoffTarget: request.handoffTarget } : {}),
       };
       postAppModalHostMessage(
         {
@@ -278,13 +310,21 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
       createGpuiSidebarSettings(this.runtimeSettings),
       agent.agentId
     );
+    // The user may pick another agent in the dialog; the model only means something to the family that offers it.
+    const target = exported.handoffTarget;
+    const launchModel =
+      target &&
+      (target.provider === 'claude' || target.provider === 'codex') &&
+      modelPickerProvider(agent.icon) === target.provider
+        ? { agentModel: target.model, ...(target.effort ? { agentEffort: target.effort } : {}) }
+        : {};
     if (exported.machineId) {
       await this.createRemoteAgentSessionForProject(
         { machineId: exported.machineId, projectId: exported.projectId },
         agent.agentId,
         '',
         title,
-        { draft: true, firstUserInputDraft: draft, preferredInterface }
+        { ...launchModel, draft: true, firstUserInputDraft: draft, preferredInterface }
       ).catch((error: unknown) => {
         this.postRemoteToast('error', 'Could not start the conversation', {
           description: error instanceof Error ? error.message : String(error),
@@ -297,6 +337,7 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
       return;
     }
     await this.createAgentSessionRecordForProject(project, agent, '', {
+      ...launchModel,
       draft: true,
       errorMessage: 'Could not create the new agent session.',
       firstUserInputDraft: draft,

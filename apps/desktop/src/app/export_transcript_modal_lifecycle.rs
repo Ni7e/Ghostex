@@ -45,12 +45,22 @@ impl GhostexGpuiApp {
             .map(str::trim)
             .filter(|agent_id| !agent_id.is_empty())
             .map(str::to_string);
+        let target_agent_id = message
+            .get("targetAgentId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|agent_id| !agent_id.is_empty())
+            .map(str::to_string);
         let config = ExportTranscriptModalConfig {
             agents: self.gpui_export_transcript_prompt_agents(),
             default_agent_id,
             palette: self.gpui_native_modal_palette(),
             prefs_path: Some(gpui_export_transcript_modal_prefs_path()),
-            initial_mode: None,
+            // A handover from the chat model picker opens on Handoff without rewriting the remembered mode.
+            initial_mode: target_agent_id
+                .is_some()
+                .then_some(ExportTranscriptMode::Handoff),
+            target_agent_id,
         };
         let host = self.native_app_modal_host(cx, move |app, command, cx| {
             app.handle_gpui_export_transcript_modal_command(&request_id, command, cx);

@@ -32,7 +32,7 @@ import {
 import { AppTooltip } from './app-tooltip';
 import { playCopySound } from './copy-sound';
 
-const clientStorage = storageScope(["exportOptions","exportMode"]);
+const clientStorage = storageScope(['exportOptions', 'exportMode']);
 
 /**
  * CDXC:TranscriptExport 2026-08-24:
@@ -147,6 +147,12 @@ export type ExportTranscriptModalProps = {
   stage: ExportTranscriptModalStage;
   /** Disables Handoff while the host is creating the session. */
   startBusy?: boolean;
+  /**
+   * The agent the chat model picker is handing over to. It fills the user's own selection rather than
+   * `defaultAgentId`, which the finished export's agent outranks, and opens the dialog on Handoff
+   * without rewriting the remembered mode.
+   */
+  targetAgentId?: string;
 };
 
 const INCLUDE_TOGGLE_ROWS: Array<{
@@ -195,10 +201,13 @@ export function ExportTranscriptModal({
   onStartNewConversation,
   stage,
   startBusy = false,
+  targetAgentId,
 }: ExportTranscriptModalProps) {
   const agentSelectId = useId();
-  const [mode, setMode] = useState<ExportTranscriptMode>(() => initialMode ?? readExportTranscriptMode());
-  const [selectedAgentId, setSelectedAgentId] = useState('');
+  const [mode, setMode] = useState<ExportTranscriptMode>(
+    () => initialMode ?? (targetAgentId ? 'handoff' : readExportTranscriptMode())
+  );
+  const [selectedAgentId, setSelectedAgentId] = useState(targetAgentId ?? '');
   const [copied, setCopied] = useState(false);
   const [includeOptions, setIncludeOptions] = useState(readExportTranscriptIncludeOptions);
   const handoffRequestedRef = useRef(false);
@@ -223,11 +232,11 @@ export function ExportTranscriptModal({
       return;
     }
     handoffRequestedRef.current = false;
-    setMode(initialMode ?? readExportTranscriptMode());
-    setSelectedAgentId('');
+    setMode(initialMode ?? (targetAgentId ? 'handoff' : readExportTranscriptMode()));
+    setSelectedAgentId(targetAgentId ?? '');
     setCopied(false);
     setIncludeOptions(readExportTranscriptIncludeOptions());
-  }, [initialMode, isOpen]);
+  }, [initialMode, isOpen, targetAgentId]);
 
   useEffect(() => {
     if (!isDone || !handoffRequestedRef.current || !effectiveAgentId) {

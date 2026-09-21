@@ -31,6 +31,7 @@ import type {
   SidebarSessionGroup,
   SidebarToExtensionMessage,
 } from '@/packages/shared/session-grid-contract';
+import type { ModelPickerProvider } from '@/packages/shared/session-chat-presentation/model-picker';
 import type { SidebarGitAction, SidebarGitChangedFile, SidebarGitState } from '@/packages/shared/sidebar-git';
 
 export type GpuiGxserverBootstrap = {
@@ -636,6 +637,15 @@ export type GpuiExportTranscriptRequestContext = {
   /** Identifies this exact dialog open across close/reopen races. */
   requestId: string;
   sessionId: string;
+  /** Set when the chat model picker opened the dialog by picking another agent's model. */
+  handoffTarget?: GpuiHandoffModelTarget;
+};
+
+/** The model the chat model picker chose for the follow-up session, and the agent family that offers it. */
+export type GpuiHandoffModelTarget = {
+  provider: ModelPickerProvider;
+  model: string;
+  effort: string;
 };
 
 export type GpuiExportedTranscriptResult = {
@@ -649,6 +659,7 @@ export type GpuiExportedTranscriptResult = {
   requestId: string;
   /** Absent for the local daemon; set for a remote machine's own daemon. */
   machineId?: string;
+  handoffTarget?: GpuiHandoffModelTarget;
 };
 
 export type GpuiProjectDiffStatsRefreshTarget =
@@ -808,6 +819,13 @@ export type GpuiWorkspaceTerminalRuntimeActionPayload =
       agentId: string;
       projectId: string;
       sessionId: string;
+    }
+  | {
+      /** The chat model picker chose a model that belongs to another agent than the session's. */
+      action: 'handoffToModel';
+      projectId: string;
+      sessionId: string;
+      target: GpuiHandoffModelTarget;
     }
   | { action: 'sleepAllDaemonSessions' }
   | { action: 'sleepInactiveSessions' };
