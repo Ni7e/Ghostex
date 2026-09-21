@@ -66,6 +66,12 @@ pub struct MessagesState {
     pub seed_started_at_ms: f64,
     /// How many seed reads have been retried inside that window.
     pub seed_attempt: u32,
+    /// Bumped whenever an authoritative frame or read replaces the folded snapshot.
+    ///
+    /// The composed list the projection reads is `useMemo`'d over that fold in the TypeScript, so
+    /// a new fold is a new array even when the rows in it are identical, and `take`'s identity
+    /// test ships a splice for it. This counter is what stands in for that identity.
+    pub authoritative_revision: u64,
 }
 
 /// Where the accepted stream stands, and whether it ever started.

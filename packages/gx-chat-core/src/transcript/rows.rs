@@ -6,7 +6,7 @@
 //! live is described on [`crate::state::TranscriptViewState`].
 
 use crate::document::{RowDetails, TranscriptItem};
-use crate::state::{ChatContext, ChatState};
+use crate::state::{ChatContext, ChatState, ProjectionInputs};
 use crate::transcript::presentation;
 
 /// The whole transcript list, from which family a computes the splice against what the host last
@@ -46,11 +46,31 @@ pub fn row_details(state: &ChatState, context: &ChatContext) -> RowDetails {
 /// a row that shipped as a placeholder is queued here, and the next [`advance`] projects a batch of
 /// them so the following publish carries the whole row.
 pub fn refresh(state: &mut ChatState, context: &ChatContext) {
+    // `NativeChatPresentation.update` rebuilds only when one of its five inputs changed and hands
+    // back the SAME result object otherwise, which is what `take`'s identity comparison reads. The
+    // core has no identities, so the five inputs are remembered here and the revision below stands
+    // in for "this is a new array".
+    let inputs = ProjectionInputs {
+        composed: state.messages.composed.clone(),
+        authoritative_revision: state.messages.authoritative_revision,
+        working: crate::transcript::foreign::is_working(state),
+        summary: state.transcript_view.summary_mode,
+        detail_revision: state.transcript_view.detail_revision,
+        backfill_revision: state.transcript_view.backfill_revision,
+    };
+    if state.transcript_view.projection_inputs.as_ref() == Some(&inputs) {
+        return;
+    }
     let projection = presentation::build(state, context);
     let view = &mut state.transcript_view;
     view.items = projection.items;
     view.final_ids = projection.final_ids;
     view.backfill = projection.backfill;
+    view.projection_inputs = Some(inputs);
+    // `update` runs INSIDE `publish` in the TypeScript, so a rebuild only becomes a new array the
+    // host can see on a turn that publishes. `ChatCore::republish` turns this flag into the
+    // revision the frame's identity test reads.
+    view.projection_rebuilt = true;
     state.transcript_view.row_details = row_details(state, context);
 }
 

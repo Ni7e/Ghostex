@@ -172,10 +172,14 @@ fn self_naming(method: &ChatRpcMethod) -> bool {
 struct World {
     storage: BTreeMap<(String, String), String>,
     outstanding: VecDeque<Outstanding>,
-    /// Storage answers raised by the effects of the record being processed, delivered on the next
-    /// one. The TypeScript's storage answers arrive over the broker, so they never land inside the
-    /// call that asked.
-    deferred: Vec<Event>,
+    /// Storage answers the core is waiting for, oldest first.
+    ///
+    /// They are delivered on the recorded `resolve` records that answer NOTHING the core asked
+    /// for, because those records ARE the TypeScript's storage answers: its client storage rides
+    /// on the broker (`composer('summary')`, `composer('questionWrite')`, …) where the core's is
+    /// an [`Effect`]. Delivering them there rather than immediately is what puts a
+    /// `summaryMode = await composer('summary', …)` on the same turn in both brains.
+    storage_answers: VecDeque<Event>,
     unanswered: usize,
     unmatched_answers: usize,
 }
@@ -199,7 +203,8 @@ impl World {
                 }
                 Effect::ReadStorage { key } => {
                     let value = self.storage.get(&slot(&key)).cloned();
-                    self.deferred.push(Event::StorageLoaded { key, value });
+                    self.storage_answers
+                        .push_back(Event::StorageLoaded { key, value });
                 }
                 Effect::WriteStorage { key, value, .. } => {
                     match value {
@@ -210,8 +215,8 @@ impl World {
                             self.storage.remove(&slot(&key));
                         }
                     }
-                    self.deferred
-                        .push(Event::StorageWritten { key, error: None });
+                    self.storage_answers
+                        .push_back(Event::StorageWritten { key, error: None });
                 }
                 _ => {}
             }
@@ -238,6 +243,11 @@ impl World {
                     (Some(method), false, None) => !self_naming(method),
                 });
         let Some(at) = at else {
+            // Not an answer to anything the core asked for: it is the TypeScript's own storage
+            // round trip, and the core has a storage answer of its own waiting for this turn.
+            if let Some(event) = self.storage_answers.pop_front() {
+                return Some(event);
+            }
             self.unmatched_answers += 1;
             return None;
         };
@@ -329,13 +339,6 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
             }
         }
 
-        // The storage answers the previous record's effects asked for. The host performs them
-        // between calls, which is where the TypeScript's own answers land.
-        for event in std::mem::take(&mut world.deferred) {
-            let effects = core.handle(event, context);
-            world.perform(effects);
-        }
-
         match kind {
             "in" => {
                 inputs += 1;
@@ -394,6 +397,12 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
         }
     }
 
+    // Storage answers the recording ran out of `resolve` records for are delivered at the end,
+    // so a surface that reads one is not left loading in the last documents of the run.
+    while let Some(event) = world.storage_answers.pop_front() {
+        let effects = core.handle(event, ChatContext::at(0.0));
+        world.perform(effects);
+    }
     let unanswered = world.outstanding.len() + world.unanswered;
     Ok(Report {
         name,

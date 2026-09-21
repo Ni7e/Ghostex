@@ -29,9 +29,26 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
             outcome.as_ref(),
         ));
     }
-    // `presentation.update(...)` runs once per turn, inside `publish`, and is what fills the item
-    // list and the queue of rows still drawn as plain text.
-    crate::transcript::rows::refresh(state, context);
+    // The two transcript modes change when their write lands, which is what `await
+    // composer('summary'|'verbose', …)` does.
+    if let Event::StorageWritten { key, error } = event {
+        if key.store == crate::composer::storage::SUMMARY_STORE {
+            if let (Some(next), None) = (state.transcript_view.pending_summary_mode.take(), error) {
+                state.transcript_view.summary_mode = next;
+                state.transcript_view.invalidate();
+            }
+        }
+        if key.store == crate::composer::storage::VERBOSE_STORE {
+            if let (Some(next), None) =
+                (state.transcript_view.pending_verbose_override.take(), error)
+            {
+                state.transcript_view.verbose_override = next;
+            }
+        }
+    }
+    // `presentation.update(...)` runs inside `publish`, AFTER the controller has composed the
+    // message list it projects, so `ChatCore::republish` calls `rows::refresh` rather than this
+    // hook: calling it here would project the previous turn's transcript.
     // `scheduleBackfill` is a zero-delay timer that promotes 24 placeholders per pass, newest
     // first, and re-arms itself while any are left.
     if matches!(event, Event::Tick) && state.core.timer_fired(BACKFILL_TIMER) {

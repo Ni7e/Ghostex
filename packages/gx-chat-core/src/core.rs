@@ -40,6 +40,9 @@ pub struct ChatCore {
     armed_wake_ms: Option<u64>,
     /// What the host was last sent, so a frame carries only the changed window.
     sent: SentFrame,
+    /// Bumped whenever `republish` rebuilds the frame parts, which stands in for the array
+    /// identity `take` compares on.
+    parts_revision: u64,
 }
 
 /// The parts the host already has, which is what turns a whole list into a splice.
@@ -49,6 +52,9 @@ pub struct ChatCore {
 /// value here is the same test.
 #[derive(Clone, Debug, Default)]
 struct SentFrame {
+    /// The parts counter the host was last sent, so a drain after a publish ships all four
+    /// channels and a drain without one ships none.
+    parts_revision: u64,
     items: Option<Vec<TranscriptItem>>,
     subagent_items: Option<Vec<TranscriptItem>>,
     minimap: Option<Vec<MinimapMarker>>,
@@ -124,13 +130,34 @@ impl ChatCore {
     /// The document is left out when the host is already current, which is what keeps a
     /// once-a-second status frame from shipping the whole transcript.
     pub fn frame(&mut self, last_revision: u64) -> Frame {
-        let items_splice = splice(self.sent.items.as_deref(), &self.parts.items);
-        self.sent.items = Some(self.parts.items.clone());
-        let subagent_splice = splice(
-            self.sent.subagent_items.as_deref(),
-            &self.parts.subagent_items,
-        );
-        self.sent.subagent_items = Some(self.parts.subagent_items.clone());
+        // `take` compares its four channels by IDENTITY. `projection.items` is a new array
+        // whenever `NativeChatPresentation.update` rebuilt, even when every row in it was reused,
+        // so a rebuild ships the degenerate splice `{start: length, deleteCount: 0, items: []}`;
+        // an unchanged turn hands back the same result object and ships nothing. The core has no
+        // identities, so the projection's own revision stands in for it.
+        // The first drain always ships, whatever happened: `itemsSplice(undefined, next)` has no
+        // previous array to compare against.
+        let rebuilt = self.sent.items.is_none() || self.parts_revision != self.sent.parts_revision;
+        self.sent.parts_revision = self.parts_revision;
+        let mut items_splice = None;
+        if rebuilt {
+            items_splice = Some(splice(self.sent.items.as_deref(), &self.parts.items));
+            self.sent.items = Some(self.parts.items.clone());
+        }
+        // The other three keep their identity when their content does: the minimap rail caches its
+        // own projection, the subagent viewer hands back one stable list, and `rowDetails` is a
+        // STRING, so `sentRowDetails === rowDetails` is a value comparison already.
+        let subagent_splice =
+            if self.sent.subagent_items.as_deref() == Some(self.parts.subagent_items.as_slice()) {
+                None
+            } else {
+                let splice = splice(
+                    self.sent.subagent_items.as_deref(),
+                    &self.parts.subagent_items,
+                );
+                self.sent.subagent_items = Some(self.parts.subagent_items.clone());
+                Some(splice)
+            };
         let minimap = if self.sent.minimap.as_deref() == Some(self.parts.minimap.as_slice()) {
             None
         } else {
@@ -186,11 +213,19 @@ impl ChatCore {
             None,
             crate::session::working::is_working(&self.state),
         );
+        // `presentation.update(state.messages, …)` runs here in `publish`, on the list the
+        // composition above has just produced.
+        crate::transcript::rows::refresh(&mut self.state, &self.context);
         // The test is "did the STATE change", asked in the only terms the core has: assemble the
         // new state at the clock the published document was assembled at. Equal means nothing but
         // the clock moved, and the TypeScript would not have published either, so the host keeps
         // the snapshot it has (its `snapshot` variable is not refreshed without a publish).
         let requested = std::mem::take(&mut self.state.core.publish_requested);
+        // `if (controller) publish(...)`: before the boot read answers there is no controller, so
+        // nothing the core has done can ship yet and the host's first drain is empty.
+        if !self.state.core.controller_started {
+            return;
+        }
         let probe = assemble(&self.state, &self.published_context);
         let probe_parts = frame_parts(&self.state, &self.published_context);
         if !requested && probe == self.document && probe_parts == self.parts {
@@ -198,6 +233,10 @@ impl ChatCore {
         }
         self.document = assemble(&self.state, &self.context);
         self.parts = frame_parts(&self.state, &self.context);
+        if std::mem::take(&mut self.state.transcript_view.projection_rebuilt) {
+            self.state.transcript_view.projection_revision += 1;
+        }
+        self.parts_revision = self.state.transcript_view.projection_revision;
         self.published_context = self.context;
         self.revision += 1;
     }
@@ -217,18 +256,15 @@ impl ChatCore {
 /// of JSON per frame on a 139-message session. Only the changed window crosses the bridge; GPUI
 /// splices its item list and list state the same way.
 /// SEE-ALSO: apps/desktop/src/app/native_chat/state.rs (pump).
-fn splice(previous: Option<&[TranscriptItem]>, next: &[TranscriptItem]) -> Option<ItemsSplice> {
+fn splice(previous: Option<&[TranscriptItem]>, next: &[TranscriptItem]) -> ItemsSplice {
     let Some(previous) = previous else {
-        return Some(ItemsSplice {
+        return ItemsSplice {
             start: 0,
             delete_count: 0,
             items: next.to_vec(),
             length: next.len(),
-        });
+        };
     };
-    if previous == next {
-        return None;
-    }
     let limit = previous.len().min(next.len());
     let mut start = 0;
     while start < limit && previous[start] == next[start] {
@@ -238,10 +274,10 @@ fn splice(previous: Option<&[TranscriptItem]>, next: &[TranscriptItem]) -> Optio
     while end < limit - start && previous[previous.len() - 1 - end] == next[next.len() - 1 - end] {
         end += 1;
     }
-    Some(ItemsSplice {
+    ItemsSplice {
         start,
         delete_count: previous.len() - start - end,
         items: next[start..next.len() - end].to_vec(),
         length: next.len(),
-    })
+    }
 }

@@ -111,6 +111,7 @@ pub fn boot_read(
     context: &ChatContext,
 ) -> Vec<Effect> {
     state.session.boot_read_request = None;
+    state.core.controller_started = true;
     state.identity.client_id = read.client_id.clone();
     state.identity.session_key = read.session_key.clone();
     let config = state.session.boot_config.clone().unwrap_or_default();
@@ -133,6 +134,7 @@ pub fn boot_read(
         apply_draft_agent_carriage(state, &cached.result);
         apply_authoritative(state, &cached.result, true, context);
         state.messages.snapshot = Some(cached);
+        state.messages.authoritative_revision += 1;
     }
 
     // The stall watchdog runs for as long as the chat is open. Nothing below the socket reports a
@@ -196,6 +198,7 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
             }
             apply_authoritative(state, &folded.result, true, context);
             state.messages.snapshot = Some(folded);
+            state.messages.authoritative_revision += 1;
             Vec::new()
         }
         ChatFrame::Appended(appended) => {
@@ -214,6 +217,7 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                     // same frame.
                     if state.messages.remove_ids(&appended.superseded_message_ids) {
                         state.messages.snapshot = Some(previous.clone());
+                        state.messages.authoritative_revision += 1;
                     }
                     let folded = fold_append(&previous, appended);
                     if !appended.messages.is_empty() {
@@ -234,6 +238,7 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                         state.session.lifecycle = Some(lifecycle);
                     }
                     state.messages.snapshot = Some(folded);
+                    state.messages.authoritative_revision += 1;
                     Vec::new()
                 }
             }
@@ -251,6 +256,7 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                         fold_state(state.messages.snapshot.as_ref(), StateCarrier::State(frame));
                     apply_authoritative(state, &folded.result, true, context);
                     state.messages.snapshot = Some(folded);
+                    state.messages.authoritative_revision += 1;
                     Vec::new()
                 }
             }

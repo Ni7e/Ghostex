@@ -140,3 +140,19 @@ pub fn encode_verbose(verbose: bool) -> &'static str {
         "0"
     }
 }
+
+/// `ghostex.sessionChat.summary.<sessionKey>`, as the store plus the suffix the host prefixes.
+pub fn summary_key(session_key: &str) -> crate::event::StorageKey {
+    crate::event::StorageKey {
+        store: SUMMARY_STORE.to_string(),
+        suffix: session_key.to_string(),
+    }
+}
+
+/// `ghostex.sessionChat.verbose.<sessionKey>`.
+pub fn verbose_key(session_key: &str) -> crate::event::StorageKey {
+    crate::event::StorageKey {
+        store: VERBOSE_STORE.to_string(),
+        suffix: session_key.to_string(),
+    }
+}

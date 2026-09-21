@@ -72,22 +72,27 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             state.transcript_view.row_details = rows::row_details(state, context);
             Vec::new()
         }
+        // `summaryMode = await composer('summary', …)`: the mode changes when the WRITE lands,
+        // not when the row is clicked, so a refused write leaves the transcript as it was. The
+        // flip is applied by `crate::transcript::settle` on `Event::StorageWritten`.
         ActionKind::ToggleSummary => {
-            state.transcript_view.summary_mode = !state.transcript_view.summary_mode;
-            state.transcript_view.invalidate();
-            rows::refresh(state, context);
-            // The stored value is the composer's boot input, so the host persists it.
-            vec![Effect::HostAction {
-                action: "summary".to_string(),
-                params: Box::new(json!({ "enabled": state.transcript_view.summary_mode })),
+            let next = !state.transcript_view.summary_mode;
+            state.transcript_view.pending_summary_mode = Some(next);
+            vec![Effect::WriteStorage {
+                key: crate::composer::storage::summary_key(&state.identity.session_key),
+                value: Some(crate::composer::storage::encode_summary(next).to_string()),
+                durable: false,
             }]
         }
         ActionKind::SetVerbose => {
             let enabled = param(action, "enabled").and_then(Value::as_bool);
-            state.transcript_view.verbose_override = enabled;
-            vec![Effect::HostAction {
-                action: "verbose".to_string(),
-                params: Box::new(json!({ "enabled": enabled })),
+            state.transcript_view.pending_verbose_override = Some(enabled);
+            vec![Effect::WriteStorage {
+                key: crate::composer::storage::verbose_key(&state.identity.session_key),
+                value: Some(
+                    crate::composer::storage::encode_verbose(enabled == Some(true)).to_string(),
+                ),
+                durable: false,
             }]
         }
         ActionKind::LoadWork => {

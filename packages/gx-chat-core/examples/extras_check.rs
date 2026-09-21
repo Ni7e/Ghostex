@@ -479,7 +479,11 @@ impl Core {
             last_effects: Vec::new(),
             document: Value::Null,
         };
-        core.tick();
+        // Nothing publishes before the composer boot read answers, the same way `startController`
+        // is only called from `composer('read')`'s `.then(...)`.
+        core.drive(Event::ComposerBootRead(Box::new(
+            ghostex_gx_chat_core::ComposerBootRead::default(),
+        )));
         core
     }
 

@@ -14,6 +14,12 @@
  * gate on its own keys while the others are still empty. A key is matched inside `snapshot` as
  * well as at the top level of the take payload, because that is where the document's own keys
  * live.
+ *
+ * `--ignore` drops whole pointer prefixes from the comparison. `tooling/gx-chat-core/run-gates.sh`
+ * passes `/requests`, which is the QuickJS bridge's wire form and not part of the Rust core's
+ * contract at all: client storage rides on it there (`composer('read')`, `composer('summary')`)
+ * and is an `Effect` here, and its ids come off a counter the TypeScript shares with its timers.
+ * The Rust host consumes `Vec<Effect>` and builds no `requests` array.
  */
 
 import { readFileSync } from 'node:fs';
@@ -22,6 +28,8 @@ interface Options {
   expected: string;
   actual: string;
   keys: string[] | null;
+  /** Pointer prefixes dropped from the comparison, with the reason printed in the report. */
+  ignore: string[];
   limit: number;
 }
 
@@ -30,6 +38,7 @@ function parseOptions(argv: readonly string[]): Options {
   let expected = '';
   let actual = '';
   let keys: string[] | null = null;
+  const ignore: string[] = [];
   let limit = 40;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -39,6 +48,14 @@ function parseOptions(argv: readonly string[]): Options {
         .split(',')
         .map((key) => key.trim())
         .filter(Boolean);
+      index += 1;
+    } else if (argument === '--ignore' && next) {
+      ignore.push(
+        ...next
+          .split(',')
+          .map((pointer) => pointer.trim())
+          .filter(Boolean)
+      );
       index += 1;
     } else if (argument === '--expected' && next) {
       expected = next;
@@ -57,6 +74,7 @@ function parseOptions(argv: readonly string[]): Options {
     actual: actual || `/tmp/gx-chat/actual/${name}.jsonl`,
     expected: expected || `/tmp/gx-chat/expected/${name}.jsonl`,
     keys,
+    ignore,
     limit,
   };
 }
@@ -148,8 +166,11 @@ function main(): void {
   let matched = 0;
 
   for (let index = 0; index < compared; index += 1) {
-    const pointers: string[] = [];
-    collectPointers(documentOf(expected[index], options.keys), documentOf(actual[index], options.keys), '', pointers);
+    const found: string[] = [];
+    collectPointers(documentOf(expected[index], options.keys), documentOf(actual[index], options.keys), '', found);
+    const pointers = found.filter(
+      (pointer) => !options.ignore.some((prefix) => pointer === prefix || pointer.startsWith(`${prefix}/`))
+    );
     if (pointers.length === 0) {
       matched += 1;
       continue;
@@ -162,6 +183,9 @@ function main(): void {
   console.log(`expected        ${expected.length} documents (${options.expected})`);
   console.log(`actual          ${actual.length} documents (${options.actual})`);
   console.log(`compared        ${compared} documents${options.keys ? ` on ${options.keys.length} keys` : ''}`);
+  if (options.ignore.length) {
+    console.log(`ignored         ${options.ignore.join(', ')}`);
+  }
   console.log(`matched         ${matched}/${compared}`);
   if (expected.length !== actual.length) {
     console.log(`length          the two runs published a different number of documents`);

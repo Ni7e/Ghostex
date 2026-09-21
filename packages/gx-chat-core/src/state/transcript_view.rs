@@ -83,6 +83,31 @@ pub struct TranscriptViewState {
     pub deferred_requests: BTreeMap<u64, String>,
     /// The `readSessionChatImage` reads in flight, by request id, with the path asked for.
     pub image_requests: BTreeMap<u64, String>,
+    /// The summary mode the write in flight will adopt once it lands.
+    pub pending_summary_mode: Option<bool>,
+    /// The verbose override the write in flight will adopt once it lands.
+    pub pending_verbose_override: Option<Option<bool>>,
+    /// The five inputs the last projection was built from, so an unchanged turn rebuilds nothing.
+    pub projection_inputs: Option<ProjectionInputs>,
+    /// The projection was rebuilt and the publish that ships it has not run yet.
+    pub projection_rebuilt: bool,
+    /// Bumped by `ChatCore::republish` when it publishes a rebuilt projection, which is what the
+    /// host's incremental channels compare on: `take` tests
+    /// `sentTranscriptItems === transcriptItems`, and a rebuilt list is a new array even when
+    /// every row in it was reused.
+    pub projection_revision: u64,
+}
+
+/// What `NativeChatPresentation.update` decides on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectionInputs {
+    pub composed: Vec<ChatMessage>,
+    /// A new fold is a new composed array in the TypeScript, whatever its rows say.
+    pub authoritative_revision: u64,
+    pub working: bool,
+    pub summary: bool,
+    pub detail_revision: u64,
+    pub backfill_revision: u64,
 }
 
 impl Default for TranscriptViewState {
@@ -107,6 +132,11 @@ impl Default for TranscriptViewState {
             save_prompt_requests: BTreeMap::new(),
             deferred_requests: BTreeMap::new(),
             image_requests: BTreeMap::new(),
+            pending_summary_mode: None,
+            pending_verbose_override: None,
+            projection_inputs: None,
+            projection_rebuilt: false,
+            projection_revision: 0,
         }
     }
 }
@@ -118,6 +148,7 @@ impl TranscriptViewState {
         self.projected.clear();
         self.backfill.clear();
         self.items.clear();
+        self.projection_inputs = None;
     }
 
     /// Whether any row is still drawn as a plain-text placeholder, which is what keeps the 0 ms

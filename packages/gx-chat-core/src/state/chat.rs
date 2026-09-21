@@ -77,6 +77,13 @@ pub struct CoreState {
     /// return instead of awaiting, so the same turn is named here: the dispatcher records what the
     /// action asked for, and family a's settle publishes when that answer lands.
     pub publish_awaits: Vec<PublishAwait>,
+    /// The controller exists, which is only true once the composer boot read has answered.
+    ///
+    /// Every publish in `native-host.ts` is written `if (controller) publish(controller.current())`
+    /// or runs inside the controller itself, and `startController` is called from the boot read's
+    /// `.then(...)`. Nothing the core does before that can ship a document, which is why `start`
+    /// leaves the host's first drain empty.
+    pub controller_started: bool,
     /// The id the next request carries, for every family.
     ///
     /// One counter for the whole core, because [`crate::Event::RpcSettled`] routes by id alone: two
