@@ -11,8 +11,10 @@ import {
   openSync,
   readFileSync,
   readSync,
+  renameSync,
   rmSync,
   statSync,
+  writeFileSync,
   writeSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -184,7 +186,7 @@ if (isWindows) {
   reexecUnderLocalStartLock();
 }
 if (targetsWindows) {
-  ensureWindowsWslRuntimeArchive();
+  await ensureWindowsWslRuntimeArchive();
 }
 const platformLabel = isDarwin
   ? `${configuration}, ${arch}`
@@ -509,31 +511,33 @@ function processIsAlive(pid) {
   }
 }
 
-function ensureWindowsWslRuntimeArchive() {
+/*
+CDXC:PlatformSupport 2026-09-22 WHY:
+The gxserver runtime is a public release asset, so it is fetched straight from
+the release download URL. `gh release download` was used here before, but the
+GitHub CLI refuses to run unauthenticated and answers 401 whenever its stored
+token has expired, which blocked `bun run start` on a machine that never needed
+GitHub credentials to build the app.
+*/
+async function downloadPublicReleaseAsset(tag, assetName, destination) {
+  const url = `https://github.com/maddada/Ghostex/releases/download/${tag}/${encodeURIComponent(assetName)}`;
+  const response = await fetch(url, { redirect: 'follow' });
+  if (!response.ok || !response.body) {
+    throw new Error(`Could not download ${url}: HTTP ${response.status} ${response.statusText}`);
+  }
+  const partial = `${destination}.partial`;
+  writeFileSync(partial, Buffer.from(await response.arrayBuffer()));
+  renameSync(partial, destination);
+}
+
+async function ensureWindowsWslRuntimeArchive() {
   if (!existsSync(windowsWslArchive)) {
     if (explicitWindowsWslArchive) {
       throw new Error(`GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE does not exist: ${windowsWslArchive}`);
     }
     mkdirSync(path.dirname(windowsWslArchive), { recursive: true });
     logStartStep(`Downloading the Ghostex ${appVersion} WSL2 runtime...`);
-    run(
-      'gh',
-      [
-        'release',
-        'download',
-        `v${appVersion}`,
-        '--repo',
-        'maddada/Ghostex',
-        '--pattern',
-        path.basename(windowsWslArchive),
-        '--dir',
-        path.dirname(windowsWslArchive),
-        '--clobber',
-      ],
-      {
-        quietLabel: 'Windows WSL2 runtime download',
-      }
-    );
+    await downloadPublicReleaseAsset(`v${appVersion}`, path.basename(windowsWslArchive), windowsWslArchive);
     if (!existsSync(windowsWslArchive)) {
       throw new Error(`The WSL2 runtime download did not produce ${windowsWslArchive}.`);
     }
