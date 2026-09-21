@@ -14,8 +14,9 @@
 //! local calendar, and `bulk` the plural payloads, which are a SET and an ORDER over the ones
 //! above rather than new behaviour. `reload` and `split` are the same shape one row at a time:
 //! Full Reload is the sleep and the wake in order, and Split Right is a focus that carries where
-//! the pane goes. `remote` is every per-session payload when the row is on a remote machine, where
-//! an action is a call down that machine's tunnel and nothing local moves.
+//! the pane goes, and `reload_set` is Full Reload over a project's rows or a user-made group's
+//! members. `remote` is every per-session payload when the row is on a remote machine, where an
+//! action is a call down that machine's tunnel and nothing local moves.
 
 mod bulk;
 mod close;
@@ -26,6 +27,7 @@ mod modals;
 mod plan;
 mod read_only;
 mod reload;
+mod reload_set;
 mod remote;
 mod resolve;
 mod snooze;
@@ -55,6 +57,9 @@ pub use plan::{ActionEffect, SidebarActionPlan, ToastLevel};
 pub use read_only::{plan_read_only_action, READ_ONLY_MESSAGE_TYPES};
 pub use reload::{
     owns_reload_message, plan_full_reload, reload_continues_after, ReloadPlan, RELOAD_MESSAGE_TYPES,
+};
+pub use reload_set::{
+    owns_reload_set_message, plan_reload_set, ReloadSetPlan, RELOAD_SET_MESSAGE_TYPES,
 };
 pub use remote::{
     owns_remote_session_message, plan_remote_session_action, RemoteActionKind, RemoteCallMode,

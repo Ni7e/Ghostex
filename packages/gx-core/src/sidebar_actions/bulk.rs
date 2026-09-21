@@ -342,7 +342,7 @@ fn project_tabs_known_absent(inputs: &SidebarInputs, project_id: &str) -> bool {
 /// `isGpuiInactiveProjectPresentationSession`: awake, and neither working nor waiting on the user.
 /// Stopped history that is pinned, tagged or starred stays in the presentation and is deliberately
 /// NOT included, because sleeping it would promote it back into the active shelf.
-fn is_inactive(row: &ghostex_gx_protocol::PresentationSession) -> bool {
+pub(super) fn is_inactive(row: &ghostex_gx_protocol::PresentationSession) -> bool {
     row.lifecycle_state == LifecycleState::Running
         && row.activity != SessionActivity::Working
         && row.activity != SessionActivity::Attention
@@ -355,7 +355,7 @@ fn is_inactive(row: &ghostex_gx_protocol::PresentationSession) -> bool {
 /// array by the byte order of that key, and a store built from deltas has no array order to read.
 /// It matters here because the order is the order the requests go out in, and a paced sleep makes
 /// that visible: the rows go to sleep one at a time, in this order, 350 ms apart.
-fn project_rows(
+pub(super) fn project_rows(
     core: &Core,
     project: &ProjectKey,
     keep: impl Fn(&ghostex_gx_protocol::PresentationSession) -> bool,

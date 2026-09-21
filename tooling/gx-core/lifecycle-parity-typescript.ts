@@ -701,7 +701,7 @@ function reloadRuntime(scenario: Json): Json {
  * is ICU collation. Using the shipped comparator here would compare the port against a collation
  * the app does not have.
  */
-function orderedPresentation(snapshot: Json): Json {
+export function orderedPresentation(snapshot: Json): Json {
   const sessions = [...((snapshot?.sessions ?? []) as Json[])].sort((left, right) =>
     compareCodePoints(
       [left.projectId, left.groupId, left.sortKey, left.sessionId],
