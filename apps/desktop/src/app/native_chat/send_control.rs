@@ -83,6 +83,18 @@ impl NativeChatView {
                 || self.snapshot["pendingAttachments"].as_u64().unwrap_or(0) > 0
         };
         let blocked = !stop && self.snapshot["sendBlockedReason"].is_string();
+        // Matches React's Send label: the gesture hints appear only while the draft can queue.
+        let label: gpui::SharedString = if stop {
+            "Stop the agent".into()
+        } else if has_draft && self.snapshot["queue"]["capabilities"]["canQueue"] == true {
+            format!(
+                "Send (hold to queue, {}-click or right-click for Compact & Send)",
+                crate::hotkey_label::terminal_overlay_hotkey_chord_label("alt")
+            )
+            .into()
+        } else {
+            "Send".into()
+        };
         let fill = gpui::rgb(if stop {
             if p.light { 0xf6b5b5 } else { 0x171717 }
         } else if p.light {
@@ -100,7 +112,7 @@ impl NativeChatView {
         div()
             .id("chat-send")
             .role(gpui::Role::Button)
-            .aria_label(if stop { "Stop the agent" } else { "Send" })
+            .aria_label(label.clone())
             .size(px(24.0 * p.scale))
             .flex_shrink_0()
             .flex()
@@ -110,12 +122,7 @@ impl NativeChatView {
             .bg(fill)
             .when(disabled || blocked, |this| this.opacity(0.5))
             .tooltip(move |window, cx| {
-                gpui_component::tooltip::Tooltip::new(if stop {
-                    "Stop the agent"
-                } else {
-                    "Send (hold to queue, right-click for Compact & Send)"
-                })
-                .build(window, cx)
+                gpui_component::tooltip::Tooltip::new(label.clone()).build(window, cx)
             })
             .when(!disabled, |this| {
                 this.chat_cursor_pointer()
@@ -136,17 +143,22 @@ impl NativeChatView {
                             this.send_hold_task = None;
                         }
                     }))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.send_hold_task = None;
-                        if std::mem::take(&mut this.send_hold_fired) {
-                            return;
-                        }
-                        if stop {
-                            this.stop_from_button(cx);
-                        } else {
-                            this.send(false, window, cx);
-                        }
-                    }))
+                    .on_click(
+                        cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                            this.send_hold_task = None;
+                            if std::mem::take(&mut this.send_hold_fired) {
+                                return;
+                            }
+                            if stop {
+                                this.stop_from_button(cx);
+                            } else if event.modifiers().alt {
+                                // Option-click is Compact & Send, the same as Option+Enter.
+                                this.submit("compact", window, cx);
+                            } else {
+                                this.send(false, window, cx);
+                            }
+                        }),
+                    )
             })
             .when(!stop, |this| {
                 this.on_mouse_down(

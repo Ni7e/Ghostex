@@ -89,6 +89,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -1290,7 +1291,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     };
 
     /** CDXC:SessionChat 2026-09-16 DECISION:
-     * User: Option+Enter or Send's right-click "Compact & Send" sends /compact to the terminal first, then queues the text written in chat.
+     * User: Option+Enter, Option-click on Send, or Send's right-click "Compact & Send" sends /compact to the terminal first, then queues the text written in chat.
      */
     const send = (text: string = getInputApi()?.getValue() ?? draftRef.current, compactFirst = false): void => {
       if (text.trim() === '' || sendInFlightRef.current) {
@@ -1560,7 +1561,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       }, SESSION_CHAT_QUEUE_LONG_PRESS_MS);
     };
 
-    const handleSendClick = (): void => {
+    const handleSendClick = (event: ReactMouseEvent<HTMLElement>): void => {
       cancelSendLongPress();
       if (longPressFiredRef.current) {
         // The press already queued; the click that closes the same gesture must
@@ -1569,10 +1570,14 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         longPressFiredRef.current = false;
         return;
       }
-      send();
+      send(undefined, event.altKey);
     };
 
     useEffect(() => cancelSendLongPress, []);
+
+    const sendButtonLabel = canQueueDraft
+      ? `Send (hold to queue, ${formatSidebarHotkeyLabel('alt')}-click or right-click for Compact & Send)`
+      : 'Send';
 
     const handleStopClick = (): void => {
       if (stopButtonCooldownTimerRef.current !== null) {
@@ -2945,45 +2950,49 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                       <IconPlayerStopFilled aria-hidden='true' className='size-3' stroke={1.6} />
                     </Button>
                   ) : (
-                    <ContextMenu
-                      onOpenChange={(open, details) => {
-                        // Touch holds keep their existing queue gesture.
-                        if (
-                          open &&
-                          (details.event.type.startsWith('touch') ||
-                            (details.event.type === 'contextmenu' && sendPointerTypeRef.current === 'touch'))
-                        ) {
-                          details.cancel();
-                          return;
-                        }
-                        if (open) cancelSendLongPress();
-                      }}
-                    >
-                      <ContextMenuTrigger
-                        render={<Button disabled={!hasSendableDraft} size='icon' />}
-                        aria-disabled={sendBlocked ? 'true' : undefined}
-                        aria-label={canQueueDraft ? 'Send (hold to queue, right-click for Compact & Send)' : 'Send'}
-                        // A blocked send stays clickable so the tap can explain
-                        // itself with a toast; only an empty draft truly disables it.
-                        className={cn('ghostex-chat-send-button size-6', sendBlocked && 'opacity-50')}
-                        onClick={handleSendClick}
-                        onPointerCancel={cancelSendLongPress}
-                        onPointerDown={(event) => {
-                          sendPointerTypeRef.current = event.pointerType;
-                          if (event.button === 0) beginSendLongPress();
-                        }}
-                        onPointerLeave={cancelSendLongPress}
-                        onPointerUp={cancelSendLongPress}
-                      >
-                        <IconArrowUp aria-hidden='true' className='size-3' stroke={2.2} />
-                      </ContextMenuTrigger>
-                      <ContextMenuContent className='ghostex-session-chat-popup' data-chat-theme={theme}>
-                        <ContextMenuItem disabled={!canQueueDraft} onClick={() => send(undefined, true)}>
-                          Compact &amp; Send
-                          <ContextMenuShortcut>{formatSidebarHotkeyLabel('alt+enter')}</ContextMenuShortcut>
-                        </ContextMenuItem>
-                      </ContextMenuContent>
-                    </ContextMenu>
+                    <AppTooltip content={sendButtonLabel} side='top'>
+                      <span className='inline-flex'>
+                        <ContextMenu
+                          onOpenChange={(open, details) => {
+                            // Touch holds keep their existing queue gesture.
+                            if (
+                              open &&
+                              (details.event.type.startsWith('touch') ||
+                                (details.event.type === 'contextmenu' && sendPointerTypeRef.current === 'touch'))
+                            ) {
+                              details.cancel();
+                              return;
+                            }
+                            if (open) cancelSendLongPress();
+                          }}
+                        >
+                          <ContextMenuTrigger
+                            render={<Button disabled={!hasSendableDraft} size='icon' />}
+                            aria-disabled={sendBlocked ? 'true' : undefined}
+                            aria-label={sendButtonLabel}
+                            // A blocked send stays clickable so the tap can explain
+                            // itself with a toast; only an empty draft truly disables it.
+                            className={cn('ghostex-chat-send-button size-6', sendBlocked && 'opacity-50')}
+                            onClick={handleSendClick}
+                            onPointerCancel={cancelSendLongPress}
+                            onPointerDown={(event) => {
+                              sendPointerTypeRef.current = event.pointerType;
+                              if (event.button === 0) beginSendLongPress();
+                            }}
+                            onPointerLeave={cancelSendLongPress}
+                            onPointerUp={cancelSendLongPress}
+                          >
+                            <IconArrowUp aria-hidden='true' className='size-3' stroke={2.2} />
+                          </ContextMenuTrigger>
+                          <ContextMenuContent className='ghostex-session-chat-popup' data-chat-theme={theme}>
+                            <ContextMenuItem disabled={!canQueueDraft} onClick={() => send(undefined, true)}>
+                              Compact &amp; Send
+                              <ContextMenuShortcut>{formatSidebarHotkeyLabel('alt+enter')}</ContextMenuShortcut>
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
+                      </span>
+                    </AppTooltip>
                   )}
                 </div>
               </div>
