@@ -42,7 +42,7 @@ const SLOW_UPDATE_US: u64 = 5_000;
 /// whole HUD document, which was affordable once per publish and is not affordable on the path an
 /// update takes: since step 3 an update runs on every focus move, and holding "next tab" would
 /// have hashed a few hundred kilobytes of HUD per keystroke. Every part here moves only when its
-/// own source moved, so the comparison is six integers.
+/// own source moved, so the comparison is four cheap numbers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SidebarCarryKey {
     /// The runtime facts channel's HUD, which the snapshot and the menus read.
@@ -586,7 +586,7 @@ impl GhostexGpuiApp {
                 "canAddProject": false,
                 "copy": Value::Null,
             }),
-            hud: Value::Null,
+            hud: std::sync::Arc::new(Value::Null),
             groups: Vec::new(),
             selected_machine_id: view.selected_machine_id.clone(),
             machines: Vec::new(),

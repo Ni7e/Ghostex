@@ -81,7 +81,7 @@ pub(super) fn refresh_inputs(
     }
     if cache.hud_generation != Some(facts.hud_generation) {
         cache.hud_generation = Some(facts.hud_generation);
-        refresh_recent_projects(&mut inputs.host, facts.hud.as_ref());
+        refresh_recent_projects(&mut inputs.host, facts.hud.as_deref());
     }
     if cache.rows_generation != Some(facts.rows_generation) {
         cache.rows_generation = Some(facts.rows_generation);

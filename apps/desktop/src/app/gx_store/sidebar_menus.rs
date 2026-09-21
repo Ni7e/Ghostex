@@ -102,8 +102,9 @@ impl GhostexGpuiApp {
     /// The facts the menus read that are neither the store nor the settings.
     pub(super) fn gx_store_menu_host(&mut self) -> MenuHost {
         self.gx_store_menu_host_generation();
-        let hud = self.gx_store.runtime_facts.hud.clone();
-        let hud = hud.as_ref();
+        // Borrowed, not cloned: the HUD is behind an `Arc` and this runs on every list install
+        // (gx_store/runtime_facts.rs).
+        let hud = self.gx_store.runtime_facts.hud.as_deref();
         // The selected tab and the connect states are the store's own since M4d, so Add Project on
         // a remote machine is decided by the same list the tabs are drawn from.
         let selected = self.gx_store.sidebar_ui.selected_machine_id().to_string();

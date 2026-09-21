@@ -35,6 +35,7 @@
 //! SEE-ALSO: apps/desktop/src/app/gx_store/sidebar_list.rs,
 //! apps/desktop/src/app/gx_store/sidebar_ui.rs.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -99,15 +100,15 @@ impl GhostexGpuiApp {
     /// The HUD the installed list carries, which is an empty object once the HUD leg was given up
     /// on. Every reader of it indexes and defaults, so an empty one is the built-in appearance and
     /// an empty launcher rather than a list that is not drawn.
-    pub(super) fn gx_store_sidebar_hud(&self) -> Option<Value> {
+    pub(super) fn gx_store_sidebar_hud(&self) -> Option<Arc<Value>> {
         match self.gx_store.runtime_facts.hud() {
-            Some(hud) => Some(hud.clone()),
+            Some(hud) => Some(Arc::clone(hud)),
             None => self
                 .gx_store
                 .sidebar_list
                 .ready_recovery()
                 .hud
-                .then(|| json!({})),
+                .then(|| Arc::new(json!({}))),
         }
     }
 

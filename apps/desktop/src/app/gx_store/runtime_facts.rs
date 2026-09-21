@@ -20,6 +20,7 @@
 //! apps/desktop/src/app/gx_store/diagnostics_runtime_facts.rs.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use ghostex_gx_core::{CloseAfterDoneInput, DelayedSendInput, ProjectDiffStats};
 use serde_json::Value;
@@ -31,7 +32,13 @@ use crate::app::native_sidebar::model::NativeSidebarRevealRequest;
 #[derive(Default)]
 pub(crate) struct SidebarRuntimeFacts {
     /// The sidebar HUD as the zustand store holds it, normalized the way the store normalizes it.
-    pub(super) hud: Option<Value>,
+    ///
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// Behind an `Arc` because every list install used to deep-clone it three times (the install
+    /// itself, the menus and the snapshot the renderer draws), and since step 3 an install happens
+    /// on every focus move: holding "next tab" copied a few hundred kilobytes of HUD per keystroke.
+    /// Nothing mutates it, so the three copies were three readers of one immutable document.
+    pub(super) hud: Option<Arc<Value>>,
     pub(super) project_diff_stats: HashMap<String, ProjectDiffStats>,
     pub(super) close_after_done: HashMap<String, CloseAfterDoneInput>,
     pub(super) delayed_sends: HashMap<String, DelayedSendInput>,
@@ -61,7 +68,7 @@ pub(crate) struct RuntimeFactsCounters {
 
 impl SidebarRuntimeFacts {
     /// The HUD the runtime posted, or `None` while it has not posted one.
-    pub(super) fn hud(&self) -> Option<&Value> {
+    pub(super) fn hud(&self) -> Option<&Arc<Value>> {
         self.hud.as_ref()
     }
 
@@ -86,7 +93,7 @@ impl GhostexGpuiApp {
         let facts = &mut self.gx_store.runtime_facts;
         match value.get("kind").and_then(Value::as_str) {
             Some("hud") => {
-                facts.hud = value.get("hud").cloned();
+                facts.hud = value.get("hud").cloned().map(Arc::new);
                 facts.hud_generation += 1;
                 facts.counters.hud_posts += 1;
             }

@@ -242,7 +242,7 @@ impl SnapshotCache {
 pub(super) struct SnapshotInput<'a> {
     pub(super) menus: &'a SidebarMenus<'a>,
     /// The sidebar HUD, from the runtime's facts channel.
-    pub(super) hud: &'a Value,
+    pub(super) hud: &'a std::sync::Arc<Value>,
     /// The collection whose inline rename the renderer opens next, and the row it scrolls to.
     pub(super) rename_request: Option<NativeSidebarRenameRequest>,
     pub(super) reveal_request: Option<NativeSidebarRevealRequest>,
@@ -359,7 +359,7 @@ pub(super) fn snapshot_from_view(
             "canAddProject": view.empty_state.can_add_project,
             "copy": view.empty_state.copy,
         }),
-        hud: input.hud.clone(),
+        hud: std::sync::Arc::clone(input.hud),
         groups,
         selected_machine_id: view.selected_machine_id.clone(),
         machines: view
