@@ -284,6 +284,9 @@ pub(crate) fn read_zmx_session_screen_capture_vt(
     read_zmx_session_screen_capture_format(zmx_name, true)
 }
 
+/// CDXC:AgentScreenDetection 2026-09-22 SEE-ALSO:
+/// Every reader of this text strips all CSI sequences, so the provider must answer with physical rows: one line per grid row, real spaces, and SGR the only escapes. A serializer that replays the grid with cursor motion instead (`ESC[6;1H`, `ESC[3C`) merges rows and deletes spaces, which erases the `rule / marker / rule` composer sandwich and makes every chat send fail its verified clear with the input box on screen.
+/// SEE-ALSO: .dependencies/wmx/src/history.rs (`styled_row`, `plain_rows`), .dependencies/zmx/src/util.zig (`serializeTerminalRange`), server/src/session_chat_options.rs (`strip_ansi_sgr`).
 #[cfg(not(unix))]
 fn read_zmx_session_screen_capture_format(
     zmx_name: &str,
