@@ -201,32 +201,50 @@ impl GhostexGpuiApp {
     /// resolving it there would make unhiding it a silent no-op. The collection still has to be
     /// one the sidebar knows, so an id from a stale menu does nothing, which is what the
     /// TypeScript's `if (!collection) return` does.
+    ///
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// "One the sidebar knows" is asked of the list that is DRAWN, which is the store's own list
+    /// once it draws one. It used to be asked of the old page's projection in both positions of the
+    /// switch, and that projection is about to stop being published: with no publish every
+    /// collection would answer `None` here and collapse, hide, select and Collapse Projects would
+    /// silently stop on every one of them.
     fn sidebar_collection_storage_id(&self, collection_id: &str) -> Option<String> {
         let state = self.gx_store.sidebar_ui.state();
         let storage_id = format!("{}:{}", state.section_key(), collection_id);
-        let published = self
-            .native_sidebar
-            .projection
-            .iter()
-            .flat_map(|snapshot| snapshot.collections.iter())
-            .any(|collection| collection.collection_id == collection_id);
+        let drawn = self.sidebar_drawn_collection(collection_id).is_some();
         let hidden = state
             .hidden_items
             .collection_keys
             .iter()
             .any(|key| *key == storage_id);
-        (published || hidden).then_some(storage_id)
+        (drawn || hidden).then_some(storage_id)
     }
 
-    /// The groups of a collection, from the publish the menu that sent the command was built from.
+    /// The groups of a collection, from the list the menu that sent the command was built from.
     fn sidebar_collection_group_ids(&self, collection_id: &str) -> Vec<String> {
-        self.native_sidebar
-            .projection
-            .iter()
-            .flat_map(|snapshot| snapshot.collections.iter())
-            .find(|collection| collection.collection_id == collection_id)
-            .map(|collection| collection.group_ids.clone())
+        self.sidebar_drawn_collection(collection_id)
             .unwrap_or_default()
+    }
+
+    /// The drawn collection's group ids, or `None` when no drawn collection carries that id.
+    fn sidebar_drawn_collection(&self, collection_id: &str) -> Option<Vec<String>> {
+        match self.gx_store_sidebar_draws_store_list() {
+            true => self
+                .gx_store
+                .sidebar_list
+                .view()
+                .collections
+                .iter()
+                .find(|collection| collection.collection_id == collection_id)
+                .map(|collection| collection.group_ids.clone()),
+            false => self
+                .native_sidebar
+                .projection
+                .iter()
+                .flat_map(|snapshot| snapshot.collections.iter())
+                .find(|collection| collection.collection_id == collection_id)
+                .map(|collection| collection.group_ids.clone()),
+        }
     }
 
     fn sidebar_collection_session_ids(&self, collection_id: &str) -> Vec<String> {
