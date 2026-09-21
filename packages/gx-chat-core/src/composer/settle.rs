@@ -14,6 +14,37 @@ use crate::event::{ComposerBootRead, Event};
 use crate::state::{ChatContext, ChatState};
 use crate::wire::{ChatRpcMethod, RpcOutcome};
 
+/// `composer('claimReturned')`: the prompt reaches the composer only the first time its id is seen.
+///
+/// The applied-id list is one record for the whole app, so the claim is a read, a membership test
+/// and a write-back of the bounded list.
+fn settle_returned_claim(
+    state: &mut ChatState,
+    key: &crate::event::StorageKey,
+    value: Option<&str>,
+) -> Vec<Effect> {
+    if key.store != crate::composer::storage::RETURNED_PROMPTS_STORE {
+        return Vec::new();
+    }
+    let Some((id, text)) = state.composer.claiming_returned.take() else {
+        return Vec::new();
+    };
+    let applied = crate::composer::storage::decode_applied_returned_ids(value);
+    if applied.contains(&id) {
+        return Vec::new();
+    }
+    vec![
+        Effect::WriteStorage {
+            key: crate::composer::storage::returned_prompts_key(),
+            value: Some(crate::composer::storage::encode_applied_returned_ids(
+                &applied, &id,
+            )),
+            durable: true,
+        },
+        Effect::RestoreReturnedPrompt { text },
+    ]
+}
+
 /// Settles family d's carried state for this event.
 pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
     let mut effects = Vec::new();
@@ -40,6 +71,9 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
                 Some(round) => effects.extend(round),
                 None => settle_catalog(state, *request_id, outcome.as_ref()),
             }
+        }
+        Event::StorageLoaded { key, value } => {
+            effects.extend(settle_returned_claim(state, key, value.as_deref()));
         }
         Event::StorageWritten { key, error } => {
             if let Some(round) =

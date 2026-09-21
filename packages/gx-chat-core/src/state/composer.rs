@@ -81,6 +81,11 @@ pub struct ComposerState {
     pub queue_mutation: Option<(u64, Option<String>)>,
     /// The boot read has answered, so the two catalog reads may go out.
     pub boot_read: bool,
+    /// The returned prompt whose claim is in flight: its id and the text to restore.
+    ///
+    /// `composer('claimReturned')` reads the applied-id list, and the restore only happens when
+    /// the id was not already on it.
+    pub claiming_returned: Option<(String, String)>,
     /// `sendBlockedReason(state)`, recomputed once per event by family d's settle.
     ///
     /// Family b's `rewindEnabled` is `sendBlockedReason(...) === null`, and `document::assemble`

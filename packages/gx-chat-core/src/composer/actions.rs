@@ -69,7 +69,7 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
         ActionKind::OpenComposerReference => open_reference(action),
         ActionKind::RefreshComposerChrome => refresh_chrome(state, action),
         ActionKind::Stash => stash(state, action),
-        ActionKind::RestoreReturned => restore_returned(action),
+        ActionKind::RestoreReturned => restore_returned(state, action),
         ActionKind::ApplyReturned => apply_returned(action),
         ActionKind::RestoreSubmission => vec![Effect::SetComposerText {
             content: restore_undelivered_text(text_param(action), string_param(action, "current")),
@@ -538,18 +538,21 @@ fn stash(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
     ]
 }
 
-fn restore_returned(action: &UserAction) -> Vec<Effect> {
+fn restore_returned(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
     let Some(returned) = action.param("returned") else {
         return Vec::new();
     };
     let Some(id) = returned.get("id").and_then(Value::as_str) else {
         return Vec::new();
     };
+    let text = returned
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    state.composer.claiming_returned = Some((id.to_string(), text));
     vec![Effect::ReadStorage {
-        key: crate::event::StorageKey {
-            store: "returnedPrompts".to_string(),
-            suffix: id.to_string(),
-        },
+        key: crate::composer::storage::returned_prompts_key(),
     }]
 }
 
@@ -751,13 +754,7 @@ fn track_draft_attachments(state: &mut ChatState, text: &str) {
 }
 
 fn draft_key(state: &ChatState) -> crate::event::StorageKey {
-    crate::event::StorageKey {
-        store: crate::composer::storage::DRAFTS_STORE.to_string(),
-        suffix: format!(
-            "{}:{}",
-            state.identity.project_id, state.identity.session_id
-        ),
-    }
+    crate::composer::storage::draft_key(&state.identity.session_key)
 }
 
 fn text_param(action: &UserAction) -> &str {

@@ -113,10 +113,10 @@ pub fn project(
 ///
 /// One effect, not two: `composer('asyncQuestionRead')` hands back `{drafts, retired}` from the two
 /// stores in a single host call, and the number of round trips is part of the contract.
-pub fn load(state: &mut AsyncQuestionsState) -> Vec<Effect> {
+pub fn load(state: &mut AsyncQuestionsState, session_key: &str) -> Vec<Effect> {
     state.pending_reads = 2;
     vec![Effect::ReadStorageBatch {
-        keys: vec![async_drafts_key(), retired_key()],
+        keys: vec![async_drafts_key(session_key), retired_key(session_key)],
     }]
 }
 
@@ -144,7 +144,12 @@ pub fn navigate(state: &mut AsyncQuestionsState, key: Option<&str>) {
 }
 
 /// Replaces one question's typed answer.
-pub fn edit(state: &mut AsyncQuestionsState, key: &str, text: &str) -> Vec<Effect> {
+pub fn edit(
+    state: &mut AsyncQuestionsState,
+    session_key: &str,
+    key: &str,
+    text: &str,
+) -> Vec<Effect> {
     if state.submitting || state.loading {
         return Vec::new();
     }
@@ -152,11 +157,16 @@ pub fn edit(state: &mut AsyncQuestionsState, key: &str, text: &str) -> Vec<Effec
     draft.other = text.to_string();
     let mut drafts = state.drafts.clone();
     drafts.insert(key.to_string(), draft);
-    save(state, drafts)
+    save(state, session_key, drafts)
 }
 
 /// Picks one question's option, which replaces any typed answer.
-pub fn select(state: &mut AsyncQuestionsState, key: &str, index: u32) -> Vec<Effect> {
+pub fn select(
+    state: &mut AsyncQuestionsState,
+    session_key: &str,
+    key: &str,
+    index: u32,
+) -> Vec<Effect> {
     if state.submitting || state.saving_images || state.loading {
         return Vec::new();
     }
@@ -168,7 +178,7 @@ pub fn select(state: &mut AsyncQuestionsState, key: &str, index: u32) -> Vec<Eff
             other: String::new(),
         },
     );
-    save(state, drafts)
+    save(state, session_key, drafts)
 }
 
 /// The host is writing pasted pictures, so a send would leave them out.
@@ -178,12 +188,13 @@ pub fn images_pending(state: &mut AsyncQuestionsState, value: bool) {
 
 fn save(
     state: &mut AsyncQuestionsState,
+    session_key: &str,
     drafts: crate::questions::drafts::AnswerDrafts,
 ) -> Vec<Effect> {
     let value = encode_drafts(&drafts);
     state.drafts = drafts;
     vec![Effect::WriteStorage {
-        key: async_drafts_key(),
+        key: async_drafts_key(session_key),
         value,
         durable: true,
     }]
@@ -228,6 +239,7 @@ pub fn begin_submit(state: &mut AsyncQuestionsState) {
 /// document also honours `retiredAsyncQuestionIds` from the wire.
 pub fn submit_succeeded(
     state: &mut AsyncQuestionsState,
+    session_key: &str,
     key: &str,
     submitted: &crate::questions::drafts::AnswerDrafts,
 ) -> Vec<Effect> {
@@ -245,12 +257,12 @@ pub fn submit_succeeded(
     vec![Effect::WriteStorageBatch {
         writes: vec![
             crate::effect::StorageWrite {
-                key: async_drafts_key(),
+                key: async_drafts_key(session_key),
                 value: encode_drafts(&state.drafts),
                 durable: true,
             },
             crate::effect::StorageWrite {
-                key: retired_key(),
+                key: retired_key(session_key),
                 value: Some(retired_value),
                 durable: true,
             },

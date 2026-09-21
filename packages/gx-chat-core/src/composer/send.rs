@@ -816,13 +816,7 @@ fn command_catalog() -> Vec<String> {
 }
 
 fn draft_key(state: &ChatState) -> StorageKey {
-    StorageKey {
-        store: DRAFTS_STORE.to_string(),
-        suffix: format!(
-            "{}:{}",
-            state.identity.project_id, state.identity.session_id
-        ),
-    }
+    crate::composer::storage::draft_key(&state.identity.session_key)
 }
 
 /// The flush's own answer key: a store with no suffix, which is what [`Effect::FlushStorage`]

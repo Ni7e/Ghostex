@@ -96,6 +96,12 @@ pub enum Effect {
     Copy { text: String },
     /// Show a toast.
     Toast { level: String, message: String },
+    /// A prompt the agent handed back was claimed: put it in the composer.
+    ///
+    /// Its own variant rather than a [`Effect::HostAction`] string, because the host already has a
+    /// dispatch arm for it ([`RequestKind::ReturnedPrompt`], `returnedPrompt`/`restore` in
+    /// `apps/desktop/src/app/native_chat/state.rs`) and the app shell has none.
+    RestoreReturnedPrompt { text: String },
     /// A Markdown document was written: put its path on the clipboard and say so.
     ///
     /// Its own variant rather than a [`Effect::HostAction`] string, because the host already has a

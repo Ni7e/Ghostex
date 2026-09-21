@@ -63,7 +63,7 @@ pub fn sync(state: &mut ChatState) -> Vec<Effect> {
         if is_question {
             if let Some(key) = next_content_key.as_deref() {
                 effects.push(Effect::ReadStorage {
-                    key: drafts_key(key),
+                    key: drafts_key(&state.identity.session_key, key),
                 });
             }
         }
@@ -73,7 +73,11 @@ pub fn sync(state: &mut ChatState) -> Vec<Effect> {
     // `asyncQuestions.load()`.
     if !state.questions.async_questions.load_started {
         state.questions.async_questions.load_started = true;
-        effects.extend(async_controller::load(&mut state.questions.async_questions));
+        let session_key = state.identity.session_key.clone();
+        effects.extend(async_controller::load(
+            &mut state.questions.async_questions,
+            &session_key,
+        ));
     }
     refresh_gates(state);
     effects

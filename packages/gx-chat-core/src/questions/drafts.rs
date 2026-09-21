@@ -30,35 +30,60 @@ pub const RETIRED_STORE: &str = "retiredQuestions";
 /// The client-storage store one dismissed notice per session lives in.
 pub const NOTICES_STORE: &str = "notices";
 
+/// The fixed prompt key the async strip's own drafts are stored under.
+pub const ASYNC_PROMPT_KEY: &str = "async";
+
 /// Where one card's drafts are stored.
 ///
-/// The host owns the `ghostex.sessionChat.questionDraft.` prefix and the session key inside it
-/// (`questionDraftStorageKey`), so the core never builds a storage key string.
-pub fn drafts_key(prompt_key: &str) -> StorageKey {
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// The host owns the `ghostex.sessionChat.questionDraft.` prefix and nothing else, so the session
+/// key is part of the suffix the core builds: `questionDraftStorageKey` spells it
+/// `JSON.stringify([sessionKey, promptKey])`. Leaving the session out made every chat on a machine
+/// share one card record, which the replay could not see because its storage is an in-memory map
+/// keyed by the same wrong string on both sides.
+pub fn drafts_key(session_key: &str, prompt_key: &str) -> StorageKey {
     StorageKey {
         store: DRAFTS_STORE.to_string(),
-        suffix: prompt_key.to_string(),
+        suffix: serde_json::to_string(&[session_key, prompt_key]).unwrap_or_default(),
     }
 }
 
 /// The async strip's own draft record, which is the card record under the fixed `async` key.
-pub fn async_drafts_key() -> StorageKey {
-    drafts_key("async")
+pub fn async_drafts_key(session_key: &str) -> StorageKey {
+    drafts_key(session_key, ASYNC_PROMPT_KEY)
+}
+
+/// Whether this is the async strip's record rather than a blocking card's.
+pub fn is_async_drafts_key(key: &StorageKey) -> bool {
+    decode_drafts_suffix(&key.suffix).is_some_and(|(_, prompt)| prompt == ASYNC_PROMPT_KEY)
+}
+
+/// The `[sessionKey, promptKey]` pair a drafts suffix carries.
+pub fn decode_drafts_suffix(suffix: &str) -> Option<(String, String)> {
+    let parts: Vec<String> = serde_json::from_str(suffix).ok()?;
+    match parts.as_slice() {
+        [session, prompt] => Some((session.clone(), prompt.clone())),
+        _ => None,
+    }
 }
 
 /// The retired async question keys, one record per session.
-pub fn retired_key() -> StorageKey {
+///
+/// `ghostex:async-questions:<sessionKey>` (`async-question-storage.ts`).
+pub fn retired_key(session_key: &str) -> StorageKey {
     StorageKey {
         store: RETIRED_STORE.to_string(),
-        suffix: String::new(),
+        suffix: session_key.to_string(),
     }
 }
 
 /// The dismissed notice, one record per session.
-pub fn notice_key() -> StorageKey {
+///
+/// `ghostex.sessionChat.noticeDismissed.<sessionKey>` (`notice-state.ts:57`).
+pub fn notice_key(session_key: &str) -> StorageKey {
     StorageKey {
         store: NOTICES_STORE.to_string(),
-        suffix: String::new(),
+        suffix: session_key.to_string(),
     }
 }
 

@@ -80,6 +80,11 @@ fn switch_draft_agent(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
     let Some(agent_id) = action.params.get("agentId").and_then(Value::as_str) else {
         return Vec::new();
     };
+    switch_draft_agent_to(state, agent_id)
+}
+
+/// `switchDraftAgent` for an agent another rule already picked.
+pub fn switch_draft_agent_to(state: &mut ChatState, agent_id: &str) -> Vec<Effect> {
     let known =
         crate::menus::option_menus::DraftAgent::list(state.session.available_agents.as_ref())
             .is_some_and(|agents| agents.iter().any(|agent| agent.agent_id == agent_id));

@@ -266,13 +266,34 @@ fn model_menu_pick_action(state: &mut ChatState, action: &UserAction) -> Vec<Eff
             effort,
         } => {
             // A draft has no conversation to hand over, so another agent's model switches the
-            // draft to that agent; `switchDraftAgent` is family e1's.
+            // draft to that agent.
+            //
+            // CDXC:SessionChat 2026-09-22 WHY:
+            // The agent is looked up HERE rather than handed to the host as a
+            // `switchDraftAgentForProvider` action nobody performs: `native-host.ts:1058` does the
+            // same `availableAgents.find(...)` before it dispatches `switchDraftAgent`, and the
+            // core already holds the list.
             if state.session.available_agents.is_some() {
                 state.pickers.model_menu_view = Default::default();
-                return vec![Effect::HostAction {
-                    action: "switchDraftAgentForProvider".to_string(),
-                    params: Box::new(json!({ "provider": provider.as_str() })),
-                }];
+                let agent_id = crate::menus::option_menus::DraftAgent::list(
+                    state.session.available_agents.as_ref(),
+                )
+                .and_then(|agents| {
+                    agents
+                        .iter()
+                        .find(|agent| {
+                            crate::menus::picker::request::model_picker_provider(
+                                agent.icon.as_deref(),
+                            ) == Some(provider)
+                        })
+                        .map(|agent| agent.agent_id.clone())
+                });
+                return match agent_id {
+                    Some(agent_id) => {
+                        crate::menus::actions::switch_draft_agent_to(state, &agent_id)
+                    }
+                    None => Vec::new(),
+                };
             }
             vec![Effect::HostAction {
                 action: "handoffToModel".to_string(),

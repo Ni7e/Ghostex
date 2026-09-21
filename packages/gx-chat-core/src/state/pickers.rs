@@ -48,6 +48,11 @@ pub struct PickersState {
     pub model_favorites_loaded: bool,
     /// The model selection outbox and what it is waiting for.
     pub model_selection: ModelSelectionState,
+    /// The delivery in flight: the request id and the intent id it carries.
+    ///
+    /// `computeModelSelectionOutbox`'s delivery `useEffect` keeps one operation per session key in
+    /// a module-level map and refuses to start a second; this is that map's one entry.
+    pub model_selection_request: Option<(u64, String)>,
     /// The branch family this conversation belongs to, read once per chat.
     pub fork_branches: ForkBranchesState,
     /// The context meter, its editor and its status line.

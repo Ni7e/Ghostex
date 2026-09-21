@@ -156,6 +156,68 @@ pub fn encode_verbose(verbose: bool) -> &'static str {
 }
 
 /// `ghostex.sessionChat.summary.<sessionKey>`, as the store plus the suffix the host prefixes.
+/// The client-storage store the applied returned-prompt ids live in.
+pub const RETURNED_PROMPTS_STORE: &str = "returnedPrompts";
+
+/// The applied returned-prompt ids, ONE record for the whole app.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// `ghostex.sessionChat.returnedPrompts.applied` holds a JSON array of ids, not one record per id
+/// (`session-chat-returned-prompt.ts`). The core was reading a per-id record, which the desktop
+/// host refuses outright because that store is a singleton, so a prompt the agent handed back was
+/// never claimed and never reached the composer.
+pub fn returned_prompts_key() -> crate::event::StorageKey {
+    crate::event::StorageKey {
+        store: RETURNED_PROMPTS_STORE.to_string(),
+        suffix: String::new(),
+    }
+}
+
+/// `readAppliedIds`: the stored list, or empty when the record is missing or malformed.
+pub fn decode_applied_returned_ids(value: Option<&str>) -> Vec<String> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<Value>>(value)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `markSessionChatReturnedPromptApplied`: the id moved to the end, the list cut to the last 32.
+pub fn encode_applied_returned_ids(applied: &[String], id: &str) -> String {
+    let mut next: Vec<&str> = applied
+        .iter()
+        .map(String::as_str)
+        .filter(|value| *value != id)
+        .collect();
+    next.push(id);
+    let limit = crate::session::constants::RETURNED_PROMPT_APPLIED_LIMIT;
+    if next.len() > limit {
+        next.drain(..next.len() - limit);
+    }
+    serde_json::to_string(&next).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// The stored draft entry for this session.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// Every per-session record is keyed by the SESSION KEY the composer boot read hands back, not by
+/// `<projectId>:<sessionId>`. On a remote chat the host spells that key
+/// `remote-<machineId>:<projectId>:<sessionId>` (`broker.ts:113`), so building it from the project
+/// and session alone wrote the draft under the local spelling and the two brains read different
+/// records. Found by the desktop host agent on 2026-09-22.
+pub fn draft_key(session_key: &str) -> crate::event::StorageKey {
+    crate::event::StorageKey {
+        store: DRAFTS_STORE.to_string(),
+        suffix: session_key.to_string(),
+    }
+}
+
 pub fn summary_key(session_key: &str) -> crate::event::StorageKey {
     crate::event::StorageKey {
         store: SUMMARY_STORE.to_string(),

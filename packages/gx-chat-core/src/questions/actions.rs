@@ -83,8 +83,10 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
         ActionKind::AsyncQuestionText => {
             if let Some(key) = action.param("key").and_then(Value::as_str) {
                 let text = action.param("text").and_then(Value::as_str).unwrap_or("");
+                let session_key = state.identity.session_key.clone();
                 effects.extend(async_controller::edit(
                     &mut state.questions.async_questions,
+                    &session_key,
                     key,
                     text,
                 ));
@@ -104,8 +106,10 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
                         .is_some_and(|options| (index as usize) < options.len())
             });
             if !projection.disabled && offered {
+                let session_key = state.identity.session_key.clone();
                 effects.extend(async_controller::select(
                     &mut state.questions.async_questions,
+                    &session_key,
                     key,
                     index,
                 ));
@@ -161,7 +165,7 @@ fn dismiss_notice(
     let value = serde_json::to_string(&dismissed).ok();
     state.questions.dismissed_notice = Some(dismissed);
     vec![Effect::WriteStorage {
-        key: notice_key(),
+        key: notice_key(&state.identity.session_key),
         value,
         durable: true,
     }]
@@ -378,7 +382,7 @@ fn write_card_drafts(state: &mut ChatState, advance_after: bool) -> Vec<Effect> 
     state.questions.draft_write_content_key = Some(content_key.clone());
     state.questions.advance_after_write = advance_after;
     vec![Effect::WriteStorage {
-        key: drafts_key(&content_key),
+        key: drafts_key(&state.identity.session_key, &content_key),
         value: encode_drafts(&drafts),
         durable: true,
     }]
@@ -389,7 +393,7 @@ pub(crate) fn clear_card_drafts(state: &ChatState, content_key: &str) -> Effect 
     let submitted = indexed_drafts(&state.questions.question_drafts);
     let remaining = remaining_drafts(&submitted, &submitted);
     Effect::WriteStorage {
-        key: drafts_key(content_key),
+        key: drafts_key(&state.identity.session_key, content_key),
         value: encode_drafts(&remaining),
         durable: true,
     }

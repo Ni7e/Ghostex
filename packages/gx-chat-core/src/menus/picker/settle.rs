@@ -101,7 +101,13 @@ pub fn settle(
         Event::RpcSettled {
             request_id,
             outcome,
-        } => settle_fork_branches(state, *request_id, outcome),
+        } => {
+            if let Some(round) = settle_outbox_answer(state, context, *request_id, outcome) {
+                effects.extend(round);
+            } else {
+                settle_fork_branches(state, *request_id, outcome);
+            }
+        }
         _ => {}
     }
 
@@ -124,6 +130,11 @@ pub fn settle(
     }
 
     effects.extend(settle_picker_timers(state, context));
+    // A due retry clears the wait, and the delivery below picks the intent up again.
+    if state.core.timer_fired(MODEL_OUTBOX_TIMER) {
+        state.pickers.model_selection.retry_at_ms = None;
+    }
+    effects.extend(settle_outbox_delivery(state, context));
     effects.extend(arm_timers(state, context));
     effects
 }
@@ -190,15 +201,113 @@ fn settle_picker_timers(state: &mut ChatState, context: &ChatContext) -> Vec<Eff
     ) {
         return Vec::new();
     }
-    // The intent's id is the host's, so the core asks for one rather than inventing it.
-    vec![Effect::HostAction {
-        action: "selectModel".to_string(),
-        params: Box::new(serde_json::json!({
-            "model": selection.model,
-            "effort": selection.effort,
-            "scope": outcome.scope.as_str(),
-        })),
+    // `modelSelection.select(selection, undefined, scope)`: the picker's choice goes into the
+    // durable outbox, the same lane a queued option pick uses. The intent's id is the host's, so
+    // the core takes it from the turn's own draw rather than inventing one.
+    //
+    // CDXC:SessionChat 2026-09-22 WHY:
+    // This was an `Effect::HostAction { action: "selectModel" }` no host performed, so a pick made
+    // in the model picker reached neither the outbox nor gxserver. Found by the desktop host agent
+    // on 2026-09-22.
+    let intent = state.pickers.model_selection.persist(
+        selection,
+        None,
+        Some(outcome.scope),
+        context.random_id(0),
+    );
+    vec![Effect::WriteStorage {
+        key: crate::menus::picker::selection::model_outbox_key(&state.identity.session_key),
+        value: Some(crate::menus::picker::selection::serialize_model_selection_intent(&intent)),
+        durable: true,
     }]
+}
+
+/// `computeModelSelectionOutbox`'s delivery `useEffect`.
+///
+/// While an intent sits in the outbox and the daemon can queue a model at all, it is delivered
+/// with `selectSessionChatModel { defer: true }`. A refusal waits [`MODEL_OUTBOX_RETRY_MS`] and is
+/// tried again; an acceptance deletes the record, which is `persistence.acknowledge`.
+fn settle_outbox_delivery(state: &mut ChatState, _context: &ChatContext) -> Vec<Effect> {
+    let selection = &state.pickers.model_selection;
+    if selection.delivering || selection.retry_at_ms.is_some() {
+        return Vec::new();
+    }
+    let Some(intent) = selection.outbox.clone() else {
+        return Vec::new();
+    };
+    // `canQueue`: the daemon carries `pendingModelSelection` and the agent has a quick picker.
+    if state.session.pending_model_selection.is_absent() {
+        return Vec::new();
+    }
+    let mut params = serde_json::Map::new();
+    params.insert("model".to_string(), Value::String(intent.model.clone()));
+    params.insert("effort".to_string(), Value::String(intent.effort.clone()));
+    for (key, value) in &intent.options {
+        params.insert(key.clone(), value.clone());
+    }
+    if let Some(scope) = intent.scope {
+        params.insert(
+            "scope".to_string(),
+            Value::String(scope.as_str().to_string()),
+        );
+    }
+    params.insert("defer".to_string(), Value::Bool(true));
+    let request_id = state.core.allocate_request_id();
+    state.pickers.model_selection.delivering = true;
+    state.pickers.model_selection_request = Some((request_id, intent.id.clone()));
+    vec![Effect::SendRpc {
+        request_id,
+        method: ChatRpcMethod::SelectSessionChatModel,
+        params: Box::new(Value::Object(params)),
+    }]
+}
+
+/// The delivery answered: accepted deletes the record, refused waits and tries again.
+fn settle_outbox_answer(
+    state: &mut ChatState,
+    context: &ChatContext,
+    request_id: u64,
+    outcome: &RpcOutcome,
+) -> Option<Vec<Effect>> {
+    let (pending_id, intent_id) = state.pickers.model_selection_request.clone()?;
+    if pending_id != request_id {
+        return None;
+    }
+    state.pickers.model_selection_request = None;
+    let intent = state.pickers.model_selection.outbox.clone();
+    let requested_options = intent
+        .as_ref()
+        .map(|intent| intent.options.clone())
+        .unwrap_or_default();
+    let requested_scope = intent.as_ref().and_then(|intent| intent.scope);
+    let accepted = match outcome {
+        RpcOutcome::Ok { result } => {
+            crate::menus::picker::selection::accept_queued_model_selection(
+                result,
+                &requested_options,
+                requested_scope,
+            )
+        }
+        RpcOutcome::Err { message, .. } => Err(message.clone()),
+    };
+    match accepted {
+        Ok(_) => {
+            if state.pickers.model_selection.acknowledge(&intent_id) {
+                return Some(vec![Effect::WriteStorage {
+                    key: crate::menus::picker::selection::model_outbox_key(
+                        &state.identity.session_key,
+                    ),
+                    value: None,
+                    durable: true,
+                }]);
+            }
+            Some(Vec::new())
+        }
+        Err(_) => {
+            state.pickers.model_selection.defer(context.now_ms);
+            Some(Vec::new())
+        }
+    }
 }
 
 /// `computeModelSelectionOutbox`'s second `useEffect`: the pills show where the session is HEADING.

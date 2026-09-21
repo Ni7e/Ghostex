@@ -21,7 +21,14 @@ use crate::state::ChatState;
 use crate::wire::RpcOutcome;
 
 /// The suffix the async strip's own draft record uses.
-const ASYNC_SUFFIX: &str = "async";
+use crate::questions::drafts::{decode_drafts_suffix, is_async_drafts_key};
+
+/// The prompt key a drafts record belongs to, which is the second half of its suffix.
+fn drafts_prompt_key(key: &StorageKey) -> String {
+    decode_drafts_suffix(&key.suffix)
+        .map(|(_, prompt)| prompt)
+        .unwrap_or_default()
+}
 
 /// Finishes a gxserver call family c asked for, or answers `None` when the id is not one of its
 /// own.
@@ -119,11 +126,15 @@ fn async_settled(state: &mut ChatState, outcome: &RpcOutcome) -> Vec<Effect> {
         return Vec::new();
     };
     let effects = match outcome {
-        RpcOutcome::Ok { .. } => async_controller::submit_succeeded(
-            &mut state.questions.async_questions,
-            &submit.key,
-            &submit.submitted,
-        ),
+        RpcOutcome::Ok { .. } => {
+            let session_key = state.identity.session_key.clone();
+            async_controller::submit_succeeded(
+                &mut state.questions.async_questions,
+                &session_key,
+                &submit.key,
+                &submit.submitted,
+            )
+        }
         RpcOutcome::Err { message, .. } => {
             async_controller::submit_failed(
                 &mut state.questions.async_questions,
@@ -155,13 +166,13 @@ pub fn storage_loaded(state: &mut ChatState, key: &StorageKey, value: Option<&st
             refresh_gates(state);
             true
         }
-        DRAFTS_STORE if key.suffix == ASYNC_SUFFIX => {
+        DRAFTS_STORE if is_async_drafts_key(key) => {
             state.questions.async_questions.drafts = value.map(decode_drafts).unwrap_or_default();
             async_controller::read_answered(&mut state.questions.async_questions);
             state.core.request_publish();
             true
         }
-        DRAFTS_STORE if state.questions.question_content_key.as_deref() == Some(&key.suffix) => {
+        DRAFTS_STORE if state.questions.question_content_key == Some(drafts_prompt_key(key)) => {
             let stored = value.map(decode_drafts).unwrap_or_default();
             let prompt = InteractivePrompt::parse(state.session.prompt.as_ref());
             let mut drafts = blank_drafts(prompt.as_ref());
@@ -187,7 +198,7 @@ pub fn storage_written(
     error: Option<&str>,
 ) -> Option<Vec<Effect>> {
     match key.store.as_str() {
-        DRAFTS_STORE if key.suffix == ASYNC_SUFFIX => {
+        DRAFTS_STORE if is_async_drafts_key(key) => {
             async_controller::write_settled(&mut state.questions.async_questions, error);
             // `save()`'s own `changed()` on the write settling, which is what clears or raises the
             // "could not be saved on this computer" line.
@@ -195,15 +206,15 @@ pub fn storage_written(
             Some(Vec::new())
         }
         DRAFTS_STORE => {
-            if state.questions.draft_write_content_key.as_deref() != Some(key.suffix.as_str()) {
+            let prompt_key = drafts_prompt_key(key);
+            if state.questions.draft_write_content_key != Some(prompt_key.clone()) {
                 return Some(Vec::new());
             }
             state.questions.draft_write_content_key = None;
             let advance = state.questions.advance_after_write;
             state.questions.advance_after_write = false;
             // The write only releases the card it belongs to; a later prompt already reset it.
-            let current =
-                state.questions.question_content_key.as_deref() == Some(key.suffix.as_str());
+            let current = state.questions.question_content_key == Some(prompt_key.clone());
             if current {
                 state.questions.question_transition = false;
             }
