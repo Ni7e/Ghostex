@@ -4939,20 +4939,6 @@
       "agentWritable": false
     },
     {
-      "key": "sessionChatUseGpui",
-      "title": "Use GPUI chat",
-      "subtitle": "Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "chat",
-      "groupTitle": "Chat",
-      "section": "chat",
-      "sectionTitle": "Chat",
-      "type": "boolean",
-      "default": true,
-      "agentWritable": true
-    },
-    {
       "key": "preferredAgentInterface",
       "title": "Default view for compatible agents",
       "subtitle": "Automatically switch to chat as soon as Ghostex detects that an agent session supports it.",
@@ -6895,6 +6881,8 @@
         "openHotkeys": "cmd+.",
         "toggleSidebarCollapsed": "cmd+b",
         "toggleViewPanel": "cmd+alt+b",
+        "expandViewPanel": "cmd+ctrl+e",
+        "expandViewPanelFully": "cmd+ctrl+shift+e",
         "renameActiveSession": "cmd+r",
         "openBrowserPane": "cmd+n",
         "switchAgentsView": "",
@@ -7667,18 +7655,6 @@
       "agentWritable": false
     },
     {
-      "key": "sessionChatModelPicksSessionOnly",
-      "title": "Session-only model picks",
-      "subtitle": "Apply a model or effort picked in a chat to that session only, without changing the default for new sessions. Off saves every pick as the default. Claude only: other agents always save the default.",
-      "tab": "agents",
-      "tabTitle": "Agents",
-      "section": "config",
-      "sectionTitle": "Config",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
       "key": "acceptAll",
       "title": "Agent approvals",
       "subtitle": "Choose whether supported agents ask before editing files or running commands. Per-agent settings can override this default.",
@@ -8331,7 +8307,7 @@
     {
       "key": "tips",
       "title": "Tips & Tricks",
-      "subtitle": "A page of short tips for getting more out of Ghostex, opened from the ⋯ menu.",
+      "subtitle": "A panel of short tips for getting more out of Ghostex, opened from the ⋯ menu.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8353,7 +8329,7 @@
     {
       "key": "help",
       "title": "Ghostex Help",
-      "subtitle": "A page of sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.",
+      "subtitle": "A ⋯ menu entry with sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8364,7 +8340,7 @@
     {
       "key": "devServers",
       "title": "Dev servers",
-      "subtitle": "The Browser view’s start page, listing development servers running on this computer.",
+      "subtitle": "A ⋯ menu panel listing development servers running on this computer. A new Browser tab shows the same list.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8375,7 +8351,7 @@
     {
       "key": "resources",
       "title": "Resources",
-      "subtitle": "A page listing what Ghostex is running right now, with the CPU and memory each part is using.",
+      "subtitle": "A ⋯ menu panel listing what Ghostex is running right now, with the CPU and memory each part is using.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -9355,6 +9331,18 @@
       "title": "Toggle View Panel",
       "description": "Open or close the view panel beside your sessions.",
       "defaultKey": "cmd+alt+b"
+    },
+    {
+      "id": "expandViewPanel",
+      "title": "Expand Side Panel",
+      "description": "Expand the side panel over the sessions column, or bring the sessions back.",
+      "defaultKey": "cmd+ctrl+e"
+    },
+    {
+      "id": "expandViewPanelFully",
+      "title": "Expand Side Panel Fully",
+      "description": "Expand the side panel over the sessions column and hide the sidebar, or bring both back.",
+      "defaultKey": "cmd+ctrl+shift+e"
     },
     {
       "id": "renameActiveSession",

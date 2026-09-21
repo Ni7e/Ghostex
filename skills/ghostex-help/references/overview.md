@@ -21,7 +21,7 @@ hotkeys Every shortcut and its default binding
   name and current session title as one breadcrumb. On the right are the
   **Start**, **Open** and **Commit** buttons (Quick Actions, Open In and Git
   actions, each with a caret for its menu), a **⋯** menu holding Ask Ghostex,
-  Tips & Tricks, Resources, Dev servers and Extensions, and the command terminal
+  Tips & Tricks, Resources, Dev servers, Extensions and Customize, and the command terminal
   and view panel toggles. The header covers your sessions only: when a view panel
   is open, the panel's own tabs take the rest of that same row, so the tabs sit
   over the view and the header's buttons over your sessions. Narrow the sessions
@@ -29,12 +29,14 @@ hotkeys Every shortcut and its default binding
   name. There is no line under the header: your chat fades out beneath it. Drag
   the header, or the sidebar's Search row, to move the window.
 - **Sidebar** (left by default): projects, their sessions, tags and filters,
-  remote machines, Quick chats, and the More Options menu (Settings, Search by
-  Prompt, Previous Sessions, Mobile & Remote, Extensions). The Notifications
-  bell is in its top row; the Commands row at the bottom carries a chart button
-  that shows or hides your account usage meters above it, and a Settings gear.
-  Drag the sidebar narrow and the Search and Commands rows become icon buttons
-  that keep their names and shortcuts in their tooltips.
+  remote machines, Quick chats, and the More Options menu under the button at
+  the top right (Add Project, Sort & Filter, Sessions, Import Sessions, Search by
+  Prompt, Agents Hub, All Automations, Mobile & Remote, Join Discord). The
+  Notifications bell is in its top row; the Commands row at the bottom carries a
+  chart button that shows or hides your account usage meters above it, and the
+  Settings gear, which is where Settings and its Hotkeys page open from. Drag
+  the sidebar narrow and the Search and Commands rows become icon buttons, lined
+  up on the right, that keep their names and shortcuts in their tooltips.
 - **Work area**: your sessions, and the views open beside them. The sessions are
   a grid of terminal panes and tabs; each pane can show the raw terminal or the
   Session Chat rendering of the same agent conversation. Opening Code, Browser,
@@ -43,8 +45,7 @@ hotkeys Every shortcut and its default binding
   the header's row: several views can be open at once, the **+** opens another,
   and the two buttons at its end pop the view out into its own window or expand
   it over the sessions column. With nothing open it shows **Open a view**, a picker of
-  everything this project can open, including Ghostex's own Ask Ghostex, Tips &
-  Tricks and Resources pages. Project views load on demand and sleep when unused.
+  everything this project can open. Project views load on demand and sleep when unused.
   The view panel toggle at the right end of the header, or Cmd+Option+B, opens
   and closes the whole panel.
 - **Quick Access** (Cmd+Shift+P): search every command, pane action, settings

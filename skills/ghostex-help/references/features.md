@@ -28,33 +28,40 @@ Hotkeys, and hovering a tab shows its shortcut. Views other than Agents are
 extensions: they load on demand, sleep when idle (Auto Sleep), and can be hidden
 or reordered in Settings > Extensions.
 
-The **+** button at the end of the tabs opens another view. It lists every view,
-with a tick beside the ones already open (clicking one of those focuses its
-tab), then **Hidden here**, which lists the views you hid in this project and
-brings one back in a click, then **Manage views…**. Drag a tab to reorder the
-strip, and close a tab with its **x**, with a middle click, or from its menu.
-After the **+**, the same row carries the Browser view's own tabs, one per open
-page, so a page you have open reads as a tab beside the views themselves.
+The **+** button right after the last tab opens another view. Its top row,
+**Browser Tab**, always opens a new browser tab. Below it is every other view:
+clicking one opens it, or switches to its tab if it is already open. Then comes
+**Hidden here**, which lists the views you hid in this project and brings one
+back in a click, then **Customize**. Close a tab with its **x**, with a middle
+click, or from its menu. Browser has no view tab of its own: the same row
+carries its page tabs, one per open page, so a page you have open reads as a tab
+beside the views. The row is one order: drag any tab, a view or a page, anywhere
+in it, and it scrolls sideways once the tabs run out of room. Right-click a tab
+and choose **Pin tab** to shrink it to its icon and keep it at the left of the
+row; a pinned tab has no **x** and ignores a middle click, so it closes only from
+its menu, and **Unpin tab** puts it back.
 Only the view you are looking at, and the two you came from most recently, stay
 loaded; the rest keep their tab and wake when you click them.
 
-The two buttons at the far end of the strip **pop the view out** into its own
+The buttons at the far end of the strip **pop the view out** into its own
 window, for a second monitor, and **expand** it over the sessions column so it
-has the whole work area. The same expand button brings the sessions back.
+has the whole work area (Cmd+Ctrl+E, `expandViewPanel`). The **+** joined to the
+expand button **expands it fully**, hiding the sidebar as well
+(Cmd+Ctrl+Shift+E, `expandViewPanelFully`). The same buttons bring everything
+back.
 
 The **view panel toggle** in the work area header (Cmd+Option+B,
 `toggleViewPanel`) opens and closes the whole panel; opening it comes back to
 the view this project last had open, and shows **Open a view** when the project
 has no tabs yet. Closing it leaves your sessions at full width. The header itself
 carries the project breadcrumb, Start, Open and Commit, the **⋯** button (Ask
-Ghostex, Tips & Tricks, Resources, Dev servers and Extensions), **Hide sidebar**,
+Ghostex, Tips & Tricks, Resources, Dev servers, Extensions and Customize), **Hide sidebar**,
 and the command terminal toggle. When an update is available, a download button
 appears just before the project name.
 
 **Open a view** is the picker the panel shows when nothing is open in it. It
 lists every view you can open here: the built-in views first, then your own views
-and extensions, then Ghostex's own pages (Ask Ghostex, Tips & Tricks and
-Resources). Press a view's letter to open it (C for Code, B for Browser, K for
+and extensions. Press a view's letter to open it (C for Code, B for Browser, K for
 Kanban, U for Automate, D for Docs) while the picker is in front. Views you hid
 for this project are not in the list; **Manage views and where they appear…** at
 the bottom opens their settings, and **Hidden here** on the `+` menu brings one
@@ -65,12 +72,10 @@ Right-click a view tab to choose where that view appears and what happens to it.
 hides the view there and leaves it everywhere else, and the space row names the
 project's own space (it is absent when the project is not in one). **Choose
 where it's shown…** opens that view's full scope editor in Settings >
-Extensions. Below that, **Reload** refreshes the clicked view (the focused tab in
-Browser), **Sleep** unloads it while keeping its tab (Code also stops its editor
+Extensions. Below that, **Reload** refreshes the clicked view, **Sleep** unloads it while keeping its tab (Code also stops its editor
 server; choose **Wake** or click the tab to bring it back, and Resources can stop
 Code too without closing Ghostex), **Pop out to window** opens its page in its
-own window, and **Close tab** removes it from the strip. Ghostex's own pages have
-no Sleep or Pop out: they are part of the app, so Reload is all they need. **Hidden here** is on
+own window, and **Close tab** removes it from the strip. **Hidden here** is on
 this menu as well. Custom project views also offer **Command output** and
 **Configure view**, which opens that view's editor in Settings > Extensions and
 focuses its name field.
@@ -86,12 +91,15 @@ focuses its name field.
   reuses the local VS Code configuration.
 - **Browser**: embedded Chromium tabs with profiles, splits, annotations,
   DevTools, and agent control through the `$ghostex-embedded-browser-use`
-  skill. Its tabs sit in the view panel's tab strip, after the view tabs and
-  the `+`, and stay there while you are in another view, so clicking one comes
+  skill. Its tabs sit in the view panel's tab strip, in the same row as the view
+  tabs, and stay there while you are in another view, so clicking one comes
   back to Browser with that tab in front. Each tab shows its page icon and
-  title, closes with its own x or a middle click, and drags along the strip to
-  reorder. Right-click a tab for Select Tab, Sleep Tab (while it has a page)
-  and Close Tab. The `+` beside the address bar opens another tab.
+  title, closes with its own x or a middle click, and drags anywhere along the
+  strip to reorder. Right-click a tab for Select Tab, Pin Tab, Sleep (that tab),
+  Sleep Browser (every browser tab), and Close Tab. Closing the last browser tab closes the
+  Browser the way closing any view does: the panel moves to the next open view,
+  and closes only when Browser was the last one. **Browser Tab** at the top of the strip's **+** menu opens
+  another tab.
   A tab with no address yet shows the **start page**: the development
   servers running on this computer, and on each remote computer you have set up,
   with their page titles and whether they are responding. Click one to open it,
@@ -227,11 +235,13 @@ where they are while you open, change and close views.
   the same two ways instead, and then a project switch that hides it leaves it
   floating while you hover it. While collapsed, hovering the strip at the window's
   left edge floats the sidebar back over your work, and it slides away when you
-  move off it. If you have also expanded a view to fill the window, the sessions
-  column floats back with it, so you can glance at your agents without leaving the
-  view. With the sidebar open and a view expanded, hover the thin strip just right
-  of the sidebar to float the sessions column on its own. The floating sessions
-  column is always 520px wide. This works on macOS, Windows and Linux.
+  move off it. If you have also expanded a view to fill the window, the strip
+  splits in two: the top half (sidebar icon) floats the sidebar and the bottom half
+  (chat icon) floats the sessions column, so you can glance at your agents without
+  leaving the view. With the sidebar open and a view expanded, hover the sidebar's
+  left edge, click a session, or start a new agent, and the sessions column floats
+  to the right of the sidebar. It is always 520px wide and takes your typing right
+  away. This works on macOS, Windows and Linux.
 - Pane width: agent panes have a minimum resize width of 388px, and so does the
   sessions column when a view is open beside it. In the desktop app, an open Code,
   Browser, Kanban, Automate, or Docs view has a minimum width of 455px.
@@ -433,8 +443,6 @@ Related settings: `autoSleep*`, `clickToWakeSleepingSessions`,
 
 ## Session Chat
 
-In Settings > Chat, **Use GPUI chat** selects the desktop chat renderer. It is on by default, so desktop uses the native GPUI chat. Turn it off to go back to React chat. Restart the desktop app after changing it. Mobile and web keep their existing chat renderer (`sessionChatUseGpui`).
-
 Session Chat renders the same agent session as a chat GUI: composer with
 image paste and Ctrl+G rich prompt editor, a prompt queue that sends when the
 agent stops, transcript with thinking, tool, and edit cards, subagent
@@ -539,7 +547,7 @@ Cursor's `/summarize` uses the same flow. Claude shows its reported progress;
 Codex, Cursor, and Grok Build show a looping bar. Messages sent or queued during compaction
 wait until it finishes without a delivery warning.
 To compact before sending a new prompt, press `⌥Enter` on macOS or `Alt+Enter` on Windows and Linux in the chat box,
-or right-click Send and choose Compact & Send. Ghostex sends `/compact` first,
+Option-click Send (Alt-click on Windows and Linux), or right-click Send and choose Compact & Send. Ghostex sends `/compact` first,
 then puts your written prompt in the queue above the input to send after compaction.
 In narrow chats, notice cards hide Show terminal output; Open terminal remains available.
 If Codex says **Conversation open elsewhere**, choose **Continue here** or press
@@ -616,36 +624,41 @@ chat toolbar has room. In a narrow chat, find it under More actions instead.
 The button highlights when Summary mode is on; its tooltip shows the shortcut.
 As space gets tighter, toolbar buttons move into More actions one at a time:
 Summary mode, Session note, Stash prompt, Attach, Maximize, then Terminal View.
-If the context ring and effort still do not fit beside the model, they move
-together into Model settings at the top of More actions. Controls return as
-space opens up; More actions and Send or Stop stay visible.
-Click effort or the context meter to open it; hovering does not open either control.
-Hover the model or effort to see the configured Model & Effort Picker shortcut
+If the context ring still does not fit beside the model, it moves into Model
+settings at the top of More actions; the model pill shortens instead of moving.
+Controls return as space opens up; More actions and Send or Stop stay visible.
+Click the model pill or the context meter to open it; hovering does not open either control.
+Hover the model pill to see the configured Model & Effort Picker shortcut
 (Option+P by default on macOS). Hover the context circle to read the agent's
 terminal status line.
 
-The Model & Effort Picker commits a choice in one of two ways. Set as default
-saves the choice as the agent's default for new sessions as well as changing
-this session. Use in this session changes the model and effort for this session
-only and leaves the agent's saved default alone, so new sessions still start
-where they did before; waking this session later brings it back on the model
-you chose. Enter sets the default and Shift+Enter applies to this session only.
-Turn on Session-only model picks under Settings, Agents, Config to swap them, so
-Enter applies to this session only and Shift+Enter sets the default. Use in this
-session is available for Claude only: Codex's own model picker always writes the
-choice to its configuration file, so on a Codex session that action is greyed
-out and Enter sets the default.
+The chat input row has one model pill. It shows the agent's logo, the model, and
+after it the reasoning level and the context window, for example
+"Fable 5.1 High · 200K". Click it to open the model picker: a row of agent tabs
+with a starred Favorites tab first, a search box, the models of the chosen tab,
+and at the bottom Reasoning and, for models that offer more than one, Context
+Window, each opening a short list to the side. Type to filter the list, move
+with the arrow keys and press Enter, or press Cmd+1 to Cmd+9 to pick one of the
+first nine rows. Click a row's star to keep that model on the Favorites tab.
 
-The model and effort dropdowns in the chat input row follow the same setting
-without asking each time. Each carries an Also set as default switch at the
-bottom of its menu. It starts on, so picking a model or effort there saves the
-agent's default; with Session-only model picks turned on it starts off, so a
-pick changes this session and leaves the saved default alone. Flip the switch
-to do the other thing in one session: the menu stays open so you can set the
-switch and choose in one go, and the choice is remembered for that session. On
-a Codex session the switch is on and greyed out, because its picker cannot
-change a model without saving it. Settings key:
-`sessionChatModelPicksSessionOnly`.
+Clicking a model or a reasoning level applies it to this session and saves it as
+the agent's default for new sessions. Right-clicking applies it to this session
+only and leaves the saved default alone, so new sessions still start where they
+did before; waking the session later brings it back on the model you chose.
+Session-only picks work for Claude only: other agents' own model pickers always
+save the choice as the default.
+
+Picking a model from another agent's tab does not change the running session,
+which cannot switch agents. It opens Handoff / Export on Handoff to an agent with
+that agent already selected; confirm it and the new session starts on the model
+and reasoning level you picked (Claude and Codex; for other agents choose the
+model in the new session). You can still choose a different agent in the dialog.
+
+The Model & Effort Picker (Option+P by default on macOS) commits the same two
+ways: Enter saves the choice as the agent's default, and Shift+Enter applies it
+to this session only. Use in this session is available for Claude only: Codex's
+own model picker always writes the choice to its configuration file, so on a
+Codex session that action is greyed out and Enter sets the default.
 
 A choice that cannot be applied says so at the top of the model menu, under Not
 applied, with the reason. The usual reason is that the agent's own model list
@@ -771,7 +784,7 @@ or your machine default editor for long prompts. The Ghostex editor uses the
 same text editing controls as the chat composer, with F1 commands, find/replace,
 undo/redo, and image previews. Cmd+S/Ctrl+S or Ctrl+G saves and closes it; Cancel
 leaves the original prompt unchanged. Dev Servers detects localhost URLs from output and
-lists them on the Browser view's start page.
+lists them in the ⋯ menu's Dev servers panel and on the Browser view's start page.
 
 Terminals follow the app theme by default. Settings > General > Theme groups
 App theme, Chat theme, and Terminal theme together at the top of Settings.
@@ -1092,17 +1105,18 @@ docs directory), `hideProjectHeaderDiffStats`,
   arrive between releases, and installed skills are refreshed automatically
   each time Ghostex starts. Offline installs use the copy inside the app.
 - The header's ⋯ menu holds Ask Ghostex, Tips & Tricks, Resources, Dev
-  servers and Extensions. The first three open as view tabs, so they stay on
-  screen beside the session you are asking about and you can keep reading them
-  while an agent works; they are available in every project. Tips & Tricks
-  teaches features one card at a time; Resources lists what Ghostex is running
-  with per-session CPU and RAM, and can put a session or the editor to sleep;
-  Ask Ghostex is a page of sample questions, and picking one opens a Ghostex
-  Help chat with the question staged so the user can edit it and press Enter.
-  Dev servers opens the Browser view on its start page, which lists the
-  development servers running on this computer and on your remote computers;
-  the same list is what a new Browser tab shows. Extensions is still a menu.
-  An entry switched off in Settings > Extensions is not listed.
+  servers, Extensions and Customize. Each of the first five opens a panel
+  under the ⋯ button that closes when you click away. Ask Ghostex, Tips &
+  Tricks and Resources are available in every project. Tips & Tricks teaches
+  features one card at a time; Resources lists what Ghostex is running with
+  per-session CPU and RAM, and can put a session or the editor to sleep; Ask
+  Ghostex lists sample questions, and picking one opens a Ghostex Help chat
+  with the question staged so the user can edit it and press Enter. Dev
+  servers lists the development servers running on this computer and on your
+  remote computers; the same list is what a new Browser tab shows. Extensions
+  lists your installed extensions. Customize opens Settings > Extensions,
+  where each of these entries can be switched on or off; an entry switched off
+  there is not listed, and Customize itself is always in the menu.
 - Welcome to Ghostex is the onboarding that opens the first time Ghostex
   runs. Its five panels cover: the agents found on this computer, with
   Install buttons for Claude Code, Codex and Cursor Agent, an Install guide

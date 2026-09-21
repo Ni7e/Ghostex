@@ -74,7 +74,6 @@ How to use this file:
 
 #### Chat
 
-- **Use GPUI chat** `sessionChatUseGpui` (boolean, default true): Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.
 - **Default view for compatible agents** `preferredAgentInterface` (one of terminal | chat; default chat): Automatically switch to chat as soon as Ghostex detects that an agent session supports it. Option labels: terminal = Terminal, chat = Chat.
 - **Chat font family** `sessionChatFontFamily` (text, default (empty)): Use any installed font in chat messages and the prompt composer.
 - **Default chat zoom (%)** `sessionChatZoomPercent` (number 70 to 200 step 5 default 100): Scale the desktop chat interface, including messages and the prompt composer, from 70% to 200% in 5% steps. Default: 100%.
@@ -254,7 +253,6 @@ How to use this file:
 - **Default Prompt Agent** `defaultPromptAgent` (Settings UI row without a settings key; use `ghostex settings open`): Choose the agent used by Git helper prompts, project board Start Work, and the default worktree first-prompt selection.
 - **Title Generation Agent** `titleGenerationAgent` (Settings UI row without a settings key; use `ghostex settings open`): Choose the headless agent Ghostex uses for first-prompt session title generation. Hover the info icon to see the exact command Ghostex sends.
 - **Custom Title Command** `customTitleCommand` (Settings UI row without a settings key; use `ghostex settings open`): Run this command with the title prompt on stdin. It should print only the title.
-- **Session-only model picks** `sessionChatModelPicksSessionOnly` (boolean, default false): Apply a model or effort picked in a chat to that session only, without changing the default for new sessions. Off saves every pick as the default. Claude only: other agents always save the default.
 - **Agent approvals** `acceptAll` (Settings UI row without a settings key; use `ghostex settings open`): Choose whether supported agents ask before editing files or running commands. Per-agent settings can override this default.
 - **Agent approvals: accept all** `agentAcceptAllEnabled` (boolean, default false): Start supported agents with approvals turned off (full access) by default. Off keeps each agent CLI default approval mode. Projects can override it.
 - **Default Prompt Agent** `defaultPromptAgentId` (text, default codex): Agent id used when Ghostex sends a prompt on your behalf (for example PR review). Use an id from the configured agents.
@@ -299,11 +297,11 @@ How to use this file:
 - **Kanban** `kanban` (Settings UI row without a settings key; use `ghostex settings open`): Plan upcoming work and track task progress at a glance.
 - **Automate** `automate` (Settings UI row without a settings key; use `ghostex settings open`): Turn repeatable project routines into simple workflows you can run whenever you need them.
 - **Docs** `docs` (Settings UI row without a settings key; use `ghostex settings open`): Browse your project’s notes, plans, and reference files together in one focused reading space.
-- **Tips & Tricks** `tips` (Settings UI row without a settings key; use `ghostex settings open`): A page of short tips for getting more out of Ghostex, opened from the ⋯ menu.
+- **Tips & Tricks** `tips` (Settings UI row without a settings key; use `ghostex settings open`): A panel of short tips for getting more out of Ghostex, opened from the ⋯ menu.
 - **Notifications** `notifications` (Settings UI row without a settings key; use `ghostex settings open`): A bell in the sidebar's top row that lists what your agents finished or need from you.
-- **Ghostex Help** `help` (Settings UI row without a settings key; use `ghostex settings open`): A page of sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.
-- **Dev servers** `devServers` (Settings UI row without a settings key; use `ghostex settings open`): The Browser view’s start page, listing development servers running on this computer.
-- **Resources** `resources` (Settings UI row without a settings key; use `ghostex settings open`): A page listing what Ghostex is running right now, with the CPU and memory each part is using.
+- **Ghostex Help** `help` (Settings UI row without a settings key; use `ghostex settings open`): A ⋯ menu entry with sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.
+- **Dev servers** `devServers` (Settings UI row without a settings key; use `ghostex settings open`): A ⋯ menu panel listing development servers running on this computer. A new Browser tab shows the same list.
+- **Resources** `resources` (Settings UI row without a settings key; use `ghostex settings open`): A ⋯ menu panel listing what Ghostex is running right now, with the CPU and memory each part is using.
 - **Git actions** `gitActions` (Settings UI row without a settings key; use `ghostex settings open`): A work area header button for commit, branch, and worktree helpers on the active project.
 - **Quick Actions** `quickActions` (Settings UI row without a settings key; use `ghostex settings open`): A work area header button that runs your saved terminal and browser actions in one click.
 - **Open In** `openIn` (Settings UI row without a settings key; use `ghostex settings open`): A work area header button that opens the active project in another app.
