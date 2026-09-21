@@ -2372,39 +2372,21 @@ impl GhostexGpuiApp {
                     self.walk_native_sidebar_sessions(reverse, cx);
                     return;
                 }
-                if let Some((sidebar_action_id, slot_number)) =
-                    gpui_command_palette_sidebar_slot_hotkey_action_id(action_id)
+                if let Some(slot_number) =
+                    gpui_command_palette_session_slot_hotkey_number(action_id)
                 {
-                    // The store resolves the Nth drawn row and focuses it as a click would when
-                    // its list is drawn; with the switch off the old page, which draws the list,
-                    // resolves it (gx_store/sidebar_session_slot.rs).
-                    if self.gx_store_run_session_slot_hotkey(slot_number, cx) {
-                        return;
-                    }
-                    self.dispatch_gpui_sidebar_host_message(
-                        serde_json::json!({
-                            "type": "nativeHotkey",
-                            "actionId": sidebar_action_id,
-                        }),
-                        cx,
-                    );
+                    // The store resolves the Nth drawn row and focuses it as a click would
+                    // (gx_store/sidebar_session_slot.rs). Nothing else is told: the page that used
+                    // to answer `nativeHotkey` is deleted, and the message had no listener left.
+                    self.gx_store_run_session_slot_hotkey(slot_number, cx);
                     return;
                 }
                 if let Some(slot_number) =
                     gpui_command_palette_project_slot_hotkey_number(action_id)
                 {
-                    // The store plans and performs the whole jump when its list is drawn; with the
-                    // switch off it applies the jump's state and the old page, which draws the
-                    // list, does the focus and the reveal (gx_store/sidebar_slot_jump.rs).
-                    if !self.gx_store_run_project_slot_hotkey(slot_number, cx) {
-                        self.dispatch_gpui_sidebar_host_message(
-                            serde_json::json!({
-                                "type": "gpuiProjectSlotHotkey",
-                                "slotNumber": slot_number,
-                            }),
-                            cx,
-                        );
-                    }
+                    // The store plans and performs the whole jump (gx_store/sidebar_slot_jump.rs).
+                    // Nothing else is told, for the same reason as the session slot above.
+                    self.gx_store_run_project_slot_hotkey(slot_number, cx);
                     return;
                 }
                 let Some(modal) = gpui_app_modal_kind_for_hotkey_action_id(action_id) else {

@@ -94,13 +94,11 @@ pub(crate) fn gpui_sidebar_session_walk_hotkey_reverse(action_id: &str) -> Optio
     }
 }
 
-/// The action id and its slot number, 1 to 9.
-pub(crate) fn gpui_command_palette_sidebar_slot_hotkey_action_id(
-    action_id: &str,
-) -> Option<(&str, u8)> {
+/// The slot number, 1 to 9, of a session slot hotkey.
+pub(crate) fn gpui_command_palette_session_slot_hotkey_number(action_id: &str) -> Option<u8> {
     /*
     CDXC:CommandPalette 2026-09-21 WHY:
-    Numbered `focusSessionSlot1` through `focusSessionSlot9` are rendered-sidebar row commands, not Rust tab-cycle commands, and single presses. With the store's list drawn the store resolves the Nth drawn row itself (gx_store/sidebar_session_slot.rs); with the switch off only those exact action ids are delegated to SidebarApp as `nativeHotkey`, whose rendered row order resolves the slot, while jump-to-project ids cannot loop back through native. Previous/Next Session left this list for `gpui_sidebar_session_walk_hotkey_reverse`. Supersedes the 2026-09-19 note that SidebarApp always resolved them.
+    Numbered `focusSessionSlot1` through `focusSessionSlot9` are rendered-sidebar row commands, not Rust tab-cycle commands, and single presses. The store resolves the Nth drawn row itself (gx_store/sidebar_session_slot.rs) and nothing is delegated: the `nativeHotkey` message used to reach the sidebar page, whose rendered row order resolved the slot, and that page is deleted. Previous/Next Session left this list for `gpui_sidebar_session_walk_hotkey_reverse`. Supersedes the 2026-09-19 note that SidebarApp always resolved them.
     */
     let slot = match action_id {
         "focusSessionSlot1" => 1,
@@ -114,13 +112,13 @@ pub(crate) fn gpui_command_palette_sidebar_slot_hotkey_action_id(
         "focusSessionSlot9" => 9,
         _ => return None,
     };
-    Some((action_id, slot))
+    Some(slot)
 }
 
 pub(crate) fn gpui_command_palette_project_slot_hotkey_number(action_id: &str) -> Option<u8> {
     /*
     CDXC:Hotkeys 2026-09-21 WHY:
-    Project slot hotkeys are rendered-sidebar project commands. The store owns the rendered project order when its list is drawn and performs `jumpToProject1` through `jumpToProject9` itself (gx_store/sidebar_slot_jump.rs); with the switch off they are delegated to SidebarApp, never through the `nativeHotkey` bounce path it forwards back to native. Supersedes the 2026-06-26-23:42 note that Rust did not own that order.
+    Project slot hotkeys are rendered-sidebar project commands. The store owns the rendered project order and performs `jumpToProject1` through `jumpToProject9` itself (gx_store/sidebar_slot_jump.rs); nothing is delegated, because the `gpuiProjectSlotHotkey` message reached the deleted sidebar page. Supersedes the 2026-06-26-23:42 note that Rust did not own that order.
     */
     match action_id {
         "jumpToProject1" => Some(1),

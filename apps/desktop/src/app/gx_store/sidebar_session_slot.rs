@@ -62,17 +62,19 @@ pub(crate) struct SessionSlotHost {
 }
 
 impl GhostexGpuiApp {
-    /// A session slot hotkey, `slot_number` 1 to 9. Returns whether it was answered here, in which
-    /// case the `nativeHotkey` message must NOT also reach the old page, which would select and
-    /// reveal a row a second time.
+    /// A session slot hotkey, `slot_number` 1 to 9. The whole answer: nothing else is told,
+    /// because nothing else draws the sidebar.
     pub(crate) fn gx_store_run_session_slot_hotkey(
         &mut self,
         slot_number: u8,
         cx: &mut gpui::Context<Self>,
-    ) -> bool {
+    ) {
+        // Nothing at all happens while the loading skeleton is drawn, the way
+        // `dispatch_native_sidebar_ui` drops a command that arrives then: the slot names the Nth
+        // row of a list that has not been built.
         if !self.gx_store_sidebar_list_ready() {
             self.gx_store.session_slot.counters.declined_source += 1;
-            return false;
+            return;
         }
         let started = Instant::now();
         let plan = ghostex_gx_core::session_slot_plan(
@@ -89,7 +91,7 @@ impl GhostexGpuiApp {
             // `visibleSessionIds[slotNumber - 1]` is undefined: nothing is selected or revealed.
             self.gx_store.session_slot.counters.nothing += 1;
             self.gx_store_session_slot_ran("nothing", plan_us, 0);
-            return true;
+            return;
         };
         self.gx_store_apply_sidebar_ui_intents(plan.intents(), cx);
         let target = plan.target_session_id;
@@ -122,7 +124,6 @@ impl GhostexGpuiApp {
         }
         cx.notify();
         self.gx_store_session_slot_ran(route, plan_us, reveal_us);
-        true
     }
 
     /// One line per answered press, while the budget lasts: the route and the two timings, never

@@ -73,31 +73,34 @@ pub(crate) struct SlotJumpHost {
 }
 
 impl GhostexGpuiApp {
-    /// A project slot hotkey. Returns whether it was answered here, in which case the message must
-    /// NOT also reach the old page, which would select and reveal the row a second time.
+    /// A project slot hotkey. The whole answer: nothing else is told, because nothing else draws
+    /// the sidebar.
     pub(crate) fn gx_store_run_project_slot_hotkey(
         &mut self,
         slot_number: u8,
         cx: &mut gpui::Context<Self>,
-    ) -> bool {
+    ) {
+        // Nothing at all happens while the loading skeleton is drawn, the way
+        // `dispatch_native_sidebar_ui` drops a command that arrives then: the slot names the Nth
+        // row of a list that has not been built, so there is no row to focus, and the state half
+        // must not run either. It used to run, on the reasoning that this app is the only writer
+        // of the collapse key; what that really did was queue a collapse intent
+        // (`queued_intents`) that replayed on top of the state the read brought back, so a project
+        // the user left open silently expanded or closed in the launch window with nothing
+        // focused.
+        if !self.gx_store_sidebar_list_ready() {
+            self.gx_store.slot_jump.counters.declined_source += 1;
+            return;
+        }
         let started = Instant::now();
-        let draws_store_list = self.gx_store_sidebar_list_ready();
-        // The state half runs even when the list is not ready: this app is the only writer of the
-        // collapse key, so a
-        // jump whose focus and reveal are dropped must still store what it moved.
         let plan = self.gx_store_note_project_slot_hotkey(slot_number, cx);
         let plan_us = started.elapsed().as_micros() as u64;
-        if !draws_store_list {
-            self.gx_store.slot_jump.counters.declined_source += 1;
-            return false;
-        }
         let (route, reveal_us) = self.gx_store_perform_project_slot_jump(plan, cx);
         let counters = &mut self.gx_store.slot_jump.counters;
         counters.presses += 1;
         counters.plan_max_us = counters.plan_max_us.max(plan_us);
         cx.notify();
         self.gx_store_slot_jump_ran(route, plan_us, reveal_us);
-        true
     }
 
     /// The focus and the reveal of a planned jump, whose state intents are already applied.
