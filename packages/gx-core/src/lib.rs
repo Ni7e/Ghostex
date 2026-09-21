@@ -39,8 +39,8 @@ pub use crate::doc_sync::{
     EmptyEchoRule, SyncEffect, SyncPolicy, SyncedDocument,
 };
 pub use crate::focus::{
-    default_group_for_project, next_visible_sessions_for_local_focus, ActiveGroup,
-    ExternalFocusUpdate, FocusField, FocusOutcome, FocusState,
+    default_group_for_project, empty_tab_list_confirmed, next_visible_sessions_for_local_focus,
+    ActiveGroup, ExternalFocusUpdate, FocusField, FocusOutcome, FocusState,
 };
 pub use crate::keys::{
     decode_uri_component, encode_uri_component, encode_workspace_subgroup_id,
