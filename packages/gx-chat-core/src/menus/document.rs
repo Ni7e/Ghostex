@@ -8,6 +8,8 @@ use crate::state::{ChatContext, ChatState};
 ///
 /// `selectedOptions` is folded by family a, which merges by evidence priority and `detectedAt`;
 /// publishing it is family e's, because the pills decide what a weaker capture may overwrite.
-pub fn document(state: &ChatState, _context: &ChatContext, into: &mut Document) {
-    let _ = (state, into);
+pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
+    let _ = state;
+    crate::menus::picker::document(state, context, into);
+    crate::menus::context::document(state, context, into);
 }

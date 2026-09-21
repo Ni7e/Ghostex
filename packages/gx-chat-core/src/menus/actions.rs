@@ -1,5 +1,8 @@
 //! Family e's user actions: the option pills, the model menu and picker, accounts, the fork
 //! branch picker and the context editor.
+//!
+//! The model picker, model menu and fork branch kinds go to `picker::handle`, the context kinds to
+//! `context::handle`: both live in family e2's subdirectories. Everything else is family e1's.
 
 use crate::action::{ActionKind, UserAction};
 use crate::effect::Effect;
@@ -7,10 +10,8 @@ use crate::state::{ChatContext, ChatState};
 
 /// Handles one action family e owns.
 pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
-    let _ = (&state, context);
     match action.kind {
-        ActionKind::SelectOption
-        | ActionKind::ToggleModelPicker
+        ActionKind::ToggleModelPicker
         | ActionKind::ModelPickerMeasure
         | ActionKind::ModelPickerPane
         | ActionKind::ModelPickerKey
@@ -25,10 +26,9 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
         | ActionKind::ModelMenuFavorite
         | ActionKind::ModelMenuPick
         | ActionKind::ModelMenuTrait
-        | ActionKind::Accounts
-        | ActionKind::SwitchDraftAgent
-        | ActionKind::SelectForkBranch
-        | ActionKind::ContextEdit
+        | ActionKind::SelectForkBranch => crate::menus::picker::handle(state, action, context),
+
+        ActionKind::ContextEdit
         | ActionKind::ContextCancel
         | ActionKind::ContextQuery
         | ActionKind::ContextShown
@@ -37,7 +37,14 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
         | ActionKind::ContextReset
         | ActionKind::ContextSave
         | ActionKind::ContextCompact
-        | ActionKind::MeasureContextStatus => Vec::new(),
+        | ActionKind::MeasureContextStatus => {
+            crate::menus::context::handle(state, action, context)
+        }
+
+        ActionKind::SelectOption | ActionKind::Accounts | ActionKind::SwitchDraftAgent => {
+            Vec::new()
+        }
+
         _ => Vec::new(),
     }
 }
