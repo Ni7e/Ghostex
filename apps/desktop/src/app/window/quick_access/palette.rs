@@ -97,7 +97,7 @@ impl QuickAccessPalette {
                 keycap: modal_rgba(0x000000, 0.07),
                 row_selected: modal_rgba(0x000000, 0.06),
                 status_dot: rgb(0x737373),
-                status_dot_open: rgb(0x404040),
+                status_dot_open: rgb(0x26a7fc),
                 favorite: rgb(0xe3b341),
             }
         } else {
