@@ -302,7 +302,7 @@ impl NativeChatView {
             );
         }
         if !maximized {
-            if let Some(strip) = self.render_working_strip(p) {
+            if let Some(strip) = self.render_working_strip(p, cx) {
                 footer = footer.child(strip);
             }
         }

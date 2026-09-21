@@ -73,6 +73,7 @@ function ComposerStatusStory({
                   { id: 'closeAfterDone', label: 'Close After Done armed' },
                 ]
               : [],
+            onArmedActionClick: () => setNotice('Delayed actions opened.'),
           }}
           agentTasks={
             scenario === 'panels'

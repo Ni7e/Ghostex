@@ -13,10 +13,14 @@ use gpui::{
 use std::time::Duration;
 
 impl NativeChatView {
-    pub(crate) fn render_working_strip(&self, p: &ChatAppearance) -> Option<AnyElement> {
+    pub(crate) fn render_working_strip(
+        &self,
+        p: &ChatAppearance,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
         let status = &self.snapshot["workingStrip"];
         let reduced_motion = crate::app::helpers::gpui_macos_reduce_motion_enabled();
-        let armed = self.armed_action_items(p);
+        let armed = self.armed_action_items(p, cx);
         if status["presentation"].is_object() {
             let activity = self.render_working_activity(p, reduced_motion);
             if armed.is_empty() {
@@ -91,7 +95,13 @@ impl NativeChatView {
             .into_any_element()
     }
 
-    fn armed_action_items(&self, p: &ChatAppearance) -> Vec<AnyElement> {
+    /// CDXC:DelayedSend 2026-09-21 DECISION:
+    /// User: clicking an armed Delayed Send or Close After Done indicator on the chat working row opens the Delayed Actions modal so they can be managed there.
+    fn armed_action_items(
+        &self,
+        p: &ChatAppearance,
+        cx: &mut gpui::Context<Self>,
+    ) -> Vec<AnyElement> {
         let s = p.scale;
         self.armed_actions
             .as_array()
@@ -100,8 +110,22 @@ impl NativeChatView {
             .filter_map(|action| {
                 let color = VISUAL.armed_color(action["id"].as_str()?)?;
                 let label = action["label"].as_str()?.to_owned();
+                let id = action["id"].as_str()?.to_owned();
                 Some(
                     div()
+                        .id(format!("chat-armed-{id}"))
+                        .role(gpui::Role::Button)
+                        .aria_label(format!("{label}. Manage delayed actions"))
+                        .cursor_pointer()
+                        .hover(|style| style.opacity(0.8))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.host(
+                                "delayedActions",
+                                serde_json::json!({"type": "host", "action": "delayedActions"}),
+                                cx,
+                            );
+                        }))
                         .flex()
                         .items_center()
                         .gap(px(VISUAL.armed_icon_gap * s))

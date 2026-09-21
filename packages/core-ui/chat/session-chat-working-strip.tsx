@@ -28,6 +28,8 @@ export interface SessionChatWorkingStripProps {
   activity: SessionChatTerminalActivity | null;
   /** Armed Delayed Send / Close After Done, drawn at the right of the working row (armed-actions.ts). */
   armedActions?: readonly SessionChatArmedAction[];
+  /** Opens the host's Delayed Actions modal from an armed indicator; omitted means the indicators are not clickable. */
+  onArmedActionClick?: () => void;
 }
 
 const ARMED_ICON_COLORS: Record<SessionChatArmedAction['id'], string> = {
@@ -35,7 +37,12 @@ const ARMED_ICON_COLORS: Record<SessionChatArmedAction['id'], string> = {
   closeAfterDone: visual.closeAfterDoneColor,
 };
 
-export function SessionChatWorkingStrip({ working, activity, armedActions = [] }: SessionChatWorkingStripProps) {
+export function SessionChatWorkingStrip({
+  working,
+  activity,
+  armedActions = [],
+  onArmedActionClick,
+}: SessionChatWorkingStripProps) {
   const status = computeSessionChatWorkingStrip(working, activity, { useEffect, useState });
   const activityRow = status.activity ? <SessionChatActivityRow activity={status.activity} className='my-0' /> : null;
   const label = status.activity ? null : status.label;
@@ -76,14 +83,33 @@ export function SessionChatWorkingStrip({ working, activity, armedActions = [] }
             </>
           ) : null}
         </div>
-        {armedActions.map((action) => (
-          <span className='ghostex-chat-working-strip-armed' data-armed-action={action.id} key={action.id}>
-            <span aria-hidden='true' className='ghostex-chat-working-strip-armed-icon'>
-              <IconClock color={ARMED_ICON_COLORS[action.id]} />
+        {armedActions.map((action) => {
+          const content = (
+            <>
+              <span aria-hidden='true' className='ghostex-chat-working-strip-armed-icon'>
+                <IconClock color={ARMED_ICON_COLORS[action.id]} />
+              </span>
+              <span className='ghostex-chat-working-strip-armed-text'>{action.label}</span>
+            </>
+          );
+          /** CDXC:DelayedSend 2026-09-21 DECISION: User: clicking an armed Delayed Send or Close After Done indicator on the chat working row opens the Delayed Actions modal so they can be managed there. */
+          return onArmedActionClick ? (
+            <button
+              aria-label={`${action.label}. Manage delayed actions`}
+              className='ghostex-chat-working-strip-armed'
+              data-armed-action={action.id}
+              key={action.id}
+              onClick={onArmedActionClick}
+              type='button'
+            >
+              {content}
+            </button>
+          ) : (
+            <span className='ghostex-chat-working-strip-armed' data-armed-action={action.id} key={action.id}>
+              {content}
             </span>
-            <span className='ghostex-chat-working-strip-armed-text'>{action.label}</span>
-          </span>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -1963,6 +1963,7 @@ export function SessionChatView({
                                 working: !accountSwitch.busy && chat.sessionWorking,
                                 activity: accountSwitch.busy ? null : chat.terminalActivity,
                                 ...(armedActions ? { armedActions } : {}),
+                                ...(onDelayedActions ? { onArmedActionClick: onDelayedActions } : {}),
                               }}
                               paneFocused={paneFocused}
                               agentFleet={chat.agentFleet}

@@ -719,6 +719,17 @@ impl GhostexGpuiApp {
             open_message["agentIcon"] = serde_json::json!(agent_icon);
         }
         open_message["supportsSendWhenAgentStops"] = serde_json::json!(true);
+        /*
+        CDXC:DelayedSend 2026-09-21 WHY:
+        The open message names the session by its shell id (`GW…`), which never matches the sidebar-state `sessionsById` keys the dialog would otherwise read, so an armed Close After Done opened as switched off and could not be turned off from the dialog. State it here from the same armed map the chat indicator draws from.
+        */
+        open_message["closeAfterDoneActive"] = serde_json::json!(
+            self.session_chat_armed_actions(session_id)
+                .as_array()
+                .is_some_and(|actions| actions
+                    .iter()
+                    .any(|action| action["id"] == "closeAfterDone"))
+        );
         let remote_key = self
             .remote_attach_sessions
             .iter()
@@ -785,6 +796,15 @@ impl GhostexGpuiApp {
         let Some(session_id) = self.focused_agents_or_companion_shell_session_id() else {
             return false;
         };
+        self.open_gpui_delayed_send_modal_for_agents_session(session_id, cx)
+    }
+
+    /// Opens Delayed Actions for one Agents session, so a chat or terminal bar request manages its own session rather than whichever pane holds focus.
+    pub(crate) fn open_gpui_delayed_send_modal_for_agents_session(
+        &mut self,
+        session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
         let title = self.agents_workspace_tab_display_title(session_id);
         let modal = GpuiAppModalKind::DelayedSend;
         let sidebar_state_message = self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);

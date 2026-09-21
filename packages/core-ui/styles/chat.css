@@ -4106,6 +4106,24 @@ reduced-motion turns both off and keeps the static glyph.
   min-width: 0;
 }
 
+button.ghostex-chat-working-strip-armed {
+  background: transparent;
+  border: 0;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+button.ghostex-chat-working-strip-armed:hover {
+  opacity: 0.8;
+}
+
+button.ghostex-chat-working-strip-armed:focus-visible {
+  outline: 3px solid color-mix(in oklab, var(--ring) 20%, transparent);
+}
+
 .ghostex-chat-working-strip-armed-icon {
   align-items: center;
   display: flex;
