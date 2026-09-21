@@ -35,7 +35,12 @@ pub(crate) fn current_process_with_files(
         .get(name)
         .filter(|identity| identity.agent_id.as_deref() == Some(agent))
         .ok_or_else(|| anyhow::anyhow!("Agent process owner is unavailable"))?;
-    if let Some(id) = identity.agent_session_id.as_deref() {
+    // CDXC:SessionIdentity 2026-09-21 WHY: Claude's process id comes from launch argv, which `/clear`, `/resume` and a self-fork leave stale while hooks report the live conversation; comparing it hid the Subagents card for every such session. Codex's id is read from its open rollout, so it stays a valid ownership check.
+    if let Some(id) = identity
+        .agent_session_id
+        .as_deref()
+        .filter(|_| agent != "claude")
+    {
         anyhow::ensure!(
             session
                 .pointer("/runtimeSettings/agentSessionId")

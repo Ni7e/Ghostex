@@ -574,6 +574,15 @@ fn extract_agent_process_session_id(
         return None;
     }
     if matches!(agent_id, "claude" | "cursor") {
+        /*
+        CDXC:SessionFork 2026-09-21 WHY:
+        An in-app Claude fork leaves the terminal's `claude --resume <parent>` as a viewer and runs the conversation in a daemon-hosted `claude --session-id <fork> --fork-session --resume <parent>` below it. `--session-id` names the process's own conversation even on a fork launch, so it is read before the fork rule; ignoring it made the viewer's stale parent id the terminal's identity and the chat Subagents card refused the session as "a different conversation".
+        */
+        if agent_id == "claude" {
+            if let Some(id) = read_agent_process_flag_value(agent_id, args, "--session-id") {
+                return Some(id);
+            }
+        }
         if args.iter().any(|arg| {
             let token = arg.trim_matches(['"', '\'']);
             token == "--fork-session" || token.starts_with("--fork-session=")

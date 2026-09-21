@@ -138,6 +138,47 @@ pub(crate) fn apply_live_process_session_identity(
     Ok(result.get("changed").and_then(Value::as_bool) == Some(true))
 }
 
+/// CDXC:SessionIdentity 2026-09-21 WHY:
+/// A conversation id read from a process's argv (`claude --resume <id>`) is a launch fact that never changes while the process lives, but the conversation does: `/clear`, `/resume`, and a Claude session that forks itself into a background session all move on, and only a hook reports the new id. Re-applying the argv id on every poll fought those hooks, so the stored id flipped between the two conversations every few seconds and the chat kept reloading the other transcript (observed live 2026-09-21). An argv id is therefore applied once per process; a newly launched process has a new pid and can still resume an ancestor.
+pub(crate) fn launch_argv_identity_already_applied(
+    session: &Value,
+    process_id: i64,
+    agent_session_id: &str,
+) -> bool {
+    session
+        .pointer("/runtimeSettings/launchArgvIdentity")
+        .is_some_and(|applied| {
+            applied.get("processId").and_then(Value::as_i64) == Some(process_id)
+                && applied.get("agentSessionId").and_then(Value::as_str) == Some(agent_session_id)
+        })
+}
+
+pub(crate) fn record_applied_launch_argv_identity(
+    repository: &DomainRepository<'_>,
+    project_id: &str,
+    session_id: &str,
+    process_id: i64,
+    agent_session_id: &str,
+) -> Result<(), DomainStateError> {
+    let lifecycle = LifecycleParams {
+        project_id: project_id.to_string(),
+        session_id: session_id.to_string(),
+    };
+    let session = require_session(repository, &lifecycle)?;
+    let mut runtime_settings = object_field(&session, "runtimeSettings");
+    runtime_settings.insert(
+        "launchArgvIdentity".to_string(),
+        json!({ "agentSessionId": agent_session_id, "processId": process_id }),
+    );
+    let mut update = lifecycle_update(&lifecycle);
+    update.insert(
+        "runtimeSettings".to_string(),
+        Value::Object(runtime_settings),
+    );
+    repository.update_session(&update)?;
+    Ok(())
+}
+
 /*
 CDXC:SessionIdentity 2026-08-02:
 Transcript-proven identity repair. Claude Code writes a NEW transcript on
