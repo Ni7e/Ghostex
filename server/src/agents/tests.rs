@@ -2257,20 +2257,19 @@ fn resume_plan_extracts_provider_exact_identity_hints() {
         "title": "Readable Claude title",
     });
     let claude_plan = build_agent_resume_plan(&project, &claude, &settings);
-    assert_eq!(
-        claude_plan.get("primaryCommand"),
-        Some(&json!(
-            "claude --resume \"9970b270-b39f-4d63-a764-fa8d88083995\""
-        ))
-    );
-    assert_eq!(
-        claude_plan.get("displayCommand"),
-        claude_plan.get("primaryCommand")
-    );
-    assert_eq!(
-        claude_plan.get("copyCommand"),
-        claude_plan.get("primaryCommand")
-    );
+    let claude_resume = json!("claude --resume \"9970b270-b39f-4d63-a764-fa8d88083995\"");
+    #[cfg(windows)]
+    assert_eq!(claude_plan.get("primaryCommand"), Some(&claude_resume));
+    #[cfg(not(windows))]
+    assert!(claude_plan
+        .get("primaryCommand")
+        .and_then(Value::as_str)
+        .is_some_and(|command| {
+            command.starts_with("__ghostex_claude_bg_id=\"$(claude agents --json ")
+                && command.contains("then claude attach \"$__ghostex_claude_bg_id\"; else claude --resume \"9970b270-b39f-4d63-a764-fa8d88083995\"; fi")
+        }));
+    assert_eq!(claude_plan.get("displayCommand"), Some(&claude_resume));
+    assert_eq!(claude_plan.get("copyCommand"), Some(&claude_resume));
     assert!(claude_plan
         .get("fallbackCommand")
         .and_then(Value::as_str)

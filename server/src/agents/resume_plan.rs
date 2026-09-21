@@ -1,8 +1,12 @@
 use serde_json::{Map, Value};
 
+#[cfg(not(windows))]
+mod claude_background;
 #[cfg(windows)]
 mod windows;
 use super::*;
+#[cfg(not(windows))]
+use claude_background::build_claude_attach_or_resume_command;
 #[cfg(windows)]
 pub(crate) use windows::*;
 
@@ -424,10 +428,17 @@ pub(crate) fn build_agent_resume_command(
         }
         "claude" => {
             if let Some(exact) = claude_exact_reference {
-                return Some(build_claude_resume_invocation(
-                    agent_command,
-                    &quote_shell_double_arg(&exact),
-                ));
+                let resume_invocation =
+                    build_claude_resume_invocation(agent_command, &quote_shell_double_arg(&exact));
+                #[cfg(not(windows))]
+                if !options.display {
+                    return Some(build_claude_attach_or_resume_command(
+                        agent_command,
+                        &exact,
+                        resume_invocation,
+                    ));
+                }
+                return Some(resume_invocation);
             }
             let resume_title = resume_title?;
             if options.display {
