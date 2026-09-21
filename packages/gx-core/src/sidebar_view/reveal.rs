@@ -30,7 +30,9 @@
 use crate::core::Core;
 use crate::keys::{MachineId, ProjectKey, SessionKey};
 
-use super::inputs::{SectionId, SidebarInputs, LOCAL_MACHINE_ID};
+use crate::sidebar_ui::SidebarUiIntent;
+
+use super::inputs::{SectionId, SidebarInputs, SidebarUiState, LOCAL_MACHINE_ID};
 use super::model::SidebarViewModel;
 use super::spaces::{resolve_selected_space, space_for_group, SpacesState};
 use super::tags::matches_tag_filters;
@@ -64,6 +66,68 @@ pub struct SidebarRevealPlan {
     pub clear_tag_filters: bool,
     /// The compact list would still leave the row out.
     pub expand_list: bool,
+}
+
+impl SidebarRevealPlan {
+    /// The changes to the sidebar's own state that carry this plan out, in the order they must be
+    /// applied, against the state `ui` holds now. The Space memory (`remember_space`) is not one of
+    /// them: the host applies it as its own step, after these, because it is counted separately.
+    ///
+    /// One function for every caller (the reveal a publish carries, the slot hotkey's reveal, and
+    /// the gates) rather than one copy per host path, so a rule cannot change for one of them only.
+    pub fn intents(&self, ui: &SidebarUiState) -> Vec<SidebarUiIntent> {
+        let mut intents = Vec::new();
+        // The machine before everything else: every other field of the plan is keyed by that
+        // machine's section, so applying the Space or a collapse first would write them under the
+        // section the user is leaving. `rememberNativeSidebarFocus` switches the tab the same way.
+        if let Some(machine_id) = &self.select_machine {
+            intents.push(SidebarUiIntent::SelectMachine {
+                machine_id: machine_id.clone(),
+            });
+        }
+        // The Space next: it decides which groups the section draws at all, which is what the
+        // TypeScript does by running `rememberNativeSidebarFocus` before everything else.
+        if let Some(space_id) = &self.select_space {
+            intents.push(SidebarUiIntent::SelectSpace {
+                space_id: space_id.clone(),
+            });
+        }
+        if self.show_hidden {
+            intents.push(SidebarUiIntent::ToggleShowHidden);
+        }
+        if self.clear_tag_filters {
+            for tag in &ui.selected_tag_filters {
+                intents.push(SidebarUiIntent::ToggleTagFilter { tag: tag.clone() });
+            }
+        }
+        if let Some(storage_id) = &self.collapsed_collection_storage_id {
+            intents.push(SidebarUiIntent::ToggleCollectionCollapsed {
+                storage_id: storage_id.clone(),
+            });
+        }
+        if self.collapsed_group {
+            intents.push(SidebarUiIntent::ToggleGroupCollapsed {
+                group_id: self.group_id.clone(),
+            });
+        }
+        if let Some(section) = self.collapsed_section {
+            intents.push(SidebarUiIntent::ToggleSection {
+                storage_id: self.storage_id.clone(),
+                section,
+            });
+        }
+        if self.expand_list
+            && !ui
+                .collapse
+                .expanded_session_lists
+                .contains(&self.storage_id)
+        {
+            intents.push(SidebarUiIntent::ToggleSessionListExpanded {
+                storage_id: self.storage_id.clone(),
+            });
+        }
+        intents
+    }
 }
 
 /// Works out what has to change for `sidebar_session_id` to be drawn, reading `view` (the list as
