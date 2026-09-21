@@ -790,6 +790,9 @@ fn codex_plan_mode_choice() -> SessionChatDetectedChoice {
 /// published agent model catalog (`agent-model-catalog.json`).
 const CURSOR_MODEL_LABELS: &[(&str, &str)] = &[
     ("Auto", "auto"),
+    ("Grok 4.7", "grok-4.7"),
+    ("Grok 4.6", "cursor-grok-4.6"),
+    // Cursor CLI before 2026.09.18 printed its Grok rows with a "Cursor" prefix.
     ("Cursor Grok 4.6", "cursor-grok-4.6"),
     ("Composer 2.5", "composer-2.5"),
     ("Claude Opus 5", "claude-opus-5"),
@@ -798,8 +801,10 @@ const CURSOR_MODEL_LABELS: &[(&str, &str)] = &[
     ("GPT-5.5", "gpt-5.5"),
     ("Claude Fable 5.1", "claude-fable-5-1"),
     ("Claude Fable 5", "claude-fable-5"),
+    ("Grok 4.5", "cursor-grok-4.5"),
     ("Cursor Grok 4.5", "cursor-grok-4.5"),
     ("Gemini 3.8 Flash", "gemini-3.8-flash"),
+    ("Muse Spark 1.3", "muse-spark-1.3"),
     ("Gemini 3.7 Flash", "gemini-3.7-flash"),
     ("GPT-5.6 Terra", "gpt-5.6-terra"),
     ("Claude Sonnet 5", "claude-sonnet-5"),
