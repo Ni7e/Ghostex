@@ -9,7 +9,6 @@ use gpui::ParentElement as _;
 use gpui::StatefulInteractiveElement as _;
 use gpui::Styled as _;
 use gpui::Window;
-use gpui::WindowControlArea;
 use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
@@ -19,6 +18,7 @@ use gpui_component::h_flex;
 use super::anchor::record_workarea_header_bottom_y;
 use crate::app::consts::*;
 use crate::app::helpers::*;
+use crate::app::render::window_drag_region::window_drag_region;
 use crate::*;
 
 /*
@@ -41,11 +41,6 @@ fn gpui_header_double_click_window_action(window: &Window) {
 
 #[cfg(target_os = "windows")]
 fn gpui_header_double_click_window_action(_window: &Window) {}
-
-#[cfg(target_os = "linux")]
-struct GpuiLinuxHeaderDragState {
-    should_move: bool,
-}
 
 impl GhostexGpuiApp {
     /// True while the header's own half of the band is too narrow for its labels, which is what the
@@ -120,46 +115,11 @@ impl GhostexGpuiApp {
             .text_color(titlebar_text_color())
             .font_family("Inter Variable")
             .line_height(px(TITLEBAR_CONTROL_HEIGHT))
-            .window_control_area(WindowControlArea::Drag)
             .on_prepaint(|bounds, _window, _cx| {
                 record_workarea_header_bottom_y(bounds.bottom().as_f32());
             });
 
-        /*
-        X11 does not consume GPUI's WindowControlArea hit boxes, so a client-decorated Linux window
-        must hand movement to the window manager from the real drag element. Wait for pointer
-        movement so ordinary clicks and double-click maximize keep their existing behavior.
-        */
-        #[cfg(target_os = "linux")]
-        let header = {
-            let drag_state =
-                window.use_state(cx, |_, _| GpuiLinuxHeaderDragState { should_move: false });
-            header
-                .on_mouse_down_out(
-                    window.listener_for(&drag_state, |state, _, _, _| state.should_move = false),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    window.listener_for(&drag_state, |state, _, window, _| {
-                        state.should_move = matches!(
-                            window.window_decorations(),
-                            gpui::Decorations::Client { .. }
-                        );
-                    }),
-                )
-                .on_mouse_up(
-                    MouseButton::Left,
-                    window.listener_for(&drag_state, |state, _, _, _| {
-                        state.should_move = false;
-                    }),
-                )
-                .on_mouse_move(window.listener_for(&drag_state, |state, _, window, _| {
-                    if state.should_move {
-                        state.should_move = false;
-                        window.start_window_move();
-                    }
-                }))
-        };
+        let header = window_drag_region(header);
 
         header
             .on_click(|event, window, _cx| {

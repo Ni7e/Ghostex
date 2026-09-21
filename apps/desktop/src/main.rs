@@ -391,6 +391,9 @@ fn main() {
                 appears_transparent: true,
                 traffic_light_position: Some(gpui::point(px(11.0), px(11.5))),
             }),
+            // See `window_drag_region`: the top band holds draggable tabs, so the app, not AppKit,
+            // decides which drags there move the window.
+            app_owns_titlebar_drag: true,
             ..Default::default()
         };
 
