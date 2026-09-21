@@ -29,6 +29,7 @@ export const SessionChatFileChangeInteractionContext = createContext<((messageId
  * User: edits default to one collapsed row; Settings > Chat can enable seven-line previews. Counts beside the path toggle the full diff, replacing the chevron and bottom line-count label.
  * User: after either expanding or collapsing a diff, keep its header visible, scrolling to it when necessary.
  * User: the circle toggles the diff and its center turns white on hover; the left rail also toggles the open code.
+ * User: do not show the rail while the diff is collapsed; a collapsed preview has no line down its code.
  * User: clicking the card itself toggles the diff; only the path/name text opens the file, not the empty space beside it.
  * User: the header is a single line containing the file path, truncated from the start when necessary; this replaces the stacked filename and folder.
  * User: use styled action tooltips; the unified path now shares one tooltip instead of separate folder and filename tooltips.
@@ -89,7 +90,12 @@ function FileChangeCard({
   };
   return (
     <section
-      className={cn('ghostex-chat-file-change-card', showBody && 'has-preview', canExpand && 'is-expandable')}
+      className={cn(
+        'ghostex-chat-file-change-card',
+        showBody && 'has-preview',
+        expanded && 'is-expanded',
+        canExpand && 'is-expandable'
+      )}
       aria-label={`${change.action} ${change.path}`}
       onClick={(event) => {
         if (!(event.target instanceof Element) || event.target.closest('button')) return;
@@ -146,7 +152,7 @@ function FileChangeCard({
           </button>
         </AppTooltip>
       </div>
-      {showBody && canExpand ? (
+      {expanded && canExpand ? (
         <button
           type='button'
           className='ghostex-chat-file-change-rail'

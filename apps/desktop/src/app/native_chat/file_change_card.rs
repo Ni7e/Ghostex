@@ -180,7 +180,6 @@ impl NativeChatView {
         let parent = text(file, "parent");
 
         let marker_group = format!("marker:{key}");
-        let marker_key = key.clone();
         let marker = div()
             .id(format!("marker:{key}"))
             .group(marker_group.clone())
@@ -198,13 +197,10 @@ impl NativeChatView {
                     .size(px(8.0 * s))
                     .rounded_full()
                     .bg(palette.rail)
-                    .group_hover(marker_group, |style| style.bg(gpui::white())),
-            )
-            .on_click(cx.listener(move |view, _, _, cx| {
-                if can_expand {
-                    view.toggle_disclosure(&marker_key, cx);
-                }
-            }));
+                    .when(can_expand, |this| {
+                        this.group_hover(marker_group, |style| style.bg(gpui::white()))
+                    }),
+            );
 
         let open_path = text(file, "path");
         let name = div()
@@ -243,13 +239,14 @@ impl NativeChatView {
                     .child(text(file, "filename")),
             )
             .on_click(cx.listener(move |view, _, _, cx| {
+                // The path opens the file; every other press on the card toggles the diff.
+                cx.stop_propagation();
                 view.invoke(
                     json!({"type":"openMarkdownLink","href":open_path,"external":false}),
                     cx,
                 )
             }));
 
-        let counts_key = key.clone();
         let counts = div()
             .id(format!("counts:{key}"))
             .flex()
@@ -269,31 +266,38 @@ impl NativeChatView {
                 div()
                     .text_color(palette.removed)
                     .child(format!("\u{2212}{removed}")),
-            )
+            );
+
+        // One press target, as React's `<section onClick>` is: the marker, the counts, the rail,
+        // the code, the footer and the empty space between them all toggle the diff from here, so
+        // no two listeners can flip the same row twice. Only the path stops the press to open the file.
+        let card_key = key.clone();
+        let mut card = div()
+            .id(format!("card:{key}"))
             .on_click(cx.listener(move |view, _, _, cx| {
                 if can_expand {
-                    view.toggle_disclosure(&counts_key, cx);
+                    view.toggle_disclosure(&card_key, cx);
                 }
-            }));
-
-        let mut card = div()
+            }))
             .flex()
             .flex_col()
             .w_full()
             .min_w_0()
             .relative()
-            .child(
-                // The hairline React draws down the marker column joining one circle to the next
-                // (`.ghostex-chat-file-change-card::before`); visual only, and it reaches into the
-                // gap below every card but the last.
-                div()
-                    .absolute()
-                    .left(px(8.0 * s))
-                    .top(px(22.0 * s))
-                    .bottom(px(if last { 0.0 } else { -12.0 * s }))
-                    .w(px(1.0))
-                    .bg(palette.rail),
-            )
+            // The hairline React draws down the marker column joining one circle to the next
+            // (`.ghostex-chat-file-change-card::before`); visual only, and it reaches into the
+            // gap below every card but the last. A collapsed preview draws no rail through its code.
+            .when(!show_body || expanded, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left(px(8.0 * s))
+                        .top(px(22.0 * s))
+                        .bottom(px(if last { 0.0 } else { -12.0 * s }))
+                        .w(px(1.0))
+                        .bg(palette.rail),
+                )
+            })
             .child(
                 div()
                     .flex()
@@ -379,36 +383,10 @@ impl NativeChatView {
                     .child(div().min_w_0().child(text(line, "text"))),
             );
         }
-        let body_key = key.clone();
-        card = card.child(
-            div()
-                .id(format!("body:{key}"))
-                .flex()
-                .w_full()
-                .min_w_0()
-                .mt(px(8.0 * s))
-                .gap(px(12.0 * s))
-                .when(can_expand, |this| this.chat_cursor_pointer())
-                .child(
-                    // The rail is the grab target React gives the open code, not an invisible overlay.
-                    div()
-                        .w(px(17.0 * s))
-                        .flex_shrink_0()
-                        .flex()
-                        .justify_center()
-                        .child(div().w(px(1.0)).h_full().bg(palette.rail)),
-                )
-                .child(code)
-                .on_click(cx.listener(move |view, _, _, cx| {
-                    if can_expand {
-                        view.toggle_disclosure(&body_key, cx);
-                    }
-                })),
-        );
+        let mut detail_column = div().flex().flex_col().flex_1().min_w_0().child(code);
         if expanded && failed {
-            card = card.child(
+            detail_column = detail_column.child(
                 div()
-                    .ml(px(29.0 * s))
                     .mt(px(8.0 * s))
                     .min_w_0()
                     .text_color(p.error())
@@ -416,8 +394,7 @@ impl NativeChatView {
             );
         }
         if can_expand {
-            let footer_key = key.clone();
-            card = card.child(
+            detail_column = detail_column.child(
                 div()
                     .flex()
                     .justify_end()
@@ -426,7 +403,6 @@ impl NativeChatView {
                     .pb(px(7.0 * s))
                     .child(
                         div()
-                            .id(format!("footer:{key}"))
                             .px(px(8.0 * s))
                             .py(px(4.0 * s))
                             .rounded(px(6.0 * s))
@@ -438,13 +414,40 @@ impl NativeChatView {
                                 "Collapse changes"
                             } else {
                                 "Show all changes"
-                            })
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                view.toggle_disclosure(&footer_key, cx)
-                            })),
+                            }),
                     ),
             );
         }
+        let rail_group = format!("rail:{key}");
+        card = card.child(
+            div()
+                .flex()
+                .w_full()
+                .min_w_0()
+                .mt(px(8.0 * s))
+                .gap(px(12.0 * s))
+                .child(
+                    // The rail is the grab target React gives the open code, not an invisible
+                    // overlay: a real column beside the code and the footer (React's
+                    // `grid-row: 2 / 4`) whose line lights up white under the mouse.
+                    div()
+                        .group(rail_group.clone())
+                        .w(px(17.0 * s))
+                        .flex_shrink_0()
+                        .flex()
+                        .justify_center()
+                        .when(can_expand, |this| this.chat_cursor_pointer())
+                        .when(expanded, |this| {
+                            this.child(div().w(px(1.0)).h_full().bg(palette.rail).when(
+                                can_expand,
+                                |this| {
+                                    this.group_hover(rail_group, |style| style.bg(gpui::white()))
+                                },
+                            ))
+                        }),
+                )
+                .child(detail_column),
+        );
         card.into_any_element()
     }
 }

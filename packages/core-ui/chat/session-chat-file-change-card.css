@@ -64,6 +64,9 @@
 .ghostex-chat-file-change-card:last-child::before {
   bottom: 0;
 }
+.ghostex-chat-file-change-card.has-preview:not(.is-expanded)::before {
+  display: none;
+}
 .ghostex-chat-file-change-card button {
   border: 0;
   border-radius: 0;
