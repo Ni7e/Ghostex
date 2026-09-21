@@ -54,6 +54,10 @@ pub(crate) fn project_status(
     if additions == 0 && deletions == 0 {
         return None;
     }
+    // CDXC:Theming 2026-09-21 DECISION: User: make these numbers slightly darker colors when app theme is dark.
+    // SEE-ALSO: packages/core-ui/styles/groups.css `.group-project-diff-stat-additions` / `.group-project-diff-stat-deletions`.
+    let additions_color = chrome_color(0x7b9f6d, 0x1a7f37);
+    let deletions_color = chrome_color(0xa56b6b, 0xcf222e);
     Some(
         h_flex()
             .gap(px(8.0 * scale))
@@ -75,12 +79,12 @@ pub(crate) fn project_status(
             )
             .child(
                 div()
-                    .text_color(chrome_color(0x9bbf8d, 0x1a7f37))
+                    .text_color(additions_color)
                     .child(format!("+{additions}")),
             )
             .child(
                 div()
-                    .text_color(chrome_color(0xc58b8b, 0xcf222e))
+                    .text_color(deletions_color)
                     .child(format!("-{deletions}")),
             )
             .into_any_element(),

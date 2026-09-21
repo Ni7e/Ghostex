@@ -571,7 +571,7 @@ export function SessionFloatingAgentIcon({
   /*
   CDXC:Drafts 2026-09-04 DECISION:
   User picked the "stacked pile" for a session that has BOTH queued prompts and
-  composer text: the yellow count badge keeps its place and the white draft dot
+  composer text: the yellow count badge keeps its place and the light-blue draft dot
   peeks out from behind it, offset toward the top-right, instead of hiding one
   signal, moving the dot to another corner, or recolouring the badge. Alone, the
   dot sits centred on the badge's own spot so a draft becoming a queued row

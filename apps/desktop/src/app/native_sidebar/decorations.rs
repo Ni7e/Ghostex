@@ -73,6 +73,8 @@ impl GhostexGpuiApp {
         }
         let queued = session.queued_prompt_count > 0;
         if session.has_composer_draft {
+            // CDXC:Sessions 2026-09-21 DECISION:
+            // User: the composer-draft dot is #B9D8FA in both themes (was white on dark, near-black on light).
             decorations.push(
                 div()
                     .absolute()
@@ -80,7 +82,7 @@ impl GhostexGpuiApp {
                     .top(px((if queued { 4.5 } else { 8.5 }) * scale))
                     .size(px(6.0 * scale))
                     .rounded_full()
-                    .bg(chrome_color(0xffffff, 0x262626))
+                    .bg(rgb(0xb9d8fa))
                     .into_any_element(),
             );
         }

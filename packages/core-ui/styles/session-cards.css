@@ -1276,13 +1276,14 @@
  * the exact spot the queued-prompt badge occupies, so a draft that becomes a
  * queued row swaps in place. User picked the stacked pile for the case where
  * both exist: the badge stays where it is and paints in front (z-index 6 vs 5),
- * and `data-stacked` slides the dot up and to the right so a white crescent
+ * and `data-stacked` slides the dot up and to the right so a light-blue crescent
  * peeks out from behind the yellow. Same layout ownership as the badge: an
  * absolutely positioned, pointer-transparent sibling of the leading icon that
  * contributes nothing to the row's flow. Never wrap the icon to position it.
  */
 .session-composer-draft-dot {
-  background: #fff;
+  /* CDXC:Sessions 2026-09-21 DECISION: User: the composer-draft dot is #B9D8FA (GPUI sidebar matches). */
+  background: #b9d8fa;
   border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(12, 12, 14, 0.75);
   box-sizing: border-box;

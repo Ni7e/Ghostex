@@ -586,11 +586,16 @@
 }
 
 .group-project-diff-stat-additions {
-  color: color-mix(in srgb, #9ee6b2 84%, var(--app-foreground) 16%);
+  /*
+   * CDXC:Theming 2026-09-21 DECISION:
+   * User: make these numbers slightly darker colors when app theme is dark.
+   * SEE-ALSO: apps/desktop/src/app/native_sidebar/project_status.rs.
+   */
+  color: color-mix(in srgb, #78c494 84%, var(--app-foreground) 16%);
 }
 
 .group-project-diff-stat-deletions {
-  color: color-mix(in srgb, #ffaaa6 84%, var(--app-foreground) 16%);
+  color: color-mix(in srgb, #e08b87 84%, var(--app-foreground) 16%);
 }
 
 .group-head:hover .group-project-diff-stats,
