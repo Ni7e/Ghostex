@@ -8,10 +8,11 @@
 //! payload (`toggle`, `select`, `toggleProjects`, `hide`) write no document and stay where they
 //! are, in `sidebar_ui_commands.rs`.
 //!
-//! **A REMOTE machine's tab is refused here**, exactly as the project moves refuse it:
-//! `updateRemoteSidebarProjectCollections` is a direct call down that machine's tunnel with no
-//! debounce and no guard, and this app cannot make one. The payload then reaches the old runtime
-//! whole and behaves as it always has.
+//! **A REMOTE machine's tab goes down that machine's tunnel**, exactly as the project moves do
+//! since 2026-09-21: the document is that machine's held copy, the edit is the same one, and the
+//! result is sent to the runtime as `updateSidebarProjectCollections` with a `remoteMachineId`
+//! (`gx_store/remote_project_docs.rs`). It is not refused any more, because the payload reached
+//! `runNativeCollectionAction` in a page that is being deleted and nothing forwards it in its place.
 //!
 //! SEE-ALSO: packages/gx-core/src/project_docs/collection_menu.rs,
 //! apps/desktop/sidebar/native-sidebar/collections.ts,
@@ -34,7 +35,8 @@ pub(crate) struct CollectionMenuCounters {
     pub(crate) refusals: u64,
     /// Payloads the store owns but did not answer because the renderer is not drawing its list.
     pub(crate) declined_source: u64,
-    /// Payloads left to the old runtime: a remote machine's tab, or the stored key not read yet.
+    /// Payloads left to the old runtime because this computer's stored key had not been read yet.
+    /// A remote machine's tab is not one: it has no stored key to wait for.
     pub(crate) hand_offs: u64,
 }
 
@@ -53,20 +55,18 @@ impl GhostexGpuiApp {
             self.gx_store.collection_menu.declined_source += 1;
             return false;
         }
-        // Every arm of `runNativeCollectionAction` reads `ui.selectedMachineId`, and only this
-        // computer's document is one this app owns.
-        if self.gx_store.sidebar_ui.selected_machine_id() != ghostex_gx_core::LOCAL_MACHINE_ID {
-            self.gx_store.collection_menu.hand_offs += 1;
-            return false;
-        }
+        // Every arm of `runNativeCollectionAction` reads `ui.selectedMachineId`: this computer's
+        // document is one this app OWNS, a remote machine's one it holds.
+        let remote_machine_id = self.gx_store_selected_remote_machine_id();
         // The stored key has to be in hand before an edit lands on top of it, for the same reason
         // a project drop refuses until it is: a rename computed against a document this app has not
-        // read would store one folder and drop every other.
-        if !self.gx_document_restored::<CollectionsDocument>(cx) {
+        // read would store one folder and drop every other. A remote machine has no stored key.
+        if remote_machine_id.is_none() && !self.gx_document_restored::<CollectionsDocument>(cx) {
             self.gx_store.collection_menu.hand_offs += 1;
             return false;
         }
-        let plan = plan_collection_menu_edit(self.gx_store.collections.sync.document(), command);
+        let (held, _) = self.gx_store_project_documents(remote_machine_id.as_deref());
+        let plan = plan_collection_menu_edit(&held, command);
         let action = command
             .get("action")
             .and_then(Value::as_str)
@@ -91,7 +91,10 @@ impl GhostexGpuiApp {
         self.gx_store
             .diagnostics
             .collection_menu_ran(&action, true, self.gx_store.collection_menu);
-        self.gx_document_edit::<CollectionsDocument>(document, cx);
+        match remote_machine_id {
+            Some(machine_id) => self.gx_store_send_remote_collections(&machine_id, &document, cx),
+            None => self.gx_document_edit::<CollectionsDocument>(document, cx),
+        }
         true
     }
 }

@@ -32,7 +32,7 @@ use crate::project_docs::{
 };
 use crate::sidebar_view::{SidebarInputs, OTHER_SPACE_ID};
 
-use super::project_inventory::{project_section, ProjectSection};
+use super::project_inventory::{project_section, selected_machine, ProjectSection};
 
 /// The payload types this file answers.
 pub const PROJECT_MOVE_COMMAND_TYPES: &[&str] = &[
@@ -64,6 +64,10 @@ pub enum ProjectWrite {
     /// Space item of a membership menu, which creates the Space AND puts the member in it.
     OpenSpaceEditor {
         section_key: String,
+        /// `...(ui.selectedMachineId === 'local' ? {} : { remoteMachineId })`: the dialog's result
+        /// has to name the machine whose document it edits, and an absent key is not the same as a
+        /// `null` one to the dialog that reads it.
+        remote_machine_id: Option<String>,
         member_collection_id: Option<String>,
         member_project_id: Option<String>,
     },
@@ -90,11 +94,13 @@ impl ProjectWrite {
             }
             Self::OpenSpaceEditor {
                 section_key,
+                remote_machine_id,
                 member_collection_id,
                 member_project_id,
             } => json!({
                 "write": "openSpaceEditor",
                 "sectionKey": section_key,
+                "remoteMachineId": remote_machine_id,
                 "memberCollectionId": member_collection_id,
                 "memberProjectId": member_project_id,
             }),
@@ -112,6 +118,9 @@ pub struct ProjectMovePlan {
     pub writes: Vec<ProjectWrite>,
     /// Why the plan is empty, for the record line. Never compared: the TypeScript has no such word.
     pub refusal: Option<&'static str>,
+    /// Whether a project order write was taken out because the gesture was made on a remote
+    /// machine's tab. For the host's counter only; see `without_group_order`.
+    pub dropped_group_order: bool,
 }
 
 impl ProjectMovePlan {
@@ -119,6 +128,7 @@ impl ProjectMovePlan {
         Self {
             writes: Vec::new(),
             refusal: Some(reason),
+            dropped_group_order: false,
         }
     }
 
@@ -126,7 +136,29 @@ impl ProjectMovePlan {
         Self {
             writes,
             refusal: None,
+            dropped_group_order: false,
         }
+    }
+
+    /// The plan with its project order write taken out, which is what a gesture on a REMOTE
+    /// machine's tab does.
+    ///
+    /// CDXC:RemoteMachines 2026-09-21 WHY:
+    /// **Reproduced, not fixed.** `reorderNativeSidebar` and `runNativeProjectDrop` splice
+    /// `state.groupOrder`, which holds EVERY machine's groups, and post that whole list;
+    /// `syncWorkspaceGroupOrder` then returns without writing as soon as the ids name more than one
+    /// machine, so dragging a project on a remote tab has never saved an order. This store builds
+    /// the order from ONE machine's section, so posting it would send a single-machine list that
+    /// the runtime WOULD write, and a port is not the place to start saving something the app never
+    /// saved. The membership half of the same gesture still lands, exactly as it does today.
+    /// Declared difference: a workspace whose only groups are that machine's posts a single-machine
+    /// list today too, and there the order did save; this drops it there as well.
+    fn without_group_order(mut self) -> Self {
+        let before = self.writes.len();
+        self.writes
+            .retain(|write| !matches!(write, ProjectWrite::GroupOrder { .. }));
+        self.dropped_group_order = self.writes.len() != before;
+        self
     }
 
     pub fn to_json(&self) -> Value {
@@ -155,15 +187,18 @@ pub fn owns_project_move_command(command: &Value) -> bool {
 
 /// What a project move does, or `None` when the store must not answer it.
 ///
-/// **Refused, with the reason at each refusal.** Every one of these is a shape this store cannot
-/// see the whole of, never a rule it disagrees with:
+/// **Refused, with the reason at each refusal.** The one that is left is a shape this store cannot
+/// see the whole of, never a rule it disagrees with: **the payload is malformed.** A missing id or
+/// an unknown `position` would make a port guess an order the app never posts.
 ///
-/// - **The machine tab is not this computer's.** Every arm reads `ui.selectedMachineId`, and a
-///   remote edit is `updateRemoteSidebarProjectCollections` / `updateRemoteSidebarSpaces`, a direct
-///   call down that machine's tunnel with no debounce and no guard, which this store does not make
-///   yet.
-/// - **The payload is malformed.** A missing id or an unknown `position` would make a port guess an
-///   order the app never posts.
+/// CDXC:RemoteMachines 2026-09-21 WHY:
+/// A REMOTE machine's tab is no longer refused. Every arm below already read the section it was
+/// given rather than this computer's, so the generalisation is the caller's: it resolves
+/// `ui.selectedMachineId` into a machine, and the HOST hands in THAT machine's two documents (its
+/// side state) and sends the edits back down its tunnel as
+/// `updateSidebarProjectCollections` / `updateSidebarSpaces` carrying `remoteMachineId`, which is
+/// what the sidebar page did and all it did. The order write is the one arm that differs; see
+/// `without_group_order`.
 ///
 /// CDXC:Projects 2026-09-21 WHY:
 /// A remote machine being CONNECTED is not a refusal, although it was one until the user enabled a
@@ -186,10 +221,8 @@ pub fn plan_project_move(
     if !owns_project_move_command(command) {
         return None;
     }
-    if inputs.ui.selected_machine_id != crate::sidebar_view::LOCAL_MACHINE_ID {
-        return None;
-    }
-    let section = project_section(core, inputs, &MachineId::Local)?;
+    let machine = selected_machine(&inputs.ui.selected_machine_id);
+    let section = project_section(core, inputs, &machine)?;
     // `nativeSidebarSettings().sidebarSpacesEnabled ? ui.metadata.spaces[machineId] : undefined`.
     // The Spaces REORDER deliberately does not go through this: `reorderNativeSidebar` reads
     // `ui.metadata.spaces[...]` directly, so a Space row can be dragged with the setting off.
@@ -197,7 +230,7 @@ pub fn plan_project_move(
         true => spaces,
         false => None,
     };
-    match command.get("type").and_then(Value::as_str)? {
+    let plan = match command.get("type").and_then(Value::as_str)? {
         "moveGroup" => plan_move_group(&section, collections, command),
         "moveSpace" => plan_move_space(spaces, command),
         "moveToSpace" => plan_move_to_space(&section, collections, section_spaces, command),
@@ -206,7 +239,11 @@ pub fn plan_project_move(
         "projectMembership" => plan_project_membership(&section, collections, command, now_ms),
         "spaceMembership" => plan_space_membership(&section, inputs, section_spaces, command),
         _ => None,
-    }
+    }?;
+    Some(match machine {
+        MachineId::Local => plan,
+        MachineId::Remote(_) => plan.without_group_order(),
+    })
 }
 
 /// `reorderNativeSidebar`'s `moveGroup` arm: the order, then the membership, then the post.
@@ -451,9 +488,12 @@ fn plan_project_membership(
 ) -> Option<ProjectMovePlan> {
     let group_id = command.get("groupId")?.as_str()?;
     let action = command.get("action")?.as_str()?;
-    // `sidebarStore.getState().groupsById[groupId]?.projectContext?.editor.projectId`, which is the
-    // WORKSPACE project id on either machine, where `section.resolveProjectId` gives the RAW one on
-    // a remote machine. They are the same string here, because a remote gesture is refused above.
+    // `getProjectCollectionFamilyProjectIds` on this computer and
+    // `getRemoteProjectCollectionFamilyProjectIds` on a remote machine are the same walk over two
+    // id vocabularies: the local one keys everything by `projectContext.editor.projectId`, the
+    // remote one looks that group up and then works in `remoteMachineContext.projectId`. The row's
+    // resolved id IS the id its machine's document is keyed by, so one walk answers both, and the
+    // remote one's `if (!rawProjectId) return []` is this `None`.
     let Some(scoped_project_id) = section.project_of_group(group_id) else {
         return Some(ProjectMovePlan::refused("groupHasNoProject"));
     };
@@ -525,6 +565,10 @@ fn plan_space_membership(
         // `applySidebarSpaceEditorResult` and stays the modal host's.
         return Some(ProjectMovePlan::of(vec![ProjectWrite::OpenSpaceEditor {
             section_key: section.section_key.clone(),
+            remote_machine_id: match &section.machine {
+                MachineId::Local => None,
+                MachineId::Remote(machine_id) => Some(machine_id.clone()),
+            },
             member_collection_id: collection_id.map(str::to_string),
             member_project_id: project_id.map(str::to_string),
         }]));

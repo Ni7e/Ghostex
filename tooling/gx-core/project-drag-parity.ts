@@ -187,6 +187,7 @@ function installBridges(recorders: Recorders): void {
           recorders.writes.push({
             write: 'openSpaceEditor',
             sectionKey: message.sectionKey,
+            remoteMachineId: message.remoteMachineId ?? null,
             memberCollectionId: message.memberCollectionId ?? null,
             memberProjectId: message.memberProjectId ?? null,
           });

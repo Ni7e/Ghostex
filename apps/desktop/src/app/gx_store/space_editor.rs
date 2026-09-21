@@ -8,9 +8,10 @@
 //! placement, not the intent, of `CDXC:Spaces 2026-08-27`: gxserver still owns the whole document
 //! and there is still no local key, and only bounded metadata still crosses from the dialog.
 //!
-//! **A REMOTE machine's tab is left to the old runtime**, exactly as every other remote edit is:
-//! `updateRemoteSidebarSpaces` is a direct call down that machine's tunnel with no debounce and no
-//! guard, and this app cannot make one.
+//! **A REMOTE machine's document goes down that machine's tunnel** since 2026-09-21: the dialog's
+//! result is applied to the machine's held copy and sent to the runtime as `updateSidebarSpaces`
+//! with a `remoteMachineId` (`gx_store/remote_project_docs.rs`). The page used to compute it in
+//! `metadata.ts`, and that leg is gone with the local one, so there is still exactly one writer.
 //!
 //! SEE-ALSO: packages/gx-core/src/project_docs/space_editor.rs,
 //! apps/desktop/sidebar/native-sidebar/metadata.ts,
@@ -32,8 +33,8 @@ pub(crate) struct SpaceEditorCounters {
     /// Results that wrote nothing: a delete or an edit naming a Space that is gone, and a create
     /// with no name left after the trim.
     pub(crate) refusals: u64,
-    /// Results left to the old runtime because they name a remote machine's document.
-    pub(crate) hand_offs: u64,
+    /// Results that named a REMOTE machine's document and went down that machine's tunnel.
+    pub(crate) remotes: u64,
     /// Payloads that are not a dialog result at all. Its own counter because a silent drop here is
     /// a Space the user made and never got.
     pub(crate) unparsable: u64,
@@ -54,17 +55,22 @@ impl GhostexGpuiApp {
             self.gx_store.space_editor.unparsable += 1;
             return;
         };
-        if result.remote_machine_id.is_some() {
-            self.gx_store.space_editor.hand_offs += 1;
-            return;
+        // The dialog names the machine whose document it edits; the selected tab is not asked,
+        // because the dialog can outlive a tab switch.
+        let remote_machine_id = result.remote_machine_id.clone();
+        if remote_machine_id.is_some() {
+            self.gx_store.space_editor.remotes += 1;
         }
         // `this.spaces[id] ?? EMPTY_SIDEBAR_SPACES_STATE`: before the daemon's first document there
         // is nothing to hold, and the page edited the empty state too. The document has no stored
         // key at all, so there is no read to wait for and no cold-start window where an edit could
         // land on a document this app has not seen.
-        let held = match self.gx_store.spaces.sync.has_document() {
-            true => self.gx_store.spaces.sync.document().clone(),
-            false => SpacesDocument::default(),
+        let held = match &remote_machine_id {
+            Some(machine_id) => self.gx_store_remote_spaces(machine_id).unwrap_or_default(),
+            None => match self.gx_store.spaces.sync.has_document() {
+                true => self.gx_store.spaces.sync.document().clone(),
+                false => SpacesDocument::default(),
+            },
         };
         let mode = result.mode;
         let plan = plan_space_editor_result(&held, &result, super::host::now_ms() as i64);
@@ -83,6 +89,9 @@ impl GhostexGpuiApp {
         self.gx_store
             .diagnostics
             .space_editor_ran(mode, true, self.gx_store.space_editor);
-        self.gx_document_edit::<SpacesDocument>(document, cx);
+        match remote_machine_id {
+            Some(machine_id) => self.gx_store_send_remote_spaces(&machine_id, &document, cx),
+            None => self.gx_document_edit::<SpacesDocument>(document, cx),
+        }
     }
 }

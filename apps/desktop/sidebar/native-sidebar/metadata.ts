@@ -1,8 +1,6 @@
 import {
   parseSidebarSpacesFromGxserver,
   serializeSidebarSpacesForGxserver,
-  applySidebarSpaceEditorResult,
-  EMPTY_SIDEBAR_SPACES_STATE,
   type SidebarSpacesState,
 } from '@/packages/core-ui/spaces';
 import {
@@ -32,7 +30,7 @@ export class NativeSidebarMetadata {
   collections: Record<string, SidebarProjectCollectionsState> = { local: readSidebarProjectCollections() };
   connections: Record<string, { state: string; message?: string }> = {};
 
-  receive(message: ExtensionToSidebarMessage, post: SidebarPostMessage): void {
+  receive(message: ExtensionToSidebarMessage): void {
     switch (message.type) {
       case 'hydrate':
       case 'sessionState':
@@ -56,22 +54,16 @@ export class NativeSidebarMetadata {
       case 'remoteMachineStatus':
         this.connections[message.machineId] = { state: message.state, message: message.message };
         break;
-      case 'applySidebarSpaceEditorResult': {
-        /*
-        CDXC:Spaces 2026-09-21 WHY:
-        THIS COMPUTER's leg is gone: the app applies the dialog's result to the Spaces document
-        itself (apps/desktop/src/app/gx_store/space_editor.rs) and hands the result back through
-        `applySidebarSpaces`, so computing it here as well would make two writers of one document
-        and the second one would push a Space the app's guard had not been asked about. The result
-        still arrives so this page's Space selection and projection stay in step. A REMOTE machine
-        is unchanged: `updateRemoteSidebarSpaces` is a direct call down that machine's tunnel.
-        */
-        const id = message.remoteMachineId;
-        if (!id) break;
-        const next = applySidebarSpaceEditorResult(this.spaces[id] ?? EMPTY_SIDEBAR_SPACES_STATE, message);
-        this.updateSpaces(id, next, post);
-        break;
-      }
+      /*
+      CDXC:Spaces 2026-09-21 WHY:
+      BOTH legs are gone: the app applies the dialog's result to the Spaces document itself
+      (apps/desktop/src/app/gx_store/space_editor.rs), for this computer through the held document
+      and for a remote machine straight down that machine's tunnel
+      (apps/desktop/src/app/gx_store/remote_project_docs.rs). Computing it here as well would make
+      two writers of one document, and for a remote machine two `/api/updateSidebarSpaces` calls
+      whose answers race. The result still arrives so this page's Space selection and projection
+      stay in step.
+      */
     }
   }
 

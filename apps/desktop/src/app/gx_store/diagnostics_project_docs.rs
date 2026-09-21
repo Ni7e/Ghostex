@@ -75,7 +75,7 @@ impl GxStoreDiagnostics {
                 "edits": counters.edits,
                 "deletes": counters.deletes,
                 "refusals": counters.refusals,
-                "handOffs": counters.hand_offs,
+                "remotes": counters.remotes,
                 "unparsable": counters.unparsable,
             }),
         );
@@ -100,7 +100,7 @@ impl GxStoreDiagnostics {
                 "groupRestores": counters.group_restores,
                 "empty": counters.empty,
                 "kept": counters.kept,
-                "handOffs": counters.hand_offs,
+                "remotes": counters.remotes,
             }),
         );
     }
@@ -119,7 +119,7 @@ impl GxStoreDiagnostics {
                 "spaceMemberships": counters.space_memberships,
                 "placements": counters.placements,
                 "placementsUnchanged": counters.placements_unchanged,
-                "handOffs": counters.hand_offs,
+                "remotes": counters.remotes,
             }),
         );
     }

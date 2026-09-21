@@ -111,9 +111,9 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
   const receive = (event: Event) => {
     if (!(event instanceof MessageEvent)) return;
     const message = event.data as ExtensionToSidebarMessage;
-    ui.metadata.receive(message, post);
+    ui.metadata.receive(message);
     applyNativeSidebarMessage(message);
-    receiveNativeSidebarEvent(ui, message, post);
+    receiveNativeSidebarEvent(ui, message);
     if (message.type === 'playCompletionSound' && message.sessionId)
       bridge.postNativeSidebarSnapshot!(JSON.stringify({ kind: 'flash', version: 1, sessionId: message.sessionId }));
     if (message.type === 'revealSidebarSession') ui.requestReveal(message.sessionId, message.requestId);
@@ -206,7 +206,7 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     else if (command.type === 'batch') {
       if (command.clearSelection) ui.selectedSessionIds = [];
       command.messages.forEach(post);
-    } else if (command.type === 'selectSpace') switchNativeSidebarSpace(ui, command.spaceId, post);
+    } else if (command.type === 'selectSpace') switchNativeSidebarSpace(ui, command.spaceId);
     else if (command.type === 'editSpace') editNativeSidebarSpace(ui, command.spaceId);
     else ui.apply(command);
     publish();

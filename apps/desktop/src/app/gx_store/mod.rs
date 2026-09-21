@@ -34,6 +34,8 @@
 //! key, the debounced push and the echo funnel for any client-owned document, with
 //! `collection_menu.rs` holding the three Project Group menu items that write the same collections
 //! document (Rename, a colour, Ungroup), `space_editor.rs` the New/Edit Space dialog's result,
+//! `remote_project_docs.rs` the same two documents on a REMOTE machine, which are held rather than
+//! owned and go back down that machine's own tunnel,
 //! `space_switch.rs` the row a Space switch restores the focus to,
 //! `added_project.rs` the Space and the order a newly added project joins, and
 //! `diagnostics_project_docs.rs` their record lines;
@@ -57,6 +59,7 @@ mod local_focus;
 mod project_docs;
 mod records_storage;
 mod remote_clients;
+mod remote_project_docs;
 mod remote_last_seen;
 mod session_walk;
 mod shadow_diff;

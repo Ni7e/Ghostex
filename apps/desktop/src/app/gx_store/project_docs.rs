@@ -13,8 +13,9 @@
 //!
 //! **A REMOTE machine's copies are held, not owned.** `updateRemoteSidebarProjectCollections` and
 //! `updateRemoteSidebarSpaces` are direct calls down that machine's tunnel, with no debounce and no
-//! guard at all, and this app cannot reach one. So a gesture on a remote machine tab is refused in
-//! the planner and the old runtime performs it, exactly as every other remote refusal in M5.
+//! guard at all. Since 2026-09-21 this app computes those edits too and sends them straight to the
+//! runtime that owns the tunnel (`gx_store/remote_project_docs.rs`), because the page that used to
+//! compute them is being deleted and no message it sent could be forwarded in its place.
 //!
 //! SEE-ALSO: packages/gx-core/src/project_docs/,
 //! apps/desktop/src/app/gx_store/client_document.rs,
@@ -48,8 +49,8 @@ pub(crate) struct ProjectMoveCounters {
     pub(crate) space_editors: u64,
     /// Payloads the store owns but did not answer because the renderer is not drawing its list.
     pub(crate) declined_source: u64,
-    /// Payloads handed to the old runtime: a remote machine tab, a second loaded machine, or a
-    /// shape this store cannot see the whole of.
+    /// Payloads handed to the old runtime: a shape this store cannot see the whole of, or a
+    /// machine tab whose presentation the store holds nothing for.
     pub(crate) hand_offs: u64,
     /// Documents the sidebar page edited and handed over, one per `saveNativeCollections` and one
     /// per `updateSpaces` it makes for this computer. A run with a collection renamed, recoloured
@@ -170,40 +171,42 @@ impl GhostexGpuiApp {
             self.gx_store.project_moves.declined_source += 1;
             return false;
         }
-        // Both documents have to be in hand before an edit lands on top of one: a move computed
-        // against a document this app has not read yet would write an order over what it cannot
-        // see. The Spaces document has no stored key, so it is ready at once; the collections
-        // document books its read here and HOLDS the drop until it lands
-        // (gx_store/sidebar_drop_queue.rs), because the page that used to perform the refused drop
-        // is going and refusing it now would lose the gesture.
-        if !self.gx_document_restored::<CollectionsDocument>(cx) {
-            if self.gx_store_queue_sidebar_drop(command, DropQueueNeed::ProjectDocuments, cx) {
-                return true;
+        // Neither stored key is this app's to wait for when the gesture is on a REMOTE machine's
+        // tab: that machine's documents are held copies of what it published, and the drop queue
+        // must never hold a remote drop for a key it will never need.
+        let remote_machine_id = self.gx_store_selected_remote_machine_id();
+        if remote_machine_id.is_none() {
+            // Both documents have to be in hand before an edit lands on top of one: a move computed
+            // against a document this app has not read yet would write an order over what it cannot
+            // see. The Spaces document has no stored key, so it is ready at once; the collections
+            // document books its read here and HOLDS the drop until it lands
+            // (gx_store/sidebar_drop_queue.rs), because the page that used to perform the refused
+            // drop is going and refusing it now would lose the gesture.
+            if !self.gx_document_restored::<CollectionsDocument>(cx) {
+                if self.gx_store_queue_sidebar_drop(command, DropQueueNeed::ProjectDocuments, cx) {
+                    return true;
+                }
+                self.gx_store.project_moves.declined_source += 1;
+                return false;
             }
-            self.gx_store.project_moves.declined_source += 1;
-            return false;
-        }
-        // The project order also edits the workspace session groups document, so its stored key
-        // has to be in hand too, for the same reason.
-        if !self.gx_store_restore_workspace_groups(cx) {
-            if self.gx_store_queue_sidebar_drop(command, DropQueueNeed::ProjectDocuments, cx) {
-                return true;
+            // The project order also edits the workspace session groups document, so its stored key
+            // has to be in hand too, for the same reason.
+            if !self.gx_store_restore_workspace_groups(cx) {
+                if self.gx_store_queue_sidebar_drop(command, DropQueueNeed::ProjectDocuments, cx) {
+                    return true;
+                }
+                self.gx_store.project_moves.declined_source += 1;
+                return false;
             }
-            self.gx_store.project_moves.declined_source += 1;
-            return false;
         }
+        let (collections, spaces) = self.gx_store_project_documents(remote_machine_id.as_deref());
         let plan = {
             let store = &self.gx_store;
-            let spaces = store
-                .spaces
-                .sync
-                .has_document()
-                .then(|| store.spaces.sync.document());
             plan_project_move(
                 &store.core,
                 &store.sidebar_list.last_inputs,
-                store.collections.sync.document(),
-                spaces,
+                &collections,
+                spaces.as_ref(),
                 command,
                 super::host::now_ms() as i64,
             )
@@ -219,21 +222,62 @@ impl GhostexGpuiApp {
         self.gx_store
             .diagnostics
             .project_move_ran(&plan, self.gx_store.project_moves);
+        // A remote gesture's order write was taken out of the plan by `without_group_order`, so it
+        // is counted here rather than where it would have been performed.
+        if plan.dropped_group_order {
+            self.gx_store_note_remote_order_dropped();
+        }
         for write in plan.writes {
-            self.gx_store_run_project_write(write, cx);
+            self.gx_store_run_project_write(write, remote_machine_id.as_deref(), cx);
         }
         true
     }
 
-    fn gx_store_run_project_write(&mut self, write: ProjectWrite, cx: &mut gpui::Context<Self>) {
+    /// The two documents a gesture is computed against: this app's own for this computer, and the
+    /// machine's held copies for a remote tab.
+    pub(super) fn gx_store_project_documents(
+        &mut self,
+        remote_machine_id: Option<&str>,
+    ) -> (CollectionsDocument, Option<SpacesDocument>) {
+        let Some(machine_id) = remote_machine_id else {
+            let store = &self.gx_store;
+            return (
+                store.collections.sync.document().clone(),
+                store
+                    .spaces
+                    .sync
+                    .has_document()
+                    .then(|| store.spaces.sync.document().clone()),
+            );
+        };
+        (
+            self.gx_store_remote_collections(machine_id),
+            self.gx_store_remote_spaces(machine_id),
+        )
+    }
+
+    fn gx_store_run_project_write(
+        &mut self,
+        write: ProjectWrite,
+        remote_machine_id: Option<&str>,
+        cx: &mut gpui::Context<Self>,
+    ) {
         match write {
             ProjectWrite::EditCollections { document } => {
                 self.gx_store.project_moves.collection_edits += 1;
-                self.gx_document_edit::<CollectionsDocument>(document, cx);
+                match remote_machine_id {
+                    Some(machine_id) => {
+                        self.gx_store_send_remote_collections(machine_id, &document, cx)
+                    }
+                    None => self.gx_document_edit::<CollectionsDocument>(document, cx),
+                }
             }
             ProjectWrite::EditSpaces { document } => {
                 self.gx_store.project_moves.space_edits += 1;
-                self.gx_document_edit::<SpacesDocument>(document, cx);
+                match remote_machine_id {
+                    Some(machine_id) => self.gx_store_send_remote_spaces(machine_id, &document, cx),
+                    None => self.gx_document_edit::<SpacesDocument>(document, cx),
+                }
             }
             ProjectWrite::GroupOrder { group_ids } => {
                 self.gx_store.project_moves.group_orders += 1;
@@ -256,6 +300,7 @@ impl GhostexGpuiApp {
             }
             ProjectWrite::OpenSpaceEditor {
                 section_key,
+                remote_machine_id,
                 member_collection_id,
                 member_project_id,
             } => {
@@ -271,6 +316,9 @@ impl GhostexGpuiApp {
                     "mode": "create",
                     "sectionKey": section_key,
                 });
+                if let Some(machine_id) = remote_machine_id {
+                    open["remoteMachineId"] = Value::from(machine_id);
+                }
                 if let Some(collection_id) = member_collection_id {
                     open["memberCollectionId"] = Value::from(collection_id);
                 }

@@ -4,8 +4,8 @@
 //! User: switching to a Space reopens the session that Space was last left on
 //! (`sidebarSpaceSwitchBehavior: restore`, the default). The memory has been the store's since M5
 //! piece 7c (`sidebar_ui_paths.rs`); the READ was still `switchNativeSidebarSpace` in the sidebar
-//! page, which is going away, so it moves here. The page keeps it for a REMOTE machine's tab,
-//! whose rows this store does not draw.
+//! page, which is going away, so it moves here, for a REMOTE machine's tab as well as this
+//! computer's.
 //!
 //! The focus itself still goes out as the `focusSession` / `focusGroup` the page posted, through
 //! the same message route, because the runtime owns what a focus does to the panes.
@@ -29,8 +29,8 @@ pub(crate) struct SpaceSwitchCounters {
     pub(crate) empty: u64,
     /// Switches left alone because the setting is `keep`.
     pub(crate) kept: u64,
-    /// Switches on a remote machine's tab, which the old runtime still restores.
-    pub(crate) hand_offs: u64,
+    /// Of the switches, the ones made on a REMOTE machine's tab.
+    pub(crate) remotes: u64,
 }
 
 /// The Space a section was filtered by before a `selectSpace` was applied, carried across the
@@ -86,9 +86,14 @@ impl GhostexGpuiApp {
         if before.previous_space_id.as_deref() == Some(before.next_space_id.as_str()) {
             return;
         }
-        if self.gx_store.sidebar_ui.selected_machine_id() != ghostex_gx_core::LOCAL_MACHINE_ID {
-            self.gx_store.space_switch.hand_offs += 1;
-            return;
+        // CDXC:RemoteMachines 2026-09-21 WHY:
+        // A REMOTE machine's tab is restored here too. The restore reads the list the store has
+        // just rebuilt, and that list is the SELECTED machine's whichever machine it is, so the
+        // only thing the old leg in `switchNativeSidebarSpace` had that this does not is the page's
+        // own projection. Its remote leg is gone with the local one, or the click would post two
+        // `focusSession` messages.
+        if self.gx_store_selected_remote_machine_id().is_some() {
+            self.gx_store.space_switch.remotes += 1;
         }
         self.gx_store.space_switch.switches += 1;
         if !space_switch_restores() {

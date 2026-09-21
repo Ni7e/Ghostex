@@ -36,6 +36,14 @@ pub(crate) struct ProjectGroupRow {
     pub(crate) group_id: String,
     /// `describeNativeSidebarMachine.resolveProjectId`. `None` for the machine's Chats collection,
     /// which spans projects and carries no `projectContext`.
+    ///
+    /// CDXC:RemoteMachines 2026-09-21 WHY:
+    /// This is the RAW project id on either machine, and on a remote one that is deliberately NOT
+    /// `projectContext.editor.projectId`: `resolveProjectId` answers
+    /// `remoteMachineContext.projectId` for a remote row, and that machine's own collections and
+    /// Spaces documents are keyed by it, so a port that used the scoped
+    /// `remote:<machine>:project:<id>` form here would look every membership up under a key the
+    /// remote daemon has never written. The two forms are the same string on this computer.
     pub(crate) project_id: Option<String>,
     /// `groupsById[id].projectContext.worktree.parentProjectId`, which a user-made group carries
     /// too because it is built from the same project row.
@@ -229,16 +237,17 @@ pub(crate) fn project_section(
             machine: machine.clone(),
             project_id: project_id.clone(),
         };
-        // The WORKSPACE project id, which is what `projectContext.editor.projectId` carries and
-        // therefore what every collection and Space membership is keyed by.
-        let workspace_project_id = project.to_workspace_project_id();
+        // The raw project id, which is what `resolveProjectId` answers on either machine and
+        // therefore what every collection and Space membership in THAT machine's documents is
+        // keyed by.
+        let resolved_project_id = project.project_id.clone();
         let parent_project_id = meta
             .overlay(project_id)
             .and_then(|overlay| overlay.worktree.as_ref())
             .map(|worktree| worktree.parent_project_id.clone());
         rows.push(ProjectGroupRow {
             group_id: project.to_sidebar_group_id(),
-            project_id: Some(workspace_project_id.clone()),
+            project_id: Some(resolved_project_id),
             parent_project_id: parent_project_id.clone(),
             is_chat_collection: false,
         });
@@ -266,6 +275,15 @@ pub(crate) fn project_section(
         section_key: section_key(machine),
         rows,
     })
+}
+
+/// The machine tab a gesture was made on, which every arm of the project moves reads as
+/// `ui.selectedMachineId`.
+pub(crate) fn selected_machine(selected_machine_id: &str) -> MachineId {
+    match selected_machine_id == crate::sidebar_view::LOCAL_MACHINE_ID {
+        true => MachineId::Local,
+        false => MachineId::Remote(selected_machine_id.to_string()),
+    }
 }
 
 /// `machineId === 'local' ? 'local' : `remote:${machineId}``.

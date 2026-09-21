@@ -22,7 +22,6 @@ apps/desktop/src/app/gx_store/sidebar_ui_paths.rs.
 */
 export class NativeSidebarUiState {
   renameRequest?: { collectionId: string; requestId: number };
-  pendingAddedProject?: { machineId: string; projectId: string };
   unavailableSince?: number;
   hasObservedAvailableState = false;
   revealRequest?: { sessionId: string; requestId: number };

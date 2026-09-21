@@ -136,6 +136,9 @@ pub(crate) struct GxStoreHost {
     /// K6, the Spaces document. Same host, no stored key.
     pub(crate) spaces: super::client_document::ClientDocumentHost<ghostex_gx_core::SpacesDocument>,
     pub(super) project_moves: super::project_docs::ProjectMoveCounters,
+    /// K5 and K6 on a REMOTE machine: the per-machine `nextCollectionNumber` floor and what this
+    /// run sent down the machine tunnels.
+    pub(super) remote_project_docs: super::remote_project_docs::RemoteProjectDocsHost,
     /// A Project Group's Rename, colour and Ungroup, which write the same K5 document.
     pub(super) collection_menu: super::collection_menu::CollectionMenuCounters,
     /// The New/Edit Space dialog's results, which write the K6 document.

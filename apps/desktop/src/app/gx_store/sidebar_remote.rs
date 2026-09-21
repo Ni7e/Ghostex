@@ -93,6 +93,7 @@ pub(crate) struct SidebarRemoteHost {
         super::sidebar_session_slot::SessionSlotCounters,
         super::sidebar_close_project::CloseProjectCounters,
         super::sidebar_focus_route::LocalFocusRouteCounters,
+        super::remote_project_docs::RemoteProjectDocCounters,
     )>,
 }
 
@@ -328,6 +329,8 @@ impl GhostexGpuiApp {
         let close_project = self.gx_store_close_project_counters();
         // A local row's click, routed straight to the runtime (gx_store/sidebar_focus_route.rs).
         let local_focus = self.gx_store_local_focus_route_counters();
+        // The two documents of a REMOTE machine (gx_store/remote_project_docs.rs).
+        let remote_docs = self.gx_store_remote_project_doc_counters();
         let host = &mut self.gx_store.sidebar_remote;
         let now = (host.counters, local);
         if host.summary_written
@@ -341,6 +344,7 @@ impl GhostexGpuiApp {
                 session_slot,
                 close_project,
                 local_focus,
+                remote_docs,
             ))
             || host
                 .summary_at
@@ -363,6 +367,7 @@ impl GhostexGpuiApp {
             session_slot,
             close_project,
             local_focus,
+            remote_docs,
         ));
         let [
             reloads_stopped,
@@ -393,6 +398,8 @@ impl GhostexGpuiApp {
                 "sessionSlot": super::sidebar_session_slot::session_slot_counters_json(&session_slot),
                 "closeProject": super::sidebar_close_project::close_project_counters_json(&close_project),
                 "localFocus": super::sidebar_focus_route::local_focus_route_counters_json(&local_focus),
+                "remoteProjectDocs":
+                    super::remote_project_docs::remote_project_doc_counters_json(&remote_docs),
             }),
         );
     }

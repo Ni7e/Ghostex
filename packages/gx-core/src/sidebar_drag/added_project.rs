@@ -46,9 +46,17 @@ pub enum AddedProjectPlacement {
 /// `None` covers every `return state` of the TypeScript in one answer, because none of them writes:
 /// Spaces off, no document, the built-in Other view, a project the Space already shows, a project
 /// id that is blank after the trim, and a Space id the document does not hold.
+///
+/// CDXC:RemoteMachines 2026-09-21 WHY:
+/// The machine is a parameter because `receiveNativeSidebarEvent` reads
+/// `describeNativeSidebarMachine(ui, message.remoteMachineId)`, not the selected tab: a project
+/// added to a remote machine joins the Space open in THAT machine's section even while the user is
+/// looking at this computer's. `message.projectId` is the raw id there, which is what the section's
+/// rows and that machine's Spaces document are both keyed by.
 pub fn plan_added_project_space_membership(
     core: &Core,
     inputs: &SidebarInputs,
+    machine: &MachineId,
     collections: &CollectionsDocument,
     spaces: Option<&SpacesDocument>,
     project_id: &str,
@@ -62,7 +70,7 @@ pub fn plan_added_project_space_membership(
         return None;
     }
     let spaces = spaces?;
-    let section = project_section(core, inputs, &MachineId::Local)?;
+    let section = project_section(core, inputs, machine)?;
     let selection = resolve_selected_space(
         &spaces.state,
         inputs
@@ -99,9 +107,10 @@ pub fn plan_added_project_space_membership(
 pub fn plan_added_project_placement(
     core: &Core,
     inputs: &SidebarInputs,
+    machine: &MachineId,
     project_id: &str,
 ) -> AddedProjectPlacement {
-    let Some(section) = project_section(core, inputs, &MachineId::Local) else {
+    let Some(section) = project_section(core, inputs, machine) else {
         return AddedProjectPlacement::Waiting;
     };
     let Some(group_id) = section

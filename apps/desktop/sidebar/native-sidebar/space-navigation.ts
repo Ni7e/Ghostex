@@ -33,27 +33,14 @@ export function describeNativeSidebarMachine(ui: NativeSidebarUiState, machineId
 
 /*
 CDXC:Spaces 2026-09-21 WHY:
-THIS COMPUTER's restore is gone: the app reads the Space's remembered row off the list it draws and
-posts the same `focusSession` (apps/desktop/src/app/gx_store/space_switch.rs), so doing it here as
-well would send two focus messages for one click. The selection itself still moves here, because
-this page draws its own projection until that projection is deleted. A REMOTE machine's tab is
-unchanged: the app does not draw its rows.
+The restore is gone for EVERY machine: the app reads the Space's remembered row off the list it
+draws, which is the selected machine's whichever machine that is, and posts the same `focusSession`
+(apps/desktop/src/app/gx_store/space_switch.rs), so doing it here as well would send two focus
+messages for one click. The selection itself still moves here, because this page draws its own
+projection until that projection is deleted.
 */
-export function switchNativeSidebarSpace(ui: NativeSidebarUiState, spaceId: string, post: SidebarPostMessage): void {
-  const previous = describeNativeSidebarMachine(ui).selection?.spaceId;
+export function switchNativeSidebarSpace(ui: NativeSidebarUiState, spaceId: string): void {
   ui.apply({ type: 'selectSpace', spaceId });
-  const state = sidebarStore.getState();
-  if (ui.selectedMachineId === 'local') return;
-  if (previous === spaceId || nativeSidebarSettings().sidebarSpaceSwitchBehavior !== 'restore') return;
-  const section = describeNativeSidebarMachine(ui);
-  const visible = section.groupIds.filter(section.isVisible);
-  const recent = ui.collapse.recentSessionIdsBySpace[section.sectionKey]?.[spaceId] ?? [];
-  const sessionId =
-    recent.find(
-      (id) => state.sessionsById[id] && visible.some((groupId) => state.sessionIdsByGroup[groupId]?.includes(id))
-    ) ?? visible.flatMap((id) => state.sessionIdsByGroup[id] ?? [])[0];
-  if (sessionId) post({ type: 'focusSession', sessionId, keepView: true });
-  else if (visible[0]) post({ type: 'focusGroup', groupId: visible[0] });
 }
 
 export function rememberNativeSidebarFocus(ui: NativeSidebarUiState, sessionId: string, reveal = false): void {
