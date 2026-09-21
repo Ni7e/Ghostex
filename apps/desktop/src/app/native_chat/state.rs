@@ -505,11 +505,14 @@ impl NativeChatView {
     /// CDXC:SessionChat 2026-09-19 WHY:
     /// A streaming agent produced a runtime output several times a frame, and each one redrew the whole window, which re-lays out every visible transcript row; with a few agents streaming that was most of the UI thread.
     /// Redraws from runtime output are coalesced to one per 50ms; the last output in a burst still paints, only never sooner than that.
+    /// CDXC:SessionChat 2026-09-21 WHY:
+    /// The quick picker opened from terminal view belongs to a parked chat view and repaints only by observing it, so an open picker counts as shown; otherwise its keys moved the selection in the runtime while the window kept painting the state it opened with.
     fn notify_if_shown(&mut self, cx: &mut Context<Self>) {
         const NOTIFY_MIN_INTERVAL: Duration = Duration::from_millis(50);
-        if !self
-            .last_render
-            .is_some_and(|at| at.elapsed() < Duration::from_secs(1))
+        if !self.model_picker_window.is_open()
+            && !self
+                .last_render
+                .is_some_and(|at| at.elapsed() < Duration::from_secs(1))
         {
             return;
         }
