@@ -267,18 +267,27 @@ function runStorePath(rust: Json, entry: Json, target: string | null): Json {
 
 const FORBIDDEN_ON_SLOT_PATH = ['handled_reveal', 'take_reveal_request', 'revealSidebarSession', 'requestReveal'];
 
-/** The names the host's session slot path must not use outside a comment. */
+/**
+ * The names the host's session slot path must not use outside a comment. The path runs through
+ * `gx_store_focus_and_reveal_slot_row`, which lives in the project slot jump's file, so both files
+ * are read: scanning only this path's own file missed a forbidden call placed in the shared one.
+ */
 function hostSourceFindings(): string[] {
-  const path =
+  const paths = [
     process.env.SESSION_SLOT_HOST_SOURCE ??
-    fileURLToPath(new URL('../../apps/desktop/src/app/gx_store/sidebar_session_slot.rs', import.meta.url));
-  const code = readFileSync(path, 'utf8')
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/, ''))
-    .join('\n');
-  return FORBIDDEN_ON_SLOT_PATH.filter((name) => code.includes(name)).map(
-    (name) => `the host's session slot path names ${name} (${path})`
-  );
+      fileURLToPath(new URL('../../apps/desktop/src/app/gx_store/sidebar_session_slot.rs', import.meta.url)),
+    process.env.SLOT_JUMP_HOST_SOURCE ??
+      fileURLToPath(new URL('../../apps/desktop/src/app/gx_store/sidebar_slot_jump.rs', import.meta.url)),
+  ];
+  return paths.flatMap((path) => {
+    const code = readFileSync(path, 'utf8')
+      .split('\n')
+      .map((line) => line.replace(/\/\/.*$/, ''))
+      .join('\n');
+    return FORBIDDEN_ON_SLOT_PATH.filter((name) => code.includes(name)).map(
+      (name) => `the host's session slot path names ${name} (${path})`
+    );
+  });
 }
 
 /** The envelope the host would store, read back the way the page reads it. */
