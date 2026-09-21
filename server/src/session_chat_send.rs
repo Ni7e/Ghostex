@@ -3440,12 +3440,46 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
                 .and_then(|question| question.tool_name.as_deref())
                 .map(crate::session_chat::normalize_session_chat_tool_name);
             match agent.as_deref() {
-                Some("claude" | "openclaude") => crate::session_chat_send::build_ask_answer_steps(
-                    &crate::session_chat_send::build_claude_ask_answer_keys(
+                Some("claude" | "openclaude") => {
+                    // See CDXC:AgentScreenDetection in session_chat_question_liveness.rs.
+                    let Some(screen_text) =
+                        crate::session_chat_send::capture_session_terminal_text(&target.zmx_name)
+                            .await
+                    else {
+                        return domain_error_response(
+                            endpoint_path,
+                            request_id,
+                            DomainStateError {
+                                code: "invalidState",
+                                message: "The session's terminal could not be read, so the answer was not sent."
+                                    .to_string(),
+                            },
+                        );
+                    };
+                    if crate::session_chat_question_liveness::claude_question_selector_on_screen(
                         &questions,
-                        &selections,
-                    ),
-                ),
+                        &screen_text,
+                    ) {
+                        crate::session_chat_send::build_ask_answer_steps(
+                            &crate::session_chat_send::build_claude_ask_answer_keys(
+                                &questions,
+                                &selections,
+                            ),
+                        )
+                    } else if !crate::session_chat_send::has_ask_answer(&selections) {
+                        Vec::new()
+                    } else {
+                        crate::session_chat_send::build_session_chat_message_steps(
+                            agent.as_deref(),
+                            &crate::session_chat_question_liveness::format_ask_answer_message(
+                                &questions,
+                                &selections,
+                            ),
+                            &[],
+                            false,
+                        )
+                    }
+                }
                 Some("codex") => crate::session_chat_send::build_ask_answer_steps(
                     &crate::session_chat_send::build_codex_ask_answer_keys(&questions, &selections),
                 ),

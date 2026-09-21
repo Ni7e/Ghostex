@@ -96,6 +96,7 @@ pub mod session_chat_omp_blocking;
 pub mod session_chat_options;
 pub mod session_chat_paths;
 pub mod session_chat_pi_blocking;
+pub mod session_chat_question_liveness;
 pub mod session_chat_queue;
 pub mod session_chat_queue_runtime;
 pub mod session_chat_read;
