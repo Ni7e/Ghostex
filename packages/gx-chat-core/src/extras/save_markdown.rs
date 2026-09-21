@@ -254,9 +254,8 @@ fn settle_save(
                 );
             };
             // The host copies the path and says so; the sheet then closes as it would have.
-            let saved = Effect::HostAction {
-                action: "markdownSaved".to_string(),
-                params: Box::new(json!({ "path": full_path })),
+            let saved = Effect::MarkdownSaved {
+                path: full_path.to_string(),
             };
             if let Some(sheet) = state.sheet.as_mut() {
                 sheet.saving = false;

@@ -55,7 +55,8 @@ pub use crate::state::{
 };
 pub use crate::effect::{Effect, HostRequest, OpenTarget, RequestKind};
 pub use crate::event::{
-    ChatSettings, ConnectionUpdate, Event, Measurement, OpenRowDetail, StartConfig, StorageKey,
+    ChatSettings, ComposerBootRead, ConnectionUpdate, Event, Measurement, OpenRowDetail,
+    StartConfig, StorageKey,
 };
 pub use crate::wire::{
     ChatAppendedFrame, ChatBlock, ChatFrame, ChatFrameBase, ChatMessage, ChatRole, ChatRpcMethod,

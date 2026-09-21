@@ -77,6 +77,12 @@ pub struct TranscriptViewState {
     pub detail_revision: u64,
     /// Details for the rows the renderer currently draws open.
     pub row_details: RowDetails,
+    /// The `saveStashedPrompt` calls in flight, by request id, with the message they belong to.
+    pub save_prompt_requests: BTreeMap<u64, String>,
+    /// The `loadWork` reads in flight, by request id, with the turn's user-message id.
+    pub deferred_requests: BTreeMap<u64, String>,
+    /// The `readSessionChatImage` reads in flight, by request id, with the path asked for.
+    pub image_requests: BTreeMap<u64, String>,
 }
 
 impl Default for TranscriptViewState {
@@ -98,6 +104,9 @@ impl Default for TranscriptViewState {
             deferred_work: BTreeMap::new(),
             detail_revision: 0,
             row_details: RowDetails::new(),
+            save_prompt_requests: BTreeMap::new(),
+            deferred_requests: BTreeMap::new(),
+            image_requests: BTreeMap::new(),
         }
     }
 }
@@ -109,6 +118,12 @@ impl TranscriptViewState {
         self.projected.clear();
         self.backfill.clear();
         self.items.clear();
+    }
+
+    /// Whether any row is still drawn as a plain-text placeholder, which is what keeps the 0 ms
+    /// backfill timer armed.
+    pub fn has_pending_backfill(&self) -> bool {
+        !self.backfill.is_empty()
     }
 }
 

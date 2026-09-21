@@ -358,7 +358,7 @@ fn save_markdown(checks: &mut Checks) {
         "the host is told to copy the path",
         json!(matches!(
             core.last_effects.first(),
-            Some(Effect::HostAction { action, .. }) if action == "markdownSaved"
+            Some(Effect::MarkdownSaved { .. })
         )),
         json!(true),
     );

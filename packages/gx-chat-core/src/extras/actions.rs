@@ -131,18 +131,19 @@ pub fn handle_with_ids(
     }
 }
 
-/// Handles one action family f owns, with ids drawn from family f's own counter.
+/// Handles one action family f owns, with ids drawn from the core's one allocator.
 ///
-/// `crate::dispatch::actions::dispatch` has no access to [`crate::ChatCore`]'s counter, so the
-/// ids come off `ExtrasState` until family a threads the core's through. They are still monotonic
-/// and never reused, which is what a replay needs.
+/// The counter is taken out of [`crate::CoreState`] for the call and written back afterwards,
+/// which is how a `&mut ChatState` and an id source live in the same expression. It is the same
+/// counter every other family draws from, so [`crate::Event::RpcSettled`] routes by id alone with
+/// no chance of two families claiming the same one.
 pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
-    let mut next = state.extras.next_request_id;
+    let mut next = state.core.next_request_id;
     let effects = handle_with_ids(state, action, context, || {
         next += 1;
         next
     });
-    state.extras.next_request_id = next;
+    state.core.next_request_id = next;
     effects
 }
 

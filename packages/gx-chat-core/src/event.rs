@@ -39,6 +39,15 @@ pub enum Event {
         key: StorageKey,
         error: Option<String>,
     },
+    /// The answer to [`crate::Effect::ReadComposerBoot`].
+    ///
+    /// One read rather than a dozen, because the host already performs it as one:
+    /// `composer('read')` in `apps/desktop/sidebar/session-chat-runtime/native-composer.ts`
+    /// returns the client id, the stored draft, the stored option states and model outboxes, the
+    /// dismissed notice, the bundled model catalog, the chat settings, the context preferences and
+    /// the two transcript modes in a single object, and `start` in `native-host.ts` waits for it
+    /// before it publishes anything.
+    ComposerBootRead(Box<ComposerBootRead>),
     /// The chat settings the host pushes changed.
     SettingsChanged(Box<ChatSettings>),
     /// The context-details preferences changed.
@@ -55,7 +64,7 @@ pub enum Event {
 }
 
 /// What the host knows when it opens a chat.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartConfig {
     /// All three default, because the host does not always know them at boot: the desktop host
@@ -76,6 +85,54 @@ pub struct StartConfig {
     /// The Chat Lab's scenario, when this chat is a preview rather than a session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<Value>,
+}
+
+/// Everything `composer('read')` answers with, in the order that host writes it.
+///
+/// Free-form under the typed lid because each subtree belongs to a different family and every one
+/// of them is a stored record whose shape is the user's data, not this crate's: the draft entry,
+/// the option states, the model outboxes and the context preferences are all parsed by their own
+/// owner. Nothing here is invented; `native-composer.ts:142` is the whole list.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposerBootRead {
+    /// `<projectId>:<sessionId>`, with a `remote-<machineId>:` prefix off the local machine. The
+    /// storage key for every per-session record, so the core carries it rather than rebuilding it.
+    #[serde(default)]
+    pub session_key: String,
+    /// The persistent per-installation id a draft save is attributed to.
+    #[serde(default)]
+    pub client_id: String,
+    /// The stored draft, with its revision already replaced when the stored one cannot be reused.
+    #[serde(default)]
+    pub entry: Value,
+    /// A fresh revision, for the composer that has to start a new draft.
+    #[serde(default)]
+    pub next_version: Value,
+    /// `{ "<sessionKey>[#<scope>]": SessionChatOptionState }`.
+    #[serde(default)]
+    pub option_states: Value,
+    /// `{ "<sessionKey>[#<scope>]": ModelSelectionOutbox }`.
+    #[serde(default)]
+    pub model_outboxes: Value,
+    /// The catalog bundled with this build, before any push arrives.
+    #[serde(default)]
+    pub model_catalog: Value,
+    /// `{hideAccountEmails, title}`.
+    #[serde(default)]
+    pub chat_settings: Value,
+    /// `{claude, codex}` context-details preferences.
+    #[serde(default)]
+    pub context_preferences: Value,
+    /// The notice this session already dismissed, or null.
+    #[serde(default)]
+    pub dismissed_notice: Value,
+    /// Whether the transcript opens folded into one row per turn.
+    #[serde(default)]
+    pub summary_mode: bool,
+    /// The verbose override, or absent to follow the setting.
+    #[serde(default)]
+    pub verbose_override: Value,
 }
 
 /// The socket's state, which decides whether the core waits or re-reads.

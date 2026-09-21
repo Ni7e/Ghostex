@@ -93,7 +93,7 @@ pub fn move_queue_row<T: Clone>(queue: &[T], from_index: isize, to_index: isize)
 /// Both capability gates in one place: the daemon must have reported a `queue` array AND this
 /// host's transport must implement the method. Anything false hides that control outright instead
 /// of offering a button that 404s or silently does nothing.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransportQueueMethods {
     pub queue_prompt: bool,
@@ -102,6 +102,22 @@ pub struct TransportQueueMethods {
     pub reorder_queue: bool,
     pub send_queued_prompt: bool,
     pub set_draft: bool,
+}
+
+/// Every endpoint present, which is what `startController`'s transport defines
+/// (`native-host.ts`). React gates these by only passing the handler it has, so a host whose
+/// transport is narrower clears the ones it cannot serve; the desktop's serves all six.
+impl Default for TransportQueueMethods {
+    fn default() -> Self {
+        Self {
+            queue_prompt: true,
+            update_queued_prompt: true,
+            remove_queued_prompt: true,
+            reorder_queue: true,
+            send_queued_prompt: true,
+            set_draft: true,
+        }
+    }
 }
 
 /// The capability block the document carries.

@@ -52,8 +52,6 @@ pub struct PickersState {
     pub fork_branches: ForkBranchesState,
     /// The context meter, its editor and its status line.
     pub context: ContextState,
-    /// The ids family e2's own reads are allocated from, the way family f keeps its own.
-    pub next_request_id: u64,
 }
 
 impl PickersState {

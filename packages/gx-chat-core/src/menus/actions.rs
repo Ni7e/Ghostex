@@ -66,8 +66,10 @@ fn accounts(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
     state.menus.accounts_busy = true;
     state.menus.account_error = None;
     state.menus.accounts_polled_at_ms = None;
+    let request_id = state.core.allocate_request_id();
+    state.menus.accounts_request = Some(request_id);
     vec![Effect::SendRpc {
-        request_id: state.menus.accounts_generation,
+        request_id,
         method: ChatRpcMethod::AgentAccounts,
         params: Box::new(request),
     }]
@@ -84,9 +86,9 @@ fn switch_draft_agent(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
     if !known || state.session.session_agent_id.as_deref() == Some(agent_id) {
         return Vec::new();
     }
-    state.menus.accounts_generation += 1;
+    let request_id = state.core.allocate_request_id();
     vec![Effect::SendRpc {
-        request_id: state.menus.accounts_generation,
+        request_id,
         method: ChatRpcMethod::SwitchDraftAgent,
         params: Box::new(serde_json::json!({ "agentId": agent_id })),
     }]
@@ -193,9 +195,9 @@ fn select_option(state: &mut ChatState, action: &UserAction, context: &ChatConte
     for step in plan.steps {
         match step {
             DispatchStep::PickModel { model, effort } => {
-                state.menus.accounts_generation += 1;
+                let request_id = state.core.allocate_request_id();
                 effects.push(Effect::SendRpc {
-                    request_id: state.menus.accounts_generation,
+                    request_id,
                     method: ChatRpcMethod::SelectSessionChatModel,
                     params: Box::new(serde_json::json!({ "model": model, "effort": effort })),
                 });
@@ -229,9 +231,9 @@ fn queue_effects(state: &mut ChatState, queued: QueuedOption) -> Vec<Effect> {
             if let Some(fast_mode) = fast_mode {
                 params.insert("fastMode".to_string(), Value::String(fast_mode));
             }
-            state.menus.accounts_generation += 1;
+            let request_id = state.core.allocate_request_id();
             vec![Effect::SendRpc {
-                request_id: state.menus.accounts_generation,
+                request_id,
                 method: ChatRpcMethod::SelectSessionChatModel,
                 params: Box::new(Value::Object(params)),
             }]
@@ -247,9 +249,9 @@ fn queue_effects(state: &mut ChatState, queued: QueuedOption) -> Vec<Effect> {
             if let Some(scope) = scope {
                 params.insert("scope".to_string(), Value::String(scope));
             }
-            state.menus.accounts_generation += 1;
+            let request_id = state.core.allocate_request_id();
             vec![Effect::SendRpc {
-                request_id: state.menus.accounts_generation,
+                request_id,
                 method: ChatRpcMethod::SelectSessionChatModel,
                 params: Box::new(Value::Object(params)),
             }]

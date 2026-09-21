@@ -261,6 +261,19 @@ pub struct ChatSnapshotFrame {
     pub working: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// The three read-only draft-agent fields an ordinary daemon frame does NOT own.
+    ///
+    /// A host that synthesizes snapshots from reads (the mobile SSH host, and the retained-session
+    /// store's own `snapshotEvent`) sets them as own properties deliberately, including a cleared
+    /// one on promotion. Absent means the frame does not own them and the folded value stands;
+    /// present means it does. `controller.ts` tests exactly that with
+    /// `'sessionAgentId' in event`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_agents: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switchable_agents: Option<Value>,
     /// Absent on a snapshot or replaced frame means cleared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<TurnLifecycle>,

@@ -26,9 +26,6 @@ pub struct ChatCore {
     parts: FrameParts,
     /// Bumped on every publish, so the host can ask for "only what changed since N".
     revision: u64,
-    /// The id the next request carries. Monotonic, never reused, so a late answer to a retired
-    /// request is dropped rather than misrouted.
-    next_request_id: u64,
     /// The clock and locale the host last passed in. The core never reads either itself.
     context: ChatContext,
     /// The context the published document was assembled at.
@@ -78,12 +75,9 @@ impl ChatCore {
     /// makes a replay reproducible.
     pub fn handle(&mut self, event: Event, context: ChatContext) -> Vec<Effect> {
         self.context = context;
+        // `dispatch` routes the event to its owner and then runs the six per-family settle hooks
+        // in a fixed order, which is where every `useMemo` and `useEffect` of the TypeScript lives.
         let mut effects = events::dispatch(&mut self.state, &event, &self.context);
-        // Family e1's surfaces have no event of their own: the option pills rebuild from the
-        // catalog and the agent, the accounts poll runs on the clock, and the switch card advances
-        // on every frame. That is `useMemo` and `useEffect` work in the TypeScript, so it runs once
-        // per event here rather than being routed by kind.
-        effects.extend(crate::menus::observe(&mut self.state, &self.context));
         self.republish();
         // One wake for the whole core, not one per timer: the table knows which key is earliest,
         // and the host only has to be asked again when that answer changed.
@@ -166,9 +160,11 @@ impl ChatCore {
     }
 
     /// The id for the next request the core asks for.
+    ///
+    /// One counter for the whole core, on the state, because every family draws from it and
+    /// [`crate::Event::RpcSettled`] routes by id alone.
     pub fn allocate_request_id(&mut self) -> u64 {
-        self.next_request_id += 1;
-        self.next_request_id
+        self.state.core.allocate_request_id()
     }
 
     /// Reassembles the document and bumps the revision when it changed.
@@ -180,7 +176,7 @@ impl ChatCore {
         // The two `useEffect`s the TypeScript runs before the composition reads their state: the
         // pending echoes pruned against the authoritative list, and the pending tool row dropped
         // once the transcript retired it.
-        crate::session::settle(&mut self.state, &self.context);
+        crate::session::before_compose(&mut self.state, &self.context);
         self.state.messages.composed = crate::session::composition::compose(
             &self.state,
             &crate::session::constants::DEFAULT_COMMAND_CATALOG

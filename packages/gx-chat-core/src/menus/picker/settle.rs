@@ -29,8 +29,8 @@ pub const MODEL_OUTBOX_TIMER: &str = "menus.picker.outbox";
 /// Settles family e2's carried state for this event and returns whatever it has to ask the host
 /// for.
 ///
-/// `next_request_id` hands out the ids the core's own counter allocates, so a replay reproduces
-/// them exactly and a late answer to a retired read is dropped rather than misrouted.
+/// Called from family e's own uniform hook (`crate::menus::settle`), with ids from the core's one
+/// allocator.
 pub fn settle(
     state: &mut ChatState,
     event: &Event,
@@ -248,4 +248,27 @@ pub fn outbox_retry_selection(state: &ChatState) -> Option<ModelPickerSelection>
 fn bundled_agent_model_catalog() -> Option<crate::menus::catalog::AgentModelCatalog> {
     const BUNDLED: &str = include_str!("../../../../../agent-model-catalog.json");
     parse_agent_model_catalog(&serde_json::from_str::<Value>(BUNDLED).ok()?)
+}
+
+/// The half of the composer boot read that is family e2's: the context preferences for both
+/// agents, and the model-selection outbox records for this session's keys.
+pub fn adopt_boot_read(state: &mut ChatState, read: &crate::event::ComposerBootRead) {
+    for agent in [ContextDetailsAgent::Claude, ContextDetailsAgent::Codex] {
+        let stored = read.context_preferences.get(agent.as_str());
+        if stored.is_some() {
+            *state.pickers.context.preferences.get_mut(agent) =
+                crate::menus::context::preferences::normalize_preferences(stored, agent);
+        }
+    }
+    // The outbox record for THIS session key, if one survived the last run. Other keys in the map
+    // are this session's scoped variants, which the picker re-derives rather than adopts.
+    let stored = read
+        .model_outboxes
+        .get(&read.session_key)
+        .and_then(|record| record.get("selection").or(Some(record)))
+        .filter(|record| record.is_object())
+        .and_then(|record| serde_json::from_value(record.clone()).ok());
+    if let Some(intent) = stored {
+        state.pickers.model_selection.outbox = Some(intent);
+    }
 }

@@ -33,6 +33,9 @@ pub mod picker;
 pub mod status_line;
 pub mod time;
 
+pub mod settle;
+
 pub use crate::menus::actions::handle;
 pub use crate::menus::document::document;
 pub use crate::menus::lifecycle::observe;
+pub use crate::menus::settle::settle;

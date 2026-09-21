@@ -33,6 +33,13 @@ pub enum Effect {
     Reconnect,
     /// Read a stored record; answered by [`crate::Event::StorageLoaded`].
     ReadStorage { key: StorageKey },
+    /// Read everything the chat needs at boot in one go; answered by
+    /// [`crate::Event::ComposerBootRead`].
+    ///
+    /// The host already owns this as one operation (`composer('read')`), and `start` in
+    /// `native-host.ts` publishes nothing until it answers, so the core waits on it the same way
+    /// rather than issuing a dozen separate reads whose answers would each ship a frame.
+    ReadComposerBoot { request_id: u64 },
     /// Write a stored record. `value` of `None` deletes it.
     WriteStorage {
         key: StorageKey,
@@ -60,6 +67,12 @@ pub enum Effect {
     Copy { text: String },
     /// Show a toast.
     Toast { level: String, message: String },
+    /// A Markdown document was written: put its path on the clipboard and say so.
+    ///
+    /// Its own variant rather than a [`Effect::HostAction`] string, because the host already has a
+    /// dispatch arm for it (`markdownSaved` in `apps/desktop/src/app/native_chat/state.rs`) and the
+    /// Effect-to-`HostRequest` mapping would otherwise have to special-case one action name.
+    MarkdownSaved { path: String },
     /// Something only the app shell can do: switch to the terminal, pick attachments, report the
     /// composer ready. Free-form because the list belongs to the app, not to chat.
     HostAction { action: String, params: Box<Value> },

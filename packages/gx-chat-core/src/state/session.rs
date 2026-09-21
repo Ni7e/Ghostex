@@ -15,6 +15,11 @@ use serde_json::Value;
 /// Everything the session is, as folded from reads and frames.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionState {
+    /// What the host opened this chat with, kept until the boot read answers and the controller
+    /// can be built from it.
+    pub boot_config: Option<crate::event::StartConfig>,
+    /// The boot read in flight, so a late answer to a retired one is dropped.
+    pub boot_read_request: Option<u64>,
     /// The transcript status the server reported, before the local working derivation.
     pub server_status: ChatStatus,
     /// The failure copy, or `None`. Set only by a read or a frame that says `error`.
@@ -79,6 +84,8 @@ pub struct SessionState {
 impl Default for SessionState {
     fn default() -> Self {
         Self {
+            boot_config: None,
+            boot_read_request: None,
             server_status: ChatStatus::Loading,
             error: None,
             lifecycle: None,
@@ -119,4 +126,10 @@ pub struct SessionIdentity {
     pub client_id: String,
     pub project_id: String,
     pub session_id: String,
+    /// `<projectId>:<sessionId>`, with a `remote-<machineId>:` prefix off the local machine.
+    ///
+    /// The storage key for every per-session record, and the identity a stored option state is
+    /// scoped by. The host builds it (it is the one that knows the machine), and it arrives with
+    /// the boot read rather than being rebuilt here.
+    pub session_key: String,
 }

@@ -88,21 +88,9 @@ pub fn async_questions_can_send(
         && status != "loading"
 }
 
-/// Whether an option switch is in flight.
-///
-/// To fold into family e: `optionSwitching` in `native-host.ts` lives beside the option dispatch
-/// and `MenusState` does not carry it yet.
-fn option_switching(_state: &ChatState) -> bool {
-    false
-}
-
-/// Whether an account switch is in flight.
-///
-/// To fold into family e: `accountStatus.busy` is family e's document key and `MenusState` does
-/// not carry it yet.
-fn account_busy(_state: &ChatState) -> bool {
-    false
-}
+// `optionSwitching` and `accountStatus.busy` are family e's, and family d asks the same two
+// questions of the same fields; one pair of predicates answers both.
+use crate::composer::document::{account_busy, option_switching};
 
 /// Whether the turn is live, which is the document's `working` key.
 ///

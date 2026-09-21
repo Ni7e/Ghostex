@@ -29,8 +29,11 @@ pub mod transcript_menu;
 pub mod trigger;
 pub mod view;
 
+pub mod settle;
+
 pub use crate::composer::actions::handle;
 pub use crate::composer::document::document;
+pub use crate::composer::settle::settle;
 pub use crate::composer::queries::{
     composer_references, composer_key_intent, reference_menu, send_blocked_toast, transcript_menu,
 };

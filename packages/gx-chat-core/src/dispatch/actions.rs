@@ -165,14 +165,38 @@ pub fn owner(kind: &ActionKind) -> Option<Family> {
 }
 
 /// Routes one action to its owner.
+///
+/// Every arm of `action` in `packages/shared/session-chat-controller/native-host.ts` ends in a
+/// publish, whatever it changed (native-host.ts:1637), so one is asked for here rather than in six
+/// family directories. The arm is `async`, so that publish runs after its last `await`: an action
+/// that asked the host for something publishes when the answer lands, which is what
+/// [`crate::state::CoreState::publish_after`] records. The three arms that return early
+/// (`composerScroll`/`composerExpand`, `rowDetails`, and the sub-controller commands) never reach
+/// the closing publish; only the first of them is conditional, and its condition is a state change
+/// the core's own republish rule already catches.
 pub fn dispatch(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
-    match owner(&action.kind) {
+    let effects = match owner(&action.kind) {
         Some(Family::Session) => session::handle(state, action, context),
         Some(Family::Transcript) => transcript::handle(state, action, context),
         Some(Family::Questions) => questions::handle(state, action, context),
         Some(Family::Composer) => composer::handle(state, action, context),
         Some(Family::Menus) => menus::handle(state, action, context),
         Some(Family::Extras) => extras::handle(state, action, context),
-        None => Vec::new(),
+        None => return Vec::new(),
+    };
+    if publishes_on_return(&action.kind) && !state.core.publish_after(&effects) {
+        state.core.request_publish();
     }
+    effects
+}
+
+/// Whether this kind reaches the closing `publish(controller.current())`.
+///
+/// `composerScroll` and `composerExpand` return before it and publish only when the collapse
+/// actually moved, which the republish rule sees on its own.
+fn publishes_on_return(kind: &ActionKind) -> bool {
+    !matches!(
+        kind,
+        ActionKind::ComposerScroll | ActionKind::ComposerExpand | ActionKind::Other(_)
+    )
 }

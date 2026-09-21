@@ -42,12 +42,6 @@ pub struct QuestionsState {
     pub draft_write_content_key: Option<String>,
     /// That write was a single-select pick, so landing it moves the card on.
     pub advance_after_write: bool,
-    /// The id the next request family c asks for carries.
-    ///
-    /// To fold into family a: `ChatCore::allocate_request_id` is the real allocator, but
-    /// `handle` has no access to it. Every settle entry point here matches on the ids it recorded
-    /// and ignores anything else, so a collision cannot misroute an answer into this family.
-    pub next_request_id: u64,
 
     // ---- notices ----------------------------------------------------------
     /// `kind:detectedAt` of the notice currently on screen.

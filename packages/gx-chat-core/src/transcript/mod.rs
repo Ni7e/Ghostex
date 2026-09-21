@@ -40,6 +40,9 @@ pub mod transcript;
 pub mod transcript_rows;
 pub mod turns;
 
+pub mod settle;
+
 pub use crate::transcript::actions::handle;
 pub use crate::transcript::document::document;
+pub use crate::transcript::settle::settle;
 pub use crate::transcript::rows::{advance, refresh, row_details, rows};

@@ -69,6 +69,14 @@ pub struct CoreState {
     /// happened, and several rpc continuations do the same. A family that ports one of those calls
     /// [`CoreState::request_publish`] so the revision moves on exactly the same turns.
     pub publish_requested: bool,
+    /// The answers an action that is still in flight publishes on.
+    ///
+    /// `action` in `native-host.ts` is `async`: its closing `publish(controller.current())` runs
+    /// after the last `await` in the arm that handled the command, so the snapshot ships on the
+    /// record that ANSWERS the call rather than on the record that made it. The core's handlers
+    /// return instead of awaiting, so the same turn is named here: the dispatcher records what the
+    /// action asked for, and family a's settle publishes when that answer lands.
+    pub publish_awaits: Vec<PublishAwait>,
     /// The id the next request carries, for every family.
     ///
     /// One counter for the whole core, because [`crate::Event::RpcSettled`] routes by id alone: two
@@ -77,7 +85,51 @@ pub struct CoreState {
     pub next_request_id: u64,
 }
 
+/// One answer an in-flight action is waiting for before the publish that ends it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PublishAwait {
+    /// A gxserver call, by request id.
+    Rpc(u64),
+    /// A stored record being read or written.
+    Storage(crate::event::StorageKey),
+}
+
 impl CoreState {
+    /// Records that an action is waiting on these answers before it publishes.
+    ///
+    /// Nothing is recorded when the effects hold no answerable request: the TypeScript arm then
+    /// never suspends, and its closing publish runs on the action's own turn.
+    pub fn publish_after(&mut self, effects: &[crate::effect::Effect]) -> bool {
+        use crate::effect::Effect;
+        let mut awaited = false;
+        for effect in effects {
+            let await_on = match effect {
+                Effect::SendRpc { request_id, .. } => PublishAwait::Rpc(*request_id),
+                Effect::ReadStorage { key } | Effect::WriteStorage { key, .. } => {
+                    PublishAwait::Storage(key.clone())
+                }
+                _ => continue,
+            };
+            awaited = true;
+            if !self.publish_awaits.contains(&await_on) {
+                self.publish_awaits.push(await_on);
+            }
+        }
+        awaited
+    }
+
+    /// Publishes if this answer is the one an action was waiting on.
+    pub fn settle_publish_await(&mut self, await_on: &PublishAwait) {
+        if let Some(at) = self
+            .publish_awaits
+            .iter()
+            .position(|pending| pending == await_on)
+        {
+            self.publish_awaits.remove(at);
+            self.request_publish();
+        }
+    }
+
     /// Whether one of this dispatch's due timers is `key`.
     pub fn timer_fired(&self, key: &str) -> bool {
         self.fired_timers.iter().any(|fired| fired == key)

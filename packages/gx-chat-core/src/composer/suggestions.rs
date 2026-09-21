@@ -86,6 +86,15 @@ pub struct SuggestionSources {
     /// `None` until a read has answered.
     pub files: Option<Vec<String>>,
     pub files_loading: bool,
+    /// The agent the skills list was read for, so a switch re-reads it.
+    pub skills_agent: Option<String>,
+    /// The skills read in flight, so a late answer to a retired one is dropped.
+    pub skills_request: Option<u64>,
+    /// The files read in flight. Asked for once per chat, when the `@` list first opens.
+    pub files_request: Option<u64>,
+    pub files_asked: bool,
+    /// The skills read has gone out for this agent at least once.
+    pub skills_asked: bool,
 }
 
 /// One row of the draft session's agent list, as far as the `$` heading needs it.

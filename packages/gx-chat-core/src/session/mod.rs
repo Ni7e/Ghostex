@@ -35,4 +35,5 @@ pub mod working;
 pub use crate::session::actions::handle;
 pub use crate::session::document::document;
 pub use crate::session::events::handle as handle_event;
-pub use crate::session::settle::settle;
+pub use crate::session::events::{boot_read, settle};
+pub use crate::session::settle::before_compose;

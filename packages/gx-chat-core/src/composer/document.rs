@@ -92,19 +92,7 @@ pub fn document(state: &ChatState, _context: &ChatContext, into: &mut Document) 
 
     let card_visible = notice_visible(state);
     let choice_pending = terminal_choice_pending(state, notice.as_ref());
-    into.send_blocked_reason = send_blocked_reason(&SendGate {
-        // The desktop brain never holds input on another device; the web and mobile hosts gate it
-        // on their own transport, which answers through the same field.
-        can_send: true,
-        account_switch_busy: account_busy(state),
-        conversation_locked: notice
-            .as_ref()
-            .is_some_and(|notice| notice.conversation_lock.is_some()),
-        terminal_choice_pending: choice_pending,
-        notice_card_visible: card_visible,
-        session_option_switching: option_switching(state),
-    })
-    .map(str::to_string);
+    into.send_blocked_reason = send_blocked(state, _context);
     into.composer_placeholder = composer_placeholder(
         true,
         choice_pending,
@@ -165,6 +153,28 @@ fn queued_prompt(prompt: &Value) -> QueuedPrompt {
     row
 }
 
+/// `sendBlockedReason(state)`: why the send button is off, or `None`.
+///
+/// Public because family b's `rewindEnabled` is exactly `sendBlockedReason(...) === null`, and
+/// `document::assemble` runs family b before family d. Family b reads this predicate over
+/// `ChatState`, never the half-built document.
+pub fn send_blocked(state: &ChatState, _context: &ChatContext) -> Option<String> {
+    let notice = TerminalNotice::parse(state.session.terminal_notice.as_ref());
+    send_blocked_reason(&SendGate {
+        // The desktop brain never holds input on another device; the web and mobile hosts gate it
+        // on their own transport, which answers through the same field.
+        can_send: true,
+        account_switch_busy: account_busy(state),
+        conversation_locked: notice
+            .as_ref()
+            .is_some_and(|notice| notice.conversation_lock.is_some()),
+        terminal_choice_pending: terminal_choice_pending(state, notice.as_ref()),
+        notice_card_visible: notice_visible(state),
+        session_option_switching: option_switching(state),
+    })
+    .map(str::to_string)
+}
+
 /// A dialog with no rows offers controls only, so the placeholder points at them.
 fn controls_only(notice: Option<&TerminalNotice>) -> bool {
     notice
@@ -174,17 +184,25 @@ fn controls_only(notice: Option<&TerminalNotice>) -> bool {
 
 /// Whether an option switch is in flight.
 ///
-/// **To fold into family e.** `optionSwitching` in `native-host.ts` lives beside the option
-/// dispatch and `MenusState` does not carry it yet; family c's `gates.rs` holds the same private
-/// stub for the async strip.
-fn option_switching(_state: &ChatState) -> bool {
-    false
+/// `optionSwitching` is family e's, set by the switching callback the option dispatch installs.
+/// Family c's `questions::gates` asks the same two questions through the same pair.
+pub fn option_switching(state: &ChatState) -> bool {
+    state.menus.option_switching
 }
 
-/// Whether an account switch is in flight.
+/// Whether an account switch is in flight, which is family e's `accountStatus.busy`.
 ///
-/// **To fold into family e.** `accountStatus.busy` is family e's document key and `MenusState`
-/// does not carry it yet.
-fn account_busy(_state: &ChatState) -> bool {
-    false
+/// The switch machine's own answer, not "a switch record exists": a finished switch stays on the
+/// wire, and gating the composer on its presence would leave the send button off for good.
+pub fn account_busy(state: &ChatState) -> bool {
+    let progress = crate::menus::controls::switch_progress(state);
+    state
+        .menus
+        .account_switch
+        .status(
+            progress.as_ref(),
+            crate::menus::controls::switch_ready(state),
+            state.menus.account_switch.now_ms.unwrap_or_default(),
+        )
+        .busy
 }

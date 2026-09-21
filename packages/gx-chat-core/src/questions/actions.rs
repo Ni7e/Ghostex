@@ -446,8 +446,7 @@ fn with_identity(state: &ChatState, params: Value) -> Value {
     Value::Object(object)
 }
 
-/// The next request id family c owns.
+/// The next request id, from the core's one allocator.
 fn allocate(state: &mut ChatState) -> u64 {
-    state.questions.next_request_id += 1;
-    state.questions.next_request_id
+    state.core.allocate_request_id()
 }

@@ -12,7 +12,11 @@ use crate::session::working::{is_working, working_signal};
 use crate::state::{ChatContext, ChatState};
 
 /// Everything that must be true before the composed list is built.
-pub fn settle(state: &mut ChatState, context: &ChatContext) {
+///
+/// Not one of the six per-family settle hooks: this runs inside `ChatCore::republish`, between
+/// the event's handlers and `crate::session::composition::compose`, because the composition reads
+/// what it prunes.
+pub fn before_compose(state: &mut ChatState, context: &ChatContext) {
     let catalog: Vec<String> = DEFAULT_COMMAND_CATALOG
         .iter()
         .map(|name| (*name).to_string())

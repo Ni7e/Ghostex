@@ -19,7 +19,7 @@ use crate::menus::catalog::AgentModelCatalog;
 use crate::menus::option_store::OptionStore;
 
 /// What the menus, pickers, options, accounts and context surfaces remember between frames.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MenusState {
     /// The agent model catalog in effect, pushed in by the host. Empty until the first push, which
     /// is what leaves a session with no pills rather than pills naming models it cannot run.
@@ -56,6 +56,8 @@ pub struct MenusState {
     pub accounts_busy: bool,
     /// The generation of the account read in flight, so a stale answer is dropped.
     pub accounts_generation: u64,
+    /// The accounts read in flight, so its answer reaches family e and nothing else.
+    pub accounts_request: Option<u64>,
     /// When the last periodic account read started, for the 30 second poll.
     pub accounts_polled_at_ms: Option<i64>,
     /// What the poll was keyed on, so a provider or switch change re-reads at once.
@@ -71,13 +73,41 @@ pub struct MenusState {
     pub can_send_key: bool,
 }
 
-impl MenusState {
-    /// The state a chat opens with: the transport is assumed to accept raw keys, which is what
-    /// every gxserver transport does, and the host clears it for one that does not.
-    pub fn new() -> Self {
+/// The state a chat opens with.
+///
+/// Hand-written rather than derived because `can_send_key` starts TRUE: every gxserver transport
+/// accepts a raw key, and a host whose transport does not clears it. A derived `false` would hide
+/// the Shift+Tab permission cycler and every other keystroke row on a `ChatState::default()`,
+/// which is what `ChatCore::new` builds.
+impl Default for MenusState {
+    fn default() -> Self {
         Self {
+            model_catalog: AgentModelCatalog::default(),
+            session_key: None,
+            latched_draft_agent: None,
+            options: OptionStore::default(),
+            options_agent: None,
+            options_catalog_version: String::new(),
+            stored_options: Value::Null,
+            options_seeded: false,
+            accounts: None,
+            account_error: None,
+            accounts_busy: false,
+            accounts_generation: 0,
+            accounts_request: None,
+            accounts_polled_at_ms: None,
+            accounts_key: None,
+            account_switch: AccountSwitchState::default(),
+            option_dispatch_id: None,
+            option_switching: false,
             can_send_key: true,
-            ..Self::default()
         }
+    }
+}
+
+impl MenusState {
+    /// The state a chat opens with.
+    pub fn new() -> Self {
+        Self::default()
     }
 }

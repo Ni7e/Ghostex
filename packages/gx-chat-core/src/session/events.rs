@@ -5,7 +5,7 @@
 //! the Rust core folds into one place because the broker and the per-view runtime are both gone.
 
 use crate::effect::Effect;
-use crate::event::{ConnectionUpdate, Event, StartConfig};
+use crate::event::{ComposerBootRead, ConnectionUpdate, Event, StartConfig};
 use crate::session::apply::{
     apply_authoritative, apply_draft_agent_carriage, apply_selected_options,
 };
@@ -23,7 +23,7 @@ use crate::session::reads::{
 use crate::session::stream::{accept_authoritative_frame, accept_sequenced_frame, Verdict};
 use crate::session::view_state::select_view_state;
 use crate::session::working::{is_working, publish_status, working_signal};
-use crate::state::{ChatContext, ChatState, ReadKind};
+use crate::state::{ChatContext, ChatState, PublishAwait, ReadKind};
 use crate::wire::{ChatFrame, RpcOutcome};
 
 /// Handles one event family a owns.
@@ -37,10 +37,33 @@ pub fn handle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
     effects
 }
 
+/// Family a's uniform settle hook, the first of the six.
+///
+/// It owns the seam's own bookkeeping rather than a surface: the answer an in-flight action was
+/// waiting on is what ends that action's turn, and `action` in `native-host.ts` publishes there
+/// (`crate::dispatch::actions::dispatch`).
+pub fn settle(state: &mut ChatState, event: &Event, _context: &ChatContext) -> Vec<Effect> {
+    match event {
+        Event::RpcSettled { request_id, .. } => {
+            state
+                .core
+                .settle_publish_await(&PublishAwait::Rpc(*request_id));
+        }
+        Event::StorageLoaded { key, .. } | Event::StorageWritten { key, .. } => {
+            state
+                .core
+                .settle_publish_await(&PublishAwait::Storage(key.clone()));
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
 /// The event's own handler.
 fn route(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
     match event {
         Event::Start(config) => start(state, config, context),
+        Event::ComposerBootRead(read) => boot_read(state, read, context),
         Event::Frame(frame) => frame_arrived(state, frame, context),
         Event::Connection(update) => connection(state, *update, context),
         Event::RpcSettled {
@@ -57,9 +80,13 @@ fn route(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Eff
     }
 }
 
-/// The host is opening this chat: adopt what it had cached, then subscribe and seed-read.
+/// The host is opening this chat.
+///
+/// Nothing the document can see moves here, and nothing is subscribed or read: `start` in
+/// `native-host.ts` asks for `composer('read')` and waits, so the first frame the host drains
+/// carries no snapshot at all. The identity, the retained transcript and the first two calls all
+/// land in [`boot_read`].
 fn start(state: &mut ChatState, config: &StartConfig, context: &ChatContext) -> Vec<Effect> {
-    state.identity.client_id = config.client_id.clone();
     state.identity.project_id = config.project_id.clone();
     state.identity.session_id = config.session_id.clone();
     state.messages.generation += 1;
@@ -67,6 +94,26 @@ fn start(state: &mut ChatState, config: &StartConfig, context: &ChatContext) -> 
     state.messages.last_frame_at_ms = context.now_ms;
     state.messages.seed_started_at_ms = context.now_ms;
     state.messages.seed_attempt = 0;
+    state.session.boot_config = Some(config.clone());
+    let request_id = state.core.allocate_request_id();
+    state.session.boot_read_request = Some(request_id);
+    vec![Effect::ReadComposerBoot { request_id }]
+}
+
+/// The boot read answered: adopt the client id and the cached transcript, then subscribe and seed.
+///
+/// This is `start`'s `.then(...)` in `native-host.ts`: it adopts the catalog, the preferences and
+/// the settings, pushes `composerInit`, and only then builds the controller, whose subscribe
+/// effect opens the stream and whose seed read fills the transcript.
+pub fn boot_read(
+    state: &mut ChatState,
+    read: &ComposerBootRead,
+    context: &ChatContext,
+) -> Vec<Effect> {
+    state.session.boot_read_request = None;
+    state.identity.client_id = read.client_id.clone();
+    state.identity.session_key = read.session_key.clone();
+    let config = state.session.boot_config.clone().unwrap_or_default();
     state.core.preview_settings = config.preview.clone();
 
     // Retained data is folded before the first paint, so a session switch never shows an empty
@@ -137,6 +184,16 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                 state.messages.snapshot.as_ref(),
                 StateCarrier::Snapshot(snapshot),
             );
+            // Ordinary daemon frames do not own the three read-only draft-agent fields; a host
+            // that synthesizes snapshots from reads does, including a cleared one on promotion, so
+            // a frame that carries any of them carries all three (`controller.ts`, the
+            // `'sessionAgentId' in event` test).
+            if snapshot.session_agent_id.is_some()
+                || snapshot.available_agents.is_some()
+                || snapshot.switchable_agents.is_some()
+            {
+                apply_draft_agent_carriage(state, &folded.result);
+            }
             apply_authoritative(state, &folded.result, true, context);
             state.messages.snapshot = Some(folded);
             Vec::new()

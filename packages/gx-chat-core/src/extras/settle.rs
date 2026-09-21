@@ -22,9 +22,21 @@ use crate::wire::RpcOutcome;
 /// Settles family f's carried state for this event and returns whatever it has to ask the host
 /// for.
 ///
-/// `next_request_id` hands out the ids the core's own counter allocates, so a replay reproduces
-/// them exactly and a late answer to a retired read is dropped rather than misrouted.
-pub fn settle(
+/// One of the six uniform per-family hooks `crate::dispatch::events::dispatch` runs in a fixed
+/// order. Ids come off the core's one allocator, taken out for the call and written back, so a
+/// replay reproduces them exactly and a late answer to a retired read cannot reach another
+/// family.
+pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
+    let mut allocated = state.core.next_request_id;
+    let effects = settle_with_ids(state, event, context, || {
+        allocated += 1;
+        allocated
+    });
+    state.core.next_request_id = allocated;
+    effects
+}
+
+fn settle_with_ids(
     state: &mut ChatState,
     event: &Event,
     context: &ChatContext,

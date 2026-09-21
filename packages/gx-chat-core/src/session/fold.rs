@@ -452,6 +452,16 @@ fn snapshot_as_result(
     folded.result.status = frame.status.clone();
     folded.result.working = frame.working;
     folded.result.agent = frame.agent.clone();
+    // `{...previous, ...base}`: a frame that owns the three read-only draft-agent fields sets
+    // them, and one that does not leaves what the previous fold held.
+    if frame.session_agent_id.is_some()
+        || frame.available_agents.is_some()
+        || frame.switchable_agents.is_some()
+    {
+        folded.result.session_agent_id = frame.session_agent_id.clone();
+        folded.result.available_agents = frame.available_agents.clone();
+        folded.result.switchable_agents = frame.switchable_agents.clone();
+    }
     folded.result.lifecycle = frame.lifecycle.clone();
     folded.result.state = frame.state.clone();
     folded.extra.insert(
@@ -527,10 +537,14 @@ fn incoming_lifecycle<'a>(
     }
 }
 
-/// Only a read carries `sessionAgentId`, which is what makes an agent change detectable.
+/// `sessionAgentId`, which is what makes an agent change detectable.
+///
+/// A read always carries it; an ordinary daemon frame does not, but a snapshot synthesized from a
+/// read (the retained store's `snapshotEvent`, the mobile SSH host) owns it deliberately.
 fn incoming_session_agent_id<'a>(incoming: &'a StateCarrier<'a>) -> Option<&'a String> {
     match incoming {
         StateCarrier::Read(result) => result.session_agent_id.as_ref(),
+        StateCarrier::Snapshot(frame) => frame.session_agent_id.as_ref(),
         _ => None,
     }
 }

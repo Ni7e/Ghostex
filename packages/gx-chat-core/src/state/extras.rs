@@ -36,11 +36,6 @@ pub struct ExtrasState {
     pub loading_started_at_ms: Option<f64>,
     /// The stage the empty region is showing while a read runs: `blank`, `indicator` or `retry`.
     pub loading_stage: String,
-    /// The id of the next request family f asks the host for. Monotonic, never reused.
-    ///
-    /// Family a's `ChatCore::allocate_request_id` is the counter these should come off; until the
-    /// dispatch signature carries it, family f keeps its own so a replay still reproduces ids.
-    pub next_request_id: u64,
 }
 
 /// The stint word the pinned strip shows.

@@ -26,31 +26,28 @@ pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> 
         Vec::new()
     };
     let mut effects = route(state, event, context);
-    // Family f carries state a pure `document` cannot derive (the stint word, the loading stage,
-    // the task fold, the search cursor, the tail sheet), so the mutating half of the TypeScript's
-    // `publish` runs here, once per event, before `crate::document::assemble`. Other families
-    // will want the same hook; see `docs/2026-09-21/rust-chat/PROGRESS.md`.
-    let mut next = state.extras.next_request_id;
-    effects.extend(crate::extras::settle(state, event, context, || {
-        next += 1;
-        next
-    }));
-    state.extras.next_request_id = next;
-    // Family e2 carries the same kind of state: the open picker's animations run on deadlines,
-    // the fork branch family is read once inside `publish`, and the starred models, the context
-    // preferences and the agent model catalog all arrive from outside.
-    let mut next = state.pickers.next_request_id;
-    effects.extend(crate::menus::picker::settle(state, event, context, || {
-        next += 1;
-        next
-    }));
-    state.pickers.next_request_id = next;
-    // Family c uses the same hook: a new prompt or notice resets the card, forgets the dismissal
-    // and re-reads the saved answers, and the `try`, `catch` and `finally` bodies of its handlers
-    // run when the call they started answers.
-    effects.extend(crate::questions::settle(state, event, context));
+    // Every family carries state a pure `document` cannot derive, and every family has `try`,
+    // `catch` and `finally` bodies that run when a call it started answers. That is the mutating
+    // half of the TypeScript's `publish`, so each family gets ONE hook with the same signature,
+    // run here in the assembly order (a, b, c, d, e, f) before `crate::document::assemble`. The
+    // order is fixed only so two runs produce the same bytes: a settle reads `ChatState`, never a
+    // half-built document, exactly like `document`.
+    for settle in SETTLE {
+        effects.extend(settle(state, event, context));
+    }
     effects
 }
+
+/// One settle per family, in assembly order.
+type Settle = fn(&mut ChatState, &Event, &ChatContext) -> Vec<Effect>;
+const SETTLE: [Settle; 6] = [
+    crate::session::settle,
+    crate::transcript::settle,
+    crate::questions::settle,
+    crate::composer::settle,
+    crate::menus::settle,
+    crate::extras::settle,
+];
 
 /// The event's own owner, before any family settles.
 fn route(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
@@ -64,6 +61,7 @@ fn route(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Eff
         // backoffs, the stall watchdog, the read deadline, the tool-row hold). Every other family
         // reads `state.core.fired_timers` from its own settle hook.
         | Event::Tick
+        | Event::ComposerBootRead(_)
         | Event::SettingsChanged(_) => crate::session::handle_event(state, event, context),
         Event::StorageLoaded { .. }
         | Event::StorageWritten { .. }

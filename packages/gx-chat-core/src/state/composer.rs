@@ -65,6 +65,14 @@ pub struct ComposerState {
     pub platform: KeyPlatform,
     /// A send is in flight and the composer is holding its text.
     pub submitting: Option<Submission>,
+    /// The boot read has answered, so the two catalog reads may go out.
+    pub boot_read: bool,
+    /// `sendBlockedReason(state)`, recomputed once per event by family d's settle.
+    ///
+    /// Family b's `rewindEnabled` is `sendBlockedReason(...) === null`, and `document::assemble`
+    /// runs b before d, so the answer is cached on the state rather than read out of a half-built
+    /// document.
+    pub send_blocked_reason: Option<String>,
 }
 
 /// The `/`, `$` and `@` popup's own state.
@@ -76,6 +84,8 @@ pub struct ComposerSuggestionState {
     pub index: usize,
     /// Whether the `$` list was active last frame, so a skills read is asked for once.
     pub skill_active: bool,
+    /// Whether the `@` list was active last frame, which is what asks for the file catalog.
+    pub file_active: bool,
     /// The draft and caret the dismissals were judged against.
     pub text: String,
     pub caret: usize,

@@ -83,6 +83,10 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
     */
     into.rewind_available = state.core.preview_settings.is_none()
         && agent_supports_rewind(state.session.agent.as_deref());
+    // `rewindEnabled: sendBlockedReason(state) === null`. That is family d's rule, and
+    // `document::assemble` runs family b first, so it is read off the state family d's settle
+    // cached it on rather than out of a half-built document.
+    into.rewind_enabled = state.composer.send_blocked_reason.is_none();
     into.rewind = match &view.rewind {
         Some(request) => Tri::Value(rewind_projection(request)),
         None => Tri::Null,

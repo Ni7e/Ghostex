@@ -144,9 +144,28 @@ fn poll_accounts(state: &mut ChatState, now_ms: i64) -> Vec<Effect> {
     state.menus.accounts_generation += 1;
     state.menus.accounts_busy = true;
     state.menus.account_error = None;
+    let request_id = state.core.allocate_request_id();
+    state.menus.accounts_request = Some(request_id);
     vec![Effect::SendRpc {
-        request_id: state.menus.accounts_generation,
+        request_id,
         method: ChatRpcMethod::AgentAccounts,
         params: Box::new(session_accounts_request()),
     }]
+}
+
+/// The composer boot read, as `start`'s `.then(...)` in `native-host.ts` adopts it.
+///
+/// `adoptAgentModelCatalog(result.modelCatalog)`, then `nativeOptionPersistence(result, …)`, which
+/// is what seeds the option store from the records already on disk for this session key. Family e2
+/// takes the context preferences and the model outboxes out of the same object.
+pub fn boot_read(state: &mut ChatState, read: &crate::event::ComposerBootRead) -> Vec<Effect> {
+    if let Some(parsed) = crate::menus::catalog::parse_agent_model_catalog(&read.model_catalog) {
+        let current = std::mem::take(&mut state.menus.model_catalog);
+        state.menus.model_catalog = current.newer(parsed);
+    }
+    state.menus.session_key = Some(read.session_key.clone());
+    state.menus.stored_options = read.option_states.clone();
+    state.menus.options_seeded = true;
+    crate::menus::picker::settle::adopt_boot_read(state, read);
+    Vec::new()
 }
