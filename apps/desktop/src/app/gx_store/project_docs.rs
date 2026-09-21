@@ -27,6 +27,7 @@ use ghostex_gx_core::{
 use serde_json::{Value, json};
 
 use super::client_document::{ClientDocument, ClientDocumentHost};
+use super::sidebar_drop_queue::DropQueueNeed;
 use crate::GhostexGpuiApp;
 
 /// `ghostex.sidebar.projectCollections.v1`.
@@ -172,14 +173,22 @@ impl GhostexGpuiApp {
         // Both documents have to be in hand before an edit lands on top of one: a move computed
         // against a document this app has not read yet would write an order over what it cannot
         // see. The Spaces document has no stored key, so it is ready at once; the collections
-        // document books its read here and refuses until it lands.
+        // document books its read here and HOLDS the drop until it lands
+        // (gx_store/sidebar_drop_queue.rs), because the page that used to perform the refused drop
+        // is going and refusing it now would lose the gesture.
         if !self.gx_document_restored::<CollectionsDocument>(cx) {
+            if self.gx_store_queue_sidebar_drop(command, DropQueueNeed::ProjectDocuments, cx) {
+                return true;
+            }
             self.gx_store.project_moves.declined_source += 1;
             return false;
         }
         // The project order also edits the workspace session groups document, so its stored key
         // has to be in hand too, for the same reason.
         if !self.gx_store_restore_workspace_groups(cx) {
+            if self.gx_store_queue_sidebar_drop(command, DropQueueNeed::ProjectDocuments, cx) {
+                return true;
+            }
             self.gx_store.project_moves.declined_source += 1;
             return false;
         }

@@ -25,7 +25,8 @@
 //! `sidebar_bulk.rs` the plural payloads and the renderer's
 //! batch envelope, `sidebar_remote.rs` every per-session action of a row on a remote machine,
 //! `sidebar_remote_focus.rs` the one remote payload that is not a call at all, a row click,
-//! `sidebar_drag.rs` the session moves and what their order messages write, and
+//! `sidebar_drag.rs` the session moves and what their order messages write, with
+//! `sidebar_drop_queue.rs` holding a drop made before the document it edits was read, and
 //! `workspace_groups.rs` the client-owned groups document those writes land in, with its stored
 //! key, its debounced push and the guard that refuses the daemon's echo while one is outstanding;
 //! `project_docs.rs` the PROJECT moves (reorder, into and out of a collection, Space membership)
@@ -64,6 +65,7 @@ mod sidebar_actions;
 mod sidebar_bulk;
 mod sidebar_close_project;
 mod sidebar_drag;
+mod sidebar_drop_queue;
 mod sidebar_flags;
 mod sidebar_focus_route;
 mod sidebar_lifecycle;

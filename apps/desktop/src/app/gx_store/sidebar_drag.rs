@@ -29,6 +29,7 @@ use ghostex_gx_core::{
 };
 use serde_json::{Value, json};
 
+use super::sidebar_drop_queue::DropQueueNeed;
 use crate::GhostexGpuiApp;
 use crate::app::helpers::board_gxserver::gxserver_health_and_daemon::gpui_gxserver_rpc_result;
 
@@ -72,9 +73,14 @@ impl GhostexGpuiApp {
             return false;
         }
         // A move edits the document, so the stored key has to be in hand first. A read that has
-        // not landed refuses the drop rather than writing an order over a document this app cannot
-        // see; the old runtime performs it instead, which is what a `false` return means.
+        // not landed HOLDS the drop until it does (gx_store/sidebar_drop_queue.rs) instead of
+        // writing an order over a document this app cannot see: the page that used to perform the
+        // refused drop is going, so refusing it now would lose the gesture. A queue that cannot
+        // take it declines as before and the old runtime performs it.
         if !self.gx_store_restore_workspace_groups(cx) {
+            if self.gx_store_queue_sidebar_drop(command, DropQueueNeed::WorkspaceGroups, cx) {
+                return true;
+            }
             self.gx_store.sidebar_drag.declined_source += 1;
             return false;
         }
@@ -124,7 +130,11 @@ impl GhostexGpuiApp {
             self.gx_store.sidebar_drag.declined_source += 1;
             return false;
         }
+        // Held until the stored key lands, for the reason above.
         if !self.gx_store_restore_workspace_groups(cx) {
+            if self.gx_store_queue_sidebar_drop(command, DropQueueNeed::WorkspaceGroups, cx) {
+                return true;
+            }
             self.gx_store.sidebar_drag.declined_source += 1;
             return false;
         }
