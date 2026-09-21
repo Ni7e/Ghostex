@@ -33,7 +33,6 @@ pub(crate) mod cef_deferred_startup;
 pub(crate) mod chrome_input_focus;
 pub(crate) mod command_pane_auto_minimize;
 pub(crate) mod command_pane_remote_action;
-#[cfg(target_os = "macos")]
 pub(crate) mod create_worktree_modal_lifecycle;
 pub(crate) mod delayed_send;
 pub(crate) mod delayed_send_modal_lifecycle;
