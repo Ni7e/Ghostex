@@ -1,12 +1,5 @@
 import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type CSSProperties,
-} from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { getDefaultSidebarAgentById } from '@/packages/shared/sidebar-agents';
 import { AGENT_LOGOS } from '../agent-logos';
@@ -191,8 +184,7 @@ export function SessionChatModelPicker({
     if (control === 'ArrowLeft') moveEffort(-1);
     if (control === 'ArrowRight') moveEffort(1);
     if (control === 'Enter') finish(true);
-    if (control === 'EnterAlternate' && sessionScope)
-      finish(true, selection, 'session');
+    if (control === 'EnterAlternate' && sessionScope) finish(true, selection, 'session');
     if (control === 'Escape') finish(false);
   };
   useModelPickerWheelNavigation(popup, navigate);
@@ -396,9 +388,9 @@ export function SessionChatModelPicker({
                       {entry.version && <span className='model-picker-model-version'>{entry.version}</span>}
                       {entry.label}
                     </span>
-                    {narrow && offset === 0 && (
+                    {narrow && offset === 0 && request.efforts[effortIndex] && (
                       <span className='model-picker-current-effort' key={selection.effort}>
-                        {request.efforts[effortIndex]?.label ?? 'No effort setting'}
+                        {request.efforts[effortIndex].label}
                       </span>
                     )}
                   </button>
@@ -463,7 +455,7 @@ export function SessionChatModelPicker({
                 </>
               )}
               <span className='model-picker-sr-only' role='status' aria-live='polite'>
-                {model.label}, {request.efforts[effortIndex]?.label ?? 'No effort setting'}
+                {[model.label, request.efforts[effortIndex]?.label].filter(Boolean).join(', ')}
               </span>
             </div>
           </div>

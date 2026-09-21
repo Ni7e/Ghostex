@@ -125,7 +125,12 @@ fn tile(
             .size(px(38.0 * scale))
             .text_color(icon_color),
     );
-    let mut name = div().flex().flex_col().items_center().gap(px(scale));
+    let mut name = div()
+        .flex()
+        .flex_col()
+        .items_center()
+        .text_center()
+        .gap(px(scale));
     if let Some(version) = entry["version"].as_str() {
         name = name.child(
             div()
@@ -137,11 +142,15 @@ fn tile(
         );
     }
     card = card.child(name.child(label));
-    if model && selected && state["narrow"] == true {
+    if let Some(effort) = state["effortLabel"]
+        .as_str()
+        .filter(|_| model && selected && state["narrow"] == true)
+    {
         card = card.child(
             div()
+                .text_center()
                 .text_color(mix(color, gpui::white(), 0.6))
-                .child(text(state, "effortLabel")),
+                .child(effort.to_owned()),
         );
     }
     card.into_any_element()

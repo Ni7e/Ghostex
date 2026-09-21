@@ -93,7 +93,8 @@ export class NativeModelPicker {
         artwork: modelPickerEffortArtworkKey(entry.value),
         x: (i < layout.effortSplit ? i - layout.effortSplit : i - layout.effortSplit + 1) * 142,
       })),
-      effortLabel: request.efforts.find((entry) => entry.value === this.selection.effort)?.label ?? 'No effort setting',
+      // A model without effort levels (Cursor's Auto) shows only its name.
+      effortLabel: request.efforts.find((entry) => entry.value === this.selection.effort)?.label ?? null,
     };
   }
 
