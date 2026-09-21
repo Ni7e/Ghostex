@@ -10,6 +10,7 @@
 
 pub(crate) mod agents;
 mod assemble;
+pub(crate) mod close_successor;
 pub(crate) mod collections;
 mod groups;
 mod inputs;
@@ -29,6 +30,10 @@ pub(crate) mod tags;
 pub(crate) mod text;
 pub(crate) mod view;
 
+pub use close_successor::{
+    close_project_group_is_active, close_project_successor_candidates,
+    close_project_successor_group_order, first_awake_successor_session_id, is_awake_successor_row,
+};
 pub use collections::{Collection, CollectionsState};
 pub use inputs::{
     BrowserTabInput, CloseAfterDoneInput, DelayedSendInput, MachineTabInput, ProjectDiffStats,

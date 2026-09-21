@@ -178,6 +178,12 @@ impl SidebarList {
         self.model.view()
     }
 
+    /// The session Close Project focuses before it parks the project
+    /// (gx_store/sidebar_close_project.rs).
+    pub(crate) fn close_project_successor_session_id(&self, group_id: &str) -> Option<String> {
+        self.model.close_project_successor_session_id(group_id)
+    }
+
     /// Folds what one pump changed into what the next update must apply.
     pub(super) fn note_changes(&mut self, changes: &ChangeSummary) {
         self.changes.merge(changes.clone());

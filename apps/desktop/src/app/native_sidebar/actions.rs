@@ -235,6 +235,10 @@ impl GhostexGpuiApp {
         // in the same frame, and the old projection keeps its own copy for the menus it owns until
         // M4c (gx_store/sidebar_ui_commands.rs).
         self.gx_store_note_sidebar_command(&command, cx);
+        // Close Project is focus-moving work the page used to do on the message's way past: the
+        // store names the session the close focuses, from the list it draws
+        // (gx_store/sidebar_close_project.rs).
+        let command = self.gx_store_add_close_project_successor(command);
         // A sidebar command can change focus in the runtime, so it must not be handled while the runtime still holds an older focus stamp than the store (gx_store/burst.rs).
         self.gx_store_flush_old_runtime_tell(cx);
         let script = format!("window.ghostexGpui.onNativeSidebarCommand({command}); undefined;");

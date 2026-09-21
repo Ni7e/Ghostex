@@ -76,6 +76,10 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
   const post = (message: Parameters<typeof runtime.vscode.postMessage>[0]) => {
     if (
       message.type === 'closeWorkspaceProjectForGroup' &&
+      // The app names the successor itself when its own list is the one on screen
+      // (apps/desktop/src/app/gx_store/sidebar_close_project.rs), and a second answer computed here
+      // would replace it with one resolved against a list the user is not looking at.
+      message.successorSessionId === undefined &&
       sidebarStore.getState().groupsById[message.groupId]?.isActive
     ) {
       const snapshot = createNativeSidebarSnapshot(ui);

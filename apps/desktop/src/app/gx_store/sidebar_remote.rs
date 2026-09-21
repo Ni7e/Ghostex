@@ -91,6 +91,7 @@ pub(crate) struct SidebarRemoteHost {
         super::sidebar_accounts::SidebarAccountCounters,
         super::sidebar_slot_jump::SlotJumpCounters,
         super::sidebar_session_slot::SessionSlotCounters,
+        super::sidebar_close_project::CloseProjectCounters,
     )>,
 }
 
@@ -322,6 +323,8 @@ impl GhostexGpuiApp {
         let slot_jump = self.gx_store.slot_jump.counters;
         // The session slot hotkeys, cmd+1..9 (gx_store/sidebar_session_slot.rs).
         let session_slot = self.gx_store.session_slot.counters;
+        // Close Project's successor (gx_store/sidebar_close_project.rs).
+        let close_project = self.gx_store_close_project_counters();
         let host = &mut self.gx_store.sidebar_remote;
         let now = (host.counters, local);
         if host.summary_written
@@ -333,6 +336,7 @@ impl GhostexGpuiApp {
                 accounts,
                 slot_jump,
                 session_slot,
+                close_project,
             ))
             || host
                 .summary_at
@@ -353,6 +357,7 @@ impl GhostexGpuiApp {
             accounts,
             slot_jump,
             session_slot,
+            close_project,
         ));
         let [
             reloads_stopped,
@@ -381,6 +386,7 @@ impl GhostexGpuiApp {
                 "accounts": super::sidebar_accounts::account_counters_json(&accounts),
                 "slotJump": super::sidebar_slot_jump::slot_jump_counters_json(&slot_jump),
                 "sessionSlot": super::sidebar_session_slot::session_slot_counters_json(&session_slot),
+                "closeProject": super::sidebar_close_project::close_project_counters_json(&close_project),
             }),
         );
     }

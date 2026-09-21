@@ -58,6 +58,7 @@ mod shadow_diff;
 mod sidebar_accounts;
 mod sidebar_actions;
 mod sidebar_bulk;
+mod sidebar_close_project;
 mod sidebar_drag;
 mod sidebar_flags;
 mod sidebar_lifecycle;

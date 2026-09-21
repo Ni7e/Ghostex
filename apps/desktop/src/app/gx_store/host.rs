@@ -114,6 +114,8 @@ pub(crate) struct GxStoreHost {
     pub(super) sidebar_snooze: super::sidebar_snooze::SidebarSnoozeCounters,
     pub(super) sidebar_bulk: super::sidebar_bulk::SidebarBulkCounters,
     pub(super) sidebar_drag: super::sidebar_drag::SidebarDragCounters,
+    /// Close Project's successor, which the sidebar page used to fill in.
+    pub(super) close_project: super::sidebar_close_project::CloseProjectCounters,
     /// A remote row's session actions: their counters and their log budgets.
     pub(super) sidebar_remote: super::sidebar_remote::SidebarRemoteHost,
     pub(super) sidebar_remote_focus: super::sidebar_remote_focus::SidebarRemoteFocusHost,

@@ -135,6 +135,24 @@ impl SidebarViewModel {
         }
     }
 
+    /// `resolveCloseProjectSuccessorSessionId`: the session Close Project focuses before it parks
+    /// the project, or `None` when no candidate holds an awake row.
+    ///
+    /// The rows are read from the group's UNFILTERED, unsorted set, which is what the TypeScript's
+    /// `sessionIdsByGroup` is: the drawn `GroupCore::sessions` is the display layout after the tag
+    /// filter, and a successor chosen out of that would move with a filter the close has nothing to
+    /// do with.
+    pub fn close_project_successor_session_id(&self, closing_group_id: &str) -> Option<String> {
+        let state = self.state.as_ref()?;
+        super::close_successor::close_project_successor_candidates(&state.view, closing_group_id)
+            .into_iter()
+            .find_map(|group_id| {
+                let build = state.groups.get(&group_id)?;
+                super::close_successor::first_awake_successor_session_id(&build.build.store_rows)
+                    .map(str::to_string)
+            })
+    }
+
     /// The next host time at which a row moves on its own (a new session stops leading the list, a
     /// snooze ends). The host re-runs the update then; nothing else has to.
     pub fn next_deadline_ms(&self) -> Option<u64> {
