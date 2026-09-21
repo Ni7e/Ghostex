@@ -431,15 +431,15 @@ impl GhostexGpuiApp {
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
-    /// CDXC:Spaces 2026-08-27:
-    /// The New/Edit Space dialog's confirm and delete. The dialog is an app-modal
-    /// window, so its result has to cross back into the sidebar page — and it is
-    /// SidebarApp, not Rust, that owns the Space document, so this forwards the
-    /// user's field values verbatim under the inbound
-    /// `applySidebarSpaceEditorResult` type and applies nothing itself. Only
-    /// bounded metadata crosses: the mode enum, a Space id, a name, an icon id, a
-    /// color, an optional member id, and the owning machine id — never a Space
-    /// document, a project path, or daemon state.
+    /// CDXC:Spaces 2026-09-21 WHY:
+    /// The New/Edit Space dialog's confirm and delete. The dialog is an app-modal window, so its
+    /// result has to cross back, and only bounded metadata does: the mode enum, a Space id, a name,
+    /// an icon id, a colour, an optional member id and the owning machine id, never a Space
+    /// document, a project path or daemon state. Supersedes `CDXC:Spaces 2026-08-27`'s placement,
+    /// which said SidebarApp owns the Space document: for THIS COMPUTER the app owns it now
+    /// (gx_store/space_editor.rs) and the page is only told, so its Space selection and its
+    /// projection stay in step. A REMOTE machine's document is still the page's, because
+    /// `updateRemoteSidebarSpaces` is a direct call down that machine's tunnel.
     pub(crate) fn forward_gpui_sidebar_space_editor_result_to_sidebar(
         &mut self,
         command: &serde_json::Map<String, serde_json::Value>,
@@ -478,8 +478,12 @@ impl GhostexGpuiApp {
         }
         // Deleting the Space a section is filtered by leaves that section naming a Space that is
         // gone, and the sidebar's own state is the store's since M5 piece 7c
-        // (gx_store/sidebar_ui_paths.rs). The document itself stays the page's.
+        // (gx_store/sidebar_ui_paths.rs).
         self.gx_store_note_sidebar_space_editor_result(&message, cx);
+        // The document edit itself, for this computer. The page is still told, because it keeps its
+        // own Space selection and draws its own projection until that projection is deleted; what
+        // it no longer does is write the document, so there is one writer.
+        self.gx_store_run_space_editor_result(&message, cx);
         self.dispatch_gpui_sidebar_host_message(serde_json::Value::Object(message), cx)
     }
 

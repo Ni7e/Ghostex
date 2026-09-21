@@ -57,7 +57,17 @@ export class NativeSidebarMetadata {
         this.connections[message.machineId] = { state: message.state, message: message.message };
         break;
       case 'applySidebarSpaceEditorResult': {
-        const id = message.remoteMachineId ?? 'local';
+        /*
+        CDXC:Spaces 2026-09-21 WHY:
+        THIS COMPUTER's leg is gone: the app applies the dialog's result to the Spaces document
+        itself (apps/desktop/src/app/gx_store/space_editor.rs) and hands the result back through
+        `applySidebarSpaces`, so computing it here as well would make two writers of one document
+        and the second one would push a Space the app's guard had not been asked about. The result
+        still arrives so this page's Space selection and projection stay in step. A REMOTE machine
+        is unchanged: `updateRemoteSidebarSpaces` is a direct call down that machine's tunnel.
+        */
+        const id = message.remoteMachineId;
+        if (!id) break;
         const next = applySidebarSpaceEditorResult(this.spaces[id] ?? EMPTY_SIDEBAR_SPACES_STATE, message);
         this.updateSpaces(id, next, post);
         break;

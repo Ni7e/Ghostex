@@ -13,10 +13,13 @@
 
 use serde_json::json;
 
+use ghostex_gx_core::SpaceEditorMode;
+
 use super::collection_menu::CollectionMenuCounters;
 use super::diagnostics::{
     GxStoreDiagnostics, MAX_SIDEBAR_ACTION_RECORDS, record, routine_logging_enabled,
 };
+use super::space_editor::SpaceEditorCounters;
 
 impl GxStoreDiagnostics {
     /// One line per Project Group menu item that reached the document: which action, whether it
@@ -42,6 +45,36 @@ impl GxStoreDiagnostics {
                 "refusals": counters.refusals,
                 "declinedSource": counters.declined_source,
                 "handOffs": counters.hand_offs,
+            }),
+        );
+    }
+
+    /// One line per Space editor result the app applied: which button, whether it wrote, and the
+    /// run's totals. Never the Space's name, its icon or its id, all three of which are the user's.
+    pub(super) fn space_editor_ran(
+        &mut self,
+        mode: SpaceEditorMode,
+        wrote: bool,
+        counters: SpaceEditorCounters,
+    ) {
+        if !self.project_doc_edit_budget() {
+            return;
+        }
+        record(
+            "gxStore.spaceEditor",
+            json!({
+                "mode": match mode {
+                    SpaceEditorMode::Create => "create",
+                    SpaceEditorMode::Delete => "delete",
+                    SpaceEditorMode::Edit => "edit",
+                },
+                "wrote": wrote,
+                "creates": counters.creates,
+                "edits": counters.edits,
+                "deletes": counters.deletes,
+                "refusals": counters.refusals,
+                "handOffs": counters.hand_offs,
+                "unparsable": counters.unparsable,
             }),
         );
     }

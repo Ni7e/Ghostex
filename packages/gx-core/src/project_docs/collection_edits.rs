@@ -170,7 +170,7 @@ pub fn reorder_collection_projects(
 }
 
 /// `Date.now().toString(36)`.
-fn base36(value: i64) -> String {
+pub(super) fn base36(value: i64) -> String {
     if value <= 0 {
         // `(0).toString(36)` is "0", and a negative clock is not a thing a host hands over; a
         // panic here would take a drag down for a clock that went backwards.

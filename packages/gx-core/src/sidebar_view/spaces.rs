@@ -44,17 +44,76 @@ pub struct SpacesState {
     pub spaces: BTreeMap<String, Space>,
 }
 
+/// One Space as it arrives, before the client sanitizer: the fields it reads, whether they came
+/// off the wire or off a state this client has just edited.
+pub(crate) struct RawSpace<'a> {
+    pub(crate) color: &'a str,
+    pub(crate) icon: &'a str,
+    pub(crate) member_collection_ids: &'a [String],
+    pub(crate) member_project_ids: &'a [String],
+    pub(crate) name: &'a str,
+}
+
 impl SpacesState {
     /// `sanitizeSidebarSpacesState`: the order array is authoritative, a project belongs to at
     /// most one Space, and every kept Space has a name, an icon, and a `#rrggbb` colour.
     pub fn from_wire(state: &WireSpacesState) -> Self {
-        let mut candidates: Vec<(String, &ghostex_gx_protocol::SidebarSpace)> = Vec::new();
+        Self::sanitize(
+            &state.order,
+            state
+                .spaces
+                .iter()
+                .map(|(space_id, space)| {
+                    (
+                        space_id.as_str(),
+                        RawSpace {
+                            color: &space.color,
+                            icon: &space.icon,
+                            member_collection_ids: &space.member_collection_ids,
+                            member_project_ids: &space.member_project_ids,
+                            name: &space.name,
+                        },
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// The same sanitizer over a state this client built itself, which is what every `spaces.ts`
+    /// editor ends in: `createSidebarSpace` and `updateSidebarSpace` hand their result straight to
+    /// `sanitizeSidebarSpacesState`, so a new Space's colour, name and icon are bounded and the
+    /// at-most-one-Space rule is enforced before the document is pushed.
+    ///
+    /// `deleteSidebarSpace` is the one editor that does NOT sanitize, so it does not call this.
+    pub(crate) fn sanitized(&self) -> Self {
+        Self::sanitize(
+            &self.order,
+            self.spaces
+                .iter()
+                .map(|(space_id, space)| {
+                    (
+                        space_id.as_str(),
+                        RawSpace {
+                            color: &space.color,
+                            icon: &space.icon,
+                            member_collection_ids: &space.member_collection_ids,
+                            member_project_ids: &space.member_project_ids,
+                            name: &space.name,
+                        },
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    pub(crate) fn sanitize(order: &[String], raw_spaces: Vec<(&str, RawSpace<'_>)>) -> Self {
+        let mut candidates: Vec<(String, RawSpace<'_>)> = Vec::new();
         // A Space the `order` array does not name follows in id order here, where `Object.keys`
         // gives the TypeScript the document's own order, so the two can draw the Space rows in a
         // different sequence. Accepted rather than fixed: the wire type is a `BTreeMap`, so the
         // document order is gone before this runs, and every document the daemon writes has an
         // `order` array naming every Space it stores.
-        for (raw_id, space) in &state.spaces {
+        for (raw_id, space) in raw_spaces {
             let Some(space_id) = bounded_text(raw_id, MAX_ID_CHARS) else {
                 continue;
             };
@@ -64,7 +123,7 @@ impl SpacesState {
             candidates.push((space_id, space));
         }
         let mut ordered: Vec<String> = Vec::new();
-        for entry in &state.order {
+        for entry in order {
             let Some(space_id) = bounded_text(entry, MAX_ID_CHARS) else {
                 continue;
             };

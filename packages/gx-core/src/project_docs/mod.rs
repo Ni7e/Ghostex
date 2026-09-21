@@ -2,7 +2,8 @@
 //!
 //! `collections` and `spaces` are the documents and their guard policies; `collection_edits` and
 //! `space_edits` are the functions the moves apply to them; `collection_menu` is the Project Group
-//! menu's own three writes (Rename, a colour, Ungroup), which are not moves; `worktree_order` is
+//! menu's own three writes (Rename, a colour, Ungroup) and `space_editor` the New/Edit Space
+//! dialog's result, neither of which is a move; `worktree_order` is
 //! the nesting rule, which the sidebar list and the project drag must agree on and which therefore
 //! has one implementation rather than one each.
 
@@ -10,6 +11,7 @@ mod collection_edits;
 mod collection_menu;
 mod collections;
 mod space_edits;
+mod space_editor;
 mod spaces;
 mod worktree_order;
 
@@ -25,6 +27,7 @@ pub use collections::{
     COLLECTIONS_HAND_OFF_MESSAGE_TYPE, COLLECTIONS_SCRIPT_PLACEHOLDER, COLLECTIONS_SYNC_DELAY_MS,
     COLLECTIONS_SYNC_RETRY_DELAY_MS,
 };
+pub use space_editor::{plan_space_editor_result, SpaceEditorMode, SpaceEditorResult};
 pub use space_edits::{
     apply_space_row_reorder, move_members_to_space, reorder_spaces, toggle_space_member,
     SpaceMemberKind,

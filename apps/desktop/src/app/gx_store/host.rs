@@ -134,6 +134,8 @@ pub(crate) struct GxStoreHost {
     pub(super) project_moves: super::project_docs::ProjectMoveCounters,
     /// A Project Group's Rename, colour and Ungroup, which write the same K5 document.
     pub(super) collection_menu: super::collection_menu::CollectionMenuCounters,
+    /// The New/Edit Space dialog's results, which write the K6 document.
+    pub(super) space_editor: super::space_editor::SpaceEditorCounters,
     /// The last-seen copy of every remote machine: which ones owe a write, and what is unwritten.
     pub(crate) last_seen: super::remote_last_seen::RemoteLastSeenWriter,
     /// The collection a project move just created, which the renderer opens its Rename on. Held
