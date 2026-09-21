@@ -120,6 +120,14 @@ for recording in "$recordings"/*.jsonl; do
       grep '^matched' | awk '{print $2}')"
     status="$([ "${matched%%/*}" = "${matched##*/}" ] && echo ok || echo FAIL)"
     record "documents $name" "$status" "$matched documents (strict, with /requests: $strict)"
+    # The two excluded counters, measured on their own so the gap stays a number rather than a
+    # footnote. `nextWakeMs` is the earliest armed deadline and should agree; `revision` counts
+    # publishes, including the ones between two drains that no document can show.
+    wake="$(bun "$root/tooling/gx-chat-core/replay-diff.ts" "$name" --keys nextWakeMs --limit 0 2>&1 |
+      grep '^matched' | awk '{print $2}')"
+    counter="$(bun "$root/tooling/gx-chat-core/replay-diff.ts" "$name" --keys revision --limit 0 2>&1 |
+      grep '^matched' | awk '{print $2}')"
+    record "counters $name" "info" "nextWakeMs $wake, revision $counter"
     [ "$status" = "FAIL" ] && printf '%s\n' "$diff_output" | sed -n '5,20p' | sed 's/^/    /'
   fi
 done

@@ -98,7 +98,8 @@ impl BridgeTranslator {
                 ..BridgeOutcome::default()
             },
             BridgeCall::Take { .. } => {
-                let frame = core.frame(self.last_revision);
+                // `take` reads `Date.now()` itself, so the wake is measured at the DRAIN's clock.
+                let frame = core.frame_at(self.last_revision, context.now_ms);
                 self.last_revision = frame.revision;
                 BridgeOutcome {
                     applied: 1,

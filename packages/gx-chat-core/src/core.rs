@@ -130,6 +130,17 @@ impl ChatCore {
     /// The document is left out when the host is already current, which is what keeps a
     /// once-a-second status frame from shipping the whole transcript.
     pub fn frame(&mut self, last_revision: u64) -> Frame {
+        let now_ms = self.context.now_ms;
+        self.frame_at(last_revision, now_ms)
+    }
+
+    /// The same frame, with `nextWakeMs` measured at the host's clock AT THE DRAIN.
+    ///
+    /// `take` in `native-host.ts` reads `Date.now()` itself, so its wake is the remaining delay
+    /// from the moment the host asks, not from the last event the core handled. A host that drains
+    /// on a different turn from the one it last fed (which is every host: it ticks, then takes)
+    /// would otherwise arm its timer that much too late.
+    pub fn frame_at(&mut self, last_revision: u64, now_ms: f64) -> Frame {
         // `take` compares its four channels by IDENTITY. `projection.items` is a new array
         // whenever `NativeChatPresentation.update` rebuilt, even when every row in it was reused,
         // so a rebuild ships the degenerate splice `{start: length, deleteCount: 0, items: []}`;
@@ -182,7 +193,7 @@ impl ChatCore {
                 Some(Box::new(self.document.clone()))
             },
             requests: Vec::new(),
-            next_wake_ms: self.next_wake_ms(),
+            next_wake_ms: self.state.core.timers.next_wake_ms(now_ms),
         }
     }
 
