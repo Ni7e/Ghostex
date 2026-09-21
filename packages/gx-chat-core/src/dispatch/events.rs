@@ -45,6 +45,10 @@ pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> 
         next
     }));
     state.pickers.next_request_id = next;
+    // Family c uses the same hook: a new prompt or notice resets the card, forgets the dismissal
+    // and re-reads the saved answers, and the `try`, `catch` and `finally` bodies of its handlers
+    // run when the call they started answers.
+    effects.extend(crate::questions::settle(state, event, context));
     effects
 }
 
