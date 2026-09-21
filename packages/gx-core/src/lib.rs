@@ -75,7 +75,8 @@ pub use crate::sidebar_actions::{
     plan_flags_request, plan_fork_request, plan_full_reload, plan_lifecycle_request,
     plan_modal_action, plan_open_action, plan_read_only_action, plan_reload_set,
     plan_remote_focus, plan_remote_session_action,
-    plan_snooze_action, plan_snooze_request, plan_split_right, reload_continues_after,
+    plan_snooze_action, plan_snooze_request, plan_sort_action, plan_split_right,
+    reload_continues_after,
     rename_seed_title, snooze_wake_ms, ActionEffect, BatchPlan, BulkAction, BulkRequest,
     CloseAnswer, CloseFollowUp, CloseRequest, FlagsFollowUp, FlagsRequest, FocusOptions,
     ForkFollowUp, ForkRequest, LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest,
@@ -88,7 +89,7 @@ pub use crate::sidebar_actions::{
     OPEN_COMMAND_TYPES, READ_ONLY_MESSAGE_TYPES, RELOAD_MESSAGE_TYPES, RELOAD_SET_MESSAGE_TYPES,
     REMOTE_AWAITED_TIMEOUT_MS, REMOTE_FIRE_AND_FORGET_TIMEOUT_MS, REMOTE_FOCUS_MESSAGE_TYPES,
     REMOTE_SESSION_MESSAGE_TYPES,
-    SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES,
+    SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES, SORT_ACTIONS,
 };
 pub use crate::sidebar_drag::{
     owns_order_write_message, owns_project_move_command, owns_project_order_message,

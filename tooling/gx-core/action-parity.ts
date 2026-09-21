@@ -1275,8 +1275,8 @@ async function compare([outDir, ...flags]: string[]) {
       const mine = mutate ? mutateOpen(mutationName, entry) : entry;
       const theirCalls = (theirs?.calls ?? []) as Json[];
       const theirPosts = (theirs?.posts ?? []) as Json[];
-      if (mine.owned !== true) {
-        // A refusal is a hand-off: the old runtime answers it. The two that must reach nothing at
+      if (mine.owned !== true || /^sort(Manual|LastActivity)$/u.test(String(command.action))) {
+        // A refusal is a hand-off (the sort rows are sort-parity.ts's). The two that must reach nothing at
         // all are the sort rows, which are `setActiveSessionsSortMode` and NOT a modal, and the
         // two toggles, which move the sidebar's own state; a modal call for any of them would mean
         // the close this family runs is reaching a row that returns before it.

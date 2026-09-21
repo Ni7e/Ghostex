@@ -23,8 +23,9 @@
 //! Refused here, each for a reason: `projectAction: agent` (the agent launcher's run, which writes
 //! the primary-agent id and posts `runSidebarAgent`; it belongs with the create surface),
 //! `machineAction: disable` (an `updateSettingsPatch` against the settings document's revision,
-//! which this store does not hold), and the two sort rows and the two toggles, which are not opens
-//! at all and are answered elsewhere (`sidebar_ui/` for the toggles).
+//! which this store does not hold), and the two toggles, which are not opens at all and are
+//! answered in `sidebar_ui/`. The two sort rows are not opens either; they are answered here with
+//! the empty plan that `sort.rs` explains, because their TypeScript path ends in a no-op.
 //!
 //! SEE-ALSO: apps/desktop/sidebar/native-sidebar/navigation.ts (`runNativeSidebarAction`),
 //! apps/desktop/sidebar/native-sidebar/project-actions.ts (`runNativeProjectAction`),
@@ -40,6 +41,7 @@ use crate::sidebar_view::{SidebarView, LOCAL_MACHINE_ID};
 
 use super::plan::{ActionEffect, SidebarActionPlan};
 use super::resolve::text_field;
+use super::sort::plan_sort_action;
 
 /// Every renderer command type this file answers. `sidebarAction` is here even though four of its
 /// actions are not opens, because the host has to ask this file before it decides.
@@ -83,11 +85,12 @@ fn plan_sidebar_action(view: &SidebarView, action: &str) -> Option<SidebarAction
         return Some(SidebarActionPlan::one(ActionEffect::StartLocalGxserver));
     }
     // Not opens, and each answered by its own owner. They return BEFORE the close, so a port that
-    // answered them here would also close a modal the TypeScript leaves open.
-    if matches!(
-        action,
-        "sortManual" | "sortLastActivity" | "showHidden" | "toggleProjects"
-    ) {
+    // answered them here would also close a modal the TypeScript leaves open. The sort rows are
+    // `sort.rs`'s, and their answer is the empty plan.
+    if let Some(plan) = plan_sort_action(action) {
+        return Some(plan);
+    }
+    if matches!(action, "showHidden" | "toggleProjects") {
         return None;
     }
     let machine_id = view.selected_machine_id.as_str();

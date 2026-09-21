@@ -20,7 +20,8 @@
 //! remote payload that is not a call at all: a row click, which opens a pane through the fixed
 //! native project-path bridge. `open` holds the family
 //! whose whole answer is an app-modal-host message: the More menu's rows, a machine's Configure,
-//! the Space editor, and a project header's Add Worktree and History.
+//! the Space editor, and a project header's Add Worktree and History. `sort` holds the More menu's
+//! two sort rows, whose TypeScript path ends in a no-op on the desktop.
 
 mod bulk;
 mod close;
@@ -37,6 +38,7 @@ mod remote;
 mod remote_focus;
 mod resolve;
 mod snooze;
+mod sort;
 mod split;
 
 pub use bulk::{
@@ -85,4 +87,5 @@ pub use snooze::{
     plan_snooze_action, plan_snooze_request, snooze_wake_ms, SnoozeAction, SnoozeCall, SnoozeClock,
     SnoozeFollowUp, SnoozeRequest, SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES,
 };
+pub use sort::{plan_sort_action, SORT_ACTIONS};
 pub use split::{owns_split_message, plan_split_right, SplitAction, SplitPlan};
