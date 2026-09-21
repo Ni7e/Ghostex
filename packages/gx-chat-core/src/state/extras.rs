@@ -22,6 +22,12 @@ pub struct ExtrasState {
     pub working_word: WorkingWordState,
     /// The two folds above the composer.
     pub panels: PanelsState,
+    /// The loading run the two stage one-shots were armed for.
+    ///
+    /// `trackTranscriptLoading` calls `setTimeout` ONCE per run, and the indicator's delay is 0 ms.
+    /// Re-arming it on every settle put a wake that had already come due into every frame's
+    /// `nextWakeMs`, where the TypeScript's one-shot had been deleted by the tick that ran it.
+    pub loading_timers_armed_at_ms: Option<f64>,
     /// The minimap rail as it was last projected.
     pub minimap: Vec<MinimapMarkerRow>,
     /// Cmd+F over the transcript.

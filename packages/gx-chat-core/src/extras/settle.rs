@@ -102,6 +102,13 @@ fn working(state: &ChatState) -> bool {
 
 /// `trackTranscriptLoading`: the stage restarts whenever a read starts, and clears when it ends.
 fn track_transcript_loading(state: &mut ChatState, context: &ChatContext) {
+    // `trackTranscriptLoading(state.view.kind === 'loading')` is a line of `publish`, and `publish`
+    // only runs once the composer boot read has answered. Starting the run at `Event::Start` armed
+    // the two stage one-shots before the TypeScript had any timer at all, so the host's very first
+    // drain asked for a wake that should have been `null`.
+    if !state.core.controller_started {
+        return;
+    }
     let loading = state.session.server_status.as_str() == "loading";
     if loading == state.extras.loading_started_at_ms.is_some() {
         return;
@@ -193,8 +200,13 @@ fn arm_timers(state: &mut ChatState, context: &ChatContext) {
         now,
         crate::extras::activity::ACTIVITY_CLOCK_TICK_MS as f64,
     );
+    let armed_at = state.extras.loading_timers_armed_at_ms;
+    let timers = &mut state.core.timers;
     match loading {
-        Some(started) => {
+        // Armed once per run, not once per settle: `trackTranscriptLoading` calls `setTimeout`
+        // once, and the indicator's own delay is 0 ms, so re-arming republished a wake the tick
+        // that ran it had already deleted.
+        Some(started) if armed_at != Some(started) => {
             deadline(
                 timers,
                 LOADING_INDICATOR,
@@ -207,12 +219,16 @@ fn arm_timers(state: &mut ChatState, context: &ChatContext) {
                 Some(started + crate::extras::welcome::LOADING_RETRY_DELAY_MS as f64),
                 now,
             );
+            state.extras.loading_timers_armed_at_ms = Some(started);
         }
+        Some(_) => {}
         None => {
             timers.cancel(LOADING_INDICATOR);
             timers.cancel(LOADING_RETRY);
+            state.extras.loading_timers_armed_at_ms = None;
         }
     }
+    let timers = &mut state.core.timers;
     deadline(timers, SUBAGENT_POLL, poll, now);
     deadline(timers, SUBAGENT_HOLD, hold, now);
 }
