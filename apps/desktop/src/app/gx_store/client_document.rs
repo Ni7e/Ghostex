@@ -255,6 +255,16 @@ impl GhostexGpuiApp {
     }
 
     /// The stored key, once it has been read. `restored` is set HERE, on the success path only.
+    ///
+    /// CDXC:Projects 2026-09-21 WHY:
+    /// **The store is written AFTER the deferred echo is judged, and with the HELD document.**
+    /// Writing the stored document into the side state first put this app's own document where the
+    /// daemon's copy had been, and the reconcile's write is skipped when the guard adopted an echo
+    /// verbatim (the held document and the echo are then the same), on the argument that the
+    /// daemon's value is already in the side state. That argument is true on the frame path and
+    /// false here, so the side state kept the STORED document for the rest of the run while the
+    /// guard held the daemon's: the list drew one membership and a project drop was filed against
+    /// the other, which is "a drawn index is not a stored index" one level up.
     fn gx_document_adopt_stored<D: ClientDocument>(
         &mut self,
         stored: Option<String>,
@@ -268,10 +278,16 @@ impl GhostexGpuiApp {
             .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
             .map(|value| D::parse_storage(&value))
         {
-            D::host(self).sync.restore(document.clone());
-            D::apply_to_store(self, &document, cx);
+            D::host(self).sync.restore(document);
         }
         self.gx_document_settle::<D>(cx);
+        // Whatever the settle decided, the store ends up holding what the guard holds. Skipped only
+        // when there is nothing to hold at all (no stored key and no echo), because writing a
+        // default document would tell the list this app has an empty document where it has none.
+        if D::host(self).sync.has_document() {
+            let held = D::host(self).sync.document().clone();
+            D::apply_to_store(self, &held, cx);
+        }
     }
 
     /// Books another read after a failure. It never gives up, because giving up means this app
@@ -378,7 +394,11 @@ impl GhostexGpuiApp {
     /// snapshot.
     fn gx_document_settle<D: ClientDocument>(&mut self, cx: &mut gpui::Context<Self>) {
         if let Some(server_state) = D::host(self).deferred_echo.take() {
-            D::host(self).counters.deferred_recovered += 1;
+            // ASSIGNED, not incremented: a second echo REPLACES the carried one rather than queuing
+            // beside it, so two deferrals are recovered by one judgement and a `+= 1` would leave
+            // the pair permanently unequal, which is the opposite of what the counter's own doc
+            // comment promises. K4 assigns for the same reason.
+            D::host(self).counters.deferred_recovered = D::host(self).counters.echoes_deferred;
             // The echo the reconcile was handed, not whatever the side state holds now: the restore
             // that got us here put this app's own document there a moment ago.
             self.gx_document_reconcile::<D>(server_state, cx);
@@ -622,6 +642,12 @@ impl GhostexGpuiApp {
     /// own short timeout rather than the ten seconds a background push gets: a quit may wait for the
     /// local daemon, not for a network that is down. A failure is counted and dropped, and the retry
     /// the guard asks for is not booked, because the timer would never fire.
+    ///
+    /// **What the bound really costs, since it reads as one number.** It is PER DOCUMENT, so the two
+    /// project documents are up to 3 s on top of K4's storage flush. No daemon at all costs nothing:
+    /// `TcpStream::connect` has no timeout of its own (the read and write timeouts are set after it),
+    /// but on loopback a daemon that is not there answers `ECONNREFUSED` at once. The 1.5 s is for
+    /// the case in between, a daemon that accepts the connection and does not answer.
     pub(crate) fn gx_document_flush_push<D: ClientDocument>(&mut self) {
         if !D::host(self).sync.is_pending() {
             return;

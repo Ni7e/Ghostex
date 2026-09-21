@@ -249,15 +249,19 @@ impl GhostexGpuiApp {
         self.gx_store.workspace_groups.restored = true;
         // A key that is absent, or holding something that is not JSON, is an EMPTY document and not
         // a failure: that is a first launch, and `parse` answers the same way for a damaged payload.
+        //
+        // CDXC:Sessions 2026-09-21 WHY:
+        // **The store is written at the END of this function, not here.** This reconcile reads the
+        // daemon's copy out of the side state itself, so seeding the side state with the STORED
+        // document first handed the recovered deferral this app's own document as if it were the
+        // daemon's echo: the daemon's copy was never judged, and a group made on another computer
+        // never appeared, which is the gap the deferral recovery was added to close. The twin of
+        // the same ordering in `client_document.rs`, fixed with it rather than after it.
         if let Some(document) = stored
             .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
             .map(|value| WorkspaceGroupsDocument::parse(&value))
         {
-            self.gx_store
-                .workspace_groups
-                .sync
-                .restore(document.clone());
-            self.gx_store_apply_workspace_groups_to_store(&document, cx);
+            self.gx_store.workspace_groups.sync.restore(document);
         }
         // The daemon's copy arrived while the read was on its way and was deferred. This is its
         // only other chance: nothing else will report that field as changed.
@@ -268,6 +272,13 @@ impl GhostexGpuiApp {
                 self.gx_store.workspace_groups.counters.echoes_deferred;
             // This tells the page and emits the record on its way, unless the page holds newer.
             self.gx_store_reconcile_workspace_groups(cx);
+        }
+        // Now the store ends up holding what the guard holds. Skipped when there is nothing to hold
+        // at all (no stored key and no echo), because writing a default document would tell the
+        // list this app has an empty document where it has none.
+        if self.gx_store.workspace_groups.sync.has_document() {
+            let held = self.gx_store.workspace_groups.sync.document().clone();
+            self.gx_store_apply_workspace_groups_to_store(&held, cx);
         }
         // An edit the page made while the read was on its way is only in the page's copy, and
         // handing the stored document back would replace it: the user would watch the rename they
