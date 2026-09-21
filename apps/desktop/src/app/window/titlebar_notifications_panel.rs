@@ -306,6 +306,7 @@ impl GpuiTitlebarReadingPanel {
                         "titlebar/chevron-right.svg",
                         Some("jumpToLatestUnreadNotification"),
                         unread_count > 0,
+                        false,
                         cx.listener(|this, _: &MouseDownEvent, window, cx| {
                             window.prevent_default();
                             cx.stop_propagation();
@@ -319,6 +320,7 @@ impl GpuiTitlebarReadingPanel {
                         NOTIFICATION_PANEL_CHECK_ICON,
                         None,
                         unread_count > 0,
+                        false,
                         cx.listener(|this, _: &MouseDownEvent, window, cx| {
                             window.prevent_default();
                             cx.stop_propagation();
@@ -331,6 +333,7 @@ impl GpuiTitlebarReadingPanel {
                         "titlebar/xmark.svg",
                         None,
                         !feed.items.is_empty(),
+                        true,
                         cx.listener(|this, _: &MouseDownEvent, window, cx| {
                             window.prevent_default();
                             cx.stop_propagation();
@@ -349,10 +352,14 @@ impl GpuiTitlebarReadingPanel {
         icon: &'static str,
         hotkey_action: Option<&'static str>,
         enabled: bool,
+        last: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
     ) -> AnyElement {
         h_flex()
             .id(id)
+            .when(last, |this| {
+                this.rounded_tr(px(RESOURCE_PANEL_RADIUS - 1.0))
+            })
             .h_full()
             .min_w_0()
             .flex_1()
@@ -437,6 +444,7 @@ impl GpuiTitlebarReadingPanel {
                 .items_center()
                 .justify_center()
                 .cursor_pointer()
+                .rounded(px(RESOURCE_CONTROL_RADIUS))
                 .border_1()
                 .border_color(if unread {
                     rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.45)
@@ -521,6 +529,7 @@ impl GpuiTitlebarReadingPanel {
                     .size(px(28.0))
                     .items_center()
                     .justify_center()
+                    .rounded(px(RESOURCE_CARD_RADIUS))
                     .bg(if unread {
                         rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.16)
                     } else {
@@ -597,6 +606,7 @@ impl GpuiTitlebarReadingPanel {
             .w_full()
             .min_h(px(72.0))
             .items_start()
+            .rounded(px(RESOURCE_CARD_RADIUS))
             .border_1()
             .border_color(if unread {
                 rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.30)

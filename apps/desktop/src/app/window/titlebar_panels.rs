@@ -813,11 +813,25 @@ impl GpuiTitlebarReadingPanel {
 
 impl Render for GpuiTitlebarReadingPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        resource_panel_frame().child(match self.state {
-            GpuiTitlebarReadingPanelState::Tips { .. } => self.render_tips(cx),
-            GpuiTitlebarReadingPanelState::Resources { .. } => self.render_resources(cx),
-            GpuiTitlebarReadingPanelState::Notifications { .. } => self.render_notifications(cx),
-        })
+        resource_panel_frame()
+            /*
+            CDXC:Notifications 2026-09-21 DECISION:
+            User: the Notifications dropdown takes the dark-mode background colour the sidebar shows, not the near-black menu fill its sibling dropdowns use.
+            */
+            .when(
+                matches!(
+                    self.state,
+                    GpuiTitlebarReadingPanelState::Notifications { .. }
+                ),
+                |frame| frame.bg(titlebar_background()),
+            )
+            .child(match self.state {
+                GpuiTitlebarReadingPanelState::Tips { .. } => self.render_tips(cx),
+                GpuiTitlebarReadingPanelState::Resources { .. } => self.render_resources(cx),
+                GpuiTitlebarReadingPanelState::Notifications { .. } => {
+                    self.render_notifications(cx)
+                }
+            })
     }
 }
 
