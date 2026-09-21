@@ -1,4 +1,4 @@
-import { nativeTagPresentation } from './tag-presentation';
+import { nativeTagPresentation } from '../native-quick-access/tag-presentation';
 import { getSidebarBulkSessionContextMenuAvailability } from '@/packages/core-ui/session-card-capabilities';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import { nativeSidebarSettings } from './settings';

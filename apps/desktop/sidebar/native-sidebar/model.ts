@@ -1,5 +1,5 @@
 import { getGroupSessionSummary } from '@/packages/core-ui/group-session-summary';
-import { nativeTagPresentation } from './tag-presentation';
+import { nativeTagPresentation } from '../native-quick-access/tag-presentation';
 import { createNativeEmptyState } from './empty-state';
 import { applyNativeSidebarReveal } from './reveal';
 import { createNativeCollections } from './collections';
@@ -25,7 +25,6 @@ import { formatRelativeTime } from '@/packages/core-ui/relative-time';
 import { isRemoteMachineEnabledInSidebar } from '@/packages/shared/ghostex-settings';
 import { nativeSidebarSettings } from './settings';
 import { nativeSidebarProjectionPhases } from './projection-phases';
-import type { ExtensionToSidebarMessage } from '@/packages/shared/session-grid-contract';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import { createDisplaySessionLayout } from '@/packages/shared/active-sessions-sort';
 import type { NativeSidebarSnapshot } from '@/packages/shared/native-sidebar';
@@ -34,40 +33,6 @@ import type { ghostexSettings } from '@/packages/shared/ghostex-settings';
 import type { CustomSessionTagsState } from '@/packages/shared/session-tags';
 import type { NativeSidebarUiState } from './ui-state';
 import { projectNativeSidebarGroup } from './project-sections';
-
-export function applyNativeSidebarMessage(message: ExtensionToSidebarMessage): void {
-  const state = sidebarStore.getState();
-  switch (message.type) {
-    case 'hydrate':
-    case 'sessionState':
-      state.applySidebarMessage(message);
-      break;
-    case 'sessionPresentationChanged':
-      state.applySessionPresentationMessage(message);
-      break;
-    case 'sidebarGroupsChanged':
-      state.applyGroupsChangedMessage(message);
-      break;
-    case 'sidebarHudChanged':
-      state.applyHudChangedMessage(message);
-      break;
-    case 'sidebarCommandRunStateChanged':
-      state.applyCommandRunStateMessage(message);
-      break;
-    case 'sidebarCommandRunStateCleared':
-      state.applyCommandRunStateClearedMessage(message);
-      break;
-    case 'customSessionTagsChanged':
-      state.applyCustomSessionTagsChangedMessage(message);
-      break;
-    case 'sidebarOrderSyncResult':
-      state.applyOrderSyncResultMessage(message);
-      break;
-    case 'daemonSessionsState':
-      state.setDaemonSessionsState(message);
-      break;
-  }
-}
 
 /**
  * CDXC:Sidebar 2026-09-19 WHY:

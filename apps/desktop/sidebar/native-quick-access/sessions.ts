@@ -14,7 +14,7 @@ import { formatRelativeTime } from '@/packages/core-ui/relative-time';
 import { COLORED_AGENT_LOGOS } from '@/packages/core-ui/agent-logos';
 import { shouldShowTerminalSessionIcon } from '@/packages/core-ui/session-card-presentation';
 import { getSessionTagCatalogs } from '@/packages/core-ui/session-tag-catalogs';
-import { nativeTagPresentation } from '../native-sidebar/tag-presentation';
+import { nativeTagPresentation } from './tag-presentation';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import {
   getEffectiveSidebarSessionTag,

@@ -3,7 +3,7 @@ import { createGpuiSidebarRuntime } from '../gxserver-runtime';
 import { currentGpuiRuntimeSettings } from '../gxserver-runtime/helpers/bootstrap';
 import { createGpuiSidebarHudState } from '../gxserver-runtime/helpers/command-pane';
 import { installSessionChatRuntimeBroker } from '../session-chat-runtime/broker';
-import { connectNativeSidebar } from './controller';
+import { connectNativeSidebar } from '../native-sidebar/controller';
 import { connectNativeQuickAccess } from '../native-quick-access/controller';
 
 export function startNativeSidebar(): void {

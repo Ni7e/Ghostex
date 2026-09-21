@@ -1,4 +1,4 @@
-import { nativeTagPresentation } from './tag-presentation';
+import { nativeTagPresentation } from '../native-quick-access/tag-presentation';
 import { resolveSessionChatTranscriptAgent } from '@/packages/shared/session-chat';
 import { buildSidebarSessionDetailsClipboardText } from '@/packages/shared/session-details-copy';
 import {

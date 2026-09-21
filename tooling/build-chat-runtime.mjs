@@ -21,7 +21,7 @@ for (const path of Object.keys(result.metafile.inputs)) {
 
 
 const service = await build({
-  entryPoints: ['apps/desktop/sidebar/native-sidebar/service.ts'],
+  entryPoints: ['apps/desktop/sidebar/service/service.ts'],
   outfile: outfile.replace(/chat-runtime\.js$/, 'service-runtime.js'),
   bundle: true, format: 'iife', platform: 'neutral', target: 'es2023',
   define: { 'process.env.NODE_ENV': '"production"', 'import.meta.env.DEV': 'false' },

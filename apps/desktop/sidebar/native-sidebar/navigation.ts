@@ -1,4 +1,4 @@
-import { nativeTagPresentation } from './tag-presentation';
+import { nativeTagPresentation } from '../native-quick-access/tag-presentation';
 import { closeAppModal, openAppModal, openQuickAccess } from '@/packages/core-ui/app-modal-host-bridge';
 import { readSidebarKeepAwakeRuntime } from '@/packages/core-ui/sidebar-app/collapse-state';
 import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';

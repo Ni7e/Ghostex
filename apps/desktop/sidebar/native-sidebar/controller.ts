@@ -18,7 +18,8 @@ import type { ExtensionToSidebarMessage } from '@/packages/shared/session-grid-c
 import type { NativeSidebarBridge } from '@/packages/shared/native-sidebar';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import type { createGpuiSidebarRuntime } from '../gxserver-runtime';
-import { applyNativeSidebarMessage, createNativeSidebarSnapshot } from './model';
+import { applyNativeSidebarMessage } from '../sidebar-store-feed';
+import { createNativeSidebarSnapshot } from './model';
 import { nativeSidebarProjectionPhases } from './projection-phases';
 import { NativeSidebarUiState } from './ui-state';
 import { createNativeSidebarPublisher } from './updates';
