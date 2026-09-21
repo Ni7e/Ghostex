@@ -186,6 +186,13 @@ impl ProjectSection {
     }
 }
 
+/// The group order a project move is computed against, for a probe. Public so a gate can record
+/// the list the planner really used rather than describe one beside it: a record that can drift
+/// from the list that decided is a record that agrees with any answer.
+pub fn sidebar_project_group_order(core: &Core, inputs: &SidebarInputs) -> Option<Vec<String>> {
+    project_section(core, inputs, &MachineId::Local).map(|section| section.group_ids())
+}
+
 /// `map.set(key, value)`: a later write REPLACES an earlier one, which is how a worktree's
 /// inherited collection overrides the one its own row named.
 fn set_entry(entries: &mut Vec<(String, String)>, key: String, value: String) {
@@ -248,13 +255,20 @@ pub(crate) fn project_section(
             is_chat_collection: false,
         });
         for subgroup in project_members(store, entry, machine, project_id, true).subgroups {
-            // A user-made group is built from its project's own row, so it answers the same
-            // project id and carries the same worktree metadata. That is what makes a project drag
-            // carry its groups with it rather than leaving them behind.
+            // CDXC:Projects 2026-09-21 WHY:
+            // A user-made group carries NO `projectContext`, so `resolveProjectId` answers
+            // `undefined` for it and every project lookup treats it as its OWN thing: it is not in
+            // its project's family, it inherits no collection, and `moveProjectsWithWorktrees`
+            // gives it its own group id as the project id through `?? id`. The first cut of this
+            // file assumed the opposite, because `spliceWorkspaceSubgroups` builds a subgroup from
+            // its project's row and it looked like it would carry the project's context; the gate
+            // proved it does not, and the symptom was a project drag emitting its worktrees once
+            // per user-made group and leaving the groups behind at the old position. Checked
+            // against the shipped projection rather than reasoned about.
             rows.push(ProjectGroupRow {
                 group_id: subgroup.sidebar_group_id,
-                project_id: Some(workspace_project_id.clone()),
-                parent_project_id: parent_project_id.clone(),
+                project_id: None,
+                parent_project_id: None,
                 is_chat_collection: false,
             });
         }
