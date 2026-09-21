@@ -94,6 +94,11 @@ pub use crate::sidebar_actions::{
     REMOTE_SESSION_MESSAGE_TYPES,
     SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES, SORT_ACTIONS,
 };
+pub use crate::sidebar_actions::{
+    normalize_remote_machine_settings, owns_agent_run_command, owns_delayed_send_command,
+    owns_machine_disable_command, plan_agent_run, plan_delayed_send_action, plan_machine_disable,
+    MACHINE_DISABLE_SETTINGS_SOURCE,
+};
 pub use crate::sidebar_drag::{
     owns_order_write_message, owns_project_move_command, owns_project_order_message,
     owns_session_move_command, plan_order_write, plan_project_move, plan_project_order_write,

@@ -254,6 +254,11 @@ pub struct DelayedSendView {
     pub remaining_ms: Option<i64>,
     pub send_when_all_project_sessions_stop_active: bool,
     pub send_when_agent_stops_active: bool,
+    /// The daemon's `sendWhenSpecificAgentFinishes`, kept as the daemon sent it. Only the daemon's
+    /// own Delayed Send carries one: the host's timers never do, so a row whose Delayed Send came
+    /// from the host has none, which is what the TypeScript projection's fallback leaves too. The
+    /// row draws nothing from it; the Delayed Send dialog is seeded with it.
+    pub send_when_specific_agent_finishes: Option<serde_json::Value>,
 }
 
 /// The timestamps the row's labels, sections and order are derived from.

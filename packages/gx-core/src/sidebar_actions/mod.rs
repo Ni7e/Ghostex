@@ -21,13 +21,19 @@
 //! native project-path bridge. `open` holds the family
 //! whose whole answer is an app-modal-host message: the More menu's rows, a machine's Configure,
 //! the Space editor, and a project header's Add Worktree and History. `sort` holds the More menu's
-//! two sort rows, whose TypeScript path ends in a no-op on the desktop.
+//! two sort rows, whose TypeScript path ends in a no-op on the desktop. `delayed_send`, `agent_run`
+//! and `machine_disable` are the three the sidebar page answered itself with no Rust owner: a row's
+//! Delayed Send dialog, the agent launcher's run, and a machine tab's Hide Machine, which posts the
+//! list `remote_machine_settings` normalizes.
 
+mod agent_run;
 mod bulk;
 mod close;
+mod delayed_send;
 mod flags;
 mod fork;
 mod lifecycle;
+mod machine_disable;
 mod modals;
 mod open;
 mod plan;
@@ -35,6 +41,7 @@ mod read_only;
 mod reload;
 mod reload_set;
 mod remote;
+mod remote_machine_settings;
 mod remote_focus;
 mod resolve;
 mod snooze;
@@ -90,3 +97,9 @@ pub use snooze::{
 };
 pub use sort::{plan_sort_action, SORT_ACTIONS};
 pub use split::{owns_split_message, plan_split_right, SplitAction, SplitPlan};
+pub use agent_run::{owns_agent_run_command, plan_agent_run};
+pub use delayed_send::{owns_delayed_send_command, plan_delayed_send_action};
+pub use machine_disable::{
+    owns_machine_disable_command, plan_machine_disable, MACHINE_DISABLE_SETTINGS_SOURCE,
+};
+pub use remote_machine_settings::normalize_remote_machine_settings;

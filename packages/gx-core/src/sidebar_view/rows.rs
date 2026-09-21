@@ -74,8 +74,17 @@ fn delayed_send(
     session: &PresentationSession,
     local: Option<&DelayedSendInput>,
 ) -> Option<DelayedSendView> {
-    let server = session.delayed_send_deadline_at.is_some()
-        || session.delayed_send_remaining_label.is_some()
+    // JavaScript truthiness for the two strings (`deadlineAt || remainingLabel || …`): an EMPTY
+    // deadline or label does not make the daemon's Delayed Send win over the host's timer. Found by
+    // the state-action gate, whose Delayed Send dialog seeds read this.
+    let server = session
+        .delayed_send_deadline_at
+        .as_deref()
+        .is_some_and(|deadline| !deadline.is_empty())
+        || session
+            .delayed_send_remaining_label
+            .as_deref()
+            .is_some_and(|label| !label.is_empty())
         || session.delayed_send_remaining_ms.is_some()
         || session.send_when_all_project_sessions_stop_active == Some(true)
         || session.send_when_agent_stops_active == Some(true);
@@ -88,6 +97,7 @@ fn delayed_send(
                 .send_when_all_project_sessions_stop_active
                 == Some(true),
             send_when_agent_stops_active: session.send_when_agent_stops_active == Some(true),
+            send_when_specific_agent_finishes: session.send_when_specific_agent_finishes.clone(),
         });
     }
     local.map(|local| DelayedSendView {
@@ -97,6 +107,7 @@ fn delayed_send(
         send_when_all_project_sessions_stop_active: local
             .send_when_all_project_sessions_stop_active,
         send_when_agent_stops_active: local.send_when_agent_stops_active,
+        send_when_specific_agent_finishes: None,
     })
 }
 

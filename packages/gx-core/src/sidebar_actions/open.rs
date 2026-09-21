@@ -20,11 +20,10 @@
 //! closes a modal a toggle had no business closing, and neither is visible in a comparison of the
 //! drawn list.
 //!
-//! Refused here, each for a reason: `projectAction: agent` (the agent launcher's run, which writes
-//! the primary-agent id and posts `runSidebarAgent`; it belongs with the create surface),
-//! `machineAction: disable` (an `updateSettingsPatch` against the settings document's revision,
-//! which this store does not hold), and the two toggles, which are not opens at all and are
-//! answered in `sidebar_ui/`. The two sort rows are not opens either; they are answered here with
+//! Not answered here, each by its own owner: `projectAction: agent` (the agent launcher's run,
+//! `agent_run.rs`), every `machineAction` but Configure (Hide Machine's settings patch,
+//! `machine_disable.rs`), and the two toggles, which are not opens at all and are answered in
+//! `sidebar_ui/`. The host asks those two files first. The two sort rows are not opens either; they are answered here with
 //! the empty plan that `sort.rs` explains, because their TypeScript path ends in a no-op.
 //!
 //! SEE-ALSO: apps/desktop/sidebar/native-sidebar/navigation.ts (`runNativeSidebarAction`),
@@ -161,7 +160,8 @@ fn quick_access_sessions(project_id: Option<&str>, scope: &str) -> Value {
     Value::Object(open)
 }
 
-/// A machine tab's own menu. Only Configure is ported; Disable writes a settings patch.
+/// A machine tab's own menu. Only Configure is answered here; every other action is Hide
+/// Machine's settings patch, `machine_disable.rs`'s, which the host asks first.
 fn plan_machine_action(view: &SidebarView, command: &Value) -> Option<SidebarActionPlan> {
     match text_field(command, "action")? {
         // No close: this arm is not inside `runNativeSidebarAction` and has none.
@@ -230,8 +230,7 @@ fn plan_edit_space(view: &SidebarView, space_id: Option<&str>) -> SidebarActionP
 /// than a hand-off, because a row that is not drawn cannot have been clicked.
 fn plan_project_action(view: &SidebarView, command: &Value) -> Option<SidebarActionPlan> {
     let action = text_field(command, "action")?;
-    // The agent launcher's run writes the primary-agent id and posts `runSidebarAgent`; it is the
-    // create surface's, not this one's.
+    // The agent launcher's run is `agent_run.rs`'s, which the host asks first.
     if action == "agent" {
         return None;
     }

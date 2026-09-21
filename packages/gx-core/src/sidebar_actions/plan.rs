@@ -59,6 +59,13 @@ pub enum ActionEffect {
     OpenAppModal { payload: Value },
     /// `runtime.startLocalGxserver()`: the one payload of the open family that opens nothing.
     StartLocalGxserver,
+    /// A settings patch, handed to the function the app modal host's `sidebarCommand` arm calls
+    /// for `updateSettingsPatch`. `message` is `{ type, source, patch }`; see `machine_disable.rs`
+    /// for the one field of the TypeScript's post it leaves out and why.
+    UpdateSettingsPatch { message: Value },
+    /// `window.ghostexGpui.onSidebarHostMessage(message)`, the runtime's own entry for a message
+    /// the app sends it. See `agent_run.rs` for why that entry and not the sidebar's `post`.
+    SidebarHostMessage { message: Value },
 }
 
 impl ActionEffect {
@@ -95,6 +102,27 @@ impl ActionEffect {
                 json!({ "call": "openAppModal", "payload": payload })
             }
             Self::StartLocalGxserver => json!({ "call": "startLocalGxserver" }),
+            Self::UpdateSettingsPatch { message } => {
+                json!({ "call": "updateSettingsPatch", "message": message })
+            }
+            Self::SidebarHostMessage { message } => {
+                json!({ "call": "sidebarHostMessage", "message": message })
+            }
+        }
+    }
+
+    /// The effect's name alone, for a record line: never a payload, which can carry a project
+    /// path, a Space name or a machine's host.
+    pub fn call_name(&self) -> &'static str {
+        match self {
+            Self::CopyText { .. } => "copyText",
+            Self::NativeProjectPathAction { .. } => "nativeProjectPathAction",
+            Self::Toast { .. } => "toast",
+            Self::CloseAppModal => "closeAppModal",
+            Self::OpenAppModal { .. } => "openAppModal",
+            Self::StartLocalGxserver => "startLocalGxserver",
+            Self::UpdateSettingsPatch { .. } => "updateSettingsPatch",
+            Self::SidebarHostMessage { .. } => "sidebarHostMessage",
         }
     }
 }
