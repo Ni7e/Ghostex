@@ -737,10 +737,12 @@ impl GhostexGpuiApp {
         }
 
         /*
-        CDXC:Browser 2026-09-20 DECISION:
-        User: browser tabs left the sidebar for the view panel's tab strip, so the Sleep the sidebar
-        row carried comes with them. The row is offered only while the tab has a page to drop; a tab
-        that is already a restored placeholder has nothing to sleep.
+        CDXC:Browser 2026-09-21 DECISION:
+        User: a browser tab's right-click menu has Sleep, which sleeps that tab, and Sleep Browser,
+        which sleeps every browser tab. Sleep Browser is the Browser view's own Sleep, which the
+        view's tab used to carry before Browser stopped having a view tab. Each row is offered only
+        while there is a page for it to drop. Supersedes the 2026-09-20 note that offered Sleep Tab
+        alone.
         */
         let mut menu = GpuiContextMenu::new().menu(
             "Select Tab",
@@ -749,12 +751,31 @@ impl GhostexGpuiApp {
                 tab_id: tab_id.0,
             }),
         );
+        menu = menu.menu(
+            if self.view_strip_tab_pinned(ViewStripTabKey::Browser(tab_id)) {
+                "Unpin Tab"
+            } else {
+                "Pin Tab"
+            },
+            Box::new(ToggleGpuiViewStripTabPinned {
+                mode_index: TitlebarMode::Browser.switcher_index(),
+                browser_tab_id: Some(tab_id.0),
+            }),
+        );
         if self.browser_surfaces.contains_key(&tab_id) {
             menu = menu.menu(
-                "Sleep Tab",
+                "Sleep",
                 Box::new(SleepBrowserTabInPane {
                     pane_id: pane_id.0,
                     tab_id: tab_id.0,
+                }),
+            );
+        }
+        if !self.browser_surfaces.is_empty() {
+            menu = menu.menu(
+                "Sleep Browser",
+                Box::new(SleepGpuiTitlebarView {
+                    mode_index: TitlebarMode::Browser.switcher_index(),
                 }),
             );
         }
@@ -1366,8 +1387,7 @@ impl GhostexGpuiApp {
                 | TitlebarMode::Kanban
                 | TitlebarMode::Automate
                 | TitlebarMode::Manage
-                | TitlebarMode::Extension(_)
-                | TitlebarMode::Ghostex(_) => ShellFocusTarget::ProjectEditorSurface(mode),
+                | TitlebarMode::Extension(_) => ShellFocusTarget::ProjectEditorSurface(mode),
             };
             self.focus_shell_target(focus, cx);
             if mode == TitlebarMode::Browser {
@@ -1390,9 +1410,7 @@ impl GhostexGpuiApp {
             return false;
         }
 
-        // A Ghostex page has no lifecycle, so it falls straight through to the focus-only branch
-        // below: there is no CEF surface to wake, only shell focus to move onto the GPUI page.
-        if !mode.is_project_editor_mode() && !matches!(mode, TitlebarMode::Ghostex(_)) {
+        if !mode.is_project_editor_mode() {
             return false;
         }
         if self.project_editor_shell.is_mode_awake(mode) {
@@ -1420,8 +1438,7 @@ impl GhostexGpuiApp {
             | TitlebarMode::Kanban
             | TitlebarMode::Automate
             | TitlebarMode::Manage
-            | TitlebarMode::Extension(_)
-            | TitlebarMode::Ghostex(_) => ShellFocusTarget::ProjectEditorSurface(mode),
+            | TitlebarMode::Extension(_) => ShellFocusTarget::ProjectEditorSurface(mode),
             TitlebarMode::Agents => return false,
         };
         self.focus_shell_target(focus, cx);

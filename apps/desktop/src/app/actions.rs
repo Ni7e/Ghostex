@@ -330,8 +330,21 @@ pub(crate) struct OpenGpuiViewTab {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
 #[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct OpenNewBrowserTabFromViewMenu;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
 pub(crate) struct CloseGpuiViewTab {
     pub(crate) mode_index: u64,
+}
+
+/// Pin or unpin a tab of the view panel's strip. `browser_tab_id` names one of the Browser's pages;
+/// without it the row is the view `mode_index` names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct ToggleGpuiViewStripTabPinned {
+    pub(crate) mode_index: u64,
+    pub(crate) browser_tab_id: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]

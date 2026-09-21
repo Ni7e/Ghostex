@@ -7,6 +7,7 @@ use crate::*;
 pub(crate) struct GpuiShellLayoutState {
     pub(crate) active_mode: TitlebarMode,
     pub(crate) open_views: Vec<TitlebarMode>,
+    pub(crate) view_strip_layout: GpuiViewStripLayout,
     pub(crate) view_panel_maximized: bool,
     pub(crate) view_panel_picker_open: bool,
     pub(crate) shell_focus: ShellFocusTarget,
@@ -68,6 +69,7 @@ impl GpuiShellLayoutState {
         Self {
             active_mode: TitlebarMode::Agents,
             open_views: Vec::new(),
+            view_strip_layout: GpuiViewStripLayout::default(),
             view_panel_maximized: false,
             view_panel_picker_open: false,
             shell_focus,
@@ -421,6 +423,7 @@ impl GpuiShellLayoutState {
             })
             .unwrap_or_default();
         let open_views = open_view_modes_from_shell_state(object.get("openViews"), active_mode);
+        let view_strip_layout = GpuiViewStripLayout::from_shell_state(object.get("viewStrip"));
         let view_panel_maximized = object
             .get("viewPanelMaximized")
             .and_then(serde_json::Value::as_bool)
@@ -449,6 +452,7 @@ impl GpuiShellLayoutState {
         Some(Self {
             active_mode,
             open_views,
+            view_strip_layout,
             view_panel_maximized,
             view_panel_picker_open,
             shell_focus,

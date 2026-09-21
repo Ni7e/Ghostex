@@ -162,6 +162,7 @@ pub(crate) fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_jso
             .iter()
             .map(|mode| serde_json::Value::String(mode.element_slug()))
             .collect::<Vec<_>>(),
+        "viewStrip": app.view_strip_layout.to_shell_state_json(),
         "viewPanelMaximized": app.view_panel_maximized,
         "viewPanelPickerOpen": app.view_panel_picker_open,
         "lastOpenViewMode": app.last_open_view_mode.map(TitlebarMode::element_slug),

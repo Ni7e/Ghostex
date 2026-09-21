@@ -43,29 +43,41 @@ impl GhostexGpuiApp {
             .collect()
     }
 
-    /// CDXC:Workarea 2026-09-20 DECISION:
-    /// User (screen 04): the `+` menu is the picker, compact. It lists every view, ticks the ones
-    /// already open so clicking them focuses their tab instead of opening a second one, and ends
-    /// with `Hidden here ▸` (ruling 2A) and Manage views, so a view hidden in this project comes back
-    /// without a control of its own anywhere.
+    /// CDXC:Workarea 2026-09-21 DECISION:
+    /// User: the `+` menu marks nothing as open, no ticks. Its top row is Browser Tab (renamed from New Browser Tab on request), which
+    /// always opens a new browser tab (the address bar has no `+` of its own any more). Every other
+    /// view opens if it is not open yet and is switched to if it is. The menu still ends with
+    /// `Hidden here ▸` (ruling 2A) and Customize (renamed from Manage views… on request). Supersedes the 2026-09-20 screen 04 rule that
+    /// ticked the open views.
     pub(crate) fn show_view_tab_add_menu(
         &mut self,
         position: gpui::Point<Pixels>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        let open = self.open_view_tabs();
+        let items = self.view_picker_modes();
         let mut menu = GpuiContextMenu::new();
+        if let Some(browser) = items.iter().find(|item| {
+            item.mode == TitlebarMode::Browser && self.titlebar_mode_view_scope_allows(item.mode)
+        }) {
+            menu = menu.menu_with_icon(
+                "Browser Tab",
+                TITLEBAR_ICON_WORLD,
+                !browser.is_available,
+                Box::new(OpenNewBrowserTabFromViewMenu),
+            );
+        }
         let mut previous_group: Option<u8> = None;
-        for item in self.view_picker_modes() {
-            if !self.titlebar_mode_view_scope_allows(item.mode) {
+        for item in items {
+            if item.mode == TitlebarMode::Browser
+                || !self.titlebar_mode_view_scope_allows(item.mode)
+            {
                 continue;
             }
-            // The picker's three groups, as the only thing a compact menu can show of them: a rule
-            // between the built-ins, your views and extensions, and the Ghostex pages.
+            // The picker's two groups, as the only thing a compact menu can show of them: a rule
+            // between the built-ins and your views and extensions.
             let group = match item.mode {
                 TitlebarMode::Extension(_) => 1,
-                TitlebarMode::Ghostex(_) => 2,
                 _ => 0,
             };
             if previous_group.is_some_and(|previous| previous != group) {
@@ -75,16 +87,25 @@ impl GhostexGpuiApp {
             let action = Box::new(OpenGpuiViewTab {
                 mode_index: item.mode.switcher_index(),
             });
-            if item.is_available {
-                menu =
-                    menu.menu_with_check(item.mode.tab_label(), open.contains(&item.mode), action);
-            } else {
-                menu = menu.menu_with_disabled(item.mode.tab_label(), true, action);
-            }
+            menu = menu.menu_with_icon(
+                item.mode.tab_label(),
+                item.mode.tab_icon(),
+                !item.is_available,
+                action,
+            );
         }
         menu.separator()
-            .submenu("Hidden here", self.hidden_here_submenu_rows())
-            .menu("Manage views…", Box::new(OpenGpuiExtensionsModal))
+            .submenu_with_icon(
+                "Hidden here",
+                Some(TITLEBAR_ICON_EYE_OFF),
+                self.hidden_here_submenu_rows(),
+            )
+            .menu_with_icon(
+                "Customize",
+                TITLEBAR_ICON_SETTINGS,
+                false,
+                Box::new(OpenGpuiExtensionsModal),
+            )
             .show(position, window, cx);
     }
 
@@ -131,28 +152,35 @@ impl GhostexGpuiApp {
                 .separator();
         }
         let unavailable = !self.titlebar_mode_available(mode);
+        menu = menu.menu(
+            if self.view_strip_tab_pinned(ViewStripTabKey::View(mode)) {
+                "Unpin tab"
+            } else {
+                "Pin tab"
+            },
+            Box::new(ToggleGpuiViewStripTabPinned {
+                mode_index,
+                browser_tab_id: None,
+            }),
+        );
         menu = menu.menu_with_disabled(
             "Reload",
             unavailable,
             Box::new(ReloadGpuiTitlebarView { mode_index }),
         );
-        // A Ghostex page is GPUI's own drawing: there is no page to put to sleep, so the row that
-        // would say so is left out instead of being offered and doing nothing.
-        if !matches!(mode, TitlebarMode::Ghostex(_)) {
-            menu = if self.project_editor_shell.is_mode_awake(mode) {
-                menu.menu_with_disabled(
-                    "Sleep",
-                    unavailable,
-                    Box::new(SleepGpuiTitlebarView { mode_index }),
-                )
-            } else {
-                menu.menu_with_disabled(
-                    "Wake",
-                    unavailable,
-                    Box::new(OpenGpuiViewTab { mode_index }),
-                )
-            };
-        }
+        menu = if self.project_editor_shell.is_mode_awake(mode) {
+            menu.menu_with_disabled(
+                "Sleep",
+                unavailable,
+                Box::new(SleepGpuiTitlebarView { mode_index }),
+            )
+        } else {
+            menu.menu_with_disabled(
+                "Wake",
+                unavailable,
+                Box::new(OpenGpuiViewTab { mode_index }),
+            )
+        };
         /*
         CDXC:Extensions 2026-09-16 DECISION:
         User: keep Start / Restart and Stop removed, but restore Configure view and make it open the

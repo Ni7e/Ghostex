@@ -2,6 +2,7 @@ use gpui::Window;
 
 use crate::app::helpers::*;
 use crate::app::model::*;
+use crate::app::view_strip_order::ViewStripEntry;
 use crate::*;
 
 impl GhostexGpuiApp {
@@ -23,11 +24,10 @@ impl GhostexGpuiApp {
         self.active_mode != TitlebarMode::Agents || self.view_panel_picker_open
     }
 
-    /// Whether the panel's content is a CEF page. The picker and the Ghostex pages are GPUI's own
-    /// drawing, so the rules that exist because a page paints over everything do not apply to them.
+    /// Whether the panel's content is a CEF page. The picker is GPUI's own drawing, so the rules
+    /// that exist because a page paints over everything do not apply to it.
     pub(crate) fn view_panel_shows_cef_page(&self) -> bool {
-        self.open_view_mode()
-            .is_some_and(|mode| !matches!(mode, TitlebarMode::Ghostex(_)))
+        self.open_view_mode().is_some()
     }
 
     /// The panel is open and showing the picker: no tab is selected, so there is no view to draw.
@@ -123,6 +123,22 @@ impl GhostexGpuiApp {
             .collect()
     }
 
+    /// CDXC:Workarea 2026-09-21 DECISION:
+    /// User: the view tabs bar shows no "Browser" tab. The Browser view is represented by its own
+    /// page tabs after the view tabs, so a Browser button among the views would be a second tab for the
+    /// same thing. Browser stays in the open-views list (the toggle target, the successor on close,
+    /// and whether its page tabs are listed all read that list); only the drawn view tabs, their
+    /// drag indices and the Option/Alt number hotkeys walk this narrower list.
+    pub(crate) fn strip_view_tabs(&self) -> Vec<TitlebarMode> {
+        self.view_strip_entries()
+            .into_iter()
+            .filter_map(|entry| match entry {
+                ViewStripEntry::View(mode) => Some(mode),
+                ViewStripEntry::Browser(_) => None,
+            })
+            .collect()
+    }
+
     /// Where a newly opened view lands in the strip. The user's `titlebarViewOrder` seeds the
     /// position, so a freshly opened Code tab appears where the user put Code in Settings; a tab the
     /// user has since dragged keeps whatever place they dragged it to, because the stored list is
@@ -197,7 +213,6 @@ impl GhostexGpuiApp {
         // A closed tab is not a sleeping tab: the page it owned has no way back on screen, so it
         // releases its CEF surface here instead of waiting for the idle timer.
         self.sleep_titlebar_view(mode, cx);
-        self.reconcile_ghostex_page_panels();
         match successor {
             Some(next) => {
                 self.set_active_mode(next, window, cx);
@@ -216,65 +231,6 @@ impl GhostexGpuiApp {
         self.set_active_mode(TitlebarMode::Agents, window, cx);
     }
 
-    /// The Ghostex page a tab shows, built when the tab opens so its one-shot snapshot is taken then
-    /// rather than mid-render. Opening a tab that is already open keeps the page it has.
-    pub(crate) fn ensure_ghostex_page_panel(
-        &mut self,
-        mode: TitlebarMode,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let TitlebarMode::Ghostex(page) = mode else {
-            return;
-        };
-        if self.ghostex_page_panels.contains_key(&page) {
-            return;
-        }
-        let Some(panel) = self.build_ghostex_page_panel(page, cx) else {
-            return;
-        };
-        self.ghostex_page_panels.insert(page, panel);
-        if page == GhostexPage::Tips {
-            // The notices are the only part of the page that is not a constant, and they come from
-            // probes the page itself asks for when it opens.
-            self.request_gpui_titlebar_tips_runtime_status(cx);
-        }
-    }
-
-    /// Drop the page of every Ghostex tab that is no longer open, so a Resources page stops holding
-    /// its process snapshot and a Tips page its runtime status the moment its tab goes.
-    pub(crate) fn reconcile_ghostex_page_panels(&mut self) {
-        let open = self.open_views.clone();
-        self.ghostex_page_panels.retain(|page, _| {
-            open.iter()
-                .any(|mode| *mode == TitlebarMode::Ghostex(*page))
-        });
-    }
-
-    pub(crate) fn reorder_view_tab(
-        &mut self,
-        mode: TitlebarMode,
-        insertion_index: usize,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        let Some(current_index) = self.open_views.iter().position(|tab| *tab == mode) else {
-            return false;
-        };
-        let target = insertion_index.min(self.open_views.len());
-        let target = if target > current_index {
-            target - 1
-        } else {
-            target
-        };
-        if target == current_index {
-            return false;
-        }
-        self.open_views.remove(current_index);
-        self.open_views.insert(target, mode);
-        self.persist_shell_layout_state();
-        cx.notify();
-        true
-    }
-
     /// Expand and restore, the button in the tab strip and the `⋯` row beside it.
     pub(crate) fn toggle_view_panel_maximized(&mut self, cx: &mut gpui::Context<Self>) {
         if self.open_view_mode().is_none() {
@@ -288,5 +244,25 @@ impl GhostexGpuiApp {
         self.update_active_mode_cef_child_visibility(cx);
         self.persist_shell_layout_state();
         cx.notify();
+    }
+
+    /// CDXC:Workarea 2026-09-21 DECISION:
+    /// User: Expand side panel fully hides the sidebar too if it is visible, not just the sessions
+    /// column. The same control brings the sessions column back, and the sidebar with it.
+    pub(crate) fn view_panel_fully_expanded(&self) -> bool {
+        self.view_panel_maximized() && self.sidebar_collapsed
+    }
+
+    pub(crate) fn toggle_view_panel_fully_expanded(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.open_view_mode().is_none() {
+            return;
+        }
+        let expand = !self.view_panel_fully_expanded();
+        if self.sidebar_collapsed != expand {
+            self.toggle_gpui_sidebar_collapsed(cx);
+        }
+        if self.view_panel_maximized != expand {
+            self.toggle_view_panel_maximized(cx);
+        }
     }
 }

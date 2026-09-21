@@ -51,7 +51,7 @@ impl ProjectEditorAutoSleepEpochs {
             TitlebarMode::Kanban => Some(self.kanban),
             TitlebarMode::Automate => Some(self.automate),
             TitlebarMode::Manage => Some(self.manage),
-            TitlebarMode::Agents | TitlebarMode::Extension(_) | TitlebarMode::Ghostex(_) => None,
+            TitlebarMode::Agents | TitlebarMode::Extension(_) => None,
         }
     }
 
@@ -62,7 +62,7 @@ impl ProjectEditorAutoSleepEpochs {
             TitlebarMode::Kanban => &mut self.kanban,
             TitlebarMode::Automate => &mut self.automate,
             TitlebarMode::Manage => &mut self.manage,
-            TitlebarMode::Agents | TitlebarMode::Extension(_) | TitlebarMode::Ghostex(_) => {
+            TitlebarMode::Agents | TitlebarMode::Extension(_) => {
                 return None;
             }
         };
@@ -105,7 +105,7 @@ impl ProjectEditorAutoSleepPolicySnapshot {
             TitlebarMode::Kanban => self.kanban,
             TitlebarMode::Automate => self.automate,
             TitlebarMode::Manage => self.manage,
-            TitlebarMode::Agents | TitlebarMode::Extension(_) | TitlebarMode::Ghostex(_) => None,
+            TitlebarMode::Agents | TitlebarMode::Extension(_) => None,
         }
     }
 }
@@ -127,6 +127,7 @@ pub(crate) struct GpuiProjectViewState {
     /// back exactly the strip that project had. `active_mode` is always one of these, or `Agents`
     /// when the list is empty and the panel is closed.
     pub(crate) open_views: Vec<TitlebarMode>,
+    pub(crate) view_strip_layout: GpuiViewStripLayout,
     /// The last view this project had open, kept even while the panel is closed so reopening it
     /// comes back to the same view.
     pub(crate) last_view_mode: Option<TitlebarMode>,
@@ -208,7 +209,7 @@ impl ProjectEditorShellModel {
                     },
                 ))
             }
-            TitlebarMode::Agents | TitlebarMode::Ghostex(_) => None,
+            TitlebarMode::Agents => None,
         }
     }
 
@@ -228,7 +229,7 @@ impl ProjectEditorShellModel {
                     recency: u64::MAX,
                 },
             )),
-            TitlebarMode::Agents | TitlebarMode::Ghostex(_) => None,
+            TitlebarMode::Agents => None,
         }
     }
 
@@ -407,6 +408,7 @@ pub(crate) fn project_view_state_to_shell_state_json(
             .iter()
             .map(|mode| serde_json::Value::String(mode.element_slug()))
             .collect::<Vec<_>>(),
+        "viewStrip": state.view_strip_layout.to_shell_state_json(),
         "lastViewMode": state.last_view_mode.map(TitlebarMode::element_slug),
         "workareaSplitRatio": json_number_f32(workarea_split_ratio(state.workarea_split_ratio)),
     })
@@ -440,6 +442,7 @@ pub(crate) fn project_view_state_from_shell_state(
     Some(GpuiProjectViewState {
         active_mode,
         open_views: open_view_modes_from_shell_state(object.get("openViews"), active_mode),
+        view_strip_layout: GpuiViewStripLayout::from_shell_state(object.get("viewStrip")),
         last_view_mode: object
             .get("lastViewMode")
             .and_then(serde_json::Value::as_str)

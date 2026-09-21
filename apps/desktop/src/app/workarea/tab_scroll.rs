@@ -94,12 +94,9 @@ impl GhostexGpuiApp {
     /// call scrolls the view panel's strip to the tab instead: the strip is drawn from the model
     /// the tab is already in, so there is nothing left to wait for.
     pub(crate) fn reveal_new_browser_tab(&mut self, tab_id: BrowserTabId) {
-        let Some(pane_id) = find_browser_leaf_id_for_tab(&self.browser_tabs.root, tab_id) else {
-            return;
-        };
         self.ensure_tab_scroll_handles_for_current_layout();
-        if let Some(position) = self.view_strip_browser_tab_position(pane_id, tab_id) {
-            self.view_browser_tab_scroll_handle.scroll_to_item(position);
+        if let Some(position) = self.view_strip_tab_position(ViewStripTabKey::Browser(tab_id)) {
+            self.view_tab_scroll_handle.scroll_to_item(position);
         }
     }
 
@@ -154,12 +151,12 @@ impl GhostexGpuiApp {
         if let Some(handle) = self.browser_tab_scroll_handles.get(&pane_id) {
             handle.scroll_to_item(active_index);
         }
-        // The view panel's strip is one scroller across every pane, so the same reveal reads the
-        // tab's place in that flat list rather than its place inside its own pane.
-        if let Some(position) =
-            active_tab_id.and_then(|tab_id| self.view_strip_browser_tab_position(pane_id, tab_id))
+        // The view panel's strip is one scroller across every pane and every view, so the same
+        // reveal reads the tab's place in that row rather than its place inside its own pane.
+        if let Some(position) = active_tab_id
+            .and_then(|tab_id| self.view_strip_tab_position(ViewStripTabKey::Browser(tab_id)))
         {
-            self.view_browser_tab_scroll_handle.scroll_to_item(position);
+            self.view_tab_scroll_handle.scroll_to_item(position);
         }
     }
 

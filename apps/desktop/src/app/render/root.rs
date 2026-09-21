@@ -219,7 +219,7 @@ impl Render for GhostexGpuiApp {
         self.sync_terminal_search_inputs(window, cx);
         self.sync_composited_terminal_keyboard_owner(window, cx);
         self.drain_pending_keyboard_handoff(window, cx);
-        self.sync_session_chat_pane_focus(window, cx, false);
+        self.sync_session_chat_pane_focus(window, cx);
         self.refresh_zmx_persistence_focused_terminal_if_changed(cx);
         let sidebar_chrome_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
         let titlebar_popup_dismissal_active =
@@ -684,6 +684,24 @@ impl Render for GhostexGpuiApp {
                 cx.listener(|this, action: &OpenGpuiViewTab, window, cx| {
                     if let Some(mode) = this.view_tab_mode_for_index(action.mode_index) {
                         this.open_view_tab(mode, window, cx);
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &OpenNewBrowserTabFromViewMenu, window, cx| {
+                    this.open_new_browser_tab_from_view_menu(window, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &ToggleGpuiViewStripTabPinned, _window, cx| {
+                    let key = match action.browser_tab_id {
+                        Some(tab_id) => Some(ViewStripTabKey::Browser(BrowserTabId(tab_id))),
+                        None => this
+                            .view_tab_mode_for_index(action.mode_index)
+                            .map(ViewStripTabKey::View),
+                    };
+                    if let Some(key) = key {
+                        this.toggle_view_strip_tab_pinned(key, cx);
                     }
                 }),
             )
@@ -1196,8 +1214,25 @@ impl Render for GhostexGpuiApp {
                             Sidebar collapse is real layout ownership in GPUI: the sidebar CEF child and divider are removed as body-row siblings instead of being covered, overlapped, or resized to zero. Keep `sidebar_width` untouched so expand restores the previous user width.
                             */
                             div()
+                                .id("ghostex-gpui-docked-sidebar")
                                 .w(px(self.sidebar_width))
                                 .h_full()
+                                .on_mouse_move(cx.listener(
+                                    |this, event: &MouseMoveEvent, _window, _cx| {
+                                        this.handle_floating_reveal_sidebar_edge_move(
+                                            event.position.x.as_f32(),
+                                        );
+                                    },
+                                ))
+                                .on_hover(cx.listener(|this, hovered: &bool, _window, _cx| {
+                                    #[cfg(not(target_os = "macos"))]
+                                    {
+                                        this.floating_reveal.sidebar_hovered = *hovered;
+                                    }
+                                    if !*hovered && !this.sidebar_collapsed {
+                                        this.disarm_floating_reveal_edge();
+                                    }
+                                }))
                                 .child(self.render_native_sidebar(window, cx)),
                         )
                     })
@@ -1207,12 +1242,9 @@ impl Render for GhostexGpuiApp {
                     // Collapsed, the body row starts with the reveal's own edge strip instead of
                     // the sidebar and its divider. It is a sibling frame like they were, so the
                     // workarea beside it keeps every pixel it owns and every click in them.
-                    // Docked, the sidebar keeps the window's edge, so the strip follows its divider
-                    // and exists only while an expanded view has folded the sessions column away.
-                    .when(
-                        !sidebar_chrome_visible || self.floating_reveal_eligible(),
-                        |this| this.child(self.render_floating_reveal_edge_strip(cx)),
-                    )
+                    .when(self.floating_reveal_edge_strip_visible(), |this| {
+                        this.child(self.render_floating_reveal_edge_strip(cx))
+                    })
                     .child(
                         /*
                         CDXC:Titlebar 2026-09-20 WHY:

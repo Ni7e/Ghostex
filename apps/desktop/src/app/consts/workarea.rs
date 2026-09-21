@@ -48,9 +48,6 @@ pub(crate) const VIEW_PICKER_CONTENT_WIDTH: f32 = 508.0;
 
 pub(crate) const VIEW_PICKER_CARD_GAP: f32 = 8.0;
 
-/// How wide a Ghostex page's readable column grows before it stops.
-pub(crate) const GHOSTEX_PAGE_CONTENT_WIDTH: f32 = 640.0;
-
 /// CDXC:Workarea 2026-09-20 WHY:
 /// A view panel can hold many tabs, but every awake view is a live CEF child view with its own
 /// renderer process, so the cap is what stops six tabs from meaning six pages. Three is the active
@@ -76,15 +73,14 @@ pub(crate) const WORKAREA_VIEW_TAB_ICON_SIZE: f32 = 13.0;
 
 pub(crate) const WORKAREA_VIEW_TAB_CLOSE_SIZE: f32 = 16.0;
 
-/// Past this the strip scrolls instead of squeezing every tab into an unreadable sliver.
-pub(crate) const WORKAREA_VIEW_TAB_MIN_WIDTH: f32 = 78.0;
+/// CDXC:Workarea 2026-09-21 DECISION:
+/// User: "i want tabs to always have 1 width, no min/max", 160px for browser tabs and (ruling 6B)
+/// the same for Code, Docs and every other view tab. The strip scrolls as one row once the tabs run
+/// out of room instead of squeezing them. A pinned tab is its icon alone. This supersedes the
+/// 78..168px range the tabs used to flex between.
+pub(crate) const WORKAREA_VIEW_TAB_WIDTH: f32 = 160.0;
 
-pub(crate) const WORKAREA_VIEW_TAB_MAX_WIDTH: f32 = 168.0;
-
-/// The floor the Browser view's tabs keep in the strip. Without it the view tabs' own width wins
-/// every time the row runs out of room and the browser group collapses to nothing; with it both
-/// groups scroll instead, which is what a strip that carries two kinds of tab has to do.
-pub(crate) const WORKAREA_VIEW_TAB_BROWSER_GROUP_MIN_WIDTH: f32 = 110.0;
+pub(crate) const WORKAREA_VIEW_TAB_PINNED_WIDTH: f32 = 32.0;
 
 pub(crate) const PROJECT_EDITOR_AUTO_SLEEP_POLICY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 

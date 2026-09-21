@@ -13,31 +13,30 @@ use gpui::Window;
 use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
-use gpui_component::h_flex;
 use gpui_component::tooltip::ManagedTooltipExt as _;
 use gpui_component::tooltip::ManagedTooltipPlacement;
-use gpui_component::tooltip::Tooltip;
 
 use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
+use crate::app::render::view_tab_strip::ViewStripTabSlot;
+use crate::app::render::view_tab_strip::view_tab_strip_tooltip_text;
 use crate::*;
 
 const VIEW_STRIP_BROWSER_TAB_GROUP: &str = "ghostex-gpui-view-strip-browser-tab";
 
-/// One browser tab as the strip lists it: the pane that owns it and its place in that pane's own
-/// tab order, which is the index every existing selection, reorder and drop helper takes.
+/// One browser tab as the strip lists it, with the pane that owns it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ViewStripBrowserTab {
     pub(crate) pane_id: BrowserPaneId,
-    pub(crate) index_in_pane: usize,
     pub(crate) tab_id: BrowserTabId,
 }
 
 impl GhostexGpuiApp {
     /// CDXC:Browser 2026-09-20 DECISION:
     /// User: browser tabs are no longer sidebar rows. They live at the top of the view panel, in
-    /// the same strip as the view tabs and after the `+`, so a browser tab reads as a peer of the
+    /// the same strip as the view tabs (since 2026-09-21 in one order with them, draggable anywhere
+    /// in the row, with the `+` after every tab), so a browser tab reads as a peer of the
     /// Browser, Code and Docs tabs rather than as a session. They stay listed while another view is
     /// on screen, and clicking one brings the Browser view back with that tab selected. Docs is
     /// meant to list its open files the same way later, which is why the strip takes a second group
@@ -60,14 +59,13 @@ impl GhostexGpuiApp {
             let Some(leaf) = self.browser_tabs.find_leaf(pane_id) else {
                 continue;
             };
-            for (index_in_pane, pane_tab) in leaf.tab_group.tabs.iter().enumerate() {
+            for pane_tab in &leaf.tab_group.tabs {
                 let Some(tab) = self.browser_tabs.tab(pane_tab.tab_id) else {
                     continue;
                 };
                 if browser_is_open_view || tab.state == BrowserTabState::Loaded {
                     tabs.push(ViewStripBrowserTab {
                         pane_id,
-                        index_in_pane,
                         tab_id: tab.id,
                     });
                 }
@@ -76,82 +74,15 @@ impl GhostexGpuiApp {
         tabs
     }
 
-    /// Where a pane's tab sits in the one strip every pane's tabs share, so the reveal that scrolls
-    /// a pane's own tab bar can scroll this one too.
-    pub(crate) fn view_strip_browser_tab_position(
-        &self,
-        pane_id: BrowserPaneId,
-        tab_id: BrowserTabId,
-    ) -> Option<usize> {
-        self.view_strip_browser_tabs()
-            .iter()
-            .position(|tab| tab.pane_id == pane_id && tab.tab_id == tab_id)
-    }
-
-    /// The strip's browser group: a divider, then the tabs, scrolling on their own once they run
-    /// past the space the view tabs left them.
-    pub(crate) fn render_view_tab_strip_browser_tabs(
-        &self,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        let tabs = self.view_strip_browser_tabs();
-        if tabs.is_empty() {
-            return None;
-        }
-        // Exactly one tab in the row is filled: the one the panel is showing. While another view is
-        // open the browser has nothing on screen, so none of its tabs claim that fill.
-        let showing_tab_id = (self.active_mode == TitlebarMode::Browser)
-            .then(|| {
-                self.browser_tabs
-                    .active_tab_id_for_pane(self.browser_tabs.focused_pane)
-            })
-            .flatten();
-        let scroll_handle = self.view_browser_tab_scroll_handle.clone();
-        Some(
-            h_flex()
-                .id("ghostex-gpui-view-tab-strip-browser-group")
-                .flex_1()
-                .min_w(px(WORKAREA_VIEW_TAB_BROWSER_GROUP_MIN_WIDTH))
-                .h_full()
-                .items_center()
-                .gap(px(6.0))
-                .mr(px(6.0))
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .w(px(1.0))
-                        .h(px(16.0))
-                        .bg(titlebar_button_border_color()),
-                )
-                .child(
-                    h_flex()
-                        .id("ghostex-gpui-view-tab-strip-browser-tabs")
-                        .flex_1()
-                        .min_w_0()
-                        .h_full()
-                        .items_center()
-                        .gap(px(WORKAREA_VIEW_TAB_GAP))
-                        .overflow_x_scroll()
-                        .track_scroll(&scroll_handle)
-                        .children(tabs.iter().map(|tab| {
-                            self.render_view_strip_browser_tab(*tab, showing_tab_id, cx)
-                        })),
-                )
-                .into_any_element(),
-        )
-    }
-
-    fn render_view_strip_browser_tab(
+    pub(crate) fn render_view_strip_browser_tab(
         &self,
         entry: ViewStripBrowserTab,
+        slot: ViewStripTabSlot,
         showing_tab_id: Option<BrowserTabId>,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let ViewStripBrowserTab {
-            pane_id,
-            index_in_pane,
-            tab_id,
-        } = entry;
+        let pinned = slot.pinned;
+        let ViewStripBrowserTab { pane_id, tab_id } = entry;
         let tab = self.browser_tabs.tab(tab_id);
         let state = tab
             .map(|tab| tab.state)
@@ -188,32 +119,18 @@ impl GhostexGpuiApp {
             state,
             chrome_status,
         };
-        let show_insertion_marker = self.browser_tab_drop_feedback
-            == Some(BrowserDropFeedback {
-                pane_id,
-                target: BrowserTabDropTarget::TabStrip(index_in_pane),
-            });
         let view = cx.entity().clone();
         let tooltip_title = title.clone();
-        div()
-            .id(format!(
+        let tab_frame = Self::view_strip_tab_frame(
+            format!(
                 "ghostex-gpui-view-strip-browser-tab-{}-{}",
                 pane_id.0, tab_id.0
-            ))
-            .group(VIEW_STRIP_BROWSER_TAB_GROUP)
-            .relative()
-            .flex()
-            .flex_shrink_0()
-            .h(px(WORKAREA_VIEW_TAB_HEIGHT))
-            .min_w(px(WORKAREA_VIEW_TAB_MIN_WIDTH))
-            .max_w(px(WORKAREA_VIEW_TAB_MAX_WIDTH))
-            .items_center()
-            .gap(px(6.0))
-            .rounded(px(WORKAREA_VIEW_TAB_RADIUS))
-            .px(px(WORKAREA_VIEW_TAB_HORIZONTAL_PADDING))
-            .text_size(px(12.5))
-            .line_height(px(WORKAREA_VIEW_TAB_HEIGHT))
-            .cursor_default()
+            ),
+            VIEW_STRIP_BROWSER_TAB_GROUP,
+            WORKAREA_VIEW_TAB_WIDTH,
+            slot,
+        );
+        self.with_view_strip_drop_target(tab_frame, slot.index, cx)
             .when(is_showing, |this| {
                 this.bg(titlebar_active_segment_color())
                     .text_color(titlebar_active_text_color())
@@ -226,13 +143,12 @@ impl GhostexGpuiApp {
                     })
             })
             .when(asleep && !is_showing, |this| this.opacity(0.72))
-            .when(show_insertion_marker, |this| {
-                this.border_l_2()
-                    .border_color(workspace_drop_feedback_border_color())
-            })
-            .managed_tooltip_with_placement(ManagedTooltipPlacement::Below, move |window, cx| {
-                Tooltip::new(tooltip_title.clone()).build(window, cx)
-            })
+            .managed_tooltip_with_placement(
+                ManagedTooltipPlacement::WiderSide,
+                move |window, cx| {
+                    titlebar_tooltip(view_tab_strip_tooltip_text(&tooltip_title), window, cx)
+                },
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -254,7 +170,8 @@ impl GhostexGpuiApp {
                 cx.listener(move |this, _event: &MouseUpEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
-                    if can_close {
+                    // A pinned tab closes from its menu only, never by a stray middle click.
+                    if can_close && !pinned {
                         this.close_browser_tab(tab_id, window, cx);
                     }
                 }),
@@ -273,21 +190,6 @@ impl GhostexGpuiApp {
                     chrome_status: dragged.chrome_status,
                 })
             })
-            .on_drag_move::<DraggedBrowserTab>(cx.listener(
-                move |this, event: &gpui::DragMoveEvent<DraggedBrowserTab>, _window, cx| {
-                    this.update_browser_tab_drag_feedback(event, pane_id, index_in_pane, cx);
-                },
-            ))
-            .can_drop(move |value, _window, _cx| {
-                value
-                    .downcast_ref::<DraggedBrowserTab>()
-                    .is_some_and(|dragged| dragged.source_pane_id == pane_id)
-            })
-            .on_drop(
-                cx.listener(move |this, dragged: &DraggedBrowserTab, window, cx| {
-                    this.handle_browser_tab_strip_drop(pane_id, index_in_pane, dragged, window, cx);
-                }),
-            )
             .child(self.render_browser_tab_icon(
                 profile_id,
                 chrome_status,
@@ -295,16 +197,18 @@ impl GhostexGpuiApp {
                 runtime_favicon_image.as_ref(),
                 runtime_favicon_fetch.as_ref(),
             ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(title),
-            )
-            .when(can_close, |this| {
+            .when(!pinned, |this| {
+                this.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(title),
+                )
+            })
+            .when(can_close && !pinned, |this| {
                 this.child(self.render_view_strip_browser_tab_close_button(tab_id, is_showing, cx))
             })
             .into_any_element()
@@ -366,5 +270,29 @@ impl GhostexGpuiApp {
             self.open_view_tab(TitlebarMode::Browser, window, cx);
         }
         self.select_browser_tab_in_pane(pane_id, tab_id, window, cx);
+    }
+
+    /// The `+` menu's Browser row: always a new tab, never "switch to the Browser".
+    ///
+    /// A project whose Browser has only its address-only placeholder gets that placeholder opened
+    /// rather than a second tab beside it, because opening the Browser view is what turns the
+    /// placeholder into the project's first page; adding a tab as well would leave two.
+    pub(crate) fn open_new_browser_tab_from_view_menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.titlebar_mode_available(TitlebarMode::Browser) {
+            return;
+        }
+        let only_placeholder = self.browser_tabs.tabs.len() == 1
+            && self.browser_tabs.tabs[0].state == BrowserTabState::AddressOnly;
+        if self.active_mode != TitlebarMode::Browser {
+            self.open_view_tab(TitlebarMode::Browser, window, cx);
+            if only_placeholder {
+                return;
+            }
+        }
+        self.add_browser_tab(window, cx);
     }
 }

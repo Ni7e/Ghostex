@@ -534,6 +534,7 @@ impl GhostexGpuiApp {
         GpuiProjectViewState {
             active_mode: self.available_titlebar_mode_or_agents(self.active_mode),
             open_views: self.open_views.clone(),
+            view_strip_layout: self.view_strip_layout.clone(),
             last_view_mode: self.last_open_view_mode,
             workarea_split_ratio: self.project_editor_shell.workarea_split_ratio,
         }
@@ -587,8 +588,8 @@ impl GhostexGpuiApp {
             the user never asked to open them in.
             */
             self.open_views.clear();
+            self.view_strip_layout = GpuiViewStripLayout::default();
             self.view_panel_maximized = false;
-            self.reconcile_ghostex_page_panels();
             self.last_open_view_mode = self.open_view_mode();
             self.apply_view_pane_state(cx);
             self.focus_default_surface_for_active_mode(cx);
@@ -616,6 +617,7 @@ impl GhostexGpuiApp {
         if target_mode != TitlebarMode::Agents && !self.open_views.contains(&target_mode) {
             self.open_views.push(target_mode);
         }
+        self.view_strip_layout = state.view_strip_layout.clone();
         self.view_panel_maximized =
             self.view_panel_maximized && target_mode != TitlebarMode::Agents;
         self.active_mode = target_mode;
@@ -623,10 +625,6 @@ impl GhostexGpuiApp {
         // incoming project has no view of its own to show.
         self.view_panel_picker_open =
             self.view_panel_picker_open && target_mode == TitlebarMode::Agents;
-        // The incoming project's tabs are not the outgoing project's, so the pages of every Ghostex
-        // tab it does not have go, and the one it is showing is built.
-        self.reconcile_ghostex_page_panels();
-        self.ensure_ghostex_page_panel(target_mode, cx);
         self.apply_view_pane_state(cx);
         self.focus_shell_target(
             default_shell_focus_for_mode(
@@ -1849,6 +1847,7 @@ impl GhostexGpuiApp {
         );
         self.persist_shell_layout_state();
         self.update_active_mode_cef_child_visibility(cx);
+        self.reveal_floating_sessions(cx);
         cx.notify();
         true
     }
@@ -1920,6 +1919,7 @@ impl GhostexGpuiApp {
         );
         self.persist_shell_layout_state();
         self.update_active_mode_cef_child_visibility(cx);
+        self.reveal_floating_sessions(cx);
         cx.notify();
         true
     }

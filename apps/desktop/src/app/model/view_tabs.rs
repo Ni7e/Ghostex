@@ -11,11 +11,81 @@ pub(crate) struct DraggedViewTab {
     pub(crate) mode: TitlebarMode,
 }
 
-/// The live drag: which tab left its place, and the index it would be dropped at.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) struct GpuiViewTabDrag {
-    pub(crate) mode: TitlebarMode,
-    pub(crate) insertion_index: usize,
+/// One tab of the view panel's strip, whichever kind it is: a view, or one of the Browser's pages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ViewStripTabKey {
+    View(TitlebarMode),
+    Browser(BrowserTabId),
+}
+
+impl ViewStripTabKey {
+    fn to_shell_state_string(self) -> String {
+        match self {
+            Self::View(mode) => format!("view:{}", mode.element_slug()),
+            Self::Browser(tab_id) => format!("browser:{}", tab_id.0),
+        }
+    }
+
+    fn from_shell_state_string(value: &str) -> Option<Self> {
+        if let Some(slug) = value.strip_prefix("view:") {
+            return TitlebarMode::from_slug(slug)
+                .filter(|mode| !matches!(mode, TitlebarMode::Agents | TitlebarMode::Browser))
+                .map(Self::View);
+        }
+        value
+            .strip_prefix("browser:")
+            .and_then(|id| id.parse::<u64>().ok())
+            .map(|id| Self::Browser(BrowserTabId(id)))
+    }
+}
+
+/// CDXC:Workarea 2026-09-21 DECISION:
+/// User (ruling 1A): the strip is one row in one order, "any tab can be dragged anywhere, views and
+/// pages mixed", and (ruling 4B) tabs can be pinned: icon-only, kept at the left, not closable by
+/// accident. `open_views` and the Browser's panes still say which tabs exist; this only says where
+/// each is drawn and which are pinned. A tab it has not seen yet lands at the end. It is
+/// project-owned like the open views are, because browser tab ids are per project.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GpuiViewStripLayout {
+    pub(crate) order: Vec<ViewStripTabKey>,
+    pub(crate) pinned: Vec<ViewStripTabKey>,
+}
+
+impl GpuiViewStripLayout {
+    pub(crate) fn to_shell_state_json(&self) -> serde_json::Value {
+        let keys = |keys: &[ViewStripTabKey]| {
+            keys.iter()
+                .map(|key| serde_json::Value::String(key.to_shell_state_string()))
+                .collect::<Vec<_>>()
+        };
+        serde_json::json!({
+            "order": keys(&self.order),
+            "pinned": keys(&self.pinned),
+        })
+    }
+
+    pub(crate) fn from_shell_state(value: Option<&serde_json::Value>) -> Self {
+        let keys = |field: &str| {
+            let mut keys = Vec::new();
+            let entries = value
+                .and_then(|value| value.get(field))
+                .and_then(serde_json::Value::as_array);
+            for entry in entries.into_iter().flatten() {
+                if let Some(key) = entry
+                    .as_str()
+                    .and_then(ViewStripTabKey::from_shell_state_string)
+                    && !keys.contains(&key)
+                {
+                    keys.push(key);
+                }
+            }
+            keys
+        };
+        Self {
+            order: keys("order"),
+            pinned: keys("pinned"),
+        }
+    }
 }
 
 /// The tab that follows the pointer during a reorder. It is a plain label, not the live tab, because
@@ -30,7 +100,7 @@ impl Render for ViewTabDragPreview {
         div()
             .flex()
             .h(px(WORKAREA_VIEW_TAB_HEIGHT))
-            .max_w(px(WORKAREA_VIEW_TAB_MAX_WIDTH))
+            .w(px(WORKAREA_VIEW_TAB_WIDTH))
             .items_center()
             .gap(px(6.0))
             .overflow_hidden()
