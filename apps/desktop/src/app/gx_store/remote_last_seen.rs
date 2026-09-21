@@ -33,21 +33,29 @@ use std::time::{Duration, Instant};
 
 use ghostex_gx_core::{MachineId, encode_uri_component, snapshot_storage_json};
 
-use super::records_storage::{RecordStore, RecordWrite, read_record_raw, write_record};
+use super::records_storage::{RecordRead, RecordStore, RecordWrite, read_record_raw, write_record};
 use super::remote_clients::RemoteClientCounters;
 use crate::GhostexGpuiApp;
 
 /// How often the summary line repeats, the same interval `gxStore.sidebarShadow.summary` uses.
 const SUMMARY_INTERVAL: Duration = Duration::from_secs(60);
 
+/// The age at which the catalog stops answering with a `remotePresentations` row: the `cache`
+/// base's `maxAgeMs`, 30 days (`packages/client-storage/catalog.ts`). A machine nobody has
+/// connected to in a month draws nothing rather than a month-old list, which is what the
+/// TypeScript reader of this key already does.
+const CACHE_MAX_AGE_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
+
 /// The catalog row (`remotePresentations`, `packages/client-storage/catalog.ts`): the `cache` base
-/// on the indexeddb backend, with its own entry, store and entry-count bounds.
+/// on the indexeddb backend, with its own entry, store and entry-count bounds and that base's age
+/// limit.
 const STORE: RecordStore = RecordStore {
     id: "remotePresentations",
     version: 1,
     max_entry_bytes: 8 * 1024 * 1024,
     max_bytes: 24 * 1024 * 1024,
     max_entries: 32,
+    max_age_ms: Some(CACHE_MAX_AGE_MS),
 };
 
 /// The catalog row's `key` prefix, with the per-machine infix `RemoteLastSeenStore` appends.
@@ -69,9 +77,13 @@ fn machine_key(machine_id: &str) -> String {
     format!("{MACHINE_KEY_PREFIX}{}", encode_uri_component(machine_id))
 }
 
-/// The raw payload of one machine's last-seen snapshot, or `None` when there is none.
-pub(super) fn read_last_seen_raw(machine_id: &str) -> Result<Option<String>, &'static str> {
-    read_record_raw(&machine_key(machine_id))
+/// The raw payload of one machine's last-seen snapshot, if one is stored and still fresh enough
+/// for the catalog to answer with it.
+pub(super) fn read_last_seen_raw(
+    machine_id: &str,
+    now_ms: i64,
+) -> Result<RecordRead, &'static str> {
+    read_record_raw(STORE, &machine_key(machine_id), now_ms)
 }
 
 /// What this run did with the stored copies. Memory only; the record lines are built from it.

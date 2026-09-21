@@ -10,8 +10,15 @@ mod service_worker;
 mod storage;
 mod storage_import;
 mod storage_metadata;
+mod storage_records;
 pub use service::ServiceRuntime;
-pub use storage_metadata::recompute_record_metadata;
+pub use storage_metadata::{
+    RecordStoreUsage, apply_record_metadata, recompute_record_metadata, scan_record_usage,
+};
+pub use storage_records::{
+    MAX_BACKEND_BYTES, RecordRead, RecordStore, RecordWrite, read_record, storage_bytes,
+    write_record,
+};
 pub use service_worker::ServiceWorker;
 
 pub struct ChatRuntime {

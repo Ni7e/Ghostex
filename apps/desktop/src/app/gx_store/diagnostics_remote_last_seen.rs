@@ -34,6 +34,7 @@ impl GxStoreDiagnostics {
                 "bytes": bytes as u64,
                 "seeds": counters.last_seen_seeds,
                 "absent": counters.last_seen_absent,
+                "expired": counters.last_seen_expired,
                 "failures": counters.last_seen_failures,
             }),
         );
@@ -92,6 +93,7 @@ impl GxStoreDiagnostics {
             json!({
                 "seeds": read.last_seen_seeds,
                 "absent": read.last_seen_absent,
+                "expired": read.last_seen_expired,
                 "readFailures": read.last_seen_failures,
                 "dirtied": write.dirtied,
                 "attempts": write.attempts,

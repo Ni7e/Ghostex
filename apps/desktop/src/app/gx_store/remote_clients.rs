@@ -63,6 +63,9 @@ pub(crate) struct RemoteClientCounters {
     /// Machines asked for a last-seen copy that had none stored, which is every machine that has
     /// never connected on this computer.
     pub(crate) last_seen_absent: u64,
+    /// Machines whose stored copy was older than the catalog's `maxAgeMs`, so it was not used.
+    /// The row is left where it is; the client-storage service owns removing it.
+    pub(crate) last_seen_expired: u64,
     /// Reads that failed or whose payload the protocol could not parse. Not retried: the copy is
     /// a convenience and the machine connecting replaces it.
     pub(crate) last_seen_failures: u64,
@@ -189,7 +192,17 @@ impl GxStoreHost {
         // The sidebar list derives from these, whichever machine they belong to: the selected tab
         // draws one machine's rows and every tab draws a badge counted over another's.
         self.sidebar_list.note_changes(&output.changes);
-        if let Some(loaded) = self.core.presentation().loaded(&machine) {
+        // The same filter the start path applies, and for the same reason: a LAST SEEN revision is
+        // the previous run's and nothing may resume from it. A machine seeded from its stored copy
+        // whose client then started can reach this before its first live snapshot, so without the
+        // filter here the resume revision the start path deliberately left at zero would be set to
+        // yesterday's number by the first pump that found nothing new.
+        if let Some(loaded) = self
+            .core
+            .presentation()
+            .loaded(&machine)
+            .filter(|loaded| !loaded.last_seen)
+        {
             if let Some(held) = self.remote.held_revision(machine_id) {
                 held.store(loaded.revision, Ordering::Release);
             }
@@ -409,12 +422,15 @@ impl GhostexGpuiApp {
             return;
         }
         let machine_id = machine_id.to_string();
+        // Read here rather than on the background thread: the clock is the host's, the way it is
+        // for every other value the store is fed.
+        let now_ms = super::host::now_ms() as i64;
         cx.spawn(async move |this, cx| {
             let stored = cx
                 .background_executor()
                 .spawn({
                     let machine_id = machine_id.clone();
-                    async move { super::remote_last_seen::read_last_seen_raw(&machine_id) }
+                    async move { super::remote_last_seen::read_last_seen_raw(&machine_id, now_ms) }
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -428,7 +444,7 @@ impl GhostexGpuiApp {
     fn gx_store_apply_last_seen_machine(
         &mut self,
         machine_id: &str,
-        stored: Result<Option<String>, &'static str>,
+        stored: Result<super::records_storage::RecordRead, &'static str>,
         cx: &mut gpui::Context<Self>,
     ) {
         let raw = match stored {
@@ -437,11 +453,15 @@ impl GhostexGpuiApp {
                 self.gx_store.diagnostics.remote_last_seen_failed(code);
                 return;
             }
-            Ok(None) => {
+            Ok(super::records_storage::RecordRead::Missing) => {
                 self.gx_store.remote.counters.last_seen_absent += 1;
                 return;
             }
-            Ok(Some(raw)) => raw,
+            Ok(super::records_storage::RecordRead::Expired) => {
+                self.gx_store.remote.counters.last_seen_expired += 1;
+                return;
+            }
+            Ok(super::records_storage::RecordRead::Payload(raw)) => raw,
         };
         // The stored value is a `GxserverPresentationSnapshot`, the same shape the stream and
         // `/api/readPresentationSnapshot` deliver, which is why nothing here needs a codec of its
@@ -532,10 +552,12 @@ impl GhostexGpuiApp {
                 // the connect state in M5.
                 message: None,
                 // "The store can draw this machine's list", which is what `supported` gates the
-                // renderer on. A machine the host has a client for, running or waiting out a
-                // backoff, and a machine whose rows are still held after its stream dropped, both
-                // qualify; a machine that has not connected in this run does not, and its tab
-                // keeps drawing the old projection's last-seen copy.
+                // renderer on. Three machines qualify: one the host has a client for, running or
+                // waiting out a backoff; one whose rows are still held after its stream dropped;
+                // and, since the seed, one that has not connected in this run at all but whose
+                // LAST SEEN copy was read back (`seed_last_seen`), which is the case that used to
+                // fall through to the old projection's copy of the same rows. What is left saying
+                // no is a machine with no client and nothing stored, whose tab draws nothing.
                 fed: self
                     .gx_store
                     .remote

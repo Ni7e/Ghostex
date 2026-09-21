@@ -66,15 +66,10 @@ const MAX_BACKEND_BYTES: usize = 2 * 1024 * 1024;
 
 /// `storageBytes(key, raw)`: two per UTF-16 code unit of the key and the value together. Not the
 /// length of the value in bytes, which is what the bound is most easily mistaken for and admits
-/// about twice as much.
-pub(super) fn storage_bytes(key: &str, raw: &str) -> usize {
-    2 * (utf16_len(key) + utf16_len(raw))
-}
-
-/// The length JavaScript measures, which is code units rather than characters or bytes.
-fn utf16_len(value: &str) -> usize {
-    value.chars().map(char::len_utf16).sum()
-}
+/// about twice as much. One implementation for both tables, in the crate the `records` door's
+/// bounds live in, because two stores measured by two counters is a bound that disagrees with
+/// itself.
+pub(super) use ghostex_chat_runtime::storage_bytes;
 
 /// The sidebar state as storage holds it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
