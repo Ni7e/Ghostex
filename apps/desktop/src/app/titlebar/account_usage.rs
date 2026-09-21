@@ -12,8 +12,6 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::px;
 use gpui_component::ElementExt as _;
 use gpui_component::h_flex;
-use gpui_component::tooltip::ManagedTooltipExt as _;
-use gpui_component::tooltip::ManagedTooltipPlacement;
 use gpui_component::v_flex;
 use serde_json::{Value, json};
 use std::{
@@ -223,8 +221,6 @@ pub(crate) fn claude_headline_windows(windows: &[Value]) -> Vec<&Value> {
 /// tightest numbers beside it, without any of the chrome its host puts around it.
 pub(crate) struct GpuiAccountUsageMeter {
     pub(crate) id: ExtensionId,
-    /// The tooltip, already masked when Settings hides account emails.
-    pub(crate) title: String,
     pub(crate) codex: bool,
     pub(crate) indicator: Option<String>,
     pub(crate) badge_lines: Vec<String>,
@@ -257,8 +253,6 @@ pub(crate) struct GpuiAccountUsageMeterHost {
     /// Whether the meter fills the cell it is given instead of hugging its content. The
     /// meter centres its content either way, so a filled cell centres it in the column.
     pub(crate) fill_width: bool,
-    pub(crate) tooltip_placement: ManagedTooltipPlacement,
-    pub(crate) tooltip_delay: Duration,
     pub(crate) scale: f32,
 }
 
@@ -416,11 +410,6 @@ impl GhostexGpuiApp {
                 };
                 Some(GpuiAccountUsageMeter {
                     id,
-                    title: format!(
-                        "{} Usage · {}",
-                        if codex { "Codex" } else { "Claude" },
-                        text(&popup_account(account), "displayName")
-                    ),
                     codex,
                     indicator: (!indicator.is_empty() && indicator != "-")
                         .then(|| indicator.to_string()),
@@ -470,9 +459,6 @@ impl GhostexGpuiApp {
         } else {
             chrome_color(0xa4a8af, 0x9c4328)
         };
-        let tooltip = meter.title.clone();
-        let tooltip_placement = host.tooltip_placement;
-        let tooltip_delay = host.tooltip_delay;
         let hover_background = host.hover_background;
         let open_background = host.open_background;
 
@@ -566,13 +552,7 @@ impl GhostexGpuiApp {
             it does for every other sidebar click.
             */
             .on_click(cx.listener(|_, _: &gpui::ClickEvent, _, cx| cx.stop_propagation()))
-            .when(!open, |this| {
-                this.managed_discrete_tooltip_with_placement(
-                    tooltip_placement,
-                    tooltip_delay,
-                    move |window, cx| titlebar_tooltip(tooltip.clone(), window, cx),
-                )
-            })
+            // CDXC:AgentProviders 2026-09-21 DECISION: "please don't show tooltips for the account usage cards at the bottom of the gpui sidebar". A press opens the account's usage popup, which says everything the tooltip did.
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
                 move |bounds, window, cx| {

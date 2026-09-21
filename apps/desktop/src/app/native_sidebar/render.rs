@@ -19,6 +19,14 @@ impl GhostexGpuiApp {
             self.native_sidebar.drop_command = None;
             self.native_sidebar.dragging = None;
         }
+        // CDXC:Sidebar 2026-09-21 WHY: Rows only carry their tooltip while the pointer is inside, no menu is open and nothing is dragged. The frame that drops it also drops the hover-leave listener that would have closed an open tooltip, so it stayed up with the pointer elsewhere; close it on that transition.
+        let row_tooltips_attached = self.native_sidebar.pointer_inside
+            && self.native_sidebar.menu.is_none()
+            && !cx.has_active_drag();
+        if self.native_sidebar.row_tooltips_attached && !row_tooltips_attached {
+            gpui_component::Root::hide_tooltip(window, cx);
+        }
+        self.native_sidebar.row_tooltips_attached = row_tooltips_attached;
         let Some(snapshot) = self.native_sidebar.snapshot.clone() else {
             return div().size_full().into_any_element();
         };
@@ -58,7 +66,20 @@ impl GhostexGpuiApp {
             .relative()
             .on_mouse_down(
                 gpui::MouseButton::Left,
-                cx.listener(|app, _, window, cx| app.close_native_sidebar_menu(window, cx)),
+                cx.listener(|app, event: &gpui::MouseDownEvent, window, cx| {
+                    if app
+                        .native_sidebar
+                        .more_button_bounds
+                        .get()
+                        .is_some_and(|bounds| {
+                            bounds.contains(&event.position)
+                                || bounds.contains(&window.mouse_position())
+                        })
+                    {
+                        return;
+                    }
+                    app.close_native_sidebar_menu(window, cx);
+                }),
             )
             .on_click(cx.listener(|app, event: &gpui::ClickEvent, _, cx| {
                 if event.click_count() == 2

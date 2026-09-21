@@ -104,8 +104,6 @@ impl GhostexGpuiApp {
             // Brighter than the hovered card, so the account whose popup is open
             // stays distinct from the one merely under the pointer.
             open_background: card_open.into(),
-            tooltip_placement: ManagedTooltipPlacement::Right,
-            tooltip_delay: appearance.tooltip_delay,
             scale,
         };
 

@@ -10,6 +10,7 @@ use gpui::{
     AnyElement, InteractiveElement, IntoElement, MouseButton, ParentElement,
     StatefulInteractiveElement, Styled, div, img, px,
 };
+use gpui_component::tooltip::ManagedTooltipExt as _;
 use gpui_component::{ElementExt as _, h_flex};
 use serde_json::{Value, json};
 use std::{cell::Cell, rc::Rc};
@@ -34,6 +35,17 @@ impl GhostexGpuiApp {
         let menu = group.menu.clone();
         let scale = appearance.scale;
         let hovered = self.native_sidebar.hovered_group.as_ref() == Some(&id);
+        let tooltip_span = self
+            .native_sidebar
+            .group_bounds
+            .get(&id)
+            .map(|header| super::tooltips::SidebarTooltipSpan {
+                left: header.left().as_f32(),
+                right: header.right().as_f32(),
+            })
+            .unwrap_or_else(|| {
+                super::tooltips::SidebarTooltipSpan::sidebar(self.sidebar_width, scale)
+            });
         let icon_image = group
             .project_context
             .as_ref()
@@ -82,19 +94,24 @@ impl GhostexGpuiApp {
                 .id(format!("native-project-title-{id}"))
                 .flex_1()
                 .min_w_0()
-                .text_ellipsis()
+                .h_full()
+                .flex()
+                .items_center()
                 .font_weight(gpui::FontWeight::LIGHT)
-                .child(group.title.clone())
+                .child(div().min_w_0().text_ellipsis().child(group.title.clone()))
                 .when_some(tooltip, |title, tooltip| {
                     title.when(
                         self.native_sidebar.pointer_inside
                             && self.native_sidebar.menu.is_none()
                             && !cx.has_active_drag(),
                         |row| {
-                            row.tooltip_show_delay(appearance.tooltip_delay).tooltip(
+                            row.managed_discrete_tooltip_with_placement(
+                                tooltip_span.placement(),
+                                appearance.tooltip_delay,
                                 move |window, cx| {
                                     super::tooltips::sidebar_tooltip(
                                         tooltip.clone(),
+                                        tooltip_span,
                                         scale,
                                         window,
                                         cx,
@@ -183,9 +200,16 @@ impl GhostexGpuiApp {
             .when(hovered, |row| {
                 row.child(
                     h_flex()
+                        .id(format!("native-project-actions-{id}"))
                         .h_full()
                         .gap(px(2.0 * scale))
                         .flex_shrink_0()
+                        // Same as the session card's buttons (hover_actions.rs): reaching them closes the title's tooltip.
+                        .on_hover(|hovered, window, cx| {
+                            if *hovered {
+                                gpui_component::Root::hide_tooltip(window, cx);
+                            }
+                        })
                         .children(actions.into_iter().enumerate().map(|(index, item)| {
                             let label = item["label"].as_str().unwrap_or("").to_owned();
                             let command = item.get("command").cloned();

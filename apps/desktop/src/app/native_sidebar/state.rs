@@ -14,6 +14,10 @@ pub(crate) struct NativeSidebarState {
     pub(crate) bounds: gpui::Bounds<gpui::Pixels>,
     pub(crate) menu: Option<super::menu_state::SidebarMenuState>,
     pub(crate) next_menu_request: u64,
+    /// Where the sidebar menu button was last painted, so its menu can drop down from it.
+    pub(crate) more_button_bounds: std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
+    /// When the More menu was dismissed by the same press that is still on its button.
+    pub(crate) more_menu_dismissed_at: Option<std::time::Instant>,
     /// CDXC:Sidebar 2026-09-17 WHY:
     /// A frame profile found snapshot and session deep copies dominating the UI thread during redraws.
     /// Share immutable snapshots with row callbacks; incoming patches and clock updates use copy-on-write mutation.
@@ -34,12 +38,16 @@ pub(crate) struct NativeSidebarState {
     pub(crate) drop_command: Option<serde_json::Value>,
     pub(crate) name_editor: Option<super::rename::SidebarNameEditor>,
     pub(crate) pointer_inside: bool,
+    /// Whether last frame's rows carried their hover tooltips; see `render_native_sidebar`.
+    pub(crate) row_tooltips_attached: bool,
     pub(crate) hovered_collection: Option<String>,
     pub(crate) hovered_section: Option<String>,
     pub(crate) hovered_group: Option<String>,
     /// This frame's project header probes; `hovered_group` follows them.
     pub(crate) header_hover: super::project_hover::ProjectHeaderHoverProbes,
     pub(crate) hovered_session: Option<String>,
+    /// Every painted session card's bounds. A tooltip captures its span the moment hover starts, so the card it belongs to must already be known then.
+    pub(crate) session_card_bounds: std::collections::HashMap<String, gpui::Bounds<gpui::Pixels>>,
     /// Armed Delayed Send / Close After Done labels by sidebar session id, for every session rather than only the rows the snapshot shows (session_chat_armed_actions.rs).
     pub(crate) armed_actions: std::collections::HashMap<String, serde_json::Value>,
 }
@@ -229,6 +237,7 @@ impl GhostexGpuiApp {
             );
             self.native_sidebar.scroll_animation = None;
             self.native_sidebar.group_bounds.clear();
+            self.native_sidebar.session_card_bounds.clear();
         }
         if let Some(request) = &snapshot.reveal_request
             && self.native_sidebar.handled_reveal != Some(request.request_id)

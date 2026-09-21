@@ -34,9 +34,16 @@ impl GhostexGpuiApp {
         }
         actions.extend(after.into_iter().flatten().cloned());
         h_flex()
+            .id(format!("native-sidebar-hover-actions-{id}"))
             .flex_shrink_0()
             .h_full()
             .gap(px(2.0 * scale))
+            // CDXC:Sidebar 2026-09-21 DECISION: User: "make pointer over an inner button of the session also remove the tooltip". The title's tooltip was anchored to the title's width before these buttons appeared and took part of it, so the pointer reaching them does not read as leaving the title; close it here.
+            .on_hover(|hovered, window, cx| {
+                if *hovered {
+                    gpui_component::Root::hide_tooltip(window, cx);
+                }
+            })
             .children(actions.into_iter().enumerate().map(|(index, item)| {
                 let label = item["label"].as_str().unwrap_or("").to_owned();
                 let command = item.get("command").cloned();

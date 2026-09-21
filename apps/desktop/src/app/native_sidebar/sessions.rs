@@ -8,6 +8,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, px, rgb,
 };
 use gpui_component::h_flex;
+use gpui_component::tooltip::ManagedTooltipExt as _;
 use serde_json::{Value, json};
 
 use super::{
@@ -79,6 +80,15 @@ impl GhostexGpuiApp {
         let context_id = session_id.clone();
         let close_id = session_id.clone();
         let context_session = session.clone();
+        let tooltip_span = self
+            .native_sidebar
+            .session_card_bounds
+            .get(&session_id)
+            .map(|card| super::tooltips::SidebarTooltipSpan {
+                left: card.left().as_f32(),
+                right: card.right().as_f32(),
+            })
+            .unwrap_or_else(|| super::tooltips::SidebarTooltipSpan::sidebar(self.sidebar_width, scale));
         let tooltip = session
             .details
             .get("titleTooltip")
@@ -106,7 +116,7 @@ impl GhostexGpuiApp {
             })
             .unwrap_or("")
             .to_owned();
-        div().on_children_prepainted(move |bounds, window, cx| { if completion.is_some_and(|start| start.elapsed().as_secs_f32() < 3.0) { window.request_animation_frame(); cx.notify(view.entity_id()); } if let Some(bounds) = bounds.first() { view.update(cx, |app, cx| app.reveal_native_session_bounds(&reveal_id, *bounds, scale, window, cx)); } }).w_full().pb(px(SESSION_SPACING * scale)).px(px(SESSION_INSET_X * scale))
+        div().on_children_prepainted(move |bounds, window, cx| { if completion.is_some_and(|start| start.elapsed().as_secs_f32() < 3.0) { window.request_animation_frame(); cx.notify(view.entity_id()); } if let Some(bounds) = bounds.first() { view.update(cx, |app, cx| { if app.native_sidebar.session_card_bounds.get(&reveal_id) != Some(bounds) { app.native_sidebar.session_card_bounds.insert(reveal_id.clone(), *bounds); } app.reveal_native_session_bounds(&reveal_id, *bounds, scale, window, cx) }); } }).w_full().pb(px(SESSION_SPACING * scale)).px(px(SESSION_INSET_X * scale))
             .child(h_flex()
                 .id(format!("native-sidebar-session-{session_id}"))
                 .relative().h(px(SESSION_HEIGHT * scale)).w_full().min_w_0().pl(px(5.0 * scale)).pr(px(6.0 * scale)).gap(px(6.0 * scale)).rounded(px(5.0 * scale))
@@ -125,7 +135,7 @@ impl GhostexGpuiApp {
                 .child(self.render_native_session_identity(session, icon, appearance, cx))
                 .children(self.render_native_session_decorations(session, appearance, cx))
                 .when_some(self.native_sidebar.reveal_flash.as_ref().filter(|(id, _)| id == &session.session_id).map(|(_, start)| *start), |row, start| row.child(super::scroll::reveal_flash(start, scale)))
-                .child(div().id(format!("native-session-title-{session_id}")).flex_1().min_w_0().truncate().child(session.title().to_owned()).when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.tooltip_show_delay(appearance.tooltip_delay).tooltip(move |window, cx| super::tooltips::sidebar_tooltip(tooltip.clone(), scale, window, cx))))
+                .child(div().id(format!("native-session-title-{session_id}")).flex_1().min_w_0().h_full().flex().items_center().child(div().min_w_0().truncate().child(session.title().to_owned())).when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.managed_discrete_tooltip_with_placement(tooltip_span.placement(), appearance.tooltip_delay, move |window, cx| super::tooltips::sidebar_tooltip(tooltip.clone(), tooltip_span, scale, window, cx))))
                 .when(!hovered && !question, |row| row.children(super::status::activity_indicator(&session.activity, scale)))
                 .when(!hovered && !question && (timer.is_some() || (show_time && session.activity != "working" && session.activity != "attention")), |row| row.child(div().text_size(px(13.55 * scale)).text_color(if sleeping { chrome_color(0x686868, 0x959595) } else { chrome_color(0xa6a6a6, 0x424242) }).child(time)))
                 .when(hovered, |row| row.child(self.render_native_session_hover_actions(group, session, appearance, cx)))
@@ -157,6 +167,7 @@ impl GhostexGpuiApp {
                     app.dispatch_native_sidebar_ui(json!({"type": "selectSession", "sessionId": session_id, "mode": mode}), cx);
                     if mode == "focus" {
                         let _ = app.react_to_native_sidebar_session_click(&session_id, cx);
+                        app.reveal_floating_sessions(cx);
                     }
                 }))
                 .on_mouse_down(MouseButton::Right, cx.listener(move |app, event: &gpui::MouseDownEvent, window, cx| {
