@@ -5,6 +5,7 @@ use serde_json::Value;
 mod call;
 mod network;
 mod platform;
+mod replay;
 mod service;
 mod service_worker;
 mod storage;
@@ -28,7 +29,10 @@ pub struct ChatRuntime {
 }
 
 impl ChatRuntime {
-    pub fn new(config: &Value) -> Result<Self> {
+    /// `replay_recording` is the private JSONL file the `native.chat.replay` diagnostic
+    /// scenario asks for. It is installed before `start` so the boot itself is recorded, and a
+    /// file that cannot be opened privately fails the runtime rather than recording in the open.
+    pub fn new(config: &Value, replay_recording: Option<&std::path::Path>) -> Result<Self> {
         let runtime = Runtime::new().context("create chat runtime")?;
         runtime.set_memory_limit(96 * 1024 * 1024);
         runtime.set_max_stack_size(1024 * 1024);
@@ -40,6 +44,9 @@ impl ChatRuntime {
             revision: 0,
         };
         engine.evaluate(include_str!(concat!(env!("OUT_DIR"), "/chat-runtime.js")))?;
+        if let Some(path) = replay_recording {
+            engine.context.with(|ctx| replay::install(&ctx, path))?;
+        }
         engine.call("start", &[config.clone()])?;
         Ok(engine)
     }

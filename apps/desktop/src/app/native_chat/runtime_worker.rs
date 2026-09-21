@@ -43,7 +43,14 @@ pub(crate) struct ChatRuntimeWorker {
 }
 
 impl ChatRuntimeWorker {
-    pub(crate) fn start(config: Value, wake: impl Fn() + Send + Sync + 'static) -> Self {
+    /// `recording` is the `native.chat.replay` file for this chat, or `None` when the scenario
+    /// is off (replay_recording.rs). It is opened on the runtime thread, so a recording that
+    /// cannot be made private stops the chat instead of leaking the conversation.
+    pub(crate) fn start(
+        config: Value,
+        recording: Option<std::path::PathBuf>,
+        wake: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
         let (commands, command_rx) = mpsc::channel::<Command>();
         let (output_tx, outputs) = mpsc::channel();
         let idle = Arc::new(AtomicBool::new(false));
@@ -55,7 +62,7 @@ impl ChatRuntimeWorker {
                     let _ = output_tx.send(output);
                     wake();
                 };
-                let mut runtime = match ChatRuntime::new(&config) {
+                let mut runtime = match ChatRuntime::new(&config, recording.as_deref()) {
                     Ok(runtime) => runtime,
                     Err(error) => {
                         post(ChatRuntimeOutput::Error(error.to_string()));

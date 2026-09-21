@@ -44,6 +44,7 @@ mod question;
 mod question_exchange;
 mod queue;
 mod reference_menu;
+mod replay_recording;
 mod rewind;
 mod row_click;
 mod rpc;
