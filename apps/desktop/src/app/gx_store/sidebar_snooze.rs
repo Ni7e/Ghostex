@@ -16,7 +16,7 @@
 //! call below, and neither grows a second copy here.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_actions/snooze.rs,
-//! apps/desktop/sidebar/native-sidebar/session-actions.ts (`runNativeSessionAction`),
+//! tooling/gx-core/sidebar-page-frozen/session-actions.ts (`runNativeSessionAction`),
 //! apps/desktop/sidebar/gxserver-runtime/sessions-and-focus.ts (`snoozeSession`,
 //! `runSessionLifecycleCommand`).
 

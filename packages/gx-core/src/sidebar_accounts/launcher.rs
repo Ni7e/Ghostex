@@ -10,7 +10,7 @@
 //! the primary agent and the email setting are read when the page is BUILT, which is when the
 //! TypeScript read them too (after its `await`).
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/agent-launcher.ts,
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/agent-launcher.ts,
 //! apps/desktop/src/app/gx_store/sidebar_accounts.rs, tooling/gx-core/account-menu-parity.ts.
 
 use serde_json::{json, Map, Value};

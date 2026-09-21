@@ -19,7 +19,7 @@
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_actions/bulk.rs,
 //! apps/desktop/sidebar/gxserver-runtime/auto-sleep.ts,
-//! apps/desktop/sidebar/native-sidebar/controller.ts (the `batch` arm).
+//! the deleted sidebar page's `controller.ts` (the `batch` arm).
 
 use std::time::Duration;
 

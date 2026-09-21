@@ -11,7 +11,7 @@
 //! the same message route, because the runtime owns what a focus does to the panes.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_view/space_switch.rs (the rows it picks from, and the
-//! one declared difference), apps/desktop/sidebar/native-sidebar/space-navigation.ts.
+//! one declared difference), tooling/gx-core/sidebar-page-frozen/space-navigation.ts.
 
 use ghostex_gx_core::{SpaceSwitchFocus, plan_space_switch_restore};
 use serde_json::{Value, json};

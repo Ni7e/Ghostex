@@ -6,7 +6,7 @@
 //! sessions, and a session's activity is on the daemon row before any row is derived. So the counts
 //! here walk the store directly, over exactly the sessions the list would draw.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/model.ts, which counts
+//! SEE-ALSO: the deleted sidebar page's `model.ts`, which counted
 //! `state.groupOrder.filter(machine).flatMap(sessionIdsByGroup)` through `getGroupSessionSummary`.
 //! Browser tabs are in that list too and always count zero (an idle row with no pending question),
 //! so they are left out here rather than mirrored.

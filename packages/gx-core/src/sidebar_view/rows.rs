@@ -1,7 +1,7 @@
 //! One sidebar row from one daemon session, and one from a browser tab.
 //!
 //! SEE-ALSO: packages/shared/gxserver-presentation-sidebar-projection.ts
-//! (`createGxserverPresentationSidebarSession`) and apps/desktop/sidebar/native-sidebar/model.ts
+//! (`createGxserverPresentationSidebarSession`) and the deleted sidebar page's `model.ts`
 //! (`projectNativeSidebarSession`).
 
 use ghostex_gx_protocol::{LifecycleState, PresentationSession, SessionKind};

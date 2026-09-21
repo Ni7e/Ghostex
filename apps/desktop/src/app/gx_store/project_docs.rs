@@ -19,7 +19,7 @@
 //!
 //! SEE-ALSO: packages/gx-core/src/project_docs/,
 //! apps/desktop/src/app/gx_store/client_document.rs,
-//! apps/desktop/sidebar/native-sidebar/membership.ts.
+//! tooling/gx-core/sidebar-page-frozen/membership.ts.
 
 use ghostex_gx_core::{
     CollectionsDocument, MachineId, ProjectWrite, SideStateUpdate, SpacesDocument,

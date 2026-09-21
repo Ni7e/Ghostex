@@ -12,8 +12,8 @@
 //! would see it.
 //!
 //! SEE-ALSO: packages/core-ui/project-collections.ts,
-//! apps/desktop/sidebar/native-sidebar/membership.ts,
-//! apps/desktop/sidebar/native-sidebar/project-drag.ts.
+//! tooling/gx-core/sidebar-page-frozen/membership.ts,
+//! tooling/gx-core/sidebar-page-frozen/project-drag.ts.
 
 use crate::sidebar_view::text::js_trim;
 use crate::sidebar_view::{Collection, CollectionsState};

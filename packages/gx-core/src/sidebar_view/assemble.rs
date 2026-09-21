@@ -1,7 +1,7 @@
 //! The top level of the list: which groups are drawn, the Space buttons, the collections, the
 //! machine tab counts, and the empty state.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/model.ts (`createNativeSidebarSnapshot`),
+//! SEE-ALSO: the deleted sidebar page's `model.ts` (`createNativeSidebarSnapshot`),
 //! collections.ts, empty-state.ts, and space-navigation.ts.
 
 use std::collections::{BTreeMap, BTreeSet};

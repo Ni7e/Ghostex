@@ -3,7 +3,7 @@
 //!
 //! CDXC:DelayedSend 2026-09-21 WHY:
 //! Followed to its last function, the old path is ONE app-modal-host message and nothing else:
-//! `runNativeSessionAction` (native-sidebar/session-actions.ts) calls `openAppModal` with eleven
+//! `runNativeSessionAction` (sidebar-page-frozen/session-actions.ts) calls `openAppModal` with eleven
 //! fields read off the sidebar store's session, and `openAppModal` is `postAppModalHostMessage`,
 //! whose `open` arm is `open_app_modal_from_bridge`. Unlike Rename and Note there is NO close
 //! first, and the dialog forwards this payload VERBATIM (the Delayed Send kind is not on the
@@ -17,7 +17,7 @@
 //! After Done. The two `supports…` flags are constants in the TypeScript and are here too; the
 //! bridge's own enrichment recomputes the project-scope one for a local pane after this.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/session-actions.ts (`runNativeSessionAction`),
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/session-actions.ts (`runNativeSessionAction`),
 //! apps/desktop/src/app/remote_conn/app_modal_bridge.rs (`open_app_modal_from_bridge`),
 //! apps/desktop/src/app/gx_store/sidebar_state_actions.rs, tooling/gx-core/state-action-parity.ts.
 

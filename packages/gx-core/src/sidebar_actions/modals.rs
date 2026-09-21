@@ -15,7 +15,7 @@
 //! because the dialog would otherwise open empty over an existing note and overwrite it on
 //! confirm, and they are reported to a log as presence and never as content.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/session-actions.ts (`runNativeSessionAction`),
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/session-actions.ts (`runNativeSessionAction`),
 //! apps/desktop/sidebar/gxserver-runtime/sessions-and-focus.ts (`renameSession`,
 //! `saveSessionNote`), apps/desktop/src/app/gx_store/sidebar_modals.rs.
 

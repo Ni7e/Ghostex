@@ -16,8 +16,8 @@
 //! `nativeProjectFamily` (a project, its worktrees, and every user-made group of all of them) and
 //! `nativeCollectionGroups` (every group of one collection).
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/space-navigation.ts
-//! (`describeNativeSidebarMachine`), apps/desktop/sidebar/native-sidebar/project-drag.ts,
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/space-navigation.ts
+//! (`describeNativeSidebarMachine`), tooling/gx-core/sidebar-page-frozen/project-drag.ts,
 //! apps/desktop/sidebar/gxserver-runtime/sidebar-groups.ts (`spliceWorkspaceSubgroups`, which is
 //! what gives a user-made group the same `projectContext` its project has).
 

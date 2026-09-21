@@ -15,7 +15,7 @@
 //! `runNativeCollectionAction` in a page that is being deleted and nothing forwards it in its place.
 //!
 //! SEE-ALSO: packages/gx-core/src/project_docs/collection_menu.rs,
-//! apps/desktop/sidebar/native-sidebar/collections.ts,
+//! the deleted sidebar page's `collections.ts`,
 //! apps/desktop/src/app/gx_store/project_docs.rs.
 
 use ghostex_gx_core::{

@@ -18,7 +18,7 @@ type SessionChatArmedTimers = Pick<
 /**
  * CDXC:SessionChat 2026-09-19 DECISION:
  * User: show the armed Delayed Send and Close After Done on the right of the chat's working row, with the same font and icon size as the working indicator, white text, a yellow clock for Delayed Send and a red clock for Close After Done. The row stays (without the working text and spark) when the session is not working, and the indicators wrap to a second, left-aligned line when there is no room.
- * SEE-ALSO: apps/desktop/sidebar/native-sidebar/clock.ts publishes these labels every second for both desktop chat renderers; packages/core-ui/chat/session-chat-working-strip.tsx and apps/desktop/src/app/native_chat/working_strip.rs draw them.
+ * SEE-ALSO: apps/desktop/src/app/gx_store/sidebar_clock.rs rebuilds these labels every second for both desktop chat renderers; packages/core-ui/chat/session-chat-working-strip.tsx and apps/desktop/src/app/native_chat/working_strip.rs draw them.
  */
 export function sessionChatArmedActions(session: SessionChatArmedTimers, nowMs: number): SessionChatArmedAction[] {
   const actions: SessionChatArmedAction[] = [];

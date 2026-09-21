@@ -1,6 +1,11 @@
-import type { SidebarHudState, SidebarSessionGroup, SidebarToExtensionMessage } from './session-grid-contract';
-import type { SessionChatArmedAction } from './session-chat-presentation/armed-actions';
+import type { SidebarToExtensionMessage } from './session-grid-contract';
 
+/**
+ * What is left of the TypeScript sidebar page's contract after it was deleted (M4d part 2, 2026-09-21):
+ * the section shape the shared project-session helpers still build, the command and menu-item
+ * shapes the Rust menus are specified against (gx-core `sidebar_menu/`), and the three bridge
+ * members the gxserver runtime still needs for the workspace session groups document.
+ */
 export type NativeSidebarSection = {
   id: 'browser' | 'pinned' | 'sessions' | 'drafts' | 'parked' | 'snoozed';
   collapsed: boolean;
@@ -10,78 +15,6 @@ export type NativeSidebarSection = {
   attentionCount: number;
   questionCount: number;
   sessionIds: string[];
-};
-
-export type NativeSidebarGroup = SidebarSessionGroup & {
-  collectionColor?: string;
-  titleTooltip?: string;
-  storageId: string;
-  summary: { workingCount: number; attentionCount: number; awakeCount: number };
-  collapsed: boolean;
-  sections: NativeSidebarSection[];
-  expanded: boolean;
-  hiddenSessionCount: number;
-  showListToggle: boolean;
-  hoverActionsExpanded: boolean;
-  menu: NativeSidebarMenuItem[];
-  headerActions: NativeSidebarMenuItem[];
-};
-
-export type NativeSidebarCollection = {
-  collectionId: string;
-  storageId: string;
-  title: string;
-  color: string;
-  groupIds: string[];
-  collapsed: boolean;
-  containsActiveSession: boolean;
-  workingCount: number;
-  attentionCount: number;
-  awakeCount: number;
-  menu: NativeSidebarMenuItem[];
-};
-
-/**
- * CDXC:Sidebar 2026-09-16 DECISION:
- * User: replace the desktop sidebar with modular GPUI UI, retaining the React sidebar and matching its appearance, functionality, and settings exactly.
- * The existing sidebar service owns presentation and commands; this contract carries display state to the native renderer without a React tree.
- */
-export type NativeSidebarSnapshot = {
-  kind: 'snapshot';
-  version: 1;
-  revision: number;
-  renameRequest?: { collectionId: string; requestId: number };
-  revealRequest?: { sessionId: string; requestId: number };
-  scrollScope: string;
-  ready: boolean;
-  emptyState: { loading: boolean; error: boolean; canAddProject: boolean; copy: string };
-  hud: SidebarHudState;
-  groups: NativeSidebarGroup[];
-  selectedMachineId: string;
-  machines: {
-    id: string;
-    label: string;
-    state: string;
-    message?: string;
-    workingCount: number;
-    attentionCount: number;
-  }[];
-  spaces: {
-    id: string;
-    name: string;
-    icon: string;
-    color: string;
-    selected: boolean;
-    containsActiveSession: boolean;
-    workingCount: number;
-    attentionCount: number;
-  }[];
-  spacesEnabled: boolean;
-  collections: NativeSidebarCollection[];
-  order: { kind: 'project' | 'collection'; id: string }[];
-  moreMenu: NativeSidebarMenuItem[];
-  searchShortcut?: string;
-  commandsShortcut?: string;
 };
 
 export type NativeSidebarCommand =
@@ -184,10 +117,9 @@ export type NativeSidebarCommand =
     };
 
 export type NativeSidebarBridge = {
-  postNativeSidebarSnapshot?: (snapshot: string) => void;
-  onNativeSidebarCommand?: (command: NativeSidebarCommand) => void;
   /**
-   * The workspace session groups document the app holds, handed to this page after every change.
+   * The workspace session groups document the app holds, handed to the gxserver runtime after every
+   * change.
    *
    * Its own named function rather than a `NativeSidebarCommand`, because a sidebar command arrives
    * in one of two envelopes and picking the wrong one is how a whole port once shipped dead; this
@@ -198,32 +130,10 @@ export type NativeSidebarBridge = {
   /** A document handed over before `applyWorkspaceGroups` was installed; drained when it is. */
   pendingWorkspaceGroups?: unknown;
   /**
-   * Post the document this page holds. Called once by the app after a read of the stored key that
-   * failed while this page was editing, where the page's copy is the only one carrying that edit.
+   * Post the document the runtime holds. Called once by the app after a read of the stored key that
+   * failed while the runtime was editing, where its copy is the only one carrying that edit.
    */
   requestWorkspaceGroups?: () => void;
-  /**
-   * The project collections document the app holds, handed to this page after every change.
-   *
-   * Same shape and same reason as `applyWorkspaceGroups`: since M5 piece 7d the app is the only
-   * writer of `ghostex.sidebar.projectCollections.v1` and the only thing that pushes it to gxserver
-   * for this computer (apps/desktop/src/app/gx_store/project_docs.rs). A REMOTE machine's copy is
-   * unchanged and still goes out as a command.
-   */
-  applyProjectCollections?: (state: unknown) => void;
-  /** A document handed over before `applyProjectCollections` was installed; drained when it is. */
-  pendingProjectCollections?: unknown;
-  /**
-   * Post the collections document this page holds. Called once by the app after a hand-off it had
-   * to refuse because the stored key had not been read yet, where this page's copy is the only one
-   * carrying that edit. The Spaces document needs no counterpart: it has no stored key, so its host
-   * is ready from the first frame and never refuses.
-   */
-  requestProjectCollections?: () => void;
-  /** The Spaces document the app holds. gxserver owns it outright, so there is no stored key. */
-  applySidebarSpaces?: (state: unknown) => void;
-  /** A document handed over before `applySidebarSpaces` was installed; drained when it is. */
-  pendingSidebarSpaces?: unknown;
 };
 
 export type NativeSidebarMenuItem = {
@@ -254,27 +164,4 @@ export type NativeSidebarMenuItem = {
   menuStyle?: 'agentLauncher';
   /** The last-used agent in the agent launcher, shown highlighted with a semibold label. */
   primary?: boolean;
-};
-
-export type NativeSidebarClockRow = {
-  sessionId: string;
-  timerLabel?: string;
-  lastInteractionLabel?: string;
-  /** Every session's armed Delayed Send / Close After Done, not only visible rows: the chat working row reads these. */
-  armedActions?: SessionChatArmedAction[];
-};
-export type NativeSidebarClockUpdate = { kind: 'clock'; version: 1; rows: NativeSidebarClockRow[] };
-
-export type NativeSidebarPatch = {
-  kind: 'patch';
-  version: 1;
-  hud: Record<string, unknown>;
-  fields: Record<string, unknown>;
-  groupOrder?: string[];
-  groups: {
-    groupId: string;
-    fields: Record<string, unknown>;
-    sessionOrder?: string[];
-    sessions: { sessionId: string; fields: Record<string, unknown> }[];
-  }[];
 };

@@ -10,18 +10,18 @@
 //! where a remote edit leaves through `post({ type: 'updateSidebarProjectCollections',
 //! remoteMachineId })` instead:
 //!
-//! - `describeNativeSidebarMachine` (apps/desktop/sidebar/native-sidebar/space-navigation.ts),
+//! - `describeNativeSidebarMachine` (tooling/gx-core/sidebar-page-frozen/space-navigation.ts),
 //!   whose `resolveProjectId` answers `remoteMachineContext.projectId`, the RAW id, on a remote
 //!   machine;
 //! - `saveNativeCollections` and `runNativeMembershipAction`
-//!   (apps/desktop/sidebar/native-sidebar/membership.ts) with
+//!   (tooling/gx-core/sidebar-page-frozen/membership.ts) with
 //!   `getRemoteProjectCollectionFamilyProjectIds`
 //!   (packages/core-ui/sidebar-app/drag-drop-geometry.ts);
 //! - `reorderNativeSidebar` and `runNativeProjectDrop` (reorder.ts, project-drag.ts), whose order
 //!   half posts the whole cross-machine `state.groupOrder` and is therefore refused by
 //!   `syncWorkspaceGroupOrder`;
 //! - `NativeSidebarMetadata.updateSpaces` and `adoptCollections`
-//!   (apps/desktop/sidebar/native-sidebar/metadata.ts), the second of which is where the
+//!   (tooling/gx-core/sidebar-page-frozen/metadata.ts), the second of which is where the
 //!   per-machine `nextCollectionNumber` floor comes from.
 //!
 //! This is tooling, not a test suite; it prints what it found and fails the process on a

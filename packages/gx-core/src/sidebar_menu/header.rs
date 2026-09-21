@@ -1,7 +1,7 @@
 //! The buttons on a project header row, and the agent launcher behind the last one.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/project-actions.ts and
-//! apps/desktop/sidebar/native-sidebar/agent-launcher.ts.
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/project-actions.ts and
+//! tooling/gx-core/sidebar-page-frozen/agent-launcher.ts.
 
 use crate::sidebar_accounts::AccountsState;
 use crate::sidebar_view::SidebarSettings;

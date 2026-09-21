@@ -16,9 +16,9 @@
 //! optimized away, for the reason the session moves reproduced theirs: the gate compares what the
 //! shipped code does, and a port that wrote less would make one fewer push per drag.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/reorder.ts,
-//! apps/desktop/sidebar/native-sidebar/project-drag.ts,
-//! apps/desktop/sidebar/native-sidebar/membership.ts,
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/reorder.ts,
+//! tooling/gx-core/sidebar-page-frozen/project-drag.ts,
+//! tooling/gx-core/sidebar-page-frozen/membership.ts,
 //! packages/gx-core/src/project_docs/, apps/desktop/src/app/gx_store/project_docs.rs.
 
 use serde_json::{json, Value};

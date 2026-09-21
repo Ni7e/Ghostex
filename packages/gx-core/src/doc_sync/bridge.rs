@@ -15,7 +15,7 @@
 //!
 //! SEE-ALSO: packages/gx-core/src/doc_sync/sync.rs,
 //! apps/desktop/src/app/gx_store/client_document.rs,
-//! apps/desktop/sidebar/native-sidebar/controller.ts.
+//! the deleted sidebar page's `controller.ts`.
 
 use serde_json::Value;
 

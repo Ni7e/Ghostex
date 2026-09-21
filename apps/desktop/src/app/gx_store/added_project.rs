@@ -14,7 +14,7 @@
 //! forgets it, exactly as the page's `pendingAddedProject` did.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_drag/added_project.rs,
-//! apps/desktop/sidebar/native-sidebar/events.ts,
+//! the deleted sidebar page's `events.ts`,
 //! apps/desktop/src/app/gx_store/project_docs.rs.
 
 use ghostex_gx_core::{

@@ -18,9 +18,9 @@
 //! means the command never reached here.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_actions/open.rs,
-//! apps/desktop/sidebar/native-sidebar/navigation.ts,
-//! apps/desktop/sidebar/native-sidebar/project-actions.ts,
-//! apps/desktop/sidebar/native-sidebar/space-navigation.ts.
+//! tooling/gx-core/sidebar-page-frozen/navigation.ts,
+//! tooling/gx-core/sidebar-page-frozen/project-actions.ts,
+//! tooling/gx-core/sidebar-page-frozen/space-navigation.ts.
 
 use std::time::Instant;
 

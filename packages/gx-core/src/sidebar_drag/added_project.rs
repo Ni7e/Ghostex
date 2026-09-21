@@ -13,7 +13,7 @@
 //! already inherits through its Project Group is left alone rather than pinned to the Space
 //! directly, which would survive the group moving out of it.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/events.ts,
+//! SEE-ALSO: the deleted sidebar page's `events.ts`,
 //! packages/core-ui/spaces.ts (`addSpaceProjectMember`),
 //! packages/core-ui/sidebar-app/drag-drop-geometry.ts (`moveProjectGroupFamilyToStart`),
 //! apps/desktop/src/app/gx_store/added_project.rs.

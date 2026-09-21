@@ -11,7 +11,7 @@
 //! sanitizer pass the TypeScript never makes.
 //!
 //! SEE-ALSO: packages/core-ui/spaces.ts (`applySidebarSpaceEditorResult`),
-//! packages/core-ui/space-colors.ts, apps/desktop/sidebar/native-sidebar/metadata.ts,
+//! packages/core-ui/space-colors.ts, tooling/gx-core/sidebar-page-frozen/metadata.ts,
 //! apps/desktop/src/app/gx_store/space_editor.rs.
 
 use serde_json::Value;

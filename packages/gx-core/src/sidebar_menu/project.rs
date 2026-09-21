@@ -1,6 +1,6 @@
 //! A project header's context menu, and the one a user-made session group carries.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/project-menu.ts.
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/project-menu.ts.
 
 use crate::sidebar_view::collections::CollectionsState;
 use crate::sidebar_view::spaces::SpacesState;

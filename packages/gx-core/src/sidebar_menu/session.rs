@@ -1,6 +1,6 @@
 //! A session row's context menu and its hover buttons.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/session-menu.ts, ported row for row.
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/session-menu.ts, ported row for row.
 //!
 //! CDXC:ContextMenus 2026-09-19 DECISION:
 //! The user asked for a different pin icon in the sidebar context menu. Pin uses the upright

@@ -8,7 +8,7 @@
 //! do and the one file to change when a payload moves into the store.
 //!
 //! SEE-ALSO: packages/shared/native-sidebar.ts (`NativeSidebarCommand`),
-//! apps/desktop/sidebar/native-sidebar/controller.ts (the one dispatcher), and
+//! the deleted sidebar page's `controller.ts` (the one dispatcher), and
 //! apps/desktop/src/app/native_sidebar/actions.rs.
 
 use serde_json::{json, Map, Value};

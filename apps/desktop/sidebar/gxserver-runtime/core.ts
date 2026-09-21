@@ -762,7 +762,7 @@ export class GpuiSidebarRuntime {
     /*
     CDXC:Sidebar 2026-09-21 WHY:
     The desktop sidebar is the Rust store's, and the page that used to receive its commands and
-    forward them here (`native-sidebar/controller.ts`'s `post`) is being deleted. Everything the
+    forward them here is deleted. Everything the
     store cannot perform itself, because this runtime still owns it (focus, session groups,
     worktrees, git, remote machines, transcripts), arrives on this one entry instead and goes
     straight to the same handler the page's forward ended in. One hop fewer, and nothing in the

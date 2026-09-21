@@ -11,7 +11,7 @@
 //! then calls `handleSidebarMessage` with the same message (it is how the New Thread picker
 //! launches). So the store sends the message there and the launch, the storage write and the
 //! `primaryAgentLauncherChanged` echo are the same functions they were, reached from Rust instead
-//! of from `native-sidebar/`. The launch itself (the hook check, the create call, the focus) stays
+//! of from the sidebar page. The launch itself (the hook check, the create call, the focus) stays
 //! the runtime's until the create surface moves; that is `runSidebarAgent`'s own row in the
 //! PROGRESS E list, not this payload's.
 //!
@@ -19,7 +19,7 @@
 //! is a missing key once the message is JSON, and `requestAgentSessionLaunch` reads it the same
 //! either way.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/project-actions.ts (`runNativeProjectAction`),
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/project-actions.ts (`runNativeProjectAction`),
 //! apps/desktop/sidebar/gxserver-runtime/core.ts (`installGpuiBridgeCallbacks`,
 //! `onSidebarHostMessage`), apps/desktop/src/app/sidebar_agent_launch_placeholder.rs,
 //! apps/desktop/src/app/gx_store/sidebar_state_actions.rs, tooling/gx-core/state-action-parity.ts.

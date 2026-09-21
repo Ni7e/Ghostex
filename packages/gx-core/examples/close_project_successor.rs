@@ -1,8 +1,8 @@
 //! The Close Project successor rule, asserted against a table derived by READING
 //! `packages/core-ui/sidebar-app/close-project-successor.ts` and the `post` that calls it in
-//! `apps/desktop/sidebar/native-sidebar/controller.ts`.
+//! the deleted sidebar page's `controller.ts`.
 //!
-//! **Why a table and not a parity harness.** The TypeScript half is `native-sidebar/controller.ts`,
+//! **Why a table and not a parity harness.** The TypeScript half was the deleted sidebar page's `controller.ts`,
 //! which M4d part 2 deletes, so a gate driving it would be a gate that cannot run a week from now.
 //! The cases below are the ones the TypeScript answers, written down with the answer it gives.
 //!

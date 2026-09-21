@@ -1,6 +1,6 @@
 //! A project collection's context menu.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/collection-menu.ts.
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/collection-menu.ts.
 
 use serde_json::Value;
 

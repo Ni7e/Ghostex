@@ -1,6 +1,6 @@
 //! The menu a multi-selection of rows carries.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/bulk-menu.ts and the bulk half of
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/bulk-menu.ts and the bulk half of
 //! packages/core-ui/session-card-capabilities.ts, which records the decision that a bulk menu
 //! shows only the actions that can run over the selected rows without guessing.
 

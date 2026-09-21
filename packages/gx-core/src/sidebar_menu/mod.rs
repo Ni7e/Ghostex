@@ -9,7 +9,7 @@
 //! could go stale. This supersedes nothing: the TypeScript builders keep running for the machines
 //! this store does not hold yet.
 //!
-//! Every builder is a port of one file under `apps/desktop/sidebar/native-sidebar/`, named in its
+//! Every builder is a port of one file of the deleted sidebar page, named in its
 //! own `SEE-ALSO`. The command payloads are unchanged, so a row built here and a row built there
 //! reach the same handler.
 

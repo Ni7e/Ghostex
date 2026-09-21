@@ -423,7 +423,7 @@ pub(crate) fn gpui_sidebar_workspace_terminal_enter_from_value(
 ///
 /// CDXC:Sessions 2026-09-21 WHY:
 /// `sessionId` carries the completion FLASH the sidebar card draws, which used to reach Rust as a
-/// `flash` payload on the old projection's snapshot bridge (`native-sidebar/controller.ts`). It is
+/// `flash` payload on the old projection's snapshot bridge (the deleted sidebar page). It is
 /// optional because the runtime posted this message without it until M4d part 2 step 3, and a
 /// payload with no id still plays the sound.
 pub(crate) fn gpui_sidebar_session_completion_sound_from_json(

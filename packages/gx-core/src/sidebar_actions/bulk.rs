@@ -28,7 +28,7 @@
 //!
 //! SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/auto-sleep.ts (`setSessionsSleeping`,
 //! `setGroupSleeping`, `collectInactiveProjectSessionIds`, `wakeProjectSleepingSessions`),
-//! apps/desktop/sidebar/bulk-sleep-pacing.ts, apps/desktop/sidebar/native-sidebar/controller.ts
+//! apps/desktop/sidebar/bulk-sleep-pacing.ts, the deleted sidebar page's `controller.ts`
 //! (the `batch` arm), apps/desktop/src/app/gx_store/sidebar_bulk.rs.
 
 use serde_json::{json, Map, Value};

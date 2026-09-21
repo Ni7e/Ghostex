@@ -16,8 +16,8 @@
 //! `requestReveal` on the same row, always, which the host performs with the reveal a published
 //! request ends in. A slot past the last drawn row does nothing at all.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/hotkeys.ts (`runNativeSidebarHotkey`),
-//! apps/desktop/sidebar/native-sidebar/selection.ts (`renderedNativeSidebarSessionIds`),
+//! SEE-ALSO: the deleted sidebar page's `hotkeys.ts` (`runNativeSidebarHotkey`) and
+//! `selection.ts` (`renderedNativeSidebarSessionIds`),
 //! apps/desktop/src/app/gx_store/sidebar_session_slot.rs, tooling/gx-core/session-slot-parity.ts.
 
 use super::view::{OrderKind, SidebarView};

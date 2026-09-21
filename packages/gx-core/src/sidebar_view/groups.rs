@@ -1,6 +1,6 @@
 //! One drawn group: its rows in display order, its sections, its counts, and its header tooltip.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/project-sections.ts,
+//! SEE-ALSO: the deleted sidebar page's `project-sections.ts`,
 //! apps/desktop/sidebar/gxserver-runtime/sidebar-groups.ts (`createSidebarGroups`, the focus and
 //! browser-row overrides) and packages/core-ui/group-session-summary.ts.
 
@@ -25,7 +25,7 @@ pub(crate) enum GroupKind {
     /// This is also where the All Automations overview row would be, and why no sidebar draws one.
     /// `withQuickAutomationsOverviewGroup` splices a synthetic row into the CHATS group of the
     /// published projection, and `createNativeSidebarSnapshot` drops every chat collection before
-    /// it builds the list (`native-sidebar/model.ts`, `group.isChatCollection` in the group loop),
+    /// it builds the list (the deleted sidebar page's `model.ts`, `group.isChatCollection` in the group loop),
     /// so the desktop sidebar has never shown it and neither does this list. What the More menu's
     /// All Automations really does is `openAutomationsPage`, which changes the active project and
     /// opens the Automate workarea; the row is a side effect nobody sees here. Do not add one to

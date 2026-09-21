@@ -26,7 +26,7 @@
 //! feature is the sleep, and that belongs to `lifecycle.rs`.
 //!
 //! SEE-ALSO: packages/shared/session-snooze.ts (`resolveSessionSnoozeWakeTime`,
-//! `isSidebarSessionSnoozed`), apps/desktop/sidebar/native-sidebar/session-actions.ts,
+//! `isSidebarSessionSnoozed`), tooling/gx-core/sidebar-page-frozen/session-actions.ts,
 //! apps/desktop/sidebar/gxserver-runtime/sessions-and-focus.ts (`snoozeSession`,
 //! `runSessionLifecycleCommand`), apps/desktop/src/app/gx_store/sidebar_snooze.rs.
 

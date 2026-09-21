@@ -10,7 +10,7 @@
 //! out would write a document the daemon and the phone would then disagree with about one colour.
 //!
 //! SEE-ALSO: packages/core-ui/project-collections.ts,
-//! apps/desktop/sidebar/native-sidebar/collections.ts (`runNativeCollectionAction`),
+//! the deleted sidebar page's `collections.ts` (`runNativeCollectionAction`),
 //! apps/desktop/src/app/gx_store/collection_menu.rs.
 
 use serde_json::Value;

@@ -13,7 +13,7 @@
 //! and whether a seed was present.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_actions/modals.rs,
-//! apps/desktop/sidebar/native-sidebar/session-actions.ts (`runNativeSessionAction`).
+//! tooling/gx-core/sidebar-page-frozen/session-actions.ts (`runNativeSessionAction`).
 
 use ghostex_gx_core::{owns_modal_message, plan_modal_action};
 use serde_json::Value;

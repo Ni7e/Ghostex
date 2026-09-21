@@ -3,7 +3,7 @@
 //!
 //! CDXC:Sidebar 2026-09-21 WHY:
 //! The old projection ran a timer once a second for the life of the app and published a clock row
-//! per session (`native-sidebar/clock.ts`). Two things rode that tick and nothing else has their
+//! per session. Two things rode that tick and nothing else has their
 //! cadence: the armed-timer labels every open chat draws, and the re-read of the two client-storage
 //! values the menus need, which a titlebar Keep Awake or an agent launched from another surface
 //! moves without the store or a publish ever reporting it. The LIST's own labels do not ride it:
@@ -71,7 +71,7 @@ impl GhostexGpuiApp {
     /// Computed for EVERY session rather than for the drawn rows, which is why it walks the
     /// presentation rather than the sidebar view: a session the machine filter, the Space, a tag
     /// filter or Show Hidden leaves out still has a chat open on it. That is the same reason
-    /// `clock.ts` walked the zustand store's `sessionsById` instead of the published list.
+    /// the page's own clock walked the zustand store's `sessionsById` instead of the published list.
     pub(super) fn gx_store_refresh_armed_actions(&mut self, cx: &mut gpui::Context<Self>) {
         let now_ms = now_ms();
         let armed = {

@@ -2,7 +2,7 @@
 //!
 //! CDXC:Projects 2026-09-21 WHY:
 //! `closeWorkspaceProjectForGroup` used to be posted bare by the store and given its
-//! `successorSessionId` by the sidebar page on its way past (`native-sidebar/controller.ts`'s
+//! `successorSessionId` by the sidebar page on its way past (the deleted sidebar page's
 //! `post`), which resolved it with `resolveCloseProjectSuccessorSessionId` against the list the
 //! page drew. With the page going the store computes it here, so a direct route to the runtime
 //! carries the same field and the close does not leave the user with no focused session.
@@ -14,7 +14,7 @@
 //! candidate counts. With none, nothing is named and the host keeps its ordinary behaviour.
 //!
 //! SEE-ALSO: packages/core-ui/sidebar-app/close-project-successor.ts,
-//! apps/desktop/sidebar/native-sidebar/controller.ts (`post`),
+//! the deleted sidebar page's `controller.ts` (`post`),
 //! apps/desktop/src/app/gx_store/sidebar_close_project.rs.
 
 use crate::focus::ActiveGroup;

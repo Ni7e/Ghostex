@@ -18,7 +18,7 @@
 //! pushed map) and the guard policy around it.
 //!
 //! SEE-ALSO: packages/core-ui/project-collections.ts,
-//! apps/desktop/sidebar/native-sidebar/metadata.ts (`adoptCollections`),
+//! tooling/gx-core/sidebar-page-frozen/metadata.ts (`adoptCollections`),
 //! apps/desktop/sidebar/gxserver-runtime/workspace-groups-sync.ts
 //! (`queueSidebarProjectCollectionsServerSync`), packages/gx-core/src/doc_sync/sync.rs.
 

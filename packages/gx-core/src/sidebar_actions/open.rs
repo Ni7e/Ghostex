@@ -3,7 +3,7 @@
 //!
 //! CDXC:Sidebar 2026-09-21 WHY:
 //! These nine are the ones the sidebar answers ITSELF rather than by posting a runtime message, so
-//! they live in `native-sidebar/` and die with it. What they all turn out to be, once
+//! they lived in the sidebar page and died with it. What they all turn out to be, once
 //! `openQuickAccess` is followed to its end, is one app-modal-host message: that helper is a
 //! translation table over `openAppModal`, and `openAppModal` is `postAppModalHostMessage`. So the
 //! whole family is a CLOSE of whatever modal is open followed by an OPEN with a built payload, and
@@ -26,10 +26,10 @@
 //! `sidebar_ui/`. The host asks those two files first. The two sort rows are not opens either; they are answered here with
 //! the empty plan that `sort.rs` explains, because their TypeScript path ends in a no-op.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/navigation.ts (`runNativeSidebarAction`),
-//! apps/desktop/sidebar/native-sidebar/project-actions.ts (`runNativeProjectAction`),
-//! apps/desktop/sidebar/native-sidebar/space-navigation.ts (`editNativeSidebarSpace`),
-//! apps/desktop/sidebar/native-sidebar/controller.ts (the `machineAction` arm),
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/navigation.ts (`runNativeSidebarAction`),
+//! tooling/gx-core/sidebar-page-frozen/project-actions.ts (`runNativeProjectAction`),
+//! tooling/gx-core/sidebar-page-frozen/space-navigation.ts (`editNativeSidebarSpace`),
+//! the deleted sidebar page's `controller.ts` (the `machineAction` arm),
 //! packages/core-ui/app-modal-host-bridge.ts (`openQuickAccess`, the translation this reproduces),
 //! apps/desktop/src/app/gx_store/sidebar_open.rs.
 

@@ -15,7 +15,7 @@
 //! did not move. That is reproduced rather than optimized away, because the gate compares what the
 //! shipped code does and a port that wrote nothing there would make one fewer push per drag.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/reorder.ts,
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/reorder.ts,
 //! packages/core-ui/sidebar-dnd.ts (`moveSessionIdsByDropTarget`),
 //! apps/desktop/src/app/gx_store/sidebar_drag.rs.
 

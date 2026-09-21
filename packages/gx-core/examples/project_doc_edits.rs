@@ -7,13 +7,13 @@
 //! were derived by reading the shipped TypeScript, not by running it, because the page that runs it
 //! is being deleted in this same milestone and a gate driving it would outlive what it proves:
 //!
-//! - `runNativeCollectionAction` (apps/desktop/sidebar/native-sidebar/collections.ts) with
+//! - `runNativeCollectionAction` (the deleted sidebar page's `collections.ts`) with
 //!   `updateSidebarProjectCollection` and `removeSidebarProjectCollection`
 //!   (packages/core-ui/project-collections.ts);
 //! - `applySidebarSpaceEditorResult`, `createSidebarSpace`, `updateSidebarSpace`,
 //!   `deleteSidebarSpace` and `sanitizeSidebarSpacesState` (packages/core-ui/spaces.ts), with the
 //!   palette of packages/core-ui/space-colors.ts;
-//! - `switchNativeSidebarSpace` (apps/desktop/sidebar/native-sidebar/space-navigation.ts).
+//! - `switchNativeSidebarSpace` (tooling/gx-core/sidebar-page-frozen/space-navigation.ts).
 //!
 //! This is tooling, not a test suite; it prints what it found and fails the process on a
 //! difference.

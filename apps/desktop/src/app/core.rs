@@ -272,7 +272,7 @@ pub struct GhostexGpuiApp {
     /// The already-sanitized failure summary of the same transition, which the machine tab's header
     /// draws under a machine that could not connect. Written at the same choke point and kept
     /// beside the state rather than inside it, because the state is a bounded wire word and this is
-    /// free text; the sidebar page used to keep its own copy (`native-sidebar/metadata.ts`
+    /// free text; the sidebar page used to keep its own copy (`sidebar-page-frozen/metadata.ts`
     /// `connections`) and the store's list carried it from that publish until M4d part 2 step 3.
     pub(crate) remote_machine_status_messages: HashMap<String, String>,
     pub(crate) remote_gxserver_connections: HashMap<String, GpuiRemoteGxserverConnection>,

@@ -238,7 +238,7 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
       (`applyProjectCollections`, `applySidebarSpaces`). A REMOTE machine's copies still arrive
       through `forwardRemoteSidebar*FromGxserver`, because this page still owns those.
       SEE-ALSO: apps/desktop/src/app/gx_store/project_docs.rs,
-      apps/desktop/sidebar/native-sidebar/metadata.ts.
+      tooling/gx-core/sidebar-page-frozen/metadata.ts.
       */
       onCustomSessionTags: (state) => {
         this.forwardCustomSessionTagsFromGxserver(state);

@@ -259,7 +259,7 @@ impl GhostexGpuiApp {
         CDXC:Sessions 2026-09-21 WHY:
         The card's completion flash rides the same message as the sound, because they are the same
         event: the runtime posted both from one place and the flash only took the long way round,
-        through the old projection's snapshot bridge (`native-sidebar/controller.ts`), which M4d
+        through the old projection's snapshot bridge (the deleted sidebar page), which M4d
         part 2 deletes.
         */
         let Some(session_id) = session_id else {

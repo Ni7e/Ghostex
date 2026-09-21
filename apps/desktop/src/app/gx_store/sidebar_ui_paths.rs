@@ -24,8 +24,8 @@
 //! `slotJumps` is zero means this file never saw the hotkey and the old runtime is still the only
 //! thing that expanded it.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/space-navigation.ts,
-//! apps/desktop/sidebar/native-sidebar/events.ts, apps/desktop/sidebar/native-sidebar/hotkeys.ts,
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/space-navigation.ts,
+//! the deleted sidebar page's `events.ts` and `hotkeys.ts`,
 //! packages/gx-core/src/sidebar_view/slot_hotkey.rs.
 
 use ghostex_gx_core::{FocusedRowSpace, SidebarUiIntent};

@@ -18,8 +18,8 @@
 //! a read before it edits, and blocker 9's drop queue must never hold a remote drop for this
 //! computer's keys.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/membership.ts (`saveNativeCollections`),
-//! apps/desktop/sidebar/native-sidebar/metadata.ts (`updateSpaces`, `adoptCollections`),
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/membership.ts (`saveNativeCollections`),
+//! tooling/gx-core/sidebar-page-frozen/metadata.ts (`updateSpaces`, `adoptCollections`),
 //! apps/desktop/src/app/gx_store/project_docs.rs.
 
 use std::collections::HashMap;

@@ -69,7 +69,7 @@ Extension source, manifests, schemas, publishing tools, and example extensions l
 - `tasks-placeholder.tsx` (+ `project-board/`) is the Kanban surface, loaded through `apps/desktop/sidebar/kanban-main.tsx`.
 - `project-board-shared.ts` and `combined-sidebar-mode.ts` are shared logic consumed by those pages.
 
-Shared gxserver logic lives in `packages/shared/` (for example `gxserver-presentation-cache.ts`); the desktop runtime client is `apps/desktop/sidebar/gxserver-runtime.ts` (+ `gxserver-runtime/`), and the web app has its own client at `apps/web/src/connections/gxserver-client.ts`. The shared React app UI is `packages/core-ui/` (`sidebar-app.tsx`, icons in `assets/`), mounted by the desktop app through `apps/desktop/sidebar/main.tsx` and by the web app.
+Shared gxserver logic lives in `packages/shared/` (for example `gxserver-presentation-cache.ts`); the desktop runtime client is `apps/desktop/sidebar/gxserver-runtime.ts` (+ `gxserver-runtime/`), and the web app has its own client at `apps/web/src/connections/gxserver-client.ts`. The shared React app UI is `packages/core-ui/` (`sidebar-app.tsx`, icons in `assets/`) and is the web app's; **the desktop app no longer mounts it**. The desktop sidebar is native Rust (`apps/desktop/src/app/native_sidebar/` for the renderer, `apps/desktop/src/app/gx_store/` for the store that feeds it), the TypeScript sidebar page and its `index.html` entry were deleted on 2026-09-21, and what is left of the desktop's QuickJS service is `apps/desktop/sidebar/service/`, `gxserver-runtime/`, `native-quick-access/`, `session-chat-runtime/` and `sidebar-store-feed.ts`.
 
 ### Repository Search Routing
 

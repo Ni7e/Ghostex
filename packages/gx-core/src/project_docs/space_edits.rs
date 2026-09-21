@@ -7,8 +7,8 @@
 //! echo would put it back, which is an oscillation with no guard to stop it.
 //!
 //! SEE-ALSO: packages/core-ui/spaces.ts, packages/core-ui/sidebar-space-order.ts,
-//! apps/desktop/sidebar/native-sidebar/reorder.ts (the `moveSpace` arm),
-//! apps/desktop/sidebar/native-sidebar/project-drag.ts (the `moveToSpace` arm).
+//! tooling/gx-core/sidebar-page-frozen/reorder.ts (the `moveSpace` arm),
+//! tooling/gx-core/sidebar-page-frozen/project-drag.ts (the `moveToSpace` arm).
 
 use crate::sidebar_view::text::js_trim;
 use crate::sidebar_view::SpacesState;

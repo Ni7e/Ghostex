@@ -20,7 +20,7 @@
 //! is matched by id against that list, so an id normalization renumbered is not the one the tab
 //! carried and nothing is hidden, on both sides.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/controller.ts (the `machineAction` arm),
+//! SEE-ALSO: the deleted sidebar page's `controller.ts` (the `machineAction` arm),
 //! apps/desktop/sidebar/gxserver-runtime/app-shot-and-misc.ts (`saveSidebarSettingsPatch`),
 //! apps/desktop/src/app/remote_conn/settings_and_install_probe.rs,
 //! apps/desktop/src/app/gx_store/sidebar_state_actions.rs, tooling/gx-core/state-action-parity.ts.

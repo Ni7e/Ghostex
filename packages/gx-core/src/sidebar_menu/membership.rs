@@ -1,6 +1,6 @@
 //! The Spaces and Add to Group submenus a project or a collection carries.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/membership.ts.
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/membership.ts.
 
 use crate::sidebar_view::collections::CollectionsState;
 use crate::sidebar_view::spaces::SpacesState;

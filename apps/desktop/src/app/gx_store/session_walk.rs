@@ -22,8 +22,8 @@ struct WalkRow<'a> {
 
 /// CDXC:Hotkeys 2026-09-19 DECISION:
 /// User: holding the previous or next session hotkey must fly through sessions.
-/// The rendered row order, ported from `renderedNativeSidebarSessionIds` (apps/desktop/sidebar/native-sidebar/selection.ts): the snapshot's top-level `order`, where a project item is its group and any other item is a collection that contributes its groups unless it is collapsed; a group that is missing or collapsed contributes nothing; an open group contributes the session ids of its sections that are not collapsed, in section order. An id without a row in the group is left out, as the runtime left out ids missing from its store.
-/// SEE-ALSO: apps/desktop/sidebar/native-sidebar/hotkeys.ts (`focusSessionSlot` with slot 0 and -1 still serves the numbered slots there), packages/core-ui/sidebar-visible-session-slots.ts (`resolveAdjacentRenderedSidebarSessionSlotId`).
+/// The rendered row order, ported from the deleted sidebar page's `renderedNativeSidebarSessionIds`: the snapshot's top-level `order`, where a project item is its group and any other item is a collection that contributes its groups unless it is collapsed; a group that is missing or collapsed contributes nothing; an open group contributes the session ids of its sections that are not collapsed, in section order. An id without a row in the group is left out, as the runtime left out ids missing from its store.
+/// SEE-ALSO: packages/core-ui/sidebar-visible-session-slots.ts (`resolveAdjacentRenderedSidebarSessionSlotId`).
 fn rendered_rows(snapshot: &NativeSidebarSnapshot) -> Vec<WalkRow<'_>> {
     let mut rows = Vec::new();
     for item in &snapshot.order {

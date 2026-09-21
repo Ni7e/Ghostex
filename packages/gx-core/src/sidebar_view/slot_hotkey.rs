@@ -23,7 +23,7 @@
 //! DELETE, not toggle. `runNativeProjectSlotHotkey` removes both keys, so a jump to a project that
 //! is already expanded leaves it expanded, where a toggle would collapse it.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/hotkeys.ts (`runNativeProjectSlotHotkey`),
+//! SEE-ALSO: the deleted sidebar page's `hotkeys.ts` (`runNativeProjectSlotHotkey`),
 //! packages/gx-core/src/sidebar_ui/intents.rs (`ExpandProjectForSlotJump`),
 //! apps/desktop/src/app/gx_store/sidebar_slot_jump.rs.
 

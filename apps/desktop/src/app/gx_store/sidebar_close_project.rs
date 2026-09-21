@@ -3,7 +3,7 @@
 //!
 //! CDXC:Projects 2026-09-21 WHY:
 //! The store posted `closeWorkspaceProjectForGroup` bare and the sidebar page filled in
-//! `successorSessionId` on its way past (`native-sidebar/controller.ts`'s `post`, which is the only
+//! `successorSessionId` on its way past (the deleted sidebar page's `post`, which was the only
 //! thing that ever set the field on the desktop). With that page going, a direct route to the
 //! runtime would have carried no successor at all, and closing the active project would have left
 //! the user with no focused session, which is exactly what `CDXC:Projects 2026-09-16 DECISION`

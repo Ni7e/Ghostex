@@ -3,7 +3,7 @@
 //!
 //! CDXC:Sessions 2026-09-21 WHY:
 //! On the desktop app both rows END IN A NO-OP, so the store's answer is the empty plan. Followed to
-//! the last function: `runNativeSidebarAction` (native-sidebar/navigation.ts) posts
+//! the last function: `runNativeSidebarAction` (sidebar-page-frozen/navigation.ts) posts
 //! `{ type: 'setActiveSessionsSortMode', sortMode, manualSessionIdsByGroup }` through the
 //! controller's `post`, which is `runtime.vscode.postMessage`, which is
 //! `GpuiSidebarRuntime.handleSidebarMessage` (gxserver-runtime/core.ts). That switch has no
@@ -21,14 +21,14 @@
 //! under the current mode over the FULL membership of every group of every machine (the sidebar
 //! store's `sessionIdsByGroup`, `sessionsById` and `workspaceGroupIds`), hidden groups and chat
 //! collections included. The tag filter, the machine filter, Space and section visibility and
-//! hidden items are applied AFTER that layout, in native-sidebar/model.ts, so seeding from the
+//! hidden items are applied AFTER that layout, in the page's own model, so seeding from the
 //! drawn rows (`SidebarView::groups`) would silently drop every row a filter hides and every group
 //! of another machine. The sort gate (tooling/gx-core/sort-parity.ts) fails the day the
 //! TypeScript's end stops being `handleUnsupportedSidebarMessage`.
 //!
 //! Both rows return BEFORE `runNativeSidebarAction`'s `closeAppModal`, so there is no close either.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/navigation.ts (`runNativeSidebarAction`),
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/navigation.ts (`runNativeSidebarAction`),
 //! apps/desktop/sidebar/gxserver-runtime/core.ts (`handleSidebarMessage`),
 //! packages/shared/active-sessions-sort.ts (`createDisplaySessionLayout`),
 //! packages/gx-core/src/sidebar_view/ordering.rs, tooling/gx-core/sort-parity.ts.

@@ -1,7 +1,7 @@
 //! The rows of the two account pages, as data.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/agent-launcher.ts (the launcher's account page)
-//! and apps/desktop/sidebar/native-sidebar/accounts.ts (a session's Switch Account flyout).
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/agent-launcher.ts (the launcher's account page)
+//! and the deleted sidebar page's `accounts.ts` (a session's Switch Account flyout).
 
 use crate::sidebar_menu::{colored_agent_logo, LauncherAgent, MenuCommand, MenuItem};
 

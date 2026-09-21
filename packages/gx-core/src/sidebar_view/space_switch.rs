@@ -15,7 +15,7 @@
 //! the sidebar is not showing. The same "the rows the list draws" rule already decides
 //! `collectionAction:select` and `sidebarAction:toggleProjects`.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/space-navigation.ts,
+//! SEE-ALSO: tooling/gx-core/sidebar-page-frozen/space-navigation.ts,
 //! apps/desktop/src/app/gx_store/space_switch.rs.
 
 use super::view::SidebarView;

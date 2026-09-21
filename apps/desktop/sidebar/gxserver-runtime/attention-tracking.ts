@@ -733,7 +733,7 @@ export const gpuiSidebarRuntimeAttentionMethods = {
 
   CDXC:Sessions 2026-09-21 WHY:
   `sessionId` carries the sidebar card's completion FLASH, which used to reach Rust the long way
-  round: the SidebarApp `playCompletionSound` message, read by `native-sidebar/controller.ts`, which
+  round: the SidebarApp `playCompletionSound` message, read by the deleted sidebar page, which
   posted a `flash` payload on the old projection's snapshot bridge. They are one event, so they go
   on one message, and M4d part 2 can delete that bridge.
   */
