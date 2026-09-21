@@ -15,12 +15,12 @@
 //! - **`gpuiProjectSlotHotkey`.** A THIRD route, neither of the two sidebar-command envelopes. It
 //!   deletes the jumped-to project's collapsed flag and, with `showLessForExpandedProjectJumps` on,
 //!   its session list's expanded flag, and that second one fought the Rust reveal that follows the
-//!   same jump over one key on every cmd+1..9. What moves here is the state, in either position of
-//!   the list-source switch; the jump itself (the focus and the reveal) is `sidebar_slot_jump.rs`
+//!   same jump over one key on every cmd+ctrl+1..9. What moves here is the state, in either
+//!   position of the list-source switch; the jump itself (the focus and the reveal) is `sidebar_slot_jump.rs`
 //!   with the store's list drawn, and the old page's with the switch off.
 //!
 //! **The counters that prove these fire** are `spaceMemoryWrites`, `spaceForgets` and `slotJumps`
-//! on `gxStore.sidebarUi`. A run in which the user pressed cmd+1 on a collapsed project and
+//! on `gxStore.sidebarUi`. A run in which the user pressed cmd+ctrl+1 on a collapsed project and
 //! `slotJumps` is zero means this file never saw the hotkey and the old runtime is still the only
 //! thing that expanded it.
 //!

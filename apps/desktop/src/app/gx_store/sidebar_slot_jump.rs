@@ -1,4 +1,4 @@
-//! The project slot hotkeys (cmd+1 to cmd+9), performed by the store when its list is drawn.
+//! The project slot hotkeys (Jump to Project 1 to 9, cmd+ctrl+1 to cmd+ctrl+9 by default), performed by the store when its list is drawn.
 //!
 //! CDXC:Hotkeys 2026-09-21 WHY:
 //! The jump used to be the old sidebar page's: `gpuiProjectSlotHotkey` went to QuickJS, which
@@ -18,21 +18,25 @@
 //! (`gx_store_reveal_walk_row`). A slot never names a remote project (gx-core
 //! `sidebar_view/slot_hotkey.rs`), so the remote focus path is never reached from here.
 //!
-//! **A held key costs no QuickJS turn.** A key repeat that lands on the row the store already
-//! focuses sends nothing: the press before it asked for everything that row needs. What a repeat
-//! still pays is the planner (one pass over the drawn groups) and a reveal plan that finds the row
-//! already drawn, and it changes no state, so the list is not rebuilt.
+//! **The old page's copy of the sidebar state** is not drawn with the switch on, but it is still
+//! read: the page resolves cmd+1..9 (`focusSessionSlot`) against the list it builds from it. So
+//! every intent the jump and its reveal applied is handed to it as a `sidebarUiMirror` message,
+//! the value each touched key now holds (gx-core `sidebar_ui_mirror_changes`), which the page sets
+//! without revealing, scrolling or focusing.
 //!
-//! **The old page's copy of the collapse state** is not drawn with the switch on and not written,
-//! but the sidebar shadow compares it. When the reveal changed something, the page is sent the same
-//! `revealSidebarSession` the titlebar's Reveal Active Session sends, under a request id this file
-//! marks handled on both Rust readers, so the page applies the reveal to its copy and nothing here
-//! runs or scrolls twice.
+//! CDXC:Sidebar 2026-09-21 WHY:
+//! The first port told the page a `revealSidebarSession` instead, under a request id it marked
+//! handled on both Rust readers. That missed the jump's own two deletions (an empty collapsed
+//! project, the show-less list flag), and it overwrote the handled id: the page never clears its
+//! reveal request, so the PREVIOUS request stayed in every projection, no longer matched the handled
+//! id, and ran again (scroll, Space and machine tab, a group the user had collapsed since). The slot
+//! path must never write a handled-reveal id and never ask the page to reveal.
 //!
 //! **Counters** ride `gxStore.sidebarActions.summary` as `slotJump`, whose first line is written at
 //! zero: `presses`, `nothing`, `emptyProjects`, `focuses`, `inProcess`, `staged`, `handedToRuntime`,
-//! `heldRepeats`, `reveals`, `revealChanges`, `pageTold`, `declinedSource`, `planMaxUs`. A run in
-//! which the user pressed cmd+1 with the store's list drawn and `presses` is zero means the key never
+//! `reveals`, `revealChanges`, `pageTold`, `declinedSource`, `planMaxUs`. `pageTold` counts mirror
+//! messages, one per press that changed the sidebar's state. A run in
+//! which the user pressed cmd+ctrl+1 with the store's list drawn and `presses` is zero means the key never
 //! reached this file; `declinedSource` moving means the old page drew the list and did the jump.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_view/slot_hotkey.rs,
@@ -61,7 +65,6 @@ pub(crate) struct SlotJumpCounters {
     /// The click reaction did not apply (a row the drawn snapshot does not hold): the runtime's
     /// `focusSession`, reached through the same `selectSession`, owns the whole selection.
     pub(crate) handed_to_runtime: u64,
-    pub(crate) held_repeats: u64,
     pub(crate) reveals: u64,
     /// Changes the reveals made to the sidebar's own state.
     pub(crate) reveal_changes: u64,
@@ -85,58 +88,64 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         let started = Instant::now();
+        let draws_store_list = self.gx_store_sidebar_draws_store_list();
+        // With the switch off the old page does the jump on its own copy, so nothing is mirrored.
+        if draws_store_list {
+            self.gx_store.sidebar_ui.mirror = Some(Vec::new());
+        }
         // The state half runs in either position of the switch: this app is the only writer of the
         // collapse key.
         let plan = self.gx_store_note_project_slot_hotkey(slot_number, cx);
         let plan_us = started.elapsed().as_micros() as u64;
-        if !self.gx_store_sidebar_draws_store_list() {
+        if !draws_store_list {
             self.gx_store.slot_jump.counters.declined_source += 1;
             return false;
         }
+        let (route, reveal_us) = self.gx_store_perform_project_slot_jump(plan, cx);
         let counters = &mut self.gx_store.slot_jump.counters;
         counters.presses += 1;
         counters.plan_max_us = counters.plan_max_us.max(plan_us);
+        self.gx_store_mirror_slot_jump_to_page(cx);
+        cx.notify();
+        self.gx_store_slot_jump_ran(route, plan_us, reveal_us);
+        true
+    }
+
+    /// The focus and the reveal of a planned jump, whose state intents are already applied.
+    /// Returns the route and the reveal's time.
+    fn gx_store_perform_project_slot_jump(
+        &mut self,
+        plan: Option<ghostex_gx_core::ProjectSlotPlan>,
+        cx: &mut gpui::Context<Self>,
+    ) -> (&'static str, u64) {
         let Some(plan) = plan else {
-            counters.nothing += 1;
-            self.gx_store_slot_jump_ran("nothing", plan_us, 0);
-            return true;
+            self.gx_store.slot_jump.counters.nothing += 1;
+            return ("nothing", 0);
         };
         let Some(target) = plan.target_session_id.clone() else {
-            counters.empty_projects += 1;
-            self.gx_store_slot_jump_ran("emptyProject", plan_us, 0);
-            return true;
+            self.gx_store.slot_jump.counters.empty_projects += 1;
+            return ("emptyProject", 0);
         };
-        let held = self.gx_store_key_is_held();
-        let focused = self
-            .native_sidebar
-            .snapshot
-            .clone()
-            .and_then(|snapshot| self.gx_store_focused_sidebar_row_id(&snapshot));
-        let route = if held && focused.as_deref() == Some(target.as_str()) {
-            self.gx_store.slot_jump.counters.held_repeats += 1;
-            "heldRepeat"
-        } else {
-            // Exactly what a row click does, in the click's order.
-            self.dispatch_native_sidebar_ui(
-                json!({"type": "selectSession", "sessionId": target, "mode": "focus"}),
-                cx,
-            );
-            let reaction = self.react_to_native_sidebar_session_click(&target, cx);
-            let counters = &mut self.gx_store.slot_jump.counters;
-            counters.focuses += 1;
-            match reaction {
-                NativeSidebarClickReaction::InProcess => {
-                    counters.in_process += 1;
-                    "inProcess"
-                }
-                NativeSidebarClickReaction::Staged => {
-                    counters.staged += 1;
-                    "staged"
-                }
-                NativeSidebarClickReaction::NotApplied => {
-                    counters.handed_to_runtime += 1;
-                    "runtime"
-                }
+        // Exactly what a row click does, in the click's order.
+        self.dispatch_native_sidebar_ui(
+            json!({"type": "selectSession", "sessionId": target, "mode": "focus"}),
+            cx,
+        );
+        let reaction = self.react_to_native_sidebar_session_click(&target, cx);
+        let counters = &mut self.gx_store.slot_jump.counters;
+        counters.focuses += 1;
+        let route = match reaction {
+            NativeSidebarClickReaction::InProcess => {
+                counters.in_process += 1;
+                "inProcess"
+            }
+            NativeSidebarClickReaction::Staged => {
+                counters.staged += 1;
+                "staged"
+            }
+            NativeSidebarClickReaction::NotApplied => {
+                counters.handed_to_runtime += 1;
+                "runtime"
             }
         };
         let mut reveal_us = 0;
@@ -147,28 +156,20 @@ impl GhostexGpuiApp {
             let counters = &mut self.gx_store.slot_jump.counters;
             counters.reveals += 1;
             counters.reveal_changes += changes as u64;
-            if changes > 0 || plan.expand_group {
-                self.gx_store_tell_page_slot_reveal(&target, cx);
-            }
             self.gx_store_reveal_walk_row(&target);
         }
-        cx.notify();
-        self.gx_store_slot_jump_ran(route, plan_us, reveal_us);
-        true
+        (route, reveal_us)
     }
 
-    /// Hands the old page the reveal it no longer requests itself, so its copy of the collapse
-    /// state follows (see the module note). The request id is marked handled first on both Rust
-    /// readers of a published reveal request, so the publish that echoes it neither plans the
-    /// reveal again nor scrolls a second time.
-    fn gx_store_tell_page_slot_reveal(&mut self, target: &str, cx: &mut gpui::Context<Self>) {
-        let request_id = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_micros() as u64);
-        self.gx_store.sidebar_ui.take_reveal_request(request_id);
-        self.native_sidebar.handled_reveal = Some(request_id);
+    /// Hands the old page what the jump and its reveal changed (see the module note), and stops
+    /// collecting. Sends nothing when nothing changed.
+    fn gx_store_mirror_slot_jump_to_page(&mut self, cx: &mut gpui::Context<Self>) {
+        let changes = self.gx_store.sidebar_ui.mirror.take().unwrap_or_default();
+        if changes.is_empty() {
+            return;
+        }
         if self.dispatch_gpui_sidebar_host_message(
-            json!({"type": "revealSidebarSession", "sessionId": target, "requestId": request_id}),
+            json!({"type": "sidebarUiMirror", "changes": changes}),
             cx,
         ) {
             self.gx_store.slot_jump.counters.page_told += 1;
@@ -195,7 +196,7 @@ impl GhostexGpuiApp {
     }
 }
 
-/// The counters as both records carry them: 13 keys at depth 2.
+/// The counters as both records carry them: 12 keys at depth 2.
 pub(super) fn slot_jump_counters_json(counters: &SlotJumpCounters) -> Value {
     json!({
         "presses": counters.presses,
@@ -205,7 +206,6 @@ pub(super) fn slot_jump_counters_json(counters: &SlotJumpCounters) -> Value {
         "inProcess": counters.in_process,
         "staged": counters.staged,
         "handedToRuntime": counters.handed_to_runtime,
-        "heldRepeats": counters.held_repeats,
         "reveals": counters.reveals,
         "revealChanges": counters.reveal_changes,
         "pageTold": counters.page_told,

@@ -66,7 +66,7 @@ pub(crate) struct SidebarUiCounters {
     pub(crate) space_memory_writes: u64,
     /// Sections whose chosen Space was dropped because that Space was deleted.
     pub(crate) space_forgets: u64,
-    /// Project slot hotkeys (cmd+1..9) this state answered.
+    /// Project slot hotkeys (cmd+ctrl+1..9 by default) this state answered.
     pub(crate) slot_jumps: u64,
     pub(crate) write_max_us: u64,
     /// Where the slowest write's time went, so a slow one says which step was slow rather than
@@ -119,6 +119,10 @@ pub(crate) struct SidebarUiHost {
     followed_session: Option<String>,
     /// The sidebar's own copy of the project collections, read with the rest of the state.
     pub(super) stored_project_collections: Option<Value>,
+    /// While a change the app makes by itself is being applied (the slot jump), what each intent
+    /// changed, for the old page's copy (`sidebar_ui_mirror_changes`). `None` otherwise, so every
+    /// other intent pays nothing for it.
+    pub(super) mirror: Option<Vec<Value>>,
     pub(super) counters: SidebarUiCounters,
     pub(super) last_error: Option<&'static str>,
 }
@@ -139,6 +143,7 @@ impl Default for SidebarUiHost {
             handled_reveal: None,
             followed_session: None,
             stored_project_collections: None,
+            mirror: None,
             counters: SidebarUiCounters::default(),
             last_error: None,
         }
@@ -375,11 +380,18 @@ impl GhostexGpuiApp {
                 ui.counters.dropped_intents += 1;
             }
         }
+        let mirrored = ui.mirror.is_some().then(|| intent.clone());
         let outcome = ui.store.apply(intent);
         if !outcome.changed {
             return false;
         }
         ui.generation += 1;
+        if let (Some(intent), Some(changes)) = (mirrored, ui.mirror.as_mut()) {
+            changes.extend(ghostex_gx_core::sidebar_ui_mirror_changes(
+                &intent,
+                ui.store.state(),
+            ));
+        }
         if !ui.store.pending().is_empty() {
             self.gx_store_schedule_sidebar_ui_write(cx);
         }
