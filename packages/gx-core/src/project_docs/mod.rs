@@ -11,7 +11,9 @@ mod space_edits;
 mod spaces;
 mod worktree_order;
 
-pub use collection_edits::{create_collection, move_projects_to_collection, reorder_collection_projects};
+pub use collection_edits::{
+    create_collection, move_projects_to_collection, reorder_collection_projects,
+};
 pub use collections::{
     collections_hand_back_script, collections_request_script, CollectionsDocument,
     COLLECTIONS_HAND_OFF_MESSAGE_TYPE, COLLECTIONS_SCRIPT_PLACEHOLDER, COLLECTIONS_SYNC_DELAY_MS,

@@ -10,8 +10,8 @@ mod store;
 
 pub use apply::SnapshotOrigin;
 pub use loaded::LoadedPresentation;
-pub use snapshot_out::{json_stringify, snapshot_storage_json};
 pub(crate) use snapshot_out::js_number;
+pub use snapshot_out::{json_stringify, snapshot_storage_json};
 pub use store::{
     MachinePresentation, PresentationState, PresentationStore, SideState, SideStateUpdate,
 };

@@ -23,25 +23,24 @@ mod rows;
 mod sections;
 pub(crate) mod session_slot;
 mod session_text;
+pub(crate) mod slot_hotkey;
 pub(crate) mod spaces;
 pub(crate) mod tags;
 pub(crate) mod text;
-pub(crate) mod slot_hotkey;
 pub(crate) mod view;
 
+pub use collections::{Collection, CollectionsState};
 pub use inputs::{
-    BrowserTabInput, CloseAfterDoneInput, DelayedSendInput, MachineTabInput,
-    ProjectDiffStats, SectionCollapse, SectionId, SessionSortMode, SidebarCollapseState,
-    SidebarHiddenItems, SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState,
-    UnavailableState, LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED,
-    MAX_RECENT_SPACE_SESSION_IDS,
+    BrowserTabInput, CloseAfterDoneInput, DelayedSendInput, MachineTabInput, ProjectDiffStats,
+    SectionCollapse, SectionId, SessionSortMode, SidebarCollapseState, SidebarHiddenItems,
+    SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState, UnavailableState,
+    LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED, MAX_RECENT_SPACE_SESSION_IDS,
 };
 pub use model::{SidebarUpdateWork, SidebarViewModel};
 pub use ordering::session_is_snoozed;
 pub use reveal::{reveal_plan, space_for_focused_row, FocusedRowSpace, SidebarRevealPlan};
 pub use session_slot::{rendered_session_ids, session_slot_plan, SessionSlotPlan};
 pub use slot_hotkey::{project_slot_plan, ProjectSlotPlan};
-pub use collections::{Collection, CollectionsState};
 pub use spaces::{Space, SpacesState, OTHER_SPACE_ID};
 pub use tags::{TagListItem, TagListItemKind, TagPresentation, UNTAGGED_TAG_FILTER};
 pub use view::{

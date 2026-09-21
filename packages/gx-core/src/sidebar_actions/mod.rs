@@ -41,13 +41,14 @@ mod read_only;
 mod reload;
 mod reload_set;
 mod remote;
-mod remote_machine_settings;
 mod remote_focus;
+mod remote_machine_settings;
 mod resolve;
 mod snooze;
 mod sort;
 mod split;
 
+pub use agent_run::{owns_agent_run_command, plan_agent_run};
 pub use bulk::{
     bulk_request_summary, owns_batch_command, owns_bulk_message, plan_batch, plan_bulk_request,
     BatchPlan, BulkAction, BulkRequest, BULK_MESSAGE_TYPES, BULK_SLEEP_INTERVAL_MS,
@@ -56,6 +57,7 @@ pub use close::{
     apply_close_answer, close_optimistic_follow_ups, owns_close_message, plan_close_request,
     CloseAnswer, CloseFollowUp, CloseRequest,
 };
+pub use delayed_send::{owns_delayed_send_command, plan_delayed_send_action};
 pub use flags::{
     apply_flags_answer, owns_flags_message, plan_flags_request, FlagsFollowUp, FlagsRequest,
     SessionFlags, FLAGS_MESSAGE_TYPES,
@@ -66,6 +68,9 @@ pub use fork::{
 pub use lifecycle::{
     apply_lifecycle_answer, owns_lifecycle_message, plan_lifecycle_request, FocusOptions,
     LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, LIFECYCLE_PATCH_TTL_MS,
+};
+pub use machine_disable::{
+    owns_machine_disable_command, plan_machine_disable, MACHINE_DISABLE_SETTINGS_SOURCE,
 };
 pub use modals::{owns_modal_message, plan_modal_action, rename_seed_title, ModalAction};
 pub use open::{owns_open_command, plan_open_action, OPEN_COMMAND_TYPES};
@@ -86,6 +91,7 @@ pub use remote_focus::{
     plan_remote_focus, remote_focus_group, PreferredInterfaceSettings, RemoteFocusPlan,
     RuntimeActiveGroup, REMOTE_FOCUS_MESSAGE_TYPES, RUNTIME_GROUP_SENT_TRUST_MS,
 };
+pub use remote_machine_settings::normalize_remote_machine_settings;
 pub use resolve::{
     local_project_group_project_id, NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
     NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
@@ -97,9 +103,3 @@ pub use snooze::{
 };
 pub use sort::{plan_sort_action, SORT_ACTIONS};
 pub use split::{owns_split_message, plan_split_right, SplitAction, SplitPlan};
-pub use agent_run::{owns_agent_run_command, plan_agent_run};
-pub use delayed_send::{owns_delayed_send_command, plan_delayed_send_action};
-pub use machine_disable::{
-    owns_machine_disable_command, plan_machine_disable, MACHINE_DISABLE_SETTINGS_SOURCE,
-};
-pub use remote_machine_settings::normalize_remote_machine_settings;
