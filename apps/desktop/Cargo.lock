@@ -2522,6 +2522,7 @@ dependencies = [
  "ghostex-chat-runtime",
  "ghostex-docs",
  "ghostex-editor-client",
+ "ghostex-gx-chat-core",
  "ghostex-gx-client",
  "ghostex-gx-core",
  "ghostex-paths",
@@ -2549,6 +2550,16 @@ dependencies = [
  "velopack",
  "windows-sys 0.61.2",
  "x11rb",
+]
+
+[[package]]
+name = "ghostex-gx-chat-core"
+version = "0.1.0"
+dependencies = [
+ "ghostex-gx-protocol",
+ "markdown",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

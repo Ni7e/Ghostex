@@ -1,4 +1,4 @@
-use ghostex_chat_runtime::ChatRuntime;
+use ghostex_chat_runtime::{ChatRuntime, ReplaySink};
 use serde_json::Value;
 use std::{
     sync::{
@@ -62,7 +62,15 @@ impl ChatRuntimeWorker {
                     let _ = output_tx.send(output);
                     wake();
                 };
-                let mut runtime = match ChatRuntime::new(&config, recording.as_deref()) {
+                // The Rust chat core run beside this one when `native.chat.shadow` is on, fed the
+                // same seam lines the recorder writes (`super::shadow`). `None` when the scenario
+                // is off, and then nothing below it costs anything.
+                let shadow = super::shadow::ShadowHost::start_if_enabled();
+                let shadow_sink = shadow.clone().map(|shadow| -> ReplaySink {
+                    Box::new(move |line: &str| shadow.record(line))
+                });
+                let mut runtime = match ChatRuntime::new(&config, recording.as_deref(), shadow_sink)
+                {
                     Ok(runtime) => runtime,
                     Err(error) => {
                         post(ChatRuntimeOutput::Error(error.to_string()));
@@ -75,6 +83,11 @@ impl ChatRuntimeWorker {
                         .drain()
                     {
                         Ok(output) => {
+                            // The other half of every comparison: the document the live brain just
+                            // drained. Its own `take` record reaches the shadow one call later.
+                            if let Some(shadow) = shadow.as_ref() {
+                                shadow.document(&output);
+                            }
                             *next_wake = output["nextWakeMs"]
                                 .as_u64()
                                 .map(|ms| Instant::now() + Duration::from_millis(ms.max(1)));

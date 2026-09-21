@@ -52,6 +52,7 @@ flate2 = "1"
 futures = "0.3"
 ghostex-paths = { path = "../../packages/paths" }
 ghostex-chat-runtime = { path = "../../packages/chat-runtime" }
+ghostex-gx-chat-core = { path = "../../packages/gx-chat-core" }
 ghostex-gx-client = { path = "../../packages/gx-client" }
 ghostex-gx-core = { path = "../../packages/gx-core" }
 ghostex-agent-sync = { path = "../../packages/agent-sync" }

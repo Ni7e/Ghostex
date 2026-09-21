@@ -92,12 +92,17 @@ pub enum GpuiDiagnosticScenario {
     /// Writes the chat brain's own recording under /tmp, never a support log
     /// (apps/desktop/src/app/native_chat/replay_recording.rs).
     ChatReplay,
+    /// Runs the Rust chat core beside the live QuickJS brain and counts what differs
+    /// (apps/desktop/src/app/native_chat/shadow/). Its records go to the session chat log.
+    ChatShadow,
     ProjectBoard,
     AppModal,
 }
 
 impl GpuiDiagnosticScenario {
-    fn scenario_id(self) -> &'static str {
+    /// The id the settings file spells this scenario with, which is also what
+    /// [`append_for_scenario`] takes for a log whose own scenario is a different one.
+    pub fn scenario_id(self) -> &'static str {
         match self {
             Self::Performance => "gpui.performance",
             Self::HostLifecycle => "native.host.lifecycle",
@@ -107,6 +112,7 @@ impl GpuiDiagnosticScenario {
             Self::TerminalFocus => "native.terminal.focus",
             Self::SessionChat => "gpui.sessionChat.viewState",
             Self::ChatReplay => "native.chat.replay",
+            Self::ChatShadow => "native.chat.shadow",
             Self::ProjectBoard => "native.project.board",
             Self::AppModal => "gpui.app.modal",
         }

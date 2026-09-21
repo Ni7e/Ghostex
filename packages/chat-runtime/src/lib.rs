@@ -28,11 +28,26 @@ pub struct ChatRuntime {
     revision: u64,
 }
 
+/// Where a replay line goes besides the recording file.
+///
+/// The shadow host in `apps/desktop/src/app/native_chat/shadow/` reads the SAME lines the
+/// recorder writes, in memory: one seam produces them, so the two readers can never drift apart
+/// on the format, and the shadow works with the file recorder off. The sink stays on the runtime
+/// thread, so it is neither `Send` nor `Sync`.
+pub type ReplaySink = Box<dyn Fn(&str)>;
+
 impl ChatRuntime {
     /// `replay_recording` is the private JSONL file the `native.chat.replay` diagnostic
     /// scenario asks for. It is installed before `start` so the boot itself is recorded, and a
     /// file that cannot be opened privately fails the runtime rather than recording in the open.
-    pub fn new(config: &Value, replay_recording: Option<&std::path::Path>) -> Result<Self> {
+    /// `replay_sink` is the same stream handed to a reader in memory (`native.chat.shadow`);
+    /// either, both, or neither may be asked for, and with neither the shipped functions are
+    /// untouched.
+    pub fn new(
+        config: &Value,
+        replay_recording: Option<&std::path::Path>,
+        replay_sink: Option<ReplaySink>,
+    ) -> Result<Self> {
         let runtime = Runtime::new().context("create chat runtime")?;
         runtime.set_memory_limit(96 * 1024 * 1024);
         runtime.set_max_stack_size(1024 * 1024);
@@ -44,8 +59,10 @@ impl ChatRuntime {
             revision: 0,
         };
         engine.evaluate(include_str!(concat!(env!("OUT_DIR"), "/chat-runtime.js")))?;
-        if let Some(path) = replay_recording {
-            engine.context.with(|ctx| replay::install(&ctx, path))?;
+        if replay_recording.is_some() || replay_sink.is_some() {
+            engine
+                .context
+                .with(|ctx| replay::install(&ctx, replay_recording, replay_sink))?;
         }
         engine.call("start", &[config.clone()])?;
         Ok(engine)

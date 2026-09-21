@@ -5,7 +5,8 @@
 //! owner-only file under /tmp, which the operating system clears on restart, and the runtime
 //! refuses to record at all when that file cannot be made private. The engine writes through a
 //! host function rather than buffering inside QuickJS so a recording survives a crash of the
-//! chat it is observing.
+//! chat it is observing. The same lines can instead (or also) be handed to a reader in memory,
+//! which is how the shadow host compares the two brains without a file ever being written.
 
 use anyhow::{Context as _, Result};
 use std::cell::RefCell;
@@ -45,15 +46,31 @@ fn open_private(path: &Path) -> Result<File> {
 }
 
 /// Installs the append function and asks the bundle to route its host seam into it.
-pub(crate) fn install(ctx: &rquickjs::Ctx<'_>, path: &Path) -> Result<()> {
-    let file = Rc::new(RefCell::new(open_private(path)?));
+///
+/// `path` is the recording file and `sink` an in-memory reader of the same lines
+/// (`crate::ReplaySink`); at least one of them is present, and both receive every line, so the
+/// shadow host and the recorder can be turned on independently without a second seam.
+pub(crate) fn install(
+    ctx: &rquickjs::Ctx<'_>,
+    path: Option<&Path>,
+    sink: Option<crate::ReplaySink>,
+) -> Result<()> {
+    let file = match path {
+        Some(path) => Some(Rc::new(RefCell::new(open_private(path)?))),
+        None => None,
+    };
     ctx.globals()
         .set(
             "ghostexChatReplayAppend",
             rquickjs::Function::new(ctx.clone(), move |line: String| {
-                let mut file = file.borrow_mut();
-                let _ = file.write_all(line.as_bytes());
-                let _ = file.write_all(b"\n");
+                if let Some(file) = file.as_ref() {
+                    let mut file = file.borrow_mut();
+                    let _ = file.write_all(line.as_bytes());
+                    let _ = file.write_all(b"\n");
+                }
+                if let Some(sink) = sink.as_ref() {
+                    sink(&line);
+                }
             })
             .context("create the chat recording sink")?,
         )

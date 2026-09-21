@@ -52,6 +52,7 @@ mod runtime_worker;
 mod scroll_bottom;
 mod scrollbar;
 mod search;
+mod shadow;
 mod startup_delivery;
 mod status_rows;
 mod subagent_view;
