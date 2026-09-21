@@ -39,6 +39,9 @@ pub(super) struct HostCounters {
     /// Effects this build has no arm for, which is only possible when the core grows a variant:
     /// `Effect` is `#[non_exhaustive]` and `effects::route` spells out every one it knows.
     pub(super) effects_unrouted: u64,
+    /// Host actions the core emits that nothing performs, by name. The names are code constants
+    /// (`effects::UNPERFORMED_HOST_ACTIONS`), never a chat's own data.
+    pub(super) host_actions_dropped: BTreeMap<&'static str, u64>,
 }
 
 /// Throttles the summary and remembers what it last wrote.
@@ -92,6 +95,7 @@ impl HostDiagnostics {
                 "storageRefused": counters.storage_refused,
                 "actionsUnrouted": counters.actions_unrouted,
                 "effectsUnrouted": counters.effects_unrouted,
+                "hostActionsDropped": counters.host_actions_dropped,
             }),
         );
     }

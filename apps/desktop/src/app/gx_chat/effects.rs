@@ -15,7 +15,7 @@
 //! second client against the same daemon, not a reuse of the first. The brain moves first; the
 //! transport follows when `gx-client` grows a chat subscription.
 
-use ghostex_gx_chat_core::{Effect, HostRequest, OpenTarget, RequestKind};
+use ghostex_gx_chat_core::{Effect, HostRequest, OpenTarget, RequestKind, UserAction};
 use serde_json::{Map, Value};
 
 /// Who performs one effect.
@@ -24,7 +24,26 @@ pub(super) enum Routed {
     Host(Effect),
     /// The view, through the frame's `requests` array.
     Renderer(Box<HostRequest>),
+    /// The core itself, as a gesture it asked to have replayed at it.
+    SelfAction(Box<UserAction>),
 }
+
+/// The host actions the core emits that nothing performs, and why each is here.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// These three are the core asking ITSELF, the way `native-host.ts` called its own helper: the
+/// TypeScript never pushed a request for any of them. `selectOption` is the same shape and is
+/// replayed into the core as a gesture, but these three cannot be: `selectModel` and
+/// `suggestionSend` have no `ActionKind`, and `switchDraftAgentForProvider` needs the agent id the
+/// core did not look up (`native-host.ts` resolves the provider to a draft agent and dispatches
+/// `switchDraftAgent`). They reach `receive_session_chat_host_action`, which has no arm for any of
+/// them and drops them. Counting them by name is how the gap stays visible until family e closes
+/// it; the names are code constants, never a user's data.
+pub(super) const UNPERFORMED_HOST_ACTIONS: &[&str] = &[
+    "selectModel",
+    "suggestionSend",
+    "switchDraftAgentForProvider",
+];
 
 /// Sorts one effect into its performer.
 ///
@@ -138,6 +157,21 @@ pub(super) fn route(effect: Effect) -> Routed {
                 method: String::new(),
                 params,
             }))
+        }
+        // `selectOption` is a gesture the core asked to have replayed at itself: its params are
+        // already a `UserAction`, `"type"` and all, because `native-host.ts` called its own
+        // `action` switch here rather than pushing a request. Feeding it back is what makes a model
+        // menu's option pick land; forwarding it to the app shell would drop it.
+        Effect::HostAction { action, params } if action == "selectOption" => {
+            match serde_json::from_value::<UserAction>(*params) {
+                Ok(action) => Routed::SelfAction(Box::new(action)),
+                Err(_) => Routed::Renderer(Box::new(HostRequest {
+                    id: None,
+                    kind: RequestKind::Other(UNROUTED.to_string()),
+                    method: String::new(),
+                    params: Map::new(),
+                })),
+            }
         }
         Effect::HostAction { action, params } => {
             Routed::Renderer(Box::new(dispatched(&action, object(*params))))

@@ -401,6 +401,7 @@ fn drive(world: &mut World, key: &str, events: Vec<Event>) {
                     .effects
                     .entry(effect_name(&effect))
                     .or_insert(0) += 1;
+                note_unperformed(world, &effect);
                 match effects::route(effect) {
                     Routed::Renderer(request) => {
                         if request.kind
@@ -413,6 +414,9 @@ fn drive(world: &mut World, key: &str, events: Vec<Event>) {
                         note_draft_save(world, &session_key, &request);
                         requests.push(adopt_park_answer(world, key, *request));
                     }
+                    // A gesture the core asked to have replayed at itself, which joins this
+                    // round's answers so it settles inside the same drive pass.
+                    Routed::SelfAction(action) => answers.push(Event::Action(action)),
                     Routed::Host(effect) => {
                         perform(
                             world,
@@ -750,6 +754,24 @@ fn effect_name(effect: &Effect) -> &'static str {
         Effect::HostAction { .. } => "hostAction",
         _ => "unrouted",
     }
+}
+
+/// Counts a host action nothing performs, by its own name.
+///
+/// The three in [`effects::UNPERFORMED_HOST_ACTIONS`] are the core calling itself through a door
+/// that does not exist yet. The counter is what makes that visible in `gxChat.host.summary` rather
+/// than leaving a model pick, a slash-command send or an agent hand-off silently doing nothing.
+fn note_unperformed(world: &mut World, effect: &Effect) {
+    let Effect::HostAction { action, .. } = effect else {
+        return;
+    };
+    let Some(name) = effects::UNPERFORMED_HOST_ACTIONS
+        .iter()
+        .find(|known| *known == action)
+    else {
+        return;
+    };
+    *world.counters.host_actions_dropped.entry(name).or_insert(0) += 1;
 }
 
 /// Writes the durable save outbox and the recovery checkpoint a draft save owes.
