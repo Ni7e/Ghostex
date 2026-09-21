@@ -22,7 +22,6 @@ const gpuiRoot = fileURLToPath(new URL('.', import.meta.url));
 const repoRoot = path.resolve(gpuiRoot, '..', '..');
 const sidebarOutDir = path.resolve(gpuiRoot, 'dist/sidebar');
 const cefHtmlEntries = [
-  'index.html',
   'find.html',
   'kanban.html',
   'manage.html',
@@ -35,7 +34,6 @@ const cefHtmlEntries = [
  * GPUI CEF entry modules should describe the stable surface they mount, not the historical porting phase. Keep this explicit entry map as the source of truth for the sidebar, Kanban, and Manage bundle inputs so HTML wrappers, Vite output, and packaged resources stay aligned.
  */
 const cefHtmlEntryScripts = {
-  'index.html': path.resolve(gpuiRoot, 'sidebar/main.tsx'),
   'find.html': path.resolve(gpuiRoot, 'sidebar/find-main.tsx'),
   'kanban.html': path.resolve(gpuiRoot, 'sidebar/kanban-main.tsx'),
   'manage.html': path.resolve(gpuiRoot, 'sidebar/manage-main.tsx'),
@@ -401,10 +399,9 @@ export default defineConfig({
     rolldownOptions: {
       /*
        * CDXC:CefRuntime 2026-06-14-12:50:
-       * The GPUI shell resolves the bundled sidebar through Contents/Resources/sidebar/index.html. Keep the Vite HTML entry at the package root so production-style packaging and local development share that single entry URL.
+       * The GPUI shell resolves the bundled pages through Contents/Resources/sidebar/<entry>.html. Keep the Vite HTML entries at the package root so production-style packaging and local development share those URLs.
        */
       input: {
-        index: path.resolve(gpuiRoot, 'index.html'),
         find: path.resolve(gpuiRoot, 'find.html'),
         kanban: path.resolve(gpuiRoot, 'kanban.html'),
         manage: path.resolve(gpuiRoot, 'manage.html'),

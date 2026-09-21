@@ -6,12 +6,8 @@
 // C1 wave-1 extraction: stateless helper functions moved verbatim out of
 // main.rs (pure move, no logic changes). See docs/2026-08-22/repo-restructure/SPLITS.md C1.
 
-use std::{env, path::PathBuf, sync::atomic::Ordering, time::Duration};
+use std::{sync::atomic::Ordering, time::Duration};
 
-// RefCell backs cross-platform runtime state (window frame persistence), not
-// just the macOS-only shims that first introduced the import.
-
-use anyhow::{Context as _, Result};
 use gpui::{Hsla, rgb};
 
 use crate::app::helpers::*;
@@ -46,48 +42,6 @@ pub(crate) fn sidebar_divider_line_color() -> Hsla {
 /// User: the resize drag handle's hovered/active color is light blue in light mode.
 pub(crate) fn sidebar_divider_hover_line_color() -> Hsla {
     chrome_color(0xffffff, 0x93c5fd).into()
-}
-
-pub(crate) fn sidebar_url() -> Result<String> {
-    if let Ok(value) = env::var("GHOSTEX_GPUI_SIDEBAR_URL") {
-        if !value.trim().is_empty() {
-            return Ok(value);
-        }
-    }
-
-    let executable = env::current_exe().context("failed to resolve current executable")?;
-    if let Some(bundle_root) = find_app_bundle_root(&executable) {
-        let bundled = bundle_root.join("Contents/Resources/sidebar/index.html");
-        if bundled.exists() {
-            return Ok(file_url(&bundled));
-        }
-    }
-
-    /*
-    CDXC:PlatformSupport 2026-07-04:
-    Packaged Windows and Linux layouts have no .app bundle: the packaging
-    scripts (build-windows-app.ps1 / build-linux-app.sh) stage the sidebar at
-    dist/sidebar beside the executable. That directory name is load-bearing —
-    the CEF helper's first-party entry-URL check accepts only
-    /Contents/Resources/sidebar/ or /dist/sidebar/ file URLs.
-    */
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    if let Some(exe_dir) = executable.parent() {
-        let packaged = exe_dir.join("dist/sidebar/index.html");
-        if packaged.exists() {
-            return Ok(file_url(&packaged));
-        }
-    }
-
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let local = manifest_dir.join("dist/sidebar/index.html");
-    if local.exists() {
-        return Ok(file_url(&local));
-    }
-
-    anyhow::bail!(
-        "sidebar bundle was not found; run gpui/scripts/build-macos-app.sh or bunx vite build --config gpui/vite.config.ts"
-    );
 }
 
 pub(crate) fn gpui_app_modal_sidebar_session_id_allowed(value: &str) -> bool {

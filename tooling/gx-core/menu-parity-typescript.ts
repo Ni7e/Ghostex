@@ -1,12 +1,14 @@
 /**
- * The TypeScript half of the menu parity harness: drives the real
- * `apps/desktop/sidebar/native-sidebar/` builders over a recorded presentation and returns their
- * menus in the shape `menu-parity.ts` diffs.
+ * The TypeScript half of the menu parity harness: drives the sidebar page's own menu builders over
+ * a recorded presentation and returns their menus in the shape `menu-parity.ts` diffs.
  *
  * The builders read the sidebar zustand store and a `NativeSidebarUiState`, so both are populated
- * here exactly as the running app populates them. Nothing is reimplemented: a difference the diff
- * reports is a difference between the shipped TypeScript and the Rust port, not between two
- * rewrites.
+ * here exactly as the running app populated them. Nothing is reimplemented: a difference the diff
+ * reports is a difference between that TypeScript and the Rust port, not between two rewrites.
+ *
+ * The builders are the FROZEN copies in `sidebar-page-frozen/` since the page was deleted on
+ * 2026-09-21 (M4d part 2 step 8), so a clean run proves Rust still matches the behaviour the app
+ * shipped that day rather than that it matches today's app.
  */
 // First, so the client-storage adapter finds a `Storage` before any module reads one.
 import { resetBrowserStorage, writeStorageItem } from './browser-shim';
@@ -25,15 +27,15 @@ import { parseSidebarProjectCollectionsFromGxserver } from '@/packages/core-ui/p
 import { parseSidebarSpacesFromGxserver } from '@/packages/core-ui/spaces';
 import { COLORED_AGENT_LOGOS } from '@/packages/core-ui/agent-logos';
 import { SIDEBAR_KEEP_AWAKE_RUNTIME_STORAGE_KEY } from '@/packages/core-ui/sidebar-app/collapse-state';
-import { NativeSidebarUiState } from '@/apps/desktop/sidebar/native-sidebar/ui-state';
-import { createNativeSessionActions } from '@/apps/desktop/sidebar/native-sidebar/session-menu';
-import { createNativeProjectMenu } from '@/apps/desktop/sidebar/native-sidebar/project-menu';
-import { createNativeCollectionMenu } from '@/apps/desktop/sidebar/native-sidebar/collection-menu';
-import { createNativeBulkMenu } from '@/apps/desktop/sidebar/native-sidebar/bulk-menu';
-import { createNativeProjectHeaderActions } from '@/apps/desktop/sidebar/native-sidebar/project-actions';
-import { nativeAgentLauncherItems } from '@/apps/desktop/sidebar/native-sidebar/agent-launcher';
-import { createNativeNavigation } from '@/apps/desktop/sidebar/native-sidebar/navigation';
-import { nativeSidebarSettings } from '@/apps/desktop/sidebar/native-sidebar/settings';
+import { NativeSidebarUiState } from '@/tooling/gx-core/sidebar-page-frozen/ui-state';
+import { createNativeSessionActions } from '@/tooling/gx-core/sidebar-page-frozen/session-menu';
+import { createNativeProjectMenu } from '@/tooling/gx-core/sidebar-page-frozen/project-menu';
+import { createNativeCollectionMenu } from '@/tooling/gx-core/sidebar-page-frozen/collection-menu';
+import { createNativeBulkMenu } from '@/tooling/gx-core/sidebar-page-frozen/bulk-menu';
+import { createNativeProjectHeaderActions } from '@/tooling/gx-core/sidebar-page-frozen/project-actions';
+import { nativeAgentLauncherItems } from '@/tooling/gx-core/sidebar-page-frozen/agent-launcher';
+import { createNativeNavigation } from '@/tooling/gx-core/sidebar-page-frozen/navigation';
+import { nativeSidebarSettings } from '@/tooling/gx-core/sidebar-page-frozen/settings';
 import type { SidebarSessionGroup, SidebarSessionItem } from '@/packages/shared/session-grid-contract';
 
 type Json = Record<string, any>;

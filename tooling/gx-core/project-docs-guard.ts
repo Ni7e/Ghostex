@@ -290,8 +290,8 @@ async function runRoundTrip(
   requested: number;
   differences: string[];
 }> {
-  const { NativeSidebarMetadata } = await import('@/apps/desktop/sidebar/native-sidebar/metadata');
-  const { saveNativeCollections } = await import('@/apps/desktop/sidebar/native-sidebar/membership');
+  const { NativeSidebarMetadata } = await import('@/tooling/gx-core/sidebar-page-frozen/metadata');
+  const { saveNativeCollections } = await import('@/tooling/gx-core/sidebar-page-frozen/membership');
   const differences: string[] = [];
   resetBrowserStorage();
   const posts: Json[] = [];

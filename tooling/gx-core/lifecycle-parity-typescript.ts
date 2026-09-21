@@ -496,7 +496,7 @@ function flagsRow(presentation: Json, reference: { projectId: string; sessionId:
  */
 export async function runTypeScriptModals(scenario: Json, rustActions: Json): Promise<Json[]> {
   resetBrowserStorage();
-  const { runNativeSessionAction } = await import('@/apps/desktop/sidebar/native-sidebar/session-actions');
+  const { runNativeSessionAction } = await import('@/tooling/gx-core/sidebar-page-frozen/session-actions');
   const { sidebarStore } = await import('@/packages/core-ui/sidebar-store-model');
   const out: Json[] = [];
   for (const entry of (rustActions.modals ?? []) as Json[]) {
@@ -874,7 +874,7 @@ export function runTypeScriptSnoozeBoundary(rustActions: Json): Json[] {
  */
 export async function runTypeScriptSnoozeActions(rustActions: Json): Promise<Json[]> {
   resetBrowserStorage();
-  const { runNativeSessionAction } = await import('@/apps/desktop/sidebar/native-sidebar/session-actions');
+  const { runNativeSessionAction } = await import('@/tooling/gx-core/sidebar-page-frozen/session-actions');
   const { sidebarStore } = await import('@/packages/core-ui/sidebar-store-model');
   const out: Json[] = [];
   for (const entry of (rustActions.snoozeActions ?? []) as Json[]) {
@@ -1007,10 +1007,10 @@ export function runTypeScriptTitleRule(rustActions: Json): (string | null)[] {
  */
 export async function runTypeScriptOpen(rustActions: Json): Promise<Json[]> {
   resetBrowserStorage();
-  const { runNativeSidebarAction } = await import('@/apps/desktop/sidebar/native-sidebar/navigation');
-  const { runNativeProjectAction } = await import('@/apps/desktop/sidebar/native-sidebar/project-actions');
-  const { editNativeSidebarSpace } = await import('@/apps/desktop/sidebar/native-sidebar/space-navigation');
-  const { NativeSidebarUiState } = await import('@/apps/desktop/sidebar/native-sidebar/ui-state');
+  const { runNativeSidebarAction } = await import('@/tooling/gx-core/sidebar-page-frozen/navigation');
+  const { runNativeProjectAction } = await import('@/tooling/gx-core/sidebar-page-frozen/project-actions');
+  const { editNativeSidebarSpace } = await import('@/tooling/gx-core/sidebar-page-frozen/space-navigation');
+  const { NativeSidebarUiState } = await import('@/tooling/gx-core/sidebar-page-frozen/ui-state');
   const { sidebarStore } = await import('@/packages/core-ui/sidebar-store-model');
   const out: Json[] = [];
   for (const entry of (rustActions.open ?? []) as Json[]) {

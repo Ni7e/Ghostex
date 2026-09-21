@@ -22,7 +22,7 @@
 // First, so the client-storage adapter finds a `Storage` before any module reads one.
 import { resetBrowserStorage } from './browser-shim';
 import { GpuiSidebarRuntime } from '@/apps/desktop/sidebar/gxserver-runtime/core';
-import { reorderNativeSidebar } from '@/apps/desktop/sidebar/native-sidebar/reorder';
+import { reorderNativeSidebar } from '@/tooling/gx-core/sidebar-page-frozen/reorder';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import { parseGpuiWorkspaceSessionGroupsState } from '@/apps/desktop/sidebar/workspace-session-groups';
 

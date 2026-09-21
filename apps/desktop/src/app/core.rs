@@ -44,7 +44,6 @@ use crate::*;
 pub struct GhostexGpuiApp {
     pub(crate) parent_ns_view: *mut std::ffi::c_void,
     pub(crate) project_name: String,
-    pub(crate) sidebar_url: String,
     pub(crate) browser_url: String,
     pub(crate) active_mode: TitlebarMode,
     pub(crate) shell_focus: ShellFocusTarget,

@@ -610,6 +610,14 @@ pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_SPECS: [AppModalHostBridgeSurface
         extra_info_value: APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW,
         exposes_native_window_identity: true,
     },
+    /*
+    CDXC:Sidebar 2026-09-21 WHY:
+    Nothing loads index.html any more: the sidebar is native Rust, its page was
+    deleted with M4d part 2, and the HTML entry went with it. The surface is
+    kept because the helper's editable-focus grant still asks whether a frame is
+    the sidebar's; it now answers no for every frame, which is correct. Delete it
+    together with that focus path, not on its own.
+    */
     AppModalHostBridgeSurfaceSpec {
         surface: AppModalHostBridgeSurface::Sidebar,
         entry_file_name: "index.html",

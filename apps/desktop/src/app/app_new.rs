@@ -15,7 +15,6 @@ use std::cell::Cell;
 
 use crate::terminal_surface_host::NativeTerminalSurfaceHost;
 use crate::terminal_surface_lifecycle::NativeTerminalSurfaceLifecycleState;
-use anyhow::Context as _;
 use anyhow::Result;
 use gpui::App;
 use gpui::AppContext as _;
@@ -35,7 +34,6 @@ impl GhostexGpuiApp {
         apply_gpui_component_theme(cx);
         let parent = cef_parent_native_view(window)?;
         let project_name = titlebar_project_label_from_latest_sidebar_snapshot(None);
-        let sidebar_url = sidebar_url().context("failed to resolve sidebar bundle URL")?;
         let shared_settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let sidebar_runtime_settings_snapshot =
             sidebar_runtime_settings_snapshot_from_shared_settings(&shared_settings_snapshot);
@@ -127,7 +125,6 @@ impl GhostexGpuiApp {
             let mut this = Self {
                 parent_ns_view: parent,
                 project_name,
-                sidebar_url,
                 browser_url,
                 active_mode: shell_layout_state.active_mode,
                 shell_focus: shell_layout_state.shell_focus,

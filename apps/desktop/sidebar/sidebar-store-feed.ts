@@ -3,10 +3,10 @@ import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 
 /**
  * CDXC:Sidebar 2026-09-21 WHY:
- * This is the only feed of the zustand `sidebarStore`, and Quick Access and native chat settings
- * read that store. It used to live in `native-sidebar/model.ts`, which is deleted with the
- * TypeScript sidebar, so it moved out here unchanged rather than dying with the list it used to
- * project.
+ * This is the only feed of the zustand `sidebarStore`, and Quick Access, native chat settings and
+ * the runtime facts channel's HUD all read that store. It used to live inside the TypeScript
+ * sidebar page, which is deleted, so it moved out here unchanged rather than dying with the list it
+ * used to project.
  */
 export function applyNativeSidebarMessage(message: ExtensionToSidebarMessage): void {
   const state = sidebarStore.getState();
@@ -40,4 +40,22 @@ export function applyNativeSidebarMessage(message: ExtensionToSidebarMessage): v
       state.setDaemonSessionsState(message);
       break;
   }
+}
+
+/**
+ * Subscribes the store to the runtime's message source. This is all that is left of the sidebar
+ * page's `connectNativeSidebar`: the list, its menus, its projection and its publisher are the Rust
+ * store's since M4d part 2, and the store fed here is only what Quick Access, native chat settings
+ * and the runtime facts channel read.
+ */
+export function connectSidebarStoreFeed(messageSource: {
+  addEventListener: (type: string, listener: (event: Event) => void) => void;
+  removeEventListener: (type: string, listener: (event: Event) => void) => void;
+}): () => void {
+  const receive = (event: Event) => {
+    if (!(event instanceof MessageEvent)) return;
+    applyNativeSidebarMessage(event.data as ExtensionToSidebarMessage);
+  };
+  messageSource.addEventListener('message', receive);
+  return () => messageSource.removeEventListener('message', receive);
 }

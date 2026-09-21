@@ -77,10 +77,10 @@ pub(crate) fn gpui_cef_html_entry_url(env_var: &str, entry_file_name: &str) -> R
     /*
     CDXC:PlatformSupport 2026-08-04:
     Packaged Windows and Linux builds stage every first-party CEF entry in
-    dist/sidebar beside the executable, just like sidebar_url's packaged
-    lookup. Resolve that directory before the compile-time checkout path so an
-    installed Ghostex never loads modal-host, titlebar-host, Kanban, Manage, or
-    Chat artifacts from the source tree that happened to build the binary.
+    dist/sidebar beside the executable. Resolve that directory before the
+    compile-time checkout path so an installed Ghostex never loads modal-host,
+    titlebar-host, Kanban, Manage, or Chat artifacts from the source tree that
+    happened to build the binary.
     */
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     if let Some(exe_dir) = executable.parent() {

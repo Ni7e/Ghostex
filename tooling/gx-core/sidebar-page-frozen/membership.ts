@@ -1,3 +1,10 @@
+/**
+ * FROZEN copy of the TypeScript sidebar page, which was deleted on 2026-09-21 (M4d part 2). It is
+ * kept only so the parity gates beside it still have the behaviour the app shipped on that date to
+ * compare the Rust store against: a clean run proves Rust still matches THAT, not that it matches
+ * the app. Never edit this file to make a gate pass; change the Rust and re-record, or delete the
+ * gate.
+ */
 import {
   createSidebarProjectCollection,
   moveProjectsToSidebarCollection,
