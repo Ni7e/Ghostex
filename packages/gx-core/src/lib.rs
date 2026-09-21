@@ -109,7 +109,7 @@ pub use crate::sidebar_ui::{
 };
 pub use crate::sidebar_view::{
     project_slot_plan, reveal_plan, session_is_snoozed, space_for_focused_row, BrowserTabInput,
-    BrowserTabsInput, CloseAfterDoneInput, Collection, CollectionView, CollectionsState,
+    CloseAfterDoneInput, Collection, CollectionView, CollectionsState,
     DelayedSendInput, DelayedSendView,
     EmptyState, FocusedRowSpace, GroupCore, GroupSummary, GroupView, LabelDeadline,
     MachineSummary,

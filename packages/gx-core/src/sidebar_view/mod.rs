@@ -29,7 +29,7 @@ pub(crate) mod slot_hotkey;
 pub(crate) mod view;
 
 pub use inputs::{
-    BrowserTabInput, BrowserTabsInput, CloseAfterDoneInput, DelayedSendInput, MachineTabInput,
+    BrowserTabInput, CloseAfterDoneInput, DelayedSendInput, MachineTabInput,
     ProjectDiffStats, SectionCollapse, SectionId, SessionSortMode, SidebarCollapseState,
     SidebarHiddenItems, SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState,
     UnavailableState, LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED,

@@ -109,13 +109,12 @@ fn ids(check: &dyn Fn(&str, bool, String)) {
     );
     // The app's browser tabs name a remote project by its machine-scoped id.
     let mut with_tab = remote_inputs();
-    with_tab.host.browser_tabs =
-        ghostex_gx_core::BrowserTabsInput::supplied(vec![ghostex_gx_core::BrowserTabInput {
-            project_id: format!("remote:{MACHINE}:project:R1"),
-            tab_id: "tab-1".to_string(),
-            title: "Docs".to_string(),
-            ..ghostex_gx_core::BrowserTabInput::default()
-        }]);
+    with_tab.host.browser_tabs = vec![ghostex_gx_core::BrowserTabInput {
+        project_id: format!("remote:{MACHINE}:project:R1"),
+        tab_id: "tab-1".to_string(),
+        title: "Docs".to_string(),
+        ..ghostex_gx_core::BrowserTabInput::default()
+    }];
     let view = remote_view(&core, with_tab);
     let rows = view
         .groups
@@ -142,13 +141,12 @@ fn ids(check: &dyn Fn(&str, bool, String)) {
     );
     // And a tab named by the RAW project id belongs to no machine's list.
     let mut wrong_tab = remote_inputs();
-    wrong_tab.host.browser_tabs =
-        ghostex_gx_core::BrowserTabsInput::supplied(vec![ghostex_gx_core::BrowserTabInput {
-            project_id: "R1".to_string(),
-            tab_id: "tab-2".to_string(),
-            title: "Docs".to_string(),
-            ..ghostex_gx_core::BrowserTabInput::default()
-        }]);
+    wrong_tab.host.browser_tabs = vec![ghostex_gx_core::BrowserTabInput {
+        project_id: "R1".to_string(),
+        tab_id: "tab-2".to_string(),
+        title: "Docs".to_string(),
+        ..ghostex_gx_core::BrowserTabInput::default()
+    }];
     let view = remote_view(&core, wrong_tab);
     check(
         "a tab named by the raw project id is not spliced in",

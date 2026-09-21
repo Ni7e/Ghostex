@@ -28,7 +28,7 @@ use std::process::ExitCode;
 
 use ghostex_gx_core::{
     plan_bulk_request, plan_remote_session_action, reload_continues_after, Core, LifecycleAnswer,
-    RemoteCallMode, RemoteSessionPlan, RemoteStep, SidebarInputs,
+    RemoteCallMode, RemoteSessionPlan, RemoteStep,
 };
 use serde_json::{json, Value};
 
@@ -79,7 +79,6 @@ fn main() -> ExitCode {
     .map(|answer| json!({ "answer": answer.as_str(), "continues": reload_continues_after(answer) }))
     .collect();
     let core = Core::new();
-    let inputs = SidebarInputs::default();
     let bulk_waits: Vec<Value> = [
         json!({ "type": "setSessionsSleeping", "sessionIds": ["a", "b", "c"], "sleeping": true }),
         json!({ "type": "setSessionsSleeping", "sessionIds": ["a", "b", "c"], "sleeping": false }),
@@ -87,7 +86,7 @@ fn main() -> ExitCode {
     ]
     .into_iter()
     .map(|payload| {
-        let request = plan_bulk_request(&core, &inputs, &payload);
+        let request = plan_bulk_request(&core, &payload);
         json!({
             "payload": payload,
             "waitsForEach": request.as_ref().map(|request| request.waits_for_each()),

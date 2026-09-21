@@ -119,12 +119,11 @@ impl GhostexGpuiApp {
             self.gx_store.sidebar_bulk.declined_source += 1;
             return false;
         }
-        // A set that would include a browser row, a remote group and a user-made session group are
-        // refused inside the planner, each for a reason written down there.
-        let planned = {
-            let store = &self.gx_store;
-            plan_bulk_request(&store.core, &store.sidebar_list.last_inputs, message)
-        };
+        // A remote group and a user-made session group are refused inside the planner, each for a
+        // reason written down there. A project's app tabs are not part of these payloads any more
+        // (`CDXC:SessionSleep 2026-09-21 DECISION` on `plan_bulk_request`), so nothing here reads
+        // or needs the app-tab list.
+        let planned = plan_bulk_request(&self.gx_store.core, message);
         let Some(request) = planned else {
             return false;
         };

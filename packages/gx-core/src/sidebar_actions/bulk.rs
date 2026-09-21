@@ -35,7 +35,6 @@ use serde_json::{json, Map, Value};
 
 use crate::core::Core;
 use crate::keys::{ProjectKey, SessionKey};
-use crate::sidebar_view::SidebarInputs;
 
 use super::resolve::text_field;
 
@@ -176,19 +175,19 @@ pub fn owns_batch_command(command: &Value) -> bool {
 
 /// The plural payloads, or `None` when this file does not own one.
 ///
+/// CDXC:SessionSleep 2026-09-21 DECISION:
+/// Asked whether Sleep, Wake, Sleep Inactive and Close Inactive on a whole project should also
+/// affect that project's browser tabs, the user chose SESSIONS ONLY: "Project actions touch only
+/// the project's sessions; browser tabs are managed from the view tab strip, where they live now."
+/// So these four sets are the project's daemon rows and nothing else, on this computer and on a
+/// remote machine, in the store and in the old runtime alike. This supersedes the browser hand-off
+/// refusal of 2026-09-20 and its `BrowserTabsInput` "not supplied refuses" guard, both removed: the
+/// payloads no longer read an app-tab list, so there is nothing for a missing one to be mistaken
+/// for. Wake used to open each sleeping tab in the Browser view one after another, which is what
+/// "waking" a tab meant there.
+///
 /// Refused, with the reason at each refusal:
 ///
-/// - **A set that would include a browser row.** Every project-scoped payload here starts from
-///   `this.browserTabs` and sleeps or closes the project's app tabs alongside its sessions, through
-///   the browser bridge and not through the daemon. The store knows which tabs a project has but
-///   the host cannot reach that bridge from this path (it needs a `Window`), so a payload whose set
-///   would contain even one is handed over WHOLE rather than performed in half: half of a Sleep All
-///   is worse than none, and the old runtime still does all of it.
-/// - **A host that does not supply the app-tab list at all**, which is not the same as a host that
-///   says there are none. The answer decides whether a payload is performed, so a question the host
-///   never answered must not be read as a "no": the desktop host stopped filling it on 2026-09-20
-///   while the old runtime's own `browserTabs` still lists tabs, and reading absence as emptiness
-///   would put a project's sessions to sleep and leave its app tabs awake.
 /// - **A remote group**, which needs that machine's tunnel.
 /// - **A user-made session group** (`gpui-wsg:`), whose membership is the workspace session groups
 ///   document, the fourth client-storage key with its own writer and its own pending-push guard.
@@ -196,11 +195,12 @@ pub fn owns_batch_command(command: &Value) -> bool {
 /// - **An explicit id list naming a row this store cannot resolve** is NOT refused: the plural
 ///   payloads parse each id independently and the single-session path answers each one, exactly as
 ///   the fan-out does there.
-pub fn plan_bulk_request(
-    core: &Core,
-    inputs: &SidebarInputs,
-    message: &Value,
-) -> Option<BulkRequest> {
+///
+/// SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/auto-sleep.ts (`setGroupSleeping`,
+/// `collectInactiveProjectSessionIds`, `wakeProjectSleepingSessions`, which lost the same legs in
+/// the same change and must keep answering these four payloads the same way while they still reach
+/// it), apps/desktop/src/app/gx_store/sidebar_bulk.rs.
+pub fn plan_bulk_request(core: &Core, message: &Value) -> Option<BulkRequest> {
     match text_field(message, "type")? {
         // An explicit list from a multi-selection. The ids are the menu's own and are fanned out
         // untouched; only the direction decides the pacing.
@@ -220,9 +220,6 @@ pub fn plan_bulk_request(
         // The project-scoped ones resolve their own set.
         kind => {
             let project = local_project_of_group(message)?;
-            if !project_tabs_known_absent(inputs, &project.project_id) {
-                return None;
-            }
             // `if (!projectId || !this.presentation) return`. Three of the four payloads would
             // answer a machine with no presentation with an empty set, which is what the early
             // return does anyway, but `wakeProjectSleepingSessions` moves the active project FIRST
@@ -318,25 +315,6 @@ fn local_project_of_group(message: &Value) -> Option<ProjectKey> {
     let group_id = text_field(message, "groupId")?;
     let project = ProjectKey::parse_sidebar_group_id(group_id)?;
     project.machine.is_local().then_some(project)
-}
-
-/// Whether the host has told us this project has NO app tabs. Three answers, and only this one
-/// lets the payload be performed.
-///
-/// The TypeScript's sets filter on the tab's own state (sleeping, visible) per payload, but this is
-/// a refusal and not a set, so the question is only whether any exist. It is asked in the positive
-/// ("known absent") on purpose: the two ways of not knowing, a host that supplies nothing and a
-/// host that lists a tab, both have to refuse, and a predicate named for the tab's presence invites
-/// the one caller it has to write `!has_tab` and turn silence into a "no".
-///
-/// The list it reads is `SidebarInputs::host.browser_tabs`, and the old runtime's own
-/// `this.browserTabs` is a SEPARATE list that no change here empties. So a host that stops feeding
-/// this one does not stop the old runtime from sleeping a project's app tabs: it stops this side
-/// from knowing they exist. If the tabs move off the sidebar, this predicate needs whatever list
-/// replaces them, not a removal.
-fn project_tabs_known_absent(inputs: &SidebarInputs, project_id: &str) -> bool {
-    let tabs = &inputs.host.browser_tabs;
-    tabs.is_supplied() && !tabs.iter().any(|tab| tab.project_id == project_id)
 }
 
 /// `isGpuiInactiveProjectPresentationSession`: awake, and neither working nor waiting on the user.

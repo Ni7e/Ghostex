@@ -17,7 +17,6 @@ import { createGpuiSidebarSettings } from './helpers/bootstrap';
 import { gpuiBrowserSidebarSessionId } from './helpers/browser-tabs';
 import { isGpuiInactiveProjectPresentationSession } from './helpers/close-after-done';
 import {
-  createGpuiRemotePresentationProjectId,
   createGpuiRemotePresentationSessionId,
   parseGpuiRemotePresentationGroupId,
   parseGpuiRemotePresentationProjectId,
@@ -176,6 +175,17 @@ export const gpuiSidebarRuntimeAutoSleepMethods = {
     await this.setSessionsSleeping(sessionIds, true);
   },
 
+  /*
+  The four project-scoped payloads below (`setGroupSleeping`,
+  `collectInactiveProjectSessionIds` for Sleep Inactive and Close Inactive, and
+  `wakeProjectSleepingSessions`) act on the project's SESSIONS only. They used to
+  sleep, wake or close the project's app tabs alongside them; see the user's
+  decision on `plan_bulk_request` in packages/gx-core/src/sidebar_actions/bulk.rs,
+  which this half has to keep matching for as long as a payload still reaches it
+  (a machine whose rows the store has not loaded, and any leg not yet ported).
+  The titlebar sweep and the Running Sessions stop above are NOT project actions
+  and still include app tabs.
+  */
   async setGroupSleeping(this: GpuiSidebarRuntime, groupId: string, sleeping: boolean): Promise<void> {
     const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
     if (subgroup) {
@@ -211,20 +221,14 @@ export const gpuiSidebarRuntimeAutoSleepMethods = {
     const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
     if (remoteGroup) {
       const presentation = this.remotePresentations.get(remoteGroup.machineId);
-      const scopedProjectId = createGpuiRemotePresentationProjectId(remoteGroup.machineId, remoteGroup.projectId);
-      const sessionIds = this.browserTabs
-        .filter((tab) => tab.projectId === scopedProjectId && tab.isSleeping === !sleeping)
-        .map(gpuiBrowserSidebarSessionId)
-        .concat(
-          (presentation?.sessions ?? [])
-            .filter(
-              (session) =>
-                session.projectId === remoteGroup.projectId &&
-                session.lifecycleState === (sleeping ? 'running' : 'sleeping')
-            )
-            .map((session) =>
-              createGpuiRemotePresentationSessionId(remoteGroup.machineId, remoteGroup.projectId, session.sessionId)
-            )
+      const sessionIds = (presentation?.sessions ?? [])
+        .filter(
+          (session) =>
+            session.projectId === remoteGroup.projectId &&
+            session.lifecycleState === (sleeping ? 'running' : 'sleeping')
+        )
+        .map((session) =>
+          createGpuiRemotePresentationSessionId(remoteGroup.machineId, remoteGroup.projectId, session.sessionId)
         );
       /*
       CDXC:SessionSleep 2026-06-27-02:05:
@@ -237,17 +241,11 @@ export const gpuiSidebarRuntimeAutoSleepMethods = {
     if (!projectId || !this.presentation) {
       return;
     }
-    const sessionIds = this.browserTabs
-      .filter((tab) => tab.projectId === projectId && tab.isSleeping === !sleeping)
-      .map(gpuiBrowserSidebarSessionId)
-      .concat(
-        this.presentation.sessions
-          .filter(
-            (session) =>
-              session.projectId === projectId && session.lifecycleState === (sleeping ? 'running' : 'sleeping')
-          )
-          .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId))
-      );
+    const sessionIds = this.presentation.sessions
+      .filter(
+        (session) => session.projectId === projectId && session.lifecycleState === (sleeping ? 'running' : 'sleeping')
+      )
+      .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId));
     /*
     CDXC:SessionSleep 2026-06-27-02:05:
     Local project group sleep uses the shared private-data-free pacing helper through setSessionsSleeping, preserving the existing per-session focus replacement behavior inside setSessionSleeping.
@@ -371,48 +369,31 @@ export const gpuiSidebarRuntimeAutoSleepMethods = {
     const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
     if (remoteGroup) {
       const presentation = this.remotePresentations.get(remoteGroup.machineId);
-      const scopedProjectId = createGpuiRemotePresentationProjectId(remoteGroup.machineId, remoteGroup.projectId);
-      return this.browserTabs
-        .filter((tab) => tab.projectId === scopedProjectId && !tab.isSleeping && !tab.isVisible)
-        .map(gpuiBrowserSidebarSessionId)
-        .concat(
-          (presentation?.sessions ?? [])
-            .filter((session) => session.projectId === remoteGroup.projectId)
-            .filter(isGpuiInactiveProjectPresentationSession)
-            .map((session) =>
-              createGpuiRemotePresentationSessionId(remoteGroup.machineId, remoteGroup.projectId, session.sessionId)
-            )
+      return (presentation?.sessions ?? [])
+        .filter((session) => session.projectId === remoteGroup.projectId)
+        .filter(isGpuiInactiveProjectPresentationSession)
+        .map((session) =>
+          createGpuiRemotePresentationSessionId(remoteGroup.machineId, remoteGroup.projectId, session.sessionId)
         );
     }
     const projectId = parseGxserverPresentationProjectGroupId(groupId);
     if (!projectId || !this.presentation) {
       return [];
     }
-    return this.browserTabs
-      .filter((tab) => tab.projectId === projectId && !tab.isSleeping && !tab.isVisible)
-      .map(gpuiBrowserSidebarSessionId)
-      .concat(
-        this.presentation.sessions
-          .filter((session) => session.projectId === projectId)
-          .filter(isGpuiInactiveProjectPresentationSession)
-          .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId))
-      );
+    return this.presentation.sessions
+      .filter((session) => session.projectId === projectId)
+      .filter(isGpuiInactiveProjectPresentationSession)
+      .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId));
   },
 
   async wakeProjectSleepingSessions(this: GpuiSidebarRuntime, groupId: string): Promise<void> {
     const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
     if (remoteGroup) {
       const presentation = this.remotePresentations.get(remoteGroup.machineId);
-      const scopedProjectId = createGpuiRemotePresentationProjectId(remoteGroup.machineId, remoteGroup.projectId);
-      const sessionIds = this.browserTabs
-        .filter((tab) => tab.projectId === scopedProjectId && tab.isSleeping)
-        .map(gpuiBrowserSidebarSessionId)
-        .concat(
-          (presentation?.sessions ?? [])
-            .filter((session) => session.projectId === remoteGroup.projectId && session.lifecycleState === 'sleeping')
-            .map((session) =>
-              createGpuiRemotePresentationSessionId(remoteGroup.machineId, remoteGroup.projectId, session.sessionId)
-            )
+      const sessionIds = (presentation?.sessions ?? [])
+        .filter((session) => session.projectId === remoteGroup.projectId && session.lifecycleState === 'sleeping')
+        .map((session) =>
+          createGpuiRemotePresentationSessionId(remoteGroup.machineId, remoteGroup.projectId, session.sessionId)
         );
       await this.setSessionsSleeping(sessionIds, false);
       return;
@@ -422,14 +403,9 @@ export const gpuiSidebarRuntimeAutoSleepMethods = {
       return;
     }
     this.focusProjectId(projectId);
-    const sessionIds = this.browserTabs
-      .filter((tab) => tab.projectId === projectId && tab.isSleeping)
-      .map(gpuiBrowserSidebarSessionId)
-      .concat(
-        this.presentation.sessions
-          .filter((session) => session.projectId === projectId && session.lifecycleState === 'sleeping')
-          .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId))
-      );
+    const sessionIds = this.presentation.sessions
+      .filter((session) => session.projectId === projectId && session.lifecycleState === 'sleeping')
+      .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId));
     await this.setSessionsSleeping(sessionIds, false);
   },
 };

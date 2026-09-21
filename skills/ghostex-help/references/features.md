@@ -152,6 +152,9 @@ Related settings: `terminalViewWidthMode`, `webLinkOpenTarget`,
 The sidebar lists projects and their sessions. Project headers carry the git
 branch and diff stats, an agent launcher, Add Worktree, and project actions.
 Right-click a project for Open Folder in the file manager or Add to Group.
+A project's Sleep, Wake, Sleep Inactive and Close Inactive act on that
+project's sessions only; its browser tabs are slept and closed from the tab
+strip above the view, where they live.
 Click a project header (or the chevron beside it) or a group header to expand
 or collapse it; rename a group from its right-click menu.
 Close Project parks the project in Recent Projects; when it held the active
