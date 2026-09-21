@@ -40,13 +40,20 @@ impl NativeChatView {
     /// keeps `content - track` equal to the list's scrollable distance exactly. That is React's math
     /// (a constant viewport against a content height that carries the composer inset), and it leaves
     /// the thumb still while the box resizes.
+    ///
+    /// CDXC:SessionChat 2026-09-21 DECISION:
+    /// "We should only show it in the gpui chat view when the user scrolls", not when new messages
+    /// appear. The component's own rule shows the bar on any offset change, and the offset of a list
+    /// following its tail moves with every streamed line, so the bar is shown from the list's scroll
+    /// handler instead, which gpui calls for the reader's wheel scrolls only.
     pub(super) fn transcript_scrollbar(&self, p: &ChatAppearance) -> AnyElement {
         let track = self.scrollbar_track.get();
         let measured = track > px(0.0);
         let mut bar = Scrollbar::vertical(&self.list)
             .id("chat-transcript-scrollbar")
             .thickness(px(THICKNESS * p.scale))
-            .scrollbar_show(ScrollbarShow::Scrolling);
+            .scrollbar_show(ScrollbarShow::Scrolling)
+            .shown_by_host_scroll(self.transcript_scrolled_at);
         if measured {
             bar = bar.scroll_size(size(
                 px(0.0),

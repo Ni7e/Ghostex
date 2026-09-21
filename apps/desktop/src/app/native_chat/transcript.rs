@@ -28,16 +28,12 @@ impl NativeChatView {
         expanded: bool,
         cx: &mut Context<Self>,
     ) {
-        let tool = id.starts_with("tool:");
         if expanded {
             self.expanded.remove(&id);
             self.collapsed.insert(id);
         } else {
             self.collapsed.remove(&id);
             self.expanded.insert(id);
-        }
-        if tool {
-            self.sync_tool_details(cx);
         }
         self.list.remeasure();
         cx.notify();
@@ -49,9 +45,6 @@ impl NativeChatView {
             self.expanded.remove(id);
         } else {
             self.expanded.insert(id.to_string());
-        }
-        if id.starts_with("tool:") {
-            self.sync_tool_details(cx);
         }
         self.list.remeasure();
         cx.notify();
@@ -219,7 +212,15 @@ impl NativeChatView {
             .w_full()
             .flex()
             .justify_center()
-            .when(index == 0, |this| this.pt(px(32.0 * s)))
+            // The header is window chrome and does not zoom with the chat, so its height is unscaled.
+            .when(index == 0, |this| {
+                let header = if main && self.under_workarea_header {
+                    crate::app::consts::WORKAREA_HEADER_HEIGHT
+                } else {
+                    0.0
+                };
+                this.pt(px(32.0 * s + header))
+            })
             .when(index + 1 == items.len(), |this| {
                 this.pb(px(super::transcript_layout::LAYOUT.end_padding * s))
             })

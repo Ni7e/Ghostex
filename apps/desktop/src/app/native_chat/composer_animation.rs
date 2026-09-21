@@ -63,6 +63,7 @@ fn eased(easing: &[f32; 4], t: f32) -> f32 {
 }
 
 /// What the composer paints this frame.
+#[derive(Clone, Copy)]
 pub(super) struct ComposerFrame {
     /// The pinned box height while a tween runs; `None` paints the box at its natural height.
     pub height: Option<f32>,
@@ -72,6 +73,8 @@ pub(super) struct ComposerFrame {
     pub controls_offset: f32,
     /// True while the view still needs frames.
     pub running: bool,
+    /// CDXC:SessionChat 2026-09-21 WHY: The native chat box is a sibling below the transcript, so a box that shrinks makes the list taller, shortens its scroll range, and near the end that clamped the offset, resumed tail follow, re-expanded the box and shifted the rows by the whole difference on every reversal. The list pads its end by what the box has given up against its expanded height, so the scroll range is the same in every collapse state: React's held inset (`use-session-chat-composer-inset.ts`), computed from the frame being painted rather than measured a frame late.
+    pub transcript_inset: f32,
 }
 
 #[derive(Default)]
@@ -84,6 +87,11 @@ pub(crate) struct ComposerAnimation {
     /// When the controls that an expansion brings back began their fade.
     arrival: Option<Instant>,
     collapsed: bool,
+    /// The natural heights last measured in each shape. A collapse or an expansion starts its tween
+    /// towards them in the frame the shape flips; waiting for that frame's measurement painted the
+    /// box once at its new height before the tween walked back to it.
+    expanded_natural: f32,
+    collapsed_natural: f32,
     /// The natural height the last painted frame reported, so a frame that measures the same value
     /// costs nothing. The chat paints far more often than the box changes shape.
     reported: Rc<Cell<f32>>,
@@ -107,6 +115,28 @@ impl ComposerAnimation {
         }
         self.collapsed = collapsed;
         self.arrival = (!collapsed && !reduce_motion).then(Instant::now);
+        let natural = if collapsed {
+            self.collapsed_natural
+        } else {
+            self.expanded_natural
+        };
+        if natural > 0.0 {
+            self.retarget(natural, reduce_motion);
+        }
+    }
+
+    /// Walk from the height on screen to `natural`. Returns true when a tween started.
+    fn retarget(&mut self, natural: f32, reduce_motion: bool) -> bool {
+        let current = self.current.unwrap_or(natural);
+        self.target = natural;
+        if reduce_motion || (natural - current).abs() < METRICS.min_delta_px {
+            self.current = Some(natural);
+            self.started = None;
+            return false;
+        }
+        self.from = current;
+        self.started = Some(Instant::now());
+        true
     }
 
     /// Advance the tween and report what to paint.
@@ -122,6 +152,7 @@ impl ComposerAnimation {
                 controls_opacity: 1.0,
                 controls_offset: 0.0,
                 running: false,
+                transcript_inset: self.transcript_inset(self.target),
             };
         }
         let duration = self.duration();
@@ -157,7 +188,12 @@ impl ComposerAnimation {
             controls_opacity,
             controls_offset,
             running: self.started.is_some() || self.arrival.is_some(),
+            transcript_inset: self.transcript_inset(height.unwrap_or(self.target)),
         }
+    }
+
+    fn transcript_inset(&self, painted: f32) -> f32 {
+        (self.expanded_natural - painted).max(0.0)
     }
 
     /// Adopt the natural height the frame just measured. Returns true when a redraw is owed.
@@ -165,23 +201,22 @@ impl ComposerAnimation {
         if !natural.is_finite() || natural <= 0.0 {
             return false;
         }
-        let Some(current) = self.current else {
+        if self.collapsed {
+            self.collapsed_natural = natural;
+        } else {
+            self.expanded_natural = natural;
+        }
+        if self.current.is_none() {
             // The first paint of a chat has nothing to move from, so it starts at rest.
             self.current = Some(natural);
             self.target = natural;
             return false;
-        };
+        }
         if (natural - self.target).abs() < METRICS.min_delta_px {
             return false;
         }
-        self.target = natural;
-        if reduce_motion || (natural - current).abs() < METRICS.min_delta_px {
-            self.current = Some(natural);
-            self.started = None;
-            return false;
-        }
-        self.from = current;
-        self.started = Some(Instant::now());
+        // A redraw is owed even when nothing tweens: the transcript's inset follows the new height.
+        self.retarget(natural, reduce_motion);
         true
     }
 }

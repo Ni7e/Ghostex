@@ -16,6 +16,18 @@ impl NativeChatView {
         self.composer_collapse_eligible() && self.snapshot["composerCollapsed"] == true
     }
 
+    /// This frame's chat box tween. `render` reads it before it builds the transcript, whose end
+    /// inset comes from the same frame, and `render_composer` reads it again to paint the box.
+    pub(super) fn composer_frame(
+        &mut self,
+        cx: &Context<Self>,
+    ) -> super::composer_animation::ComposerFrame {
+        let reduce_motion = cx.reduce_motion();
+        self.composer_animation
+            .set_collapsed(self.composer_collapsed(), reduce_motion);
+        self.composer_animation.advance(reduce_motion)
+    }
+
     pub(super) fn scrollable_transcript(
         &self,
         transcript: impl IntoElement,

@@ -30,6 +30,19 @@ impl NativeChatView {
 
     /// True while the transcript shows its first row from its very top, so nothing sits above the
     /// header to fade out.
+    /// Set by the app each frame from `agents_column_flows_under_workarea_header`; the first row is
+    /// remeasured when it changes so its top padding follows.
+    pub(crate) fn set_under_workarea_header(&mut self, under: bool, cx: &mut Context<Self>) {
+        if self.under_workarea_header == under {
+            return;
+        }
+        self.under_workarea_header = under;
+        if self.list.item_count() > 0 {
+            self.list.splice(0..1, 1);
+        }
+        cx.notify();
+    }
+
     pub(crate) fn transcript_scrolled_to_top(&self) -> bool {
         let top = self.list.logical_scroll_top();
         top.item_ix == 0 && top.offset_in_item <= px(0.0)
@@ -42,6 +55,7 @@ impl Render for NativeChatView {
         super::search::register(cx);
         super::zoom::register(cx);
         self.last_render = Some(std::time::Instant::now());
+        self.schedule_row_detail_sync(window, cx);
         self.main_window = Some(window.window_handle());
         if self.maximized_window.is_none() {
             self.ensure_input(window, cx);
@@ -71,13 +85,19 @@ impl Render for NativeChatView {
         };
         let state = self.snapshot.clone();
         let error = self.error.clone();
+        let transcript_inset = if maximized {
+            0.0
+        } else {
+            self.composer_frame(cx).transcript_inset
+        };
         let transcript = list(
             self.list.clone(),
             cx.processor(|this, index, window, cx| this.transcript_row(index, window, cx)),
         )
         .flex_1()
         .min_h_0()
-        .w_full();
+        .w_full()
+        .pb(px(transcript_inset));
         let transcript = self.scrollable_transcript(transcript, cx);
         let rows = self.list.item_count();
         /*

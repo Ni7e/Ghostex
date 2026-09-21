@@ -223,10 +223,7 @@ impl NativeChatView {
         // `packages/shared/session-chat-presentation/composer-animation.json`; `composer_animation.rs`
         // holds the interpolation.
         let metrics = &*super::composer_animation::METRICS;
-        let reduce_motion = cx.reduce_motion();
-        self.composer_animation
-            .set_collapsed(collapsed, reduce_motion);
-        let frame = self.composer_animation.advance(reduce_motion);
+        let frame = self.composer_frame(cx);
         if frame.running && !maximized {
             window.request_animation_frame();
         }
