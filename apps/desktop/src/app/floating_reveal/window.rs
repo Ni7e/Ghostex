@@ -140,6 +140,16 @@ impl GhostexGpuiApp {
             self.close_floating_reveal(cx);
             return;
         }
+        if keep_under_pointer && self.floating_reveal.panel.is_none() {
+            self.floating_reveal.want.sidebar = true;
+        }
+        let content = self.floating_reveal_content();
+        if !content.sidebar && !content.agents_column {
+            if self.floating_reveal.panel.is_some() {
+                self.close_floating_reveal(cx);
+            }
+            return;
+        }
         self.refresh_floating_reveal_panel_shape(cx);
         self.sync_floating_reveal_host(requested, keep_under_pointer, cx);
     }
@@ -188,6 +198,7 @@ impl GhostexGpuiApp {
         if hosted_before != content.agents_column {
             self.reconcile_agents_pane_surfaces(cx);
             self.update_active_mode_cef_child_visibility(cx);
+            self.schedule_floating_reveal_focus(cx);
         }
         cx.notify();
     }
@@ -296,10 +307,76 @@ impl GhostexGpuiApp {
                     // exactly as the expand toggle reconciles them.
                     app.reconcile_agents_pane_surfaces(cx);
                     app.update_active_mode_cef_child_visibility(cx);
+                    app.schedule_floating_reveal_focus(cx);
                 }
                 cx.notify();
             });
         });
+    }
+
+    /// CDXC:Sidebar 2026-09-21 DECISION:
+    /// User: a floating sessions pane opened by a hover, a session click or a new agent takes
+    /// typing right away. The panel becomes the key window and the focused pane's terminal or chat
+    /// composer takes GPUI focus in it. Deferred onto `App` for the reason `open_floating_reveal`
+    /// is: leasing the panel's window from inside this entity's update double-leases it.
+    pub(crate) fn schedule_floating_reveal_focus(&mut self, cx: &mut gpui::Context<Self>) {
+        let Some(handle) = self
+            .floating_reveal
+            .panel
+            .as_ref()
+            .filter(|panel| panel.content.agents_column)
+            .map(|panel| panel.window)
+        else {
+            return;
+        };
+        let app = cx.weak_entity();
+        gpui::App::defer(cx, move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                window.activate_window();
+                if let Some(app) = app.upgrade() {
+                    app.update(cx, |app, cx| app.focus_floating_reveal_sessions(window, cx));
+                }
+            });
+        });
+    }
+
+    fn focus_floating_reveal_sessions(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let workspace = &self.agents_workspace;
+        let Some(pane_id) = workspace
+            .focus_mode_pane
+            .into_iter()
+            .chain(std::iter::once(workspace.focused_pane))
+            .find(|pane_id| workspace.find_leaf(*pane_id).is_some())
+        else {
+            return;
+        };
+        let Some(session_id) = workspace.active_session_in_pane(pane_id) else {
+            return;
+        };
+        if self.agents_chat_mode_sessions.contains(&session_id)
+            && let Some(chat) = self.native_chat_views.get(&session_id).cloned()
+        {
+            if let Ok(root) = cef_parent_native_view(window) {
+                crate::cef::focus_gpui_root_view(root);
+            }
+            chat.update(cx, |chat, cx| {
+                chat.focus_requested = true;
+                cx.notify();
+            });
+            return;
+        }
+        self.focus_agents_terminal_mount_slot(
+            crate::app::model::AgentsTerminalBodyMountSlotId {
+                pane_id,
+                session_id,
+            },
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn close_floating_reveal(&mut self, cx: &mut gpui::Context<Self>) {
@@ -315,6 +392,7 @@ impl GhostexGpuiApp {
             .update(cx, |_, window, _| window.remove_window());
         self.floating_reveal.edge_hovered = false;
         self.floating_reveal.requested_until = None;
+        self.floating_reveal.want = FloatingRevealContent::default();
         #[cfg(not(target_os = "macos"))]
         {
             self.floating_reveal.outside_since = None;

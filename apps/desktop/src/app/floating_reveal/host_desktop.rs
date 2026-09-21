@@ -65,6 +65,8 @@ impl GhostexGpuiApp {
             .unwrap_or(false);
         let mut inside = hovered
             || self.floating_reveal.edge_hovered
+            // Beside a docked sidebar the pointer that opened the panel is still over the sidebar.
+            || (self.floating_reveal.sidebar_hovered && !self.sidebar_collapsed)
             // A menu or a rename field opened from the floating sidebar owns the pointer for as
             // long as it is up; taking the panel away under it would close both.
             || self.native_sidebar.menu.is_some()

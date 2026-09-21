@@ -48,12 +48,12 @@ pub(crate) const SIDEBAR_HOVER_REVEAL_ACTIVE_POLL: std::time::Duration =
 /// Which panels the floating window carries this time.
 ///
 /// CDXC:Sidebar 2026-09-21 DECISION:
-/// User (screen 10, extended 2026-09-21): hovering the left edge floats back whatever is folded
-/// away and it slides away when the pointer leaves. The collapsed sidebar is in the panel; the
-/// sessions column joins it exactly when the workarea has folded it away (the expanded view
-/// panel). With the sidebar docked the reveal still works for the folded sessions column: the edge
-/// strip sits just right of the sidebar and the panel carries the column alone. This supersedes the
-/// 2026-09-20 rule that the reveal existed only while the sidebar was collapsed.
+/// User (screen 10, revised 2026-09-21): hovering the left edge floats back what is folded away
+/// and it slides away when the pointer leaves. With the sidebar and the sessions column both
+/// folded, the top half of the edge floats the sidebar and the bottom half floats the sessions
+/// column; with only the sidebar folded the whole edge floats it. With the sidebar docked, its
+/// own left 10px floats the folded sessions column beside it. This supersedes the 2026-09-20 rule
+/// that one panel always carried the sidebar and that the reveal needed a collapsed sidebar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FloatingRevealContent {
     pub(crate) sidebar: bool,
@@ -112,6 +112,12 @@ pub(crate) struct FloatingRevealState {
     pub(crate) edge_hovered: bool,
     /// A reveal asked for by name holds the panel open until the pointer visits it or this passes.
     pub(crate) requested_until: Option<Instant>,
+    /// What the gesture that armed or requested the reveal asked for. Cleared when the panel
+    /// closes.
+    pub(crate) want: FloatingRevealContent,
+    /// The docked sidebar has the pointer, which keeps a panel open beside it.
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) sidebar_hovered: bool,
     /// When the pointer left the panel, for the dismissal delay.
     #[cfg(not(target_os = "macos"))]
     pub(crate) outside_since: Option<Instant>,
@@ -123,12 +129,14 @@ impl GhostexGpuiApp {
     /// The reveal exists while something is folded away: the collapsed sidebar, or the sessions
     /// column an expanded view has taken the workarea from.
     pub(crate) fn floating_reveal_eligible(&self) -> bool {
-        let content = self.floating_reveal_content();
+        let content = self.floating_reveal_available();
         content.sidebar || content.agents_column
     }
 
-    /// Where the panel starts: the window's left edge, or just past a docked sidebar and its
-    /// divider so the panel never covers the sidebar it would otherwise have to duplicate.
+    /// CDXC:Sidebar 2026-09-21 DECISION:
+    /// User: with the sidebar shown, the floating sessions pane always opens to the right of the
+    /// sidebar, whether a hover on the sidebar's left edge or a session click asked for it. This
+    /// supersedes the same-day arrangement that floated it over the sidebar for the hover.
     pub(crate) fn floating_reveal_left_inset(&self) -> f32 {
         if self.sidebar_collapsed {
             0.0
@@ -137,18 +145,81 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// CDXC:Sidebar 2026-09-20 WHY:
-    /// A React chat pane is a CEF child view of the main window, and `reparent_pane_native_view`
-    /// exists on macOS alone, so a sessions column holding one cannot be in the floating window on
-    /// two of the three platforms. Rather than float a column that is whole on one platform and
-    /// hollow on the others, the column joins the panel only while it is GPUI-painted throughout,
-    /// which is every default install: the composited terminal engine is the only terminal pipeline
-    /// and `sessionChatUseGpui` is on.
-    pub(crate) fn floating_reveal_content(&self) -> FloatingRevealContent {
+    /// The strip is the collapsed sidebar's place in the body row. Docked, the sidebar's own left
+    /// 10px is the trigger instead (`handle_floating_reveal_sidebar_edge_move`).
+    pub(crate) fn floating_reveal_edge_strip_visible(&self) -> bool {
+        self.sidebar_collapsed
+    }
+
+    /// The sidebar's left 10px arms the reveal of a folded sessions column while the sidebar is
+    /// docked. The sidebar reads its own pointer position; nothing is layered over its rows.
+    pub(crate) fn handle_floating_reveal_sidebar_edge_move(&mut self, x: f32) {
+        let armed = !self.sidebar_collapsed
+            && self.floating_reveal_available().agents_column
+            && x < FLOATING_REVEAL_EDGE_WIDTH;
+        if armed && self.floating_reveal.panel.is_none() {
+            self.floating_reveal.want = FloatingRevealContent {
+                sidebar: false,
+                agents_column: true,
+            };
+        }
+        self.floating_reveal.edge_hovered = armed;
+    }
+
+    /// The edge strip has the pointer, in the half that asks for `want`.
+    pub(crate) fn arm_floating_reveal_from_strip(&mut self, want: FloatingRevealContent) {
+        if self.floating_reveal.panel.is_none() {
+            self.floating_reveal.want = want;
+        }
+        self.floating_reveal.edge_hovered = true;
+    }
+
+    /// The pointer left a trigger without opening anything, so nothing is asked for any more.
+    pub(crate) fn disarm_floating_reveal_edge(&mut self) {
+        self.floating_reveal.edge_hovered = false;
+        if self.floating_reveal.panel.is_none() && self.floating_reveal.requested_until.is_none() {
+            self.floating_reveal.want = FloatingRevealContent::default();
+        }
+    }
+
+    /// CDXC:Sidebar 2026-09-21 DECISION:
+    /// User: clicking a session row in the sidebar, and creating a new agent, open the floating
+    /// sessions pane while an expanded view has folded the sessions column away, with the sidebar
+    /// collapsed or shown, and the pane takes the keyboard so typing lands in the terminal or chat
+    /// right away. It is a reveal asked for by name, so it waits the usual grace for the pointer
+    /// and slides away if the pointer never comes. A floating sidebar that is already out stays.
+    pub(crate) fn reveal_floating_sessions(&mut self, cx: &mut gpui::Context<Self>) {
+        if !self.floating_reveal_available().agents_column {
+            return;
+        }
+        let keeps_sidebar = self
+            .floating_reveal
+            .panel
+            .as_ref()
+            .is_some_and(|panel| panel.content.sidebar);
+        self.floating_reveal.want = FloatingRevealContent {
+            sidebar: keeps_sidebar,
+            agents_column: true,
+        };
+        self.update_floating_reveal(true, false, cx);
+        self.schedule_floating_reveal_focus(cx);
+    }
+
+    /// What is folded away and could float back.
+    pub(crate) fn floating_reveal_available(&self) -> FloatingRevealContent {
         FloatingRevealContent {
             sidebar: self.sidebar_collapsed,
-            agents_column: self.view_panel_maximized()
-                && !self.workspace_node_shows_cef_chat(&self.agents_workspace.root),
+            agents_column: self.view_panel_maximized(),
+        }
+    }
+
+    /// What the panel carries: what the gesture asked for, of what is folded away.
+    pub(crate) fn floating_reveal_content(&self) -> FloatingRevealContent {
+        let available = self.floating_reveal_available();
+        let want = self.floating_reveal.want;
+        FloatingRevealContent {
+            sidebar: want.sidebar && available.sidebar,
+            agents_column: want.agents_column && available.agents_column,
         }
     }
 

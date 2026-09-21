@@ -376,7 +376,12 @@ static bool GhostexGpuiNativeRevealUpdate(void *rootPtr, void *popupPtr, bool en
       return true;
     }
   }
-  BOOL inside = NSPointInRect(pointer, state.revealTarget == 0 ? state.panel.frame : frame);
+  // Beside a docked sidebar the pointer that opened the panel is still over the sidebar (its left
+  // edge, or the session row that was clicked), so the sidebar's slot keeps the panel open too.
+  NSRect keep = frame;
+  keep.origin.x -= inset;
+  keep.size.width += inset;
+  BOOL inside = NSPointInRect(pointer, state.revealTarget == 0 ? state.panel.frame : keep);
   for (NSWindow *child in parent.childWindows) {
     if (child != state.panel && child.visible && NSPointInRect(pointer, child.frame)) inside = YES;
   }

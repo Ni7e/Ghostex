@@ -17,6 +17,7 @@ impl GhostexGpuiApp {
         // floats the sidebar everywhere and never changes its saved collapsed state. This
         // supersedes the Windows and Linux behaviour of expanding the docked sidebar instead.
         if self.sidebar_collapsed {
+            self.floating_reveal.want.sidebar = true;
             self.update_sidebar_reveal(true, false, cx);
         }
         self.dispatch_gpui_sidebar_host_message(
