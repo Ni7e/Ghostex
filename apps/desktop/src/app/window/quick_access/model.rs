@@ -113,8 +113,6 @@ pub(crate) enum QuickAccessRow {
         sleeping: bool,
         #[serde(default)]
         can_activate: bool,
-        #[serde(default)]
-        can_delete: bool,
     },
     #[serde(rename_all = "camelCase")]
     Prompt {
@@ -134,10 +132,6 @@ pub(crate) enum QuickAccessRow {
         time: String,
         #[serde(default)]
         is_favorite: bool,
-        #[serde(default)]
-        stripe_color: String,
-        #[serde(default)]
-        actions: Vec<String>,
     },
 }
 
@@ -243,8 +237,6 @@ pub(crate) enum QuickAccessToolbar {
         views: Vec<QuickAccessSegment>,
         projects: QuickAccessSelect,
         tags: QuickAccessSelect,
-        #[serde(default)]
-        can_add: bool,
     },
 }
 
@@ -279,14 +271,6 @@ pub(crate) struct QuickAccessTagComposer {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct QuickAccessFooter {
-    pub(crate) label: String,
-    #[serde(default)]
-    pub(crate) hotkey: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct QuickAccessSnapshot {
     pub(crate) version: u32,
     pub(crate) tab: QuickAccessTabId,
@@ -312,7 +296,9 @@ pub(crate) struct QuickAccessSnapshot {
     #[serde(default)]
     pub(crate) toolbar: QuickAccessToolbar,
     #[serde(default)]
-    pub(crate) footer: Option<QuickAccessFooter>,
+    pub(crate) primary_action: String,
+    #[serde(default)]
+    pub(crate) action_hotkeys: Vec<String>,
     #[serde(default)]
     pub(crate) hint: String,
     #[serde(default)]
@@ -335,6 +321,8 @@ pub(crate) struct QuickAccessMenuItem {
     pub(crate) label: String,
     #[serde(default)]
     pub(crate) icon: QuickAccessIcon,
+    #[serde(default)]
+    pub(crate) hotkey: String,
     #[serde(default)]
     pub(crate) danger: bool,
     #[serde(default)]

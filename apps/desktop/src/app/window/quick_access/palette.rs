@@ -12,16 +12,21 @@ use crate::app::window::native_modal_kit::{
 use gpui::{Hsla, Rgba, rgb};
 
 pub(crate) const QUICK_ACCESS_ITEM_FONT_SIZE: f32 = 13.0;
-pub(crate) const QUICK_ACCESS_ROW_FONT_SIZE: f32 = 15.55;
-pub(crate) const QUICK_ACCESS_META_FONT_SIZE: f32 = 13.55;
-pub(crate) const QUICK_ACCESS_ROW_HEIGHT: f32 = 32.0;
+pub(crate) const QUICK_ACCESS_ROW_FONT_SIZE: f32 = 14.5;
+pub(crate) const QUICK_ACCESS_META_FONT_SIZE: f32 = 12.5;
+pub(crate) const QUICK_ACCESS_ROW_HEIGHT: f32 = 40.0;
+pub(crate) const QUICK_ACCESS_ROW_RADIUS: f32 = 9.0;
 pub(crate) const QUICK_ACCESS_ROW_PADDING_X: f32 = 10.0;
 pub(crate) const QUICK_ACCESS_LIST_PADDING: f32 = 6.0;
 pub(crate) const QUICK_ACCESS_GROUP_HEADING_HEIGHT: f32 = 26.0;
 pub(crate) const QUICK_ACCESS_CONTROL_HEIGHT: f32 = 32.0;
 pub(crate) const QUICK_ACCESS_RADIUS_CONTROL: f32 = 8.0;
 pub(crate) const QUICK_ACCESS_RADIUS_MENU_ITEM: f32 = 6.0;
-pub(crate) const QUICK_ACCESS_TAB_RAIL_HEIGHT: f32 = 40.0;
+pub(crate) const QUICK_ACCESS_SEARCH_BAR_HEIGHT: f32 = 54.0;
+pub(crate) const QUICK_ACCESS_SEARCH_FONT_SIZE: f32 = 17.0;
+pub(crate) const QUICK_ACCESS_FILTER_HEIGHT: f32 = 28.0;
+pub(crate) const QUICK_ACCESS_FILTER_MAX_WIDTH: f32 = 150.0;
+pub(crate) const QUICK_ACCESS_FOOTER_HEIGHT: f32 = 44.0;
 
 #[derive(Clone, Copy)]
 pub(crate) struct QuickAccessPalette {
@@ -48,19 +53,15 @@ pub(crate) struct QuickAccessPalette {
     pub(crate) menu_background: Rgba,
     pub(crate) menu_border: Rgba,
     pub(crate) menu_hover: Rgba,
-    // `.raised-tab-rail[data-variant='raised']`
-    pub(crate) rail_track: Rgba,
-    pub(crate) rail_border: Rgba,
-    pub(crate) rail_text: Rgba,
-    pub(crate) rail_active_text: Rgba,
-    pub(crate) rail_hover: Rgba,
-    pub(crate) rail_active: Rgba,
-    pub(crate) rail_active_ring: Rgba,
+    /// The footer bar's own tone, its selected tab, and the tab accelerators.
+    pub(crate) footer: Rgba,
+    pub(crate) footer_active: Rgba,
     pub(crate) rail_hotkey: Rgba,
     pub(crate) rail_active_hotkey: Rgba,
-    /// `.previous-sessions-find-prompts-button`.
-    pub(crate) float_surface: Rgba,
-    pub(crate) float_border: Rgba,
+    /// Keycaps in the footer and the actions menu.
+    pub(crate) keycap: Rgba,
+    /// The selected row's fill.
+    pub(crate) row_selected: Rgba,
     /// The session-row lifecycle dot, at rest and for a row open in the sidebar.
     pub(crate) status_dot: Rgba,
     pub(crate) status_dot_open: Rgba,
@@ -89,17 +90,12 @@ impl QuickAccessPalette {
                 menu_background: rgb(0xffffff),
                 menu_border: modal_rgba(0x000000, 0.16),
                 menu_hover: rgb(0xe9e9e9),
-                rail_track: rgb(0xededed),
-                rail_border: modal_rgba(0x000000, 0.14),
-                rail_text: rgb(0x525252),
-                rail_active_text: rgb(0x262626),
-                rail_hover: rgb(0xe3e3e3),
-                rail_active: rgb(0xffffff),
-                rail_active_ring: modal_rgba(0x000000, 0.08),
-                rail_hotkey: rgb(0x626262),
-                rail_active_hotkey: rgb(0x404040),
-                float_surface: rgb(0xffffff),
-                float_border: modal_rgba(0x000000, 0.08),
+                footer: modal_rgba(0x000000, 0.03),
+                footer_active: modal_rgba(0x000000, 0.08),
+                rail_hotkey: rgb(0x8a8a8a),
+                rail_active_hotkey: rgb(0x525252),
+                keycap: modal_rgba(0x000000, 0.07),
+                row_selected: modal_rgba(0x000000, 0.06),
                 status_dot: rgb(0x737373),
                 status_dot_open: rgb(0x404040),
                 favorite: rgb(0xe3b341),
@@ -122,17 +118,12 @@ impl QuickAccessPalette {
                 menu_background: rgb(0x161616),
                 menu_border: modal_rgba(0xffffff, 0.08),
                 menu_hover: rgb(0x232323),
-                rail_track: rgb(0x202020),
-                rail_border: modal_rgba(0xffffff, 0.14),
-                rail_text: rgb(0xb4b8bf),
-                rail_active_text: rgb(0xb4b8bf),
-                rail_hover: rgb(0x292929),
-                rail_active: rgb(0x363636),
-                rail_active_ring: modal_rgba(0xffffff, 0.08),
-                rail_hotkey: rgb(0x92969d),
-                rail_active_hotkey: rgb(0xb4b8bf),
-                float_surface: rgb(0x141414),
-                float_border: modal_rgba(0xffffff, 0.05),
+                footer: modal_rgba(0x000000, 0.18),
+                footer_active: modal_rgba(0xffffff, 0.09),
+                rail_hotkey: rgb(0x6f737a),
+                rail_active_hotkey: rgb(0x92969d),
+                keycap: modal_rgba(0xffffff, 0.07),
+                row_selected: modal_rgba(0xffffff, 0.075),
                 status_dot: modal_rgba(0xffffff, 0.20),
                 status_dot_open: rgb(0xffffff),
                 favorite: rgb(0xe3b341),
@@ -148,10 +139,6 @@ impl QuickAccessPalette {
     /// The tag/session chip fill, `color-mix(in srgb, <tag> 15%, transparent)`.
     pub(crate) fn chip_background(&self, tag: Rgba) -> Rgba {
         rgba_of(tag, 0.15)
-    }
-
-    pub(crate) fn chip_border(&self, tag: Rgba) -> Rgba {
-        rgba_of(tag, 0.30)
     }
 
     pub(crate) fn chip_text(&self, tag: Rgba) -> Rgba {

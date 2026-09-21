@@ -11,6 +11,7 @@ import { readSidebarProjectCollections } from '@/packages/core-ui/project-collec
 import type { QuickAccessGroup, QuickAccessMenuItem, QuickAccessRow } from '@/packages/shared/native-quick-access';
 import { quickAccessDayLabel } from './day-labels';
 import { assetIcon, imageIcon } from './icons';
+import { ACTION_SEPARATOR, actionItem as item } from './row-actions';
 
 export type RecentProjectsData = {
   machineId?: string;
@@ -134,26 +135,17 @@ export function removeRecentProject(
   } as SidebarToExtensionMessage);
 }
 
-/** The row context menu, in the React modal's order. */
+/** The row's actions, in the React context menu's order. Close project is what the row's hover trash did for an open project. */
 export function recentProjectMenuItems(
   project: SidebarRecentProject,
   machineId: string | undefined
 ): QuickAccessMenuItem[] {
-  const item = (
-    id: string,
-    label: string,
-    icon: string,
-    options: { danger?: boolean; disabled?: boolean } = {}
-  ): QuickAccessMenuItem => ({
-    id,
-    label,
-    icon: assetIcon(icon),
-    danger: options.danger === true,
-    disabled: options.disabled === true,
-    separator: false,
-  });
   if (project.isOpen) {
-    return [item('activate', 'Open', 'folder-open')];
+    return [
+      item('activate', 'Open', 'folder-open'),
+      ACTION_SEPARATOR,
+      item('remove', 'Close project', 'trash', { danger: true }),
+    ];
   }
   const items: QuickAccessMenuItem[] = [
     item('activate', 'Restore', 'rotate-clockwise'),
@@ -165,14 +157,7 @@ export function recentProjectMenuItems(
   } else {
     items.push(item('openLocation', 'Open File/Folder Location', 'folder-open'));
   }
-  items.push({
-    id: 'separator',
-    label: '',
-    icon: { kind: 'none' },
-    danger: false,
-    disabled: false,
-    separator: true,
-  });
+  items.push(ACTION_SEPARATOR);
   items.push(item('remove', 'Remove project', 'trash', { danger: true }));
   return items;
 }

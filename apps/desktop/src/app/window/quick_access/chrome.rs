@@ -1,16 +1,16 @@
-//! The Quick Access shell controls that every tab shares: the raised tab rail, the search field,
-//! the filter shelf's segmented controls and select pickers, and the portaled menus those pickers
-//! open. Ported from packages/core-ui/quick-access-tabs.tsx, quick-access-search-input.tsx and the
-//! `.quick-access-*` rules in packages/core-ui/styles.css.
+//! The Quick Access shell controls that every tab shares: the search line with its filters, the
+//! footer that carries the tabs and the actions, the select pickers, and the portaled menus those
+//! pickers open.
 use super::model::{QuickAccessIcon, QuickAccessOption, QuickAccessSegment, QuickAccessSelect};
 use super::palette::{
-    QUICK_ACCESS_CONTROL_HEIGHT, QUICK_ACCESS_ITEM_FONT_SIZE, QUICK_ACCESS_RADIUS_CONTROL,
-    QUICK_ACCESS_RADIUS_MENU_ITEM, QUICK_ACCESS_TAB_RAIL_HEIGHT, QuickAccessPalette, hsla,
-    parse_css_color,
+    QUICK_ACCESS_CONTROL_HEIGHT, QUICK_ACCESS_FILTER_HEIGHT, QUICK_ACCESS_FILTER_MAX_WIDTH,
+    QUICK_ACCESS_FOOTER_HEIGHT, QUICK_ACCESS_ITEM_FONT_SIZE, QUICK_ACCESS_RADIUS_CONTROL,
+    QUICK_ACCESS_RADIUS_MENU_ITEM, QUICK_ACCESS_SEARCH_BAR_HEIGHT, QUICK_ACCESS_SEARCH_FONT_SIZE,
+    QuickAccessPalette, hsla, parse_css_color,
 };
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, Context, Div, FontWeight, InteractiveElement as _,
+    AnyElement, App, Bounds, ClickEvent, Context, InteractiveElement as _,
     IntoElement, MouseDownEvent, ParentElement as _, Pixels, Rgba, ScrollHandle, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, anchored, deferred, div, img, point, px,
     svg,
@@ -57,293 +57,317 @@ pub(crate) fn quick_access_icon(icon: &QuickAccessIcon, size: f32, color: Rgba) 
     }
 }
 
-/// `.quick-access-tabs.raised-tab-rail`: a 40px inset track, 6px from the window
-/// edges, whose four equal segments carry the label and its accelerator.
-pub(crate) fn quick_access_tab_rail<V: 'static>(
+/// The search line: the window's header. One large borderless field with the
+/// tab's filters at its right edge, hairlined off the list below it.
+pub(crate) fn quick_access_search_bar<V: 'static>(
     p: &QuickAccessPalette,
-    tabs: &[(SharedString, SharedString, bool)],
-    on_select: impl Fn(&mut V, usize, &mut Window, &mut Context<V>) + Clone + 'static,
+    state: &gpui::Entity<InputState>,
+    has_query: bool,
+    filters: Vec<AnyElement>,
+    on_clear: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
     cx: &mut Context<V>,
 ) -> AnyElement {
     let p = *p;
-    let segments = tabs
+    h_flex()
+        .flex_shrink_0()
+        .w_full()
+        .min_w_0()
+        .h(px(QUICK_ACCESS_SEARCH_BAR_HEIGHT))
+        .pl(px(16.0))
+        .pr(px(10.0))
+        .gap(px(10.0))
+        .items_center()
+        .border_b_1()
+        .border_color(hsla(p.hairline))
+        .child(
+            svg()
+                .path(ICON_SEARCH)
+                .size(px(18.0))
+                .flex_shrink_0()
+                .text_color(hsla(p.muted)),
+        )
+        .child(
+            div().flex_1().min_w_0().child(
+                Input::new(state)
+                    .with_size(ComponentSize::Medium)
+                    .appearance(false)
+                    .bordered(false)
+                    .focus_bordered(false)
+                    .w_full()
+                    .px(px(0.0))
+                    .py(px(0.0))
+                    .text_size(px(QUICK_ACCESS_SEARCH_FONT_SIZE))
+                    .text_color(hsla(p.foreground)),
+            ),
+        )
+        .children(has_query.then(|| {
+            div()
+                .id("quick-access-search-clear")
+                .size(px(24.0))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(QUICK_ACCESS_RADIUS_MENU_ITEM))
+                .cursor_pointer()
+                .hover(move |this| this.bg(hsla(p.raised_hover)))
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    on_clear(this, window, cx);
+                }))
+                .child(
+                    svg()
+                        .path(ICON_CLEAR)
+                        .size(px(15.0))
+                        .text_color(hsla(p.muted)),
+                )
+        }))
+        .children((!filters.is_empty()).then(|| {
+            h_flex()
+                .flex_shrink_0()
+                .gap(px(6.0))
+                .items_center()
+                .children(filters)
+        }))
+        .into_any_element()
+}
+
+/// One filter in the search line: a 28px pill sized to its label (capped, so a
+/// long project name ellipsizes instead of squeezing the search text).
+pub(crate) fn quick_access_filter_trigger<V: 'static>(
+    p: &QuickAccessPalette,
+    select: &QuickAccessSelect,
+    menu: &QuickAccessMenuState,
+    id: &'static str,
+    active: bool,
+    tooltip: Option<String>,
+    on_toggle: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
+    cx: &mut Context<V>,
+) -> AnyElement {
+    let p = *p;
+    let open = menu.open;
+    let dot = (!select.color.is_empty()).then(|| parse_css_color(&select.color, p.muted));
+    h_flex()
+        .id(id)
+        .flex_shrink_0()
+        .when_some(tooltip.filter(|_| !open), |this, tooltip| {
+            this.tooltip(move |window, cx| quick_access_tooltip(tooltip.clone(), window, cx))
+        })
+        .max_w(px(QUICK_ACCESS_FILTER_MAX_WIDTH))
+        .h(px(QUICK_ACCESS_FILTER_HEIGHT))
+        .pl(px(10.0))
+        .pr(px(7.0))
+        .gap(px(6.0))
+        .items_center()
+        .rounded(px(7.0))
+        .border_1()
+        .border_color(hsla(if open {
+            p.focus_border
+        } else if active {
+            Rgba { a: 0.55, ..p.accent }
+        } else {
+            p.hairline
+        }))
+        .bg(hsla(if open { p.raised_hover } else { p.raised }))
+        .text_size(px(12.5))
+        .line_height(px(18.0))
+        .text_color(hsla(if active { p.foreground } else { p.item }))
+        .cursor_pointer()
+        .when(!open, |this| {
+            this.hover(move |this| this.bg(hsla(p.raised_hover)))
+        })
+        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+            on_toggle(this, window, cx);
+        }))
+        .children(dot.map(|dot| {
+            div()
+                .flex_shrink_0()
+                .size(px(7.0))
+                .rounded_full()
+                .bg(hsla(dot))
+        }))
+        .child(
+            div()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(select.label.clone()),
+        )
+        .child(
+            svg()
+                .path(ICON_SELECTOR)
+                .size(px(13.0))
+                .flex_shrink_0()
+                .text_color(hsla(p.muted)),
+        )
+        .into_any_element()
+}
+
+/// A single-choice filter (Saved / Recovered / Sent, All / Closed / External)
+/// shaped as the select the search line's other filters already are.
+pub(crate) fn segments_as_select(segments: &[QuickAccessSegment], selected: &str) -> QuickAccessSelect {
+    QuickAccessSelect {
+        label: segments
+            .iter()
+            .find(|segment| segment.value == selected)
+            .map(|segment| segment.label.clone())
+            .unwrap_or_default(),
+        options: segments
+            .iter()
+            .map(|segment| QuickAccessOption {
+                value: segment.value.clone(),
+                label: segment.label.clone(),
+                selected: segment.value == selected,
+                ..QuickAccessOption::default()
+            })
+            .collect(),
+        ..QuickAccessSelect::default()
+    }
+}
+
+/// One keycap in the footer and the actions menu.
+pub(crate) fn quick_access_keycap(p: &QuickAccessPalette, label: &str) -> AnyElement {
+    div()
+        .flex_shrink_0()
+        .min_w(px(20.0))
+        .h(px(20.0))
+        .px(px(5.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(5.0))
+        .bg(hsla(p.keycap))
+        .text_size(px(11.5))
+        .line_height(px(14.0))
+        .text_color(hsla(p.muted))
+        .child(SharedString::from(label.to_string()))
+        .into_any_element()
+}
+
+/// The footer: the four tabs on the left, what Return does to the selected row
+/// and the Actions panel on the right.
+pub(crate) fn quick_access_footer<V: 'static>(
+    p: &QuickAccessPalette,
+    tabs: &[(SharedString, SharedString, bool)],
+    primary_action: &str,
+    actions_open: bool,
+    on_select_tab: impl Fn(&mut V, usize, &mut Window, &mut Context<V>) + Clone + 'static,
+    on_primary: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
+    on_actions: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
+    cx: &mut Context<V>,
+) -> AnyElement {
+    let p = *p;
+    let tab_items = tabs
         .iter()
         .enumerate()
         .map(|(index, (label, hotkey, active))| {
             let active = *active;
-            let on_select = on_select.clone();
+            let on_select_tab = on_select_tab.clone();
             h_flex()
                 .id(("quick-access-tab", index))
-                .flex_1()
-                .flex_basis(px(0.0))
-                .min_w_0()
-                .h_full()
+                .flex_shrink_0()
+                .h(px(28.0))
+                .px(px(9.0))
+                .gap(px(6.0))
                 .items_center()
-                .justify_center()
-                .gap(px(8.0))
-                .px(px(10.0))
-                .rounded(px(5.0))
-                .text_size(px(QUICK_ACCESS_ITEM_FONT_SIZE))
-                .line_height(px(QUICK_ACCESS_ITEM_FONT_SIZE))
+                .rounded(px(7.0))
+                .text_size(px(12.5))
+                .line_height(px(18.0))
                 .whitespace_nowrap()
-                .text_color(hsla(if active {
-                    p.rail_active_text
-                } else {
-                    p.rail_text
-                }))
+                .text_color(hsla(if active { p.foreground } else { p.muted }))
                 .cursor_pointer()
-                .when(active, |this| {
-                    this.bg(hsla(p.rail_active)).shadow(vec![
-                        gpui::BoxShadow {
-                            color: hsla(Rgba {
-                                r: 0.0,
-                                g: 0.0,
-                                b: 0.0,
-                                a: 0.14,
-                            }),
-                            offset: point(px(0.0), px(1.0)),
-                            blur_radius: px(3.0),
-                            spread_radius: px(0.0),
-                            inset: false,
-                        },
-                        gpui::BoxShadow {
-                            color: hsla(p.rail_active_ring),
-                            offset: point(px(0.0), px(0.0)),
-                            blur_radius: px(0.0),
-                            spread_radius: px(1.0),
-                            inset: false,
-                        },
-                    ])
-                })
+                .when(active, |this| this.bg(hsla(p.footer_active)))
                 .when(!active, |this| {
                     this.hover(move |this| {
-                        this.bg(hsla(p.rail_hover))
-                            .text_color(hsla(p.rail_active_text))
+                        this.bg(hsla(p.raised)).text_color(hsla(p.foreground))
                     })
                 })
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    on_select(this, index, window, cx);
+                    on_select_tab(this, index, window, cx);
                 }))
                 .child(label.clone())
-                .child(
+                // `⌘1` fits beside the label; a spelled-out `Ctrl+1` would push the last tab off the footer.
+                .children((hotkey.chars().count() <= 2).then(|| {
                     div()
                         .flex_shrink_0()
                         .text_size(px(11.0))
-                        .font_weight(FontWeight::MEDIUM)
                         .text_color(hsla(if active {
                             p.rail_active_hotkey
                         } else {
                             p.rail_hotkey
                         }))
-                        .child(hotkey.clone()),
-                )
-        });
+                        .child(hotkey.clone())
+                }))
+        })
+        .collect::<Vec<_>>();
+    let footer_action = move |id: &'static str, active: bool| {
+        h_flex()
+            .id(id)
+            .flex_shrink_0()
+            .h(px(28.0))
+            .pl(px(9.0))
+            .pr(px(6.0))
+            .gap(px(7.0))
+            .items_center()
+            .rounded(px(7.0))
+            .text_size(px(12.5))
+            .line_height(px(18.0))
+            .whitespace_nowrap()
+            .cursor_pointer()
+            .when(active, |this| this.bg(hsla(p.footer_active)))
+            .hover(move |this| this.bg(hsla(p.raised)))
+    };
     h_flex()
-        .id("quick-access-tabs")
-        .flex_shrink_0()
-        .mx(px(6.0))
-        .mt(px(6.0))
-        .mb(px(2.0))
-        .h(px(QUICK_ACCESS_TAB_RAIL_HEIGHT))
-        .items_stretch()
-        .gap(px(3.0))
-        .p(px(3.0))
-        .rounded(px(QUICK_ACCESS_RADIUS_CONTROL))
-        .border_1()
-        .border_color(hsla(p.rail_border))
-        .bg(hsla(p.rail_track))
-        .overflow_hidden()
-        .children(segments)
-        .into_any_element()
-}
-
-/// `QuickAccessSearchInput` / `CommandInput`: one 32px raised field with a 12px
-/// text inset, the magnifier at rest and an X once there is a query.
-pub(crate) fn quick_access_search_field<V: 'static>(
-    p: &QuickAccessPalette,
-    state: &gpui::Entity<InputState>,
-    has_query: bool,
-    on_clear: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
-    window: &Window,
-    cx: &mut Context<V>,
-) -> AnyElement {
-    use gpui::Focusable as _;
-    let p = *p;
-    let focused = state.read(cx).focus_handle(cx).is_focused(window);
-    div()
-        .flex_shrink_0()
-        .w_full()
-        .px(px(6.0))
-        .pt(px(6.0))
-        .pb(px(2.0))
-        .child(
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .h(px(QUICK_ACCESS_CONTROL_HEIGHT))
-                .items_center()
-                .rounded(px(QUICK_ACCESS_RADIUS_CONTROL))
-                .border_1()
-                .border_color(hsla(if focused { p.focus_border } else { p.hairline }))
-                .bg(hsla(p.raised))
-                .child(
-                    div().flex_1().min_w_0().pl(px(12.0)).child(
-                        Input::new(state)
-                            .with_size(ComponentSize::Small)
-                            .appearance(false)
-                            .bordered(false)
-                            .focus_bordered(false)
-                            .w_full()
-                            .px(px(0.0))
-                            .py(px(0.0))
-                            .text_size(px(QUICK_ACCESS_ITEM_FONT_SIZE))
-                            .text_color(hsla(p.item)),
-                    ),
-                )
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .pr(px(6.0))
-                        .flex()
-                        .items_center()
-                        .child(if has_query {
-                            div()
-                                .id("quick-access-search-clear")
-                                .size(px(24.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .cursor_pointer()
-                                .text_color(hsla(p.muted))
-                                .hover(move |this| this.text_color(hsla(p.foreground)))
-                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                    on_clear(this, window, cx);
-                                }))
-                                .child(
-                                    svg()
-                                        .path(ICON_CLEAR)
-                                        .size(px(16.0))
-                                        .text_color(hsla(p.muted)),
-                                )
-                                .into_any_element()
-                        } else {
-                            div()
-                                .size(px(24.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    svg()
-                                        .path(ICON_SEARCH)
-                                        .size(px(16.0))
-                                        .opacity(0.5)
-                                        .text_color(hsla(p.item)),
-                                )
-                                .into_any_element()
-                        }),
-                ),
-        )
-        .into_any_element()
-}
-
-/// `.quick-access-filter-toolbar` / `.ghostex-stashed-prompt-toolbar`: the one
-/// control shelf under the search field, hairlined off the list below it.
-pub(crate) fn quick_access_filter_shelf(p: &QuickAccessPalette) -> Div {
-    h_flex()
+        .id("quick-access-footer")
         .flex_shrink_0()
         .w_full()
         .min_w_0()
+        .h(px(QUICK_ACCESS_FOOTER_HEIGHT))
+        .px(px(8.0))
+        .gap(px(8.0))
         .items_center()
-        .gap(px(6.0))
-        .p(px(6.0))
-        .border_b_1()
+        .border_t_1()
         .border_color(hsla(p.hairline))
-}
-
-/// The shelf's segmented control, the shared raised rail at the 32px control height.
-pub(crate) fn quick_access_segmented<V: 'static>(
-    p: &QuickAccessPalette,
-    id: &'static str,
-    items: &[QuickAccessSegment],
-    selected: &str,
-    width: Option<f32>,
-    on_select: impl Fn(&mut V, String, &mut Window, &mut Context<V>) + Clone + 'static,
-    cx: &mut Context<V>,
-) -> AnyElement {
-    let p = *p;
-    let segments = items.iter().enumerate().map(|(index, item)| {
-        let pressed = item.value == selected;
-        let value = item.value.clone();
-        let on_select = on_select.clone();
-        h_flex()
-            .id((id, index))
-            .flex_1()
-            .flex_basis(px(0.0))
-            .min_w_0()
-            .h_full()
-            .items_center()
-            .justify_center()
-            .overflow_hidden()
-            .px(px(10.0))
-            .rounded(px(5.0))
-            .text_size(px(QUICK_ACCESS_ITEM_FONT_SIZE))
-            .line_height(px(20.0))
-            .whitespace_nowrap()
-            .text_color(hsla(if pressed {
-                p.rail_active_text
-            } else {
-                p.rail_text
-            }))
-            .cursor_pointer()
-            .when(pressed, |this| {
-                this.bg(hsla(p.rail_active)).shadow(vec![
-                    gpui::BoxShadow {
-                        color: hsla(Rgba {
-                            r: 0.0,
-                            g: 0.0,
-                            b: 0.0,
-                            a: 0.14,
-                        }),
-                        offset: point(px(0.0), px(1.0)),
-                        blur_radius: px(3.0),
-                        spread_radius: px(0.0),
-                        inset: false,
-                    },
-                    gpui::BoxShadow {
-                        color: hsla(p.rail_active_ring),
-                        offset: point(px(0.0), px(0.0)),
-                        blur_radius: px(0.0),
-                        spread_radius: px(1.0),
-                        inset: false,
-                    },
-                ])
-            })
-            .when(!pressed, |this| {
-                this.hover(move |this| {
-                    this.bg(hsla(p.rail_hover))
-                        .text_color(hsla(p.rail_active_text))
-                })
-            })
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                on_select(this, value.clone(), window, cx);
-            }))
-            .child(item.label.clone())
-    });
-    h_flex()
-        .id(id)
-        .flex_shrink_0()
-        .when_some(width, |this, width| this.w(px(width)))
-        .when(width.is_none(), |this| this.flex_1().min_w_0())
-        .h(px(QUICK_ACCESS_CONTROL_HEIGHT))
-        .items_stretch()
-        .gap(px(3.0))
-        .p(px(3.0))
-        .rounded(px(QUICK_ACCESS_RADIUS_CONTROL))
-        .border_1()
-        .border_color(hsla(p.rail_border))
-        .bg(hsla(p.rail_track))
-        .overflow_hidden()
-        .children(segments)
+        .bg(hsla(p.footer))
+        .child(
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(px(2.0))
+                .items_center()
+                .overflow_hidden()
+                .children(tab_items),
+        )
+        .children((!primary_action.is_empty()).then(|| {
+            footer_action("quick-access-primary-action", false)
+                .text_color(hsla(p.foreground))
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    on_primary(this, window, cx);
+                }))
+                .child(SharedString::from(primary_action.to_string()))
+                .child(quick_access_keycap(&p, "↵"))
+        }))
+        .children((!primary_action.is_empty()).then(|| {
+            div()
+                .flex_shrink_0()
+                .w(px(1.0))
+                .h(px(16.0))
+                .bg(hsla(p.hairline))
+        }))
+        .child(
+            footer_action("quick-access-open-actions", actions_open)
+                .text_color(hsla(p.item))
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    on_actions(this, window, cx);
+                }))
+                .child("Actions")
+                .child(
+                    h_flex()
+                        .gap(px(3.0))
+                        .child(quick_access_keycap(&p, "⌘"))
+                        .child(quick_access_keycap(&p, "K")),
+                ),
+        )
         .into_any_element()
 }
 

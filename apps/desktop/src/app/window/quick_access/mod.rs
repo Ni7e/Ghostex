@@ -1,3 +1,4 @@
+pub(crate) mod actions_menu;
 pub(crate) mod chrome;
 pub(crate) mod editor;
 pub(crate) mod model;

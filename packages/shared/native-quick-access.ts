@@ -59,7 +59,6 @@ export type QuickAccessSessionRow = {
   inSidebar: boolean;
   sleeping: boolean;
   canActivate: boolean;
-  canDelete: boolean;
 };
 
 export type QuickAccessPromptChip = { label: string; color?: string };
@@ -76,9 +75,6 @@ export type QuickAccessPromptRow = {
   tags: QuickAccessPromptChip[];
   time: string;
   isFavorite: boolean;
-  stripeColor: string;
-  /** Which trailing controls this row offers, in render order. */
-  actions: QuickAccessPromptAction[];
 };
 
 export type QuickAccessPromptAction = 'open' | 'favorite' | 'tag' | 'copy' | 'edit' | 'delete' | 'save' | 'dismiss';
@@ -119,7 +115,7 @@ export type QuickAccessSelect = {
 
 export type QuickAccessSegment = { value: string; label: string };
 
-/** The control shelf under the search field. Commands and Projects have none. */
+/** The filters at the right edge of the search line. Commands and Projects have none. */
 export type QuickAccessToolbar =
   | { kind: 'none' }
   | {
@@ -137,7 +133,6 @@ export type QuickAccessToolbar =
       views: QuickAccessSegment[];
       projects: QuickAccessSelect;
       tags: QuickAccessSelect;
-      canAdd: boolean;
     };
 
 /** The Saved Prompts add/edit form, shown in place of the list. */
@@ -180,15 +175,17 @@ export type QuickAccessSnapshot = {
   /** The newest `select` command this snapshot already reflects. */
   selectionSeq: number;
   toolbar: QuickAccessToolbar;
-  /** The Sessions tab's floating Search by Prompt button. */
-  footer: { label: string; hotkey: string } | null;
+  /** What Return does to the selected row, named in the footer. Empty when the row cannot be activated. */
+  primaryAction: string;
+  /** The wire hotkeys (`cmd+shift+c`) the window forwards as `actionHotkey` instead of treating as search text. */
+  actionHotkeys: string[];
   /** The Saved Prompts stash hint pinned to the bottom-right of the list. */
   hint: string;
   editor: QuickAccessPromptEditor | null;
   tagComposer: QuickAccessTagComposer | null;
 };
 
-/** A menu the runtime asked the window to show at the pointer (row context menus). */
+/** A menu the window asked for: a row's actions (right-click or the Actions panel) or a submenu one of them opened. */
 export type QuickAccessMenuUpdate = {
   kind: 'menu';
   version: 1;
@@ -199,6 +196,8 @@ export type QuickAccessMenuItem = {
   id: string;
   label: string;
   icon: QuickAccessIcon;
+  /** Already formatted for display, empty when the item has no accelerator. */
+  hotkey: string;
   danger: boolean;
   disabled: boolean;
   separator: boolean;
@@ -233,17 +232,16 @@ export type QuickAccessCommand =
   | { type: 'query'; query: string }
   | { type: 'select'; key: string; seq: number }
   | { type: 'activate'; key: string }
+  /** Asks for the row's actions menu. `key` is empty when the list has no selection. */
   | { type: 'secondary'; key: string; x: number; y: number }
   | { type: 'menuItem'; id: string }
-  | { type: 'rowAction'; key: string; action: QuickAccessPromptAction | 'remove' }
-  | { type: 'rowTag'; key: string; tagId: string }
+  /** One of `actionHotkeys` was pressed over the selected row. */
+  | { type: 'actionHotkey'; key: string; hotkey: string }
   | { type: 'scope'; value: string }
   | { type: 'view'; value: string }
   | { type: 'project'; value: string }
   | { type: 'tagFilter'; value: string }
   | { type: 'loadMore' }
-  | { type: 'footer' }
-  | { type: 'addPrompt' }
   | { type: 'editorField'; field: 'content' | 'project' | 'tag'; value: string }
   | { type: 'editorFavorite' }
   | { type: 'editorSubmit' }

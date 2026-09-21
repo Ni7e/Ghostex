@@ -250,7 +250,6 @@ export function buildSessionGroups(state: SessionsTabState, query: string, nowMs
         inSidebar: item.kind === 'open',
         sleeping: item.kind === 'open' && getSidebarSessionLifecycleState(item.session) === 'sleeping',
         canActivate: item.kind === 'open' || item.session.isRestorable === true,
-        canDelete: item.kind === 'closed',
       };
     }),
   }));

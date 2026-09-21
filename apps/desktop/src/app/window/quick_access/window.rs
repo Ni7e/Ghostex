@@ -2,47 +2,41 @@
 //! (Commands, Projects, Sessions, Saved Prompts) replace the React pages that used to render in
 //! the CEF modal host.
 //!
-//! CDXC:AppModal 2026-09-20 DECISION:
-//! User: move Quick Access and every tab inside it from the React webview to GPUI, the way the sidebar and
-//! chat view were moved, and make it look exactly like the React one.
+//! CDXC:AppModal 2026-09-21 DECISION:
+//! User: make the GPUI Quick Access look like Raycast instead of the React one: one large search line with the
+//! tab's filters at its right edge, clean single-line rows, and a footer that holds the four tabs on the left and
+//! the Return action plus the Actions panel (Cmd+K) on the right. Every tab and every filter stays. Row buttons
+//! moved into the row's actions (right-click, Cmd+K, or the action's own hotkey). Supersedes the 2026-09-20
+//! instruction to look exactly like the React one; the React twins keep their look on web and mobile.
 //! The sidebar runtime keeps owning data and commands and publishes one resolved snapshot per frame; this
 //! window paints it, owns the search field, hover, scroll and keyboard, and posts interactions back.
 //! SEE-ALSO: packages/shared/native-quick-access.ts (the contract), apps/desktop/sidebar/native-quick-access/ (the controller),
 //! apps/desktop/src/app/quick_access_modal_lifecycle.rs (open, snapshot routing, close),
 //! packages/core-ui/command-palette.tsx, recent-projects-modal.tsx, previous-sessions-modal.tsx, stashed-prompts-modal.tsx (the retained React twins).
+use super::actions_menu::{QuickAccessMenuRequest, QuickAccessOpenMenu};
 use super::chrome::{
-    QuickAccessMenuState, capture_bounds, quick_access_filter_shelf, quick_access_icon,
-    quick_access_search_field, quick_access_segmented, quick_access_select_menu,
-    quick_access_select_trigger, quick_access_tab_rail, quick_access_tooltip, visible_options,
+    QuickAccessMenuState, capture_bounds, quick_access_filter_trigger, quick_access_footer,
+    quick_access_search_bar, quick_access_select_menu, quick_access_tooltip, segments_as_select,
+    visible_options,
 };
 use super::editor::{quick_access_prompt_editor, quick_access_tag_composer};
-use super::model::{
-    QuickAccessMenuItem, QuickAccessSnapshot, QuickAccessTabId, QuickAccessToolbar,
-};
+use super::model::{QuickAccessSnapshot, QuickAccessTabId, QuickAccessToolbar};
 use super::palette::{
-    QUICK_ACCESS_GROUP_HEADING_HEIGHT, QUICK_ACCESS_ITEM_FONT_SIZE, QUICK_ACCESS_LIST_PADDING,
-    QUICK_ACCESS_RADIUS_CONTROL, QUICK_ACCESS_RADIUS_MENU_ITEM, QUICK_ACCESS_ROW_PADDING_X,
-    QuickAccessPalette, hsla,
+    QUICK_ACCESS_GROUP_HEADING_HEIGHT, QUICK_ACCESS_ITEM_FONT_SIZE,
+    QUICK_ACCESS_LIST_PADDING, QUICK_ACCESS_ROW_PADDING_X, QuickAccessPalette, hsla,
 };
 use super::rows::{RowCallbacks, quick_access_row};
 use crate::app::window::native_modal_kit::MODAL_UI_FONT;
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, FocusHandle, Focusable,
-    FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, MouseDownEvent,
-    ParentElement as _, Point, Render, Rgba, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, anchored, deferred, div,
-    point, px, svg,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Point, Render, Rgba,
+    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
+    div, point, px, svg,
 };
 use gpui_component::input::{InputEvent, InputState};
-use gpui_component::{h_flex, v_flex};
+use gpui_component::v_flex;
 use serde_json::json;
 use std::rc::Rc;
-
-/// The React dialog is 654px wide inside a 692px window and `100vh - 16px` tall,
-/// so the native content column keeps those gutters.
-pub(crate) const QUICK_ACCESS_WINDOW_INSET_X: f32 = 19.0;
-pub(crate) const QUICK_ACCESS_WINDOW_INSET_Y: f32 = 8.0;
 
 pub(crate) type QuickAccessHost = Rc<dyn Fn(serde_json::Value, &mut App)>;
 
@@ -57,23 +51,25 @@ pub(crate) struct GpuiQuickAccessWindow {
     selection_seq: u64,
     scroll: ScrollHandle,
     pending_scroll: Option<usize>,
+    /// Saved / Recovered / Sent on Saved Prompts, All / Closed / External on Sessions.
+    view_menu: QuickAccessMenuState,
     project_menu: QuickAccessMenuState,
     tag_menu: QuickAccessMenuState,
     editor_project_menu: QuickAccessMenuState,
     editor_tag_menu: QuickAccessMenuState,
     pub(crate) editor_input: Option<Entity<InputState>>,
-    context_menu: Option<(Point<gpui::Pixels>, Vec<QuickAccessMenuItem>)>,
+    /// Where the next menu the runtime sends belongs. Kept after a choice because
+    /// an item may answer with a submenu (Tag…) that opens in the same place.
+    pub(super) menu_request: Option<QuickAccessMenuRequest>,
+    pub(super) context_menu: Option<QuickAccessOpenMenu>,
     tag_name_input: Option<Entity<InputState>>,
-    /// Where a row's tag button opened the create-tag popover, since a row has
-    /// no captured trigger bounds of its own.
-    tag_composer_anchor: Option<Point<gpui::Pixels>>,
+    /// Where the row's actions menu stood when it opened the create-tag popover,
+    /// since a row has no captured trigger bounds of its own.
+    pub(super) tag_composer_anchor: Option<Point<gpui::Pixels>>,
     /// A selection the pointer made must not scroll the list under it; only
     /// keyboard moves and re-ranked queries reveal their row.
     suppress_scroll: bool,
     last_load_more: Option<std::time::Instant>,
-    /// The inset dialog column. A click on the window's gutters around it
-    /// dismisses Quick Access, the way the React backdrop did.
-    content_bounds: Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
     focus_handle: FocusHandle,
     subscriptions: Vec<Subscription>,
 }
@@ -107,17 +103,18 @@ impl GpuiQuickAccessWindow {
             selection_seq: 0,
             scroll: ScrollHandle::new(),
             pending_scroll: None,
+            view_menu: QuickAccessMenuState::default(),
             project_menu: QuickAccessMenuState::default(),
             tag_menu: QuickAccessMenuState::default(),
             editor_project_menu: QuickAccessMenuState::default(),
             editor_tag_menu: QuickAccessMenuState::default(),
             editor_input: None,
+            menu_request: None,
             context_menu: None,
             tag_name_input: None,
             tag_composer_anchor: None,
             suppress_scroll: false,
             last_load_more: None,
-            content_bounds: Rc::new(std::cell::Cell::new(None)),
             focus_handle: cx.focus_handle(),
             subscriptions: vec![change],
         }
@@ -262,19 +259,6 @@ impl GpuiQuickAccessWindow {
         cx.notify();
     }
 
-    pub(crate) fn apply_menu(&mut self, items: Vec<QuickAccessMenuItem>, cx: &mut Context<Self>) {
-        match &mut self.context_menu {
-            Some((_, current)) if !items.is_empty() => *current = items,
-            _ if items.is_empty() => self.context_menu = None,
-            _ => {}
-        }
-        cx.notify();
-    }
-
-    pub(crate) fn set_context_menu_anchor(&mut self, position: Point<gpui::Pixels>) {
-        self.context_menu = Some((position, Vec::new()));
-    }
-
     /// The scroll index of the selected row, counting headings as rows because
     /// the list renders them as siblings so the handle can reach either.
     fn selected_flat_index(&self) -> Option<usize> {
@@ -312,32 +296,7 @@ impl GpuiQuickAccessWindow {
                 cx.notify();
             }),
             on_secondary: Rc::new(|this: &mut Self, key, position, _window, cx| {
-                this.set_context_menu_anchor(position);
-                this.post(
-                    json!({
-                        "type": "secondary",
-                        "key": key,
-                        "x": f32::from(position.x),
-                        "y": f32::from(position.y),
-                    }),
-                    cx,
-                );
-                cx.notify();
-            }),
-            on_row_action: Rc::new(|this: &mut Self, key, action, position, _window, cx| {
-                if action == "tag" {
-                    this.tag_composer_anchor = Some(position);
-                    this.post(
-                        json!({ "type": "tagComposerOpen", "anchor": format!("row:{key}") }),
-                        cx,
-                    );
-                    cx.notify();
-                    return;
-                }
-                this.post(
-                    json!({ "type": "rowAction", "key": key, "action": action }),
-                    cx,
-                );
+                this.request_row_menu(&key, QuickAccessMenuRequest::at_pointer(position), cx);
             }),
         }
     }
@@ -404,7 +363,9 @@ impl GpuiQuickAccessWindow {
     fn menu_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
-        let which = if self.project_menu.open {
+        let which = if self.view_menu.open {
+            "view"
+        } else if self.project_menu.open {
             "project"
         } else if self.tag_menu.open {
             "tag"
@@ -416,6 +377,7 @@ impl GpuiQuickAccessWindow {
             return false;
         };
         let Some(select) = self.snapshot.as_ref().and_then(|snapshot| match which {
+            "view" => view_select(snapshot),
             "project" => project_select(snapshot),
             "tag" => tag_select(snapshot),
             "editorProject" => snapshot
@@ -427,6 +389,7 @@ impl GpuiQuickAccessWindow {
             return false;
         };
         let state = match which {
+            "view" => &mut self.view_menu,
             "project" => &mut self.project_menu,
             "tag" => &mut self.tag_menu,
             "editorProject" => &mut self.editor_project_menu,
@@ -480,6 +443,15 @@ impl GpuiQuickAccessWindow {
 
     fn choose_menu_value(&mut self, which: &str, value: String, cx: &mut Context<Self>) {
         match which {
+            "view" => {
+                self.view_menu.close();
+                let kind = if self.tab() == QuickAccessTabId::RecentSessions {
+                    "scope"
+                } else {
+                    "view"
+                };
+                self.post(json!({ "type": kind, "value": value }), cx);
+            }
             "project" => {
                 self.project_menu.close();
                 self.post(json!({ "type": "project", "value": value }), cx);
@@ -507,10 +479,8 @@ impl GpuiQuickAccessWindow {
     fn handle_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
-        if self.context_menu.is_some() && key == "escape" {
-            self.context_menu = None;
+        if self.actions_menu_key(event, cx) {
             cx.stop_propagation();
-            cx.notify();
             return;
         }
         if self.menu_key(event, cx) {
@@ -568,6 +538,27 @@ impl GpuiQuickAccessWindow {
             }
             return;
         }
+        if modifiers.secondary() && !modifiers.shift && !modifiers.alt && key == "k" {
+            cx.stop_propagation();
+            self.open_actions_panel(window, cx);
+            return;
+        }
+        if let Some(hotkey) = wire_hotkey(event)
+            && self
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.action_hotkeys.contains(&hotkey))
+        {
+            cx.stop_propagation();
+            let key = self.selected_key();
+            // The action may answer with a submenu (Tag…), which opens where the Actions panel does.
+            self.menu_request = Some(QuickAccessMenuRequest::actions_panel(window));
+            self.post(
+                json!({ "type": "actionHotkey", "key": key, "hotkey": hotkey }),
+                cx,
+            );
+            return;
+        }
         match key {
             "escape" => {
                 cx.stop_propagation();
@@ -580,24 +571,13 @@ impl GpuiQuickAccessWindow {
                 }
             }
             "enter" if !modifiers.alt && !modifiers.control && !modifiers.shift => {
-                let selected = self
-                    .snapshot
-                    .as_ref()
-                    .filter(|snapshot| !snapshot.selected_key.is_empty())
-                    .and_then(|snapshot| {
-                        snapshot
-                            .rows()
-                            .find(|row| row.key() == snapshot.selected_key)
-                            .filter(|row| row.is_activatable())
-                            .map(|row| row.key().to_string())
-                    });
-                if let Some(key) = selected {
+                if self.activate_selected(cx) {
                     cx.stop_propagation();
-                    self.post(json!({ "type": "activate", "key": key }), cx);
                 }
             }
             _ => {
-                if self.project_menu.open
+                if self.view_menu.open
+                    || self.project_menu.open
                     || self.tag_menu.open
                     || self.editor_project_menu.open
                     || self.editor_tag_menu.open
@@ -612,6 +592,71 @@ impl GpuiQuickAccessWindow {
                 }
             }
         }
+    }
+}
+
+/// Return's target: the selected row, when it can be activated.
+impl GpuiQuickAccessWindow {
+    pub(super) fn selected_key(&self) -> String {
+        self.snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.selected_key.clone())
+            .unwrap_or_default()
+    }
+
+    fn activate_selected(&mut self, cx: &mut Context<Self>) -> bool {
+        let selected = self
+            .snapshot
+            .as_ref()
+            .filter(|snapshot| !snapshot.selected_key.is_empty())
+            .and_then(|snapshot| {
+                snapshot
+                    .rows()
+                    .find(|row| row.key() == snapshot.selected_key)
+                    .filter(|row| row.is_activatable())
+                    .map(|row| row.key().to_string())
+            });
+        let Some(key) = selected else {
+            return false;
+        };
+        self.post(json!({ "type": "activate", "key": key }), cx);
+        true
+    }
+
+    pub(super) fn close_filter_menus(&mut self) {
+        self.view_menu.close();
+        self.project_menu.close();
+        self.tag_menu.close();
+    }
+}
+
+/// The pressed chord in the runtime's wire form (`cmd+shift+c`), when it carries a command modifier.
+fn wire_hotkey(event: &KeyDownEvent) -> Option<String> {
+    let modifiers = event.keystroke.modifiers;
+    if !modifiers.secondary() {
+        return None;
+    }
+    let mut parts = vec!["cmd"];
+    if modifiers.control && modifiers.platform {
+        parts.push("ctrl");
+    }
+    if modifiers.alt {
+        parts.push("alt");
+    }
+    if modifiers.shift {
+        parts.push("shift");
+    }
+    parts.push(event.keystroke.key.as_str());
+    Some(parts.join("+"))
+}
+
+fn view_select(snapshot: &QuickAccessSnapshot) -> Option<super::model::QuickAccessSelect> {
+    match &snapshot.toolbar {
+        QuickAccessToolbar::Sessions { scope, scopes, .. } => {
+            Some(segments_as_select(scopes, scope))
+        }
+        QuickAccessToolbar::Prompts { view, views, .. } => Some(segments_as_select(views, view)),
+        QuickAccessToolbar::None => None,
     }
 }
 
@@ -661,6 +706,25 @@ impl Render for GpuiQuickAccessWindow {
         }
         let mut overlays: Vec<AnyElement> = Vec::new();
         if let Some(snapshot) = snapshot.as_ref() {
+            if let Some(menu) = quick_access_select_menu(
+                &p,
+                &view_select(snapshot).unwrap_or_default(),
+                &self.view_menu,
+                "quick-access-view-menu",
+                160.0,
+                |this: &mut Self, value, _window, cx| {
+                    this.choose_menu_value("view", value, cx);
+                    cx.notify();
+                },
+                |this: &mut Self, _window, cx| {
+                    this.view_menu.close();
+                    cx.notify();
+                },
+                window,
+                cx,
+            ) {
+                overlays.push(menu);
+            }
             if let Some(menu) = quick_access_select_menu(
                 &p,
                 &project_select(snapshot).unwrap_or_default(),
@@ -762,12 +826,16 @@ impl Render for GpuiQuickAccessWindow {
                     cx,
                 ));
             }
-            if let Some((position, items)) = self.context_menu.clone()
-                && !items.is_empty()
-            {
-                overlays.push(self.render_context_menu(&p, position, &items, cx));
+            if let Some(menu) = self.context_menu.as_ref() {
+                overlays.push(self.render_context_menu(&p, menu, cx));
             }
         }
+        let primary_action = snapshot
+            .as_ref()
+            .filter(|snapshot| snapshot.editor.is_none())
+            .map(|snapshot| snapshot.primary_action.clone())
+            .unwrap_or_default();
+        let actions_open = self.actions_panel_open();
         div()
             .id("quick-access-window")
             .size_full()
@@ -797,50 +865,33 @@ impl Render for GpuiQuickAccessWindow {
                     this.post(json!({ "type": "tab", "tab": tab.wire_name() }), cx);
                 },
             ))
-            .on_mouse_down(
-                gpui::MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                    let inside = this
-                        .content_bounds
-                        .get()
-                        .is_some_and(|bounds| bounds.contains(&event.position));
-                    if inside || this.context_menu.is_some() {
-                        return;
-                    }
-                    this.close(cx);
-                }),
-            )
             .child(
                 v_flex()
                     .size_full()
-                    .px(px(QUICK_ACCESS_WINDOW_INSET_X))
-                    .py(px(QUICK_ACCESS_WINDOW_INSET_Y))
-                    .on_children_prepainted(capture_bounds(self.content_bounds.clone(), 0))
-                    .child(
-                        v_flex()
-                            .size_full()
-                            .min_h_0()
-                            .relative()
-                            .pb(px(4.0))
-                            .child(quick_access_tab_rail(
-                                &p,
-                                &tabs,
-                                move |this: &mut Self, index, _window, cx| {
-                                    if let Some(tab) = tab_ids.get(index).copied() {
-                                        this.post(
-                                            json!({ "type": "tab", "tab": tab.wire_name() }),
-                                            cx,
-                                        );
-                                    }
-                                },
-                                cx,
-                            ))
-                            .children(
-                                snapshot
-                                    .as_ref()
-                                    .map(|snapshot| self.render_body(&p, snapshot, window, cx)),
-                            ),
-                    ),
+                    .min_h_0()
+                    .children(
+                        snapshot
+                            .as_ref()
+                            .map(|snapshot| self.render_body(&p, snapshot, cx)),
+                    )
+                    .child(quick_access_footer(
+                        &p,
+                        &tabs,
+                        &primary_action,
+                        actions_open,
+                        move |this: &mut Self, index, _window, cx| {
+                            if let Some(tab) = tab_ids.get(index).copied() {
+                                this.post(json!({ "type": "tab", "tab": tab.wire_name() }), cx);
+                            }
+                        },
+                        |this: &mut Self, _window, cx| {
+                            this.activate_selected(cx);
+                        },
+                        |this: &mut Self, window, cx| {
+                            this.open_actions_panel(window, cx);
+                        },
+                        cx,
+                    )),
             )
             .children(overlays)
     }
@@ -851,7 +902,6 @@ impl GpuiQuickAccessWindow {
         &mut self,
         p: &QuickAccessPalette,
         snapshot: &QuickAccessSnapshot,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if let Some(editor) = snapshot.editor.as_ref() {
@@ -865,15 +915,16 @@ impl GpuiQuickAccessWindow {
             );
         }
         let has_query = !self.query.is_empty();
+        let filters = self.render_filters(p, snapshot, cx);
         v_flex()
             .flex_1()
             .min_h_0()
             .w_full()
-            .relative()
-            .child(quick_access_search_field(
+            .child(quick_access_search_bar(
                 p,
                 &self.search,
                 has_query,
+                filters,
                 |this: &mut Self, window, cx| {
                     this.query.clear();
                     this.search.update(cx, |input, cx| {
@@ -883,227 +934,121 @@ impl GpuiQuickAccessWindow {
                     this.post(json!({ "type": "query", "query": "" }), cx);
                     cx.notify();
                 },
-                window,
                 cx,
             ))
-            .children(self.render_toolbar(p, snapshot, cx))
-            .child(self.render_list(p, snapshot, cx))
-            .children(snapshot.footer.as_ref().map(|footer| {
-                self.render_find_prompts_button(p, &footer.label, &footer.hotkey, cx)
-            }))
-            .children(
-                (!snapshot.hint.is_empty()).then(|| self.render_stash_hint(p, &snapshot.hint, cx)),
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .relative()
+                    .child(self.render_list(p, snapshot, cx))
+                    .children(
+                        (!snapshot.hint.is_empty())
+                            .then(|| self.render_stash_hint(p, &snapshot.hint, cx)),
+                    ),
             )
             .into_any_element()
     }
 
-    fn render_toolbar(
+    /// The tab's filters, in the search line's order: the single-choice view first, then project, then tags.
+    fn render_filters(
         &mut self,
         p: &QuickAccessPalette,
         snapshot: &QuickAccessSnapshot,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        match &snapshot.toolbar {
-            QuickAccessToolbar::None => None,
+    ) -> Vec<AnyElement> {
+        let (view, view_tooltip, projects, tags, tags_active) = match &snapshot.toolbar {
+            QuickAccessToolbar::None => return Vec::new(),
             QuickAccessToolbar::Sessions {
                 scope,
                 scopes,
                 scope_hotkey,
                 tag_filter_active,
+                tags,
                 projects,
                 ..
-            } => {
-                let p = *p;
-                let tag_active = *tag_filter_active;
-                Some(
-                    quick_access_filter_shelf(&p)
-                        .child(quick_access_segmented(
-                            &p,
-                            "quick-access-session-scope",
-                            scopes,
-                            scope,
-                            Some(264.0),
-                            |this: &mut Self, value, _window, cx| {
-                                this.post(json!({ "type": "scope", "value": value }), cx);
-                            },
-                            cx,
-                        ))
-                        .child(
-                            div()
-                                .flex_shrink_0()
-                                .text_size(px(10.0))
-                                .opacity(0.58)
-                                .text_color(hsla(p.item))
-                                .child(SharedString::from(scope_hotkey.clone())),
-                        )
-                        .child(
-                            h_flex()
-                                .ml_auto()
-                                .min_w_0()
-                                .gap(px(6.0))
-                                .items_center()
-                                .child(
-                                    div()
-                                        .flex_shrink_0()
-                                        .on_children_prepainted(capture_bounds(
-                                            self.tag_menu.trigger_bounds.clone(),
-                                            0,
-                                        ))
-                                        .child(
-                                            div()
-                                                .id("quick-access-tag-filter")
-                                                .size(px(32.0))
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .rounded(px(QUICK_ACCESS_RADIUS_CONTROL))
-                                                .border_1()
-                                                .border_color(hsla(p.hairline))
-                                                .cursor_pointer()
-                                                .hover(move |this| this.bg(hsla(p.raised)))
-                                                .on_click(cx.listener(
-                                                    |this, _: &ClickEvent, _window, cx| {
-                                                        this.project_menu.close();
-                                                        this.tag_menu.toggle();
-                                                        cx.notify();
-                                                    },
-                                                ))
-                                                .child(
-                                                    svg()
-                                                        .path(super::chrome::asset_icon_path(
-                                                            "filter-2",
-                                                        ))
-                                                        .size(px(16.0))
-                                                        .text_color(hsla(if tag_active {
-                                                            p.accent
-                                                        } else {
-                                                            p.item
-                                                        })),
-                                                ),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .flex_shrink(1.0)
-                                        .min_w_0()
-                                        .on_children_prepainted(capture_bounds(
-                                            self.project_menu.trigger_bounds.clone(),
-                                            0,
-                                        ))
-                                        .child(quick_access_select_trigger(
-                                            &p,
-                                            projects,
-                                            &self.project_menu,
-                                            "quick-access-project-filter",
-                                            Some(180.0),
-                                            |this: &mut Self, _window, cx| {
-                                                this.tag_menu.close();
-                                                this.project_menu.toggle();
-                                                cx.notify();
-                                            },
-                                            cx,
-                                        )),
-                                ),
-                        )
-                        .into_any_element(),
-                )
-            }
+            } => (
+                segments_as_select(scopes, scope),
+                (!scope_hotkey.is_empty()).then(|| format!("Cycle with {scope_hotkey}")),
+                projects,
+                tags,
+                *tag_filter_active,
+            ),
             QuickAccessToolbar::Prompts {
                 view,
                 views,
                 projects,
                 tags,
-                can_add,
-            } => {
-                let p = *p;
-                Some(
-                    quick_access_filter_shelf(&p)
-                        .child(quick_access_segmented(
-                            &p,
-                            "quick-access-prompt-view",
-                            views,
-                            view,
-                            Some(264.0),
-                            |this: &mut Self, value, _window, cx| {
-                                this.post(json!({ "type": "view", "value": value }), cx);
-                            },
-                            cx,
-                        ))
-                        .child(
-                            div()
-                                .flex_shrink(1.0)
-                                .min_w_0()
-                                .on_children_prepainted(capture_bounds(
-                                    self.project_menu.trigger_bounds.clone(),
-                                    0,
-                                ))
-                                .child(quick_access_select_trigger(
-                                    &p,
-                                    projects,
-                                    &self.project_menu,
-                                    "quick-access-prompt-project",
-                                    Some(180.0),
-                                    |this: &mut Self, _window, cx| {
-                                        this.tag_menu.close();
-                                        this.project_menu.toggle();
-                                        cx.notify();
-                                    },
-                                    cx,
-                                )),
-                        )
-                        .child(
-                            div()
-                                .flex_shrink(1.0)
-                                .min_w_0()
-                                .on_children_prepainted(capture_bounds(
-                                    self.tag_menu.trigger_bounds.clone(),
-                                    0,
-                                ))
-                                .child(quick_access_select_trigger(
-                                    &p,
-                                    tags,
-                                    &self.tag_menu,
-                                    "quick-access-prompt-tag",
-                                    Some(160.0),
-                                    |this: &mut Self, _window, cx| {
-                                        this.project_menu.close();
-                                        this.tag_menu.toggle();
-                                        cx.notify();
-                                    },
-                                    cx,
-                                )),
-                        )
-                        .children(can_add.then(|| {
-                            h_flex()
-                                .id("quick-access-add-prompt")
-                                .ml_auto()
-                                .flex_shrink_0()
-                                .h(px(32.0))
-                                .px(px(10.0))
-                                .gap(px(6.0))
-                                .items_center()
-                                .rounded(px(QUICK_ACCESS_RADIUS_CONTROL))
-                                .border_1()
-                                .border_color(hsla(p.hairline))
-                                .cursor_pointer()
-                                .text_size(px(QUICK_ACCESS_ITEM_FONT_SIZE))
-                                .text_color(hsla(p.item))
-                                .hover(move |this| this.bg(hsla(p.raised)))
-                                .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                                    this.post(json!({ "type": "addPrompt" }), cx);
-                                }))
-                                .child(
-                                    svg()
-                                        .path(super::chrome::asset_icon_path("plus"))
-                                        .size(px(16.0))
-                                        .text_color(hsla(p.item)),
-                                )
-                                .child("Add")
-                        }))
-                        .into_any_element(),
-                )
-            }
+                ..
+            } => (segments_as_select(views, view), None, projects, tags, false),
+        };
+        let mut tags = tags.clone();
+        if tags.label.is_empty() {
+            tags.label = "Tags".to_string();
         }
+        vec![
+            div()
+                .flex_shrink_0()
+                .on_children_prepainted(capture_bounds(self.view_menu.trigger_bounds.clone(), 0))
+                .child(quick_access_filter_trigger(
+                    p,
+                    &view,
+                    &self.view_menu,
+                    "quick-access-view-filter",
+                    false,
+                    view_tooltip,
+                    |this: &mut Self, _window, cx| {
+                        this.project_menu.close();
+                        this.tag_menu.close();
+                        this.view_menu.toggle();
+                        cx.notify();
+                    },
+                    cx,
+                ))
+                .into_any_element(),
+            div()
+                .flex_shrink_0()
+                .on_children_prepainted(capture_bounds(
+                    self.project_menu.trigger_bounds.clone(),
+                    0,
+                ))
+                .child(quick_access_filter_trigger(
+                    p,
+                    projects,
+                    &self.project_menu,
+                    "quick-access-project-filter",
+                    false,
+                    None,
+                    |this: &mut Self, _window, cx| {
+                        this.view_menu.close();
+                        this.tag_menu.close();
+                        this.project_menu.toggle();
+                        cx.notify();
+                    },
+                    cx,
+                ))
+                .into_any_element(),
+            div()
+                .flex_shrink_0()
+                .on_children_prepainted(capture_bounds(self.tag_menu.trigger_bounds.clone(), 0))
+                .child(quick_access_filter_trigger(
+                    p,
+                    &tags,
+                    &self.tag_menu,
+                    "quick-access-tag-filter",
+                    tags_active,
+                    None,
+                    |this: &mut Self, _window, cx| {
+                        this.view_menu.close();
+                        this.project_menu.close();
+                        this.tag_menu.toggle();
+                        cx.notify();
+                    },
+                    cx,
+                ))
+                .into_any_element(),
+        ]
     }
 
     fn render_list(
@@ -1208,56 +1153,6 @@ impl GpuiQuickAccessWindow {
             .into_any_element()
     }
 
-    /// `.previous-sessions-find-prompts-button`: the floating pill over the
-    /// bottom-right of the Sessions list.
-    fn render_find_prompts_button(
-        &self,
-        p: &QuickAccessPalette,
-        label: &str,
-        hotkey: &str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let p = *p;
-        h_flex()
-            .id("quick-access-find-prompts")
-            .absolute()
-            .right(px(18.0))
-            .bottom(px(14.0))
-            .h(px(32.0))
-            .pl(px(12.0))
-            .pr(px(14.0))
-            .gap(px(7.0))
-            .items_center()
-            .rounded_full()
-            .border_1()
-            .border_color(hsla(p.float_border))
-            .bg(hsla(p.float_surface))
-            .text_size(px(QUICK_ACCESS_ITEM_FONT_SIZE))
-            .line_height(px(20.0))
-            .text_color(hsla(p.foreground))
-            .cursor_default()
-            .hover(move |this| this.bg(hsla(p.raised_hover)))
-            .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                this.post(json!({ "type": "footer" }), cx);
-            }))
-            .child(
-                svg()
-                    .path(super::chrome::asset_icon_path("file-search"))
-                    .size(px(15.0))
-                    .flex_shrink_0()
-                    .text_color(hsla(p.foreground)),
-            )
-            .child(SharedString::from(label.to_string()))
-            .children((!hotkey.is_empty()).then(|| {
-                div()
-                    .flex_shrink_0()
-                    .text_size(px(10.0))
-                    .opacity(0.58)
-                    .child(SharedString::from(hotkey.to_string()))
-            }))
-            .into_any_element()
-    }
-
     /// `.ghostex-stashed-prompts-stash-hint`: the 28px info pill in the corner.
     fn render_stash_hint(
         &self,
@@ -1293,81 +1188,6 @@ impl GpuiQuickAccessWindow {
                     .text_color(hsla(p.muted)),
             )
             .into_any_element()
-    }
-
-    /// The Projects row context menu, drawn as the shared Codex popup surface.
-    fn render_context_menu(
-        &self,
-        p: &QuickAccessPalette,
-        position: Point<gpui::Pixels>,
-        items: &[QuickAccessMenuItem],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let p = *p;
-        let rows = items
-            .iter()
-            .enumerate()
-            .map(|(index, item)| {
-                if item.separator {
-                    return div()
-                        .my(px(3.0))
-                        .h(px(1.0))
-                        .w_full()
-                        .bg(hsla(p.menu_border))
-                        .into_any_element();
-                }
-                let id = item.id.clone();
-                let color = if item.danger { p.destructive } else { p.item };
-                h_flex()
-                    .id(("quick-access-menu-item", index))
-                    .w_full()
-                    .min_h(px(28.0))
-                    .px(px(8.0))
-                    .gap(px(8.0))
-                    .items_center()
-                    .rounded(px(QUICK_ACCESS_RADIUS_MENU_ITEM))
-                    .text_size(px(QUICK_ACCESS_ITEM_FONT_SIZE))
-                    .text_color(hsla(color))
-                    .when(item.disabled, |this| this.opacity(0.45))
-                    .when(!item.disabled, |this| {
-                        this.cursor_pointer()
-                            .hover(move |this| this.bg(hsla(p.menu_hover)))
-                            .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
-                                this.context_menu = None;
-                                this.post(json!({ "type": "menuItem", "id": id.clone() }), cx);
-                                cx.notify();
-                            }))
-                    })
-                    .child(quick_access_icon(&item.icon, 14.0, color))
-                    .child(SharedString::from(item.label.clone()))
-                    .into_any_element()
-            })
-            .collect::<Vec<_>>();
-        deferred(
-            anchored()
-                .position(position)
-                .snap_to_window_with_margin(px(8.0))
-                .child(
-                    v_flex()
-                        .id("quick-access-context-menu")
-                        .occlude()
-                        .min_w(px(210.0))
-                        .p(px(4.0))
-                        .gap(px(1.0))
-                        .rounded(px(QUICK_ACCESS_RADIUS_CONTROL))
-                        .border_1()
-                        .border_color(hsla(p.menu_border))
-                        .bg(hsla(p.menu_background))
-                        .shadow_lg()
-                        .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                            this.context_menu = None;
-                            cx.notify();
-                        }))
-                        .children(rows),
-                ),
-        )
-        .with_priority(2)
-        .into_any_element()
     }
 }
 

@@ -253,7 +253,7 @@ export function promptRowKey(promptId: string): string {
   return `prompt:${promptId}`;
 }
 
-function promptActions(state: PromptsTabState, prompt: GxserverStashedPrompt): QuickAccessPromptAction[] {
+export function promptActions(state: PromptsTabState, prompt: GxserverStashedPrompt): QuickAccessPromptAction[] {
   const canJump = Boolean(prompt.agentSessionId || prompt.sessionId);
   if (state.view === 'saved') {
     return [...(canJump ? (['open'] as const) : []), 'favorite', 'tag', 'copy', 'edit', 'delete'];
@@ -298,8 +298,6 @@ export function buildPromptGroups(state: PromptsTabState, query: string): QuickA
           .map((tag) => ({ label: tag.name, color: tag.color })),
         time: relativeTimeLabel(prompt.updatedAt),
         isFavorite: tagIds.includes(GXSERVER_FAVORITE_PROMPT_TAG_ID),
-        stripeColor: labelTags[0]?.color ?? '',
-        actions: promptActions(state, prompt),
       };
     }),
   }));
@@ -521,17 +519,19 @@ export function promptTagMenuItems(state: PromptsTabState, prompt: GxserverStash
       id: `tag:${tag.tagId}`,
       label: tag.name,
       icon: assetIcon(tagIds.includes(tag.tagId) ? 'circle-check-filled' : 'tag', tag.color),
+      hotkey: '',
       danger: false,
       disabled: false,
       separator: false,
     }));
   if (items.length > 0) {
-    items.push({ id: 'separator', label: '', icon: NO_ICON, danger: false, disabled: false, separator: true });
+    items.push({ id: 'separator', label: '', icon: NO_ICON, hotkey: '', danger: false, disabled: false, separator: true });
   }
   items.push({
     id: 'tag:new',
     label: 'New tag…',
     icon: assetIcon('plus'),
+    hotkey: '',
     danger: false,
     disabled: false,
     separator: false,

@@ -30,12 +30,21 @@ import type { ExtensionToSidebarMessage, SidebarToExtensionMessage } from '@/pac
 import type {
   NativeQuickAccessBridge,
   QuickAccessCommand,
+  QuickAccessMenuItem,
   QuickAccessSnapshot,
   QuickAccessTabId,
   QuickAccessToolbar,
 } from '@/packages/shared/native-quick-access';
 import type { createGpuiSidebarRuntime } from '../gxserver-runtime';
 import { buildCommandGroups, runCommandRow } from './commands';
+import {
+  ACTION_SEPARATOR,
+  ACTIVATE_ACTION_ID,
+  QUICK_ACCESS_ACTION_HOTKEYS,
+  actionForHotkey,
+  actionItem,
+  tidyActionItems,
+} from './row-actions';
 import {
   activateRecentProject,
   buildProjectGroups,
@@ -55,6 +64,7 @@ import {
   promptsProjectSelect,
   promptsTagSelect,
   promptTagMenuItems,
+  promptActions,
   promptBelongsToSession,
   hasSessionScope,
   promptProjectNames,
@@ -134,7 +144,8 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
   let projects: RecentProjectsData | undefined;
   let sessions: SessionsTabState = createSessionsTabState();
   let prompts: PromptsTabState = createPromptsTabState();
-  let menuProjectKey: string | undefined;
+  /** The row whose actions menu is showing; `menuItem` runs against it. */
+  let menuRowKey: string | undefined;
   let menuPromptKey: string | undefined;
   let openedPromptScope: 'all' | 'project' | 'session' | undefined;
   let pendingPublish: number | undefined;
@@ -197,7 +208,6 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
         ],
         projects: promptsProjectSelect(prompts),
         tags: promptsTagSelect(prompts, query),
-        canAdd: prompts.view === 'saved',
       };
     }
     return { kind: 'none' };
@@ -252,7 +262,8 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
       selectedKey,
       selectionSeq,
       toolbar: toolbar(),
-      footer: tab === 'recentSessions' ? { label: 'Search by Prompt', hotkey: findPromptsHotkey() } : null,
+      primaryAction: primaryActionLabel(),
+      actionHotkeys: QUICK_ACCESS_ACTION_HOTKEYS,
       hint: tab === 'savedPrompts' && !prompts.editing ? STASH_PROMPT_HINT : '',
       editor: tab === 'savedPrompts' ? promptEditorState(prompts) : null,
       tagComposer:
@@ -446,7 +457,6 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
     if (tab === 'recentProjects') {
       const project = findRecentProject(projects, key);
       if (!project) return;
-      menuProjectKey = undefined;
       activateRecentProject(project, post);
       close();
       return;
@@ -603,6 +613,126 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
     } as SidebarToExtensionMessage);
   };
 
+  const startAddPrompt = () => {
+    const defaultProjectId = prompts.scope === 'project' ? prompts.scopeProjectId : prompts.rawProjectId;
+    prompts.editing = {
+      content: '',
+      projectValue: defaultProjectId ? `project:${defaultProjectId}` : NO_PROJECT_VALUE,
+      tagValue:
+        prompts.tagFilter.kind === 'tag' && prompts.tagFilter.tagId !== GXSERVER_FAVORITE_PROMPT_TAG_ID
+          ? `tag:${prompts.tagFilter.tagId}`
+          : NO_TAG_VALUE,
+      isFavorite: prompts.tagFilter.kind === 'tag' && prompts.tagFilter.tagId === GXSERVER_FAVORITE_PROMPT_TAG_ID,
+    };
+    prompts.saveError = undefined;
+  };
+
+  /** Everything the row at `key` can do, Return's action first. An empty key lists what the tab offers without a row. */
+  const rowActionItems = (key: string): QuickAccessMenuItem[] => {
+    if (tab === 'commands') {
+      return key ? [actionItem(ACTIVATE_ACTION_ID, 'Run Command', 'player-play')] : [];
+    }
+    if (tab === 'recentProjects') {
+      const project = findRecentProject(projects, key);
+      return project ? recentProjectMenuItems(project, machineId) : [];
+    }
+    if (tab === 'recentSessions') {
+      const item = visibleSessionItems(sessions, query).find((candidate) => candidate.key === key);
+      return tidyActionItems([
+        ...(item
+          ? [
+              item.kind === 'open'
+                ? actionItem(ACTIVATE_ACTION_ID, 'Focus Session', 'focus-2')
+                : actionItem(ACTIVATE_ACTION_ID, 'Resume Session', 'player-play', {
+                    disabled: item.session.isRestorable !== true,
+                  }),
+            ]
+          : []),
+        ACTION_SEPARATOR,
+        actionItem('findPrompts', 'Search by Prompt', 'file-search', { hotkey: findPromptsHotkey() }),
+        ACTION_SEPARATOR,
+        ...(item?.kind === 'closed' ? [actionItem('remove', 'Delete Session', 'trash', { danger: true })] : []),
+      ]);
+    }
+    const prompt = findPrompt(prompts, key);
+    const offered = prompt ? promptActions(prompts, prompt) : [];
+    const isFavorite = prompt ? (prompt.tagIds ?? []).includes(GXSERVER_FAVORITE_PROMPT_TAG_ID) : false;
+    return tidyActionItems([
+      ...(prompt ? [actionItem(ACTIVATE_ACTION_ID, 'Insert into Chat', 'arrow-back-up')] : []),
+      ...(offered.includes('open') ? [actionItem('prompt:open', 'Open Source Session', 'arrow-up-right')] : []),
+      ACTION_SEPARATOR,
+      ...(offered.includes('favorite')
+        ? [actionItem('prompt:favorite', isFavorite ? 'Remove Star' : 'Star', isFavorite ? 'star-filled' : 'star')]
+        : []),
+      ...(offered.includes('save') ? [actionItem('prompt:save', 'Save Prompt', 'device-floppy')] : []),
+      ...(offered.includes('tag') ? [actionItem('prompt:tag', 'Tag…', 'tag')] : []),
+      ...(offered.includes('copy') ? [actionItem('prompt:copy', 'Copy Text', 'copy')] : []),
+      ...(offered.includes('edit') ? [actionItem('prompt:edit', 'Edit', 'pencil')] : []),
+      ...(prompts.view === 'saved' ? [actionItem('addPrompt', 'New Prompt', 'plus')] : []),
+      ACTION_SEPARATOR,
+      ...(offered.includes('delete') ? [actionItem('prompt:delete', 'Delete', 'trash', { danger: true })] : []),
+    ]);
+  };
+
+  /** The footer's name for Return: one word, because the footer also carries the four tabs. */
+  const primaryActionLabel = (): string => {
+    const first = rowActionItems(selectedKey)[0];
+    if (first?.id !== ACTIVATE_ACTION_ID || first.disabled) return '';
+    if (tab === 'commands') return 'Run';
+    if (tab === 'savedPrompts') return 'Insert';
+    if (tab === 'recentSessions') return first.label === 'Focus Session' ? 'Focus' : 'Resume';
+    return first.label;
+  };
+
+  /** Runs one actions-menu item. Returns true when it already answered the window, so the caller skips its publish. */
+  const runRowAction = (key: string, id: string): boolean => {
+    if (id === ACTIVATE_ACTION_ID) {
+      activateRow(key);
+      return false;
+    }
+    if (id === 'remove') {
+      removeRow(key);
+      return false;
+    }
+    if (id === 'addPrompt') {
+      startAddPrompt();
+      return false;
+    }
+    if (id === 'findPrompts') {
+      // Close first: the desktop close removes whichever app-modal window is
+      // open, so opening Find before closing would take down its own window.
+      close();
+      post({ actionId: 'openFindPrompts', type: 'runGhostexHotkeyAction' } as SidebarToExtensionMessage);
+      return true;
+    }
+    if (id === 'prompt:tag') {
+      const prompt = findPrompt(prompts, key);
+      if (!prompt) return false;
+      menuPromptKey = key;
+      send({ kind: 'menu', version: 1, items: promptTagMenuItems(prompts, prompt) });
+      return true;
+    }
+    if (id.startsWith('prompt:')) {
+      runPromptAction(key, id.slice('prompt:'.length));
+      return false;
+    }
+    const project = findRecentProject(projects, key);
+    if (!project) return false;
+    if (id === 'copyPath') {
+      post({ projectId: project.projectId, type: 'copyRecentProjectPath' } as SidebarToExtensionMessage);
+    } else if (id === 'openLocation' || id === 'openTerminal') {
+      post({
+        projectId: project.projectId,
+        type: machineId ? 'openRecentProjectTerminal' : 'openRecentProjectInFinder',
+      } as SidebarToExtensionMessage);
+      if (machineId) {
+        close();
+        return true;
+      }
+    }
+    return false;
+  };
+
   const cycleSessionsScope = () => {
     sessions.scope = sessions.scope === 'all' ? 'closed' : sessions.scope === 'closed' ? 'external' : 'all';
     if (sessions.scope === 'external') externalRefreshPending = true;
@@ -652,7 +782,7 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
       }
       case 'closed':
         open = false;
-        menuProjectKey = undefined;
+        menuRowKey = undefined;
         menuPromptKey = undefined;
         return;
       case 'close':
@@ -681,12 +811,15 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
         activateRow(command.key);
         break;
       case 'secondary': {
-        if (tab !== 'recentProjects') break;
-        const project = findRecentProject(projects, command.key);
-        if (!project) break;
-        menuProjectKey = command.key;
-        send({ kind: 'menu', version: 1, items: recentProjectMenuItems(project, machineId) });
+        menuPromptKey = undefined;
+        menuRowKey = command.key;
+        send({ kind: 'menu', version: 1, items: rowActionItems(command.key) });
         return;
+      }
+      case 'actionHotkey': {
+        const item = actionForHotkey(rowActionItems(command.key), command.hotkey);
+        if (item && runRowAction(command.key, item.id)) return;
+        break;
       }
       case 'menuItem': {
         if (menuPromptKey !== undefined) {
@@ -708,53 +841,9 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
           }
           break;
         }
-        const project = findRecentProject(projects, menuProjectKey ?? '');
-        menuProjectKey = undefined;
-        if (!project) break;
-        if (command.id === 'activate') {
-          activateRecentProject(project, post);
-          close();
-          return;
-        }
-        if (command.id === 'remove') {
-          removeRecentProject(project, post);
-          break;
-        }
-        if (command.id === 'copyPath') {
-          post({ projectId: project.projectId, type: 'copyRecentProjectPath' } as SidebarToExtensionMessage);
-          break;
-        }
-        if (command.id === 'openLocation' || command.id === 'openTerminal') {
-          post({
-            projectId: project.projectId,
-            type: machineId ? 'openRecentProjectTerminal' : 'openRecentProjectInFinder',
-          } as SidebarToExtensionMessage);
-          if (machineId) {
-            close();
-            return;
-          }
-        }
-        break;
-      }
-      case 'rowAction': {
-        if (command.action === 'remove') {
-          removeRow(command.key);
-          break;
-        }
-        if (tab !== 'savedPrompts') break;
-        if (command.action === 'tag') {
-          const prompt = findPrompt(prompts, command.key);
-          if (!prompt) break;
-          menuPromptKey = command.key;
-          send({ kind: 'menu', version: 1, items: promptTagMenuItems(prompts, prompt) });
-          return;
-        }
-        runPromptAction(command.key, command.action);
-        break;
-      }
-      case 'rowTag': {
-        const prompt = findPrompt(prompts, command.key);
-        if (prompt) setPromptTags(prompt.promptId, nextPromptTagIds(prompt, command.tagId));
+        const key = menuRowKey ?? '';
+        menuRowKey = undefined;
+        if (runRowAction(key, command.id)) return;
         break;
       }
       case 'scope': {
@@ -818,27 +907,6 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
         } else if (sessions.cursor && !sessionsLoadingMore) {
           requestSessionsPage('append', sessions.cursor);
         }
-        break;
-      }
-      case 'footer': {
-        // Close first: the desktop close removes whichever app-modal window is
-        // open, so opening Find before closing would take down its own window.
-        close();
-        post({ actionId: 'openFindPrompts', type: 'runGhostexHotkeyAction' } as SidebarToExtensionMessage);
-        return;
-      }
-      case 'addPrompt': {
-        const defaultProjectId = prompts.scope === 'project' ? prompts.scopeProjectId : prompts.rawProjectId;
-        prompts.editing = {
-          content: '',
-          projectValue: defaultProjectId ? `project:${defaultProjectId}` : NO_PROJECT_VALUE,
-          tagValue:
-            prompts.tagFilter.kind === 'tag' && prompts.tagFilter.tagId !== GXSERVER_FAVORITE_PROMPT_TAG_ID
-              ? `tag:${prompts.tagFilter.tagId}`
-              : NO_TAG_VALUE,
-          isFavorite: prompts.tagFilter.kind === 'tag' && prompts.tagFilter.tagId === GXSERVER_FAVORITE_PROMPT_TAG_ID,
-        };
-        prompts.saveError = undefined;
         break;
       }
       case 'editorField': {
