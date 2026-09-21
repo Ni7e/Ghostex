@@ -23,6 +23,9 @@
  * the store holds no rows for, which is the one refusal that costs something), and
  * `handOffsNothing` when it posts nothing (a local row, a browser row, an id that does not parse).
  * Both must be non-zero, so the refusal list cannot silently grow into "refuse everything".
+ * `lastSeenHandOffs` counts the hand-offs of a machine drawn from its stored last-seen copy, which
+ * the old runtime opens WITHOUT `preferredInterface` because its `remotePresentations` holds only
+ * what a stream delivered; it is in the zero-check so that case cannot quietly stop being built.
  *
  * A gate that cannot fail is worse than none, so `--inject` mutates the Rust dump with a plausible
  * port mistake and the run must then show a difference or collapse a counter.
@@ -110,6 +113,10 @@ const MUTATIONS: Record<string, (entry: Json) => Json> = {
     withPlan(entry, (plan) =>
       plan.keepView ? plan : { ...plan, nativeAction: { ...plan.nativeAction, keepView: false } }
     ),
+  // The planner answers a machine whose rows are the stored last-seen copy, reading the agent off
+  // those rows: the open then carries a `preferredInterface` the old runtime never sends.
+  'answer-a-last-seen-machine': (entry) =>
+    entry.lastSeenPlan ? { ...entry, owned: true, plan: entry.lastSeenPlan } : entry,
   // The planner refuses every remote click, so the old runtime does it all: no payload difference
   // at all, and every counter that says the Rust side answered anything collapses.
   'refuse-every-remote-click': (entry) => ({ ...entry, owned: false, plan: null }),
@@ -148,10 +155,11 @@ async function runCase(entry: Json): Promise<Run> {
   runtime.presentation = undefined;
   runtime.activeProjectId = undefined;
   runtime.activeGroupId = entry.activeGroupId ?? undefined;
-  // Both loaded machines carry the same presentation, which is what the Rust half seeds too; the
-  // one the store holds nothing for is simply absent from this map.
+  // The machines this run's stream delivered carry the same presentation, which is what the Rust
+  // half seeds too. The one the store holds nothing for, and the one it holds only as the stored
+  // last-seen copy, are absent from this map, as they are from the shipped runtime's.
   runtime.remotePresentations = new Map(
-    ['remote-msgckntd-ecz4w', 'remote-ab12'].map((machineId) => [machineId, entry.presentation])
+    (entry.liveMachineIds as string[]).map((machineId) => [machineId, entry.presentation])
   );
   runtime.remoteSidebarHuds = new Map();
   // `createGpuiSidebarSettings` normalizes `runtimeSettings.settings`, not `runtimeSettings`.
@@ -205,6 +213,7 @@ async function compare([outDir, ...flags]: string[]) {
     tsFocusMarks: 0,
     handOffsOpen: 0,
     handOffsNothing: 0,
+    lastSeenHandOffs: 0,
   };
   for (const raw of dump.entries as Json[]) {
     const entry = mutate(raw);
@@ -218,6 +227,7 @@ async function compare([outDir, ...flags]: string[]) {
     if (run.otherActions.length) differences.push(`${label}: the TypeScript posted ${run.otherActions.join(', ')}`);
     counters.tsFocusMarks += run.focusMarks;
     if (!entry.owned) {
+      if (entry.lastSeenPlan !== undefined && run.opens.length) counters.lastSeenHandOffs += 1;
       if (run.opens.length) counters.handOffsOpen += 1;
       else counters.handOffsNothing += 1;
       continue;

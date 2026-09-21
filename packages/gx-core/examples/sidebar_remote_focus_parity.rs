@@ -15,6 +15,13 @@
 //! Split Right rides along because it is the same open with a placement and WITHOUT the two
 //! options, which is the difference a single payload comparison would miss.
 //!
+//! A third machine is held as the stored LAST-SEEN copy (`seed_last_seen_presentation`), which is
+//! what an offline machine shows. The old runtime does not list such a machine in
+//! `remotePresentations`, so it opens the row without `preferredInterface`; the planner must hand
+//! it back. Each of its cases also carries `lastSeenPlan`, the plan a store that read those rows as
+//! live would have made, so the comparer's `answer-a-last-seen-machine` mutation is that exact port
+//! mistake rather than a guess at it.
+//!
 //!   cargo run --release --example sidebar_remote_focus_parity -- <out-dir>
 //!   bun tooling/gx-core/remote-focus-parity.ts compare <out-dir>
 
@@ -33,6 +40,8 @@ const MACHINE: &str = "remote-msgckntd-ecz4w";
 const OTHER_MACHINE: &str = "remote-ab12";
 /// A machine the store holds no rows for: the planner must hand its clicks back.
 const UNLOADED_MACHINE: &str = "remote-offline";
+/// A machine whose rows are the stored last-seen copy, not this run's stream.
+const LAST_SEEN_MACHINE: &str = "remote-lastseen";
 
 fn main() -> ExitCode {
     let out_dir = std::env::args().nth(1).unwrap_or_default();
@@ -46,19 +55,27 @@ fn main() -> ExitCode {
         for message in messages(&session_id) {
             for active_group in active_groups() {
                 for settings in interface_settings() {
-                    let core = seeded_core(active_group.as_deref());
+                    let core = seeded_core(active_group.as_deref(), false);
                     let plan = plan_remote_focus(&core, &message, &settings);
                     if plan.is_some() {
                         owned += 1;
                     }
-                    entries.push(json!({
+                    let mut entry = json!({
                         "message": message,
                         "activeGroupId": active_group,
                         "settings": settings_json(&settings),
                         "presentation": presentation_json(),
+                        "liveMachineIds": [MACHINE, OTHER_MACHINE],
                         "owned": plan.is_some(),
                         "plan": plan.as_ref().map(RemoteFocusPlan::to_json),
-                    }));
+                    });
+                    if session_id.starts_with(&format!("remote:{LAST_SEEN_MACHINE}:")) {
+                        let live = seeded_core(active_group.as_deref(), true);
+                        entry["lastSeenPlan"] = plan_remote_focus(&live, &message, &settings)
+                            .as_ref()
+                            .map_or(Value::Null, RemoteFocusPlan::to_json);
+                    }
+                    entries.push(entry);
                 }
             }
         }
@@ -97,6 +114,9 @@ fn session_ids() -> Vec<String> {
         format!("remote:{OTHER_MACHINE}:session:R1:with:colon"),
         // A machine with no rows: the planner hands it back and the old runtime still opens it.
         format!("remote:{UNLOADED_MACHINE}:session:R1:RS1"),
+        // A machine drawn from its last-seen copy, on a row WITH an agent, so a planner that read
+        // those rows would add a `preferredInterface` the old runtime never sends.
+        format!("remote:{LAST_SEEN_MACHINE}:session:R1:RS1"),
         // Shapes the remote pattern refuses.
         format!("remote:{MACHINE}:session:R1"),
         format!("remote:{MACHINE}:group:R1"),
@@ -159,8 +179,9 @@ fn settings_json(settings: &PreferredInterfaceSettings) -> Value {
     })
 }
 
-/// A core holding both loaded machines, with the active group seeded to the case's value.
-fn seeded_core(active_group_id: Option<&str>) -> Core {
+/// A core holding both loaded machines and the last-seen one, with the active group seeded to the
+/// case's value. `last_seen_live` streams the third machine instead, which is the mutant's store.
+fn seeded_core(active_group_id: Option<&str>, last_seen_live: bool) -> Core {
     let mut core = Core::new();
     for (machine, server_id) in [
         (MachineId::Local, "local"),
@@ -169,6 +190,20 @@ fn seeded_core(active_group_id: Option<&str>) -> Core {
     ] {
         core.handle_raw_frame(machine, &snapshot(server_id).to_string(), NOW_MS)
             .expect("the frame parses");
+    }
+    let last_seen = MachineId::Remote(LAST_SEEN_MACHINE.to_string());
+    let stored = snapshot("remote-c");
+    match last_seen_live {
+        true => {
+            core.handle_raw_frame(last_seen, &stored.to_string(), NOW_MS)
+                .expect("the frame parses");
+        }
+        false => {
+            core.seed_last_seen_presentation(
+                &last_seen,
+                serde_json::from_value(stored["snapshot"].clone()).expect("the snapshot parses"),
+            );
+        }
     }
     let Some(active_group_id) = active_group_id else {
         return core;

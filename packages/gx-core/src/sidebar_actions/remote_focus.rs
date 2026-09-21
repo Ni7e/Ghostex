@@ -24,9 +24,10 @@
 //! reading one rule instead of two.
 //!
 //! Refused, each with its reason: a LOCAL row (the store's own focus path owns it), a browser row
-//! (an app tab, not a session), an id that does not parse as a remote session, and a machine the
-//! store holds no rows for, because the agent lookup that decides `preferredInterface` would then
-//! answer "no agent" for a session that has one and the pane would open in the wrong view.
+//! (an app tab, not a session), an id that does not parse as a remote session, and a machine whose
+//! rows did not come from THIS run's stream (not loaded yet, or drawn from the stored last-seen
+//! copy), because the old runtime reads the agent from its live presentations only and so sends a
+//! different payload for such a row than the store's rows would give.
 //!
 //! SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/sessions-and-focus.ts (`focusSession`'s remote
 //! branch, `focusChangesActiveProject`, `sessionPreferredAgentInterface`, `splitSessionRight`),
@@ -114,11 +115,6 @@ impl RemoteFocusPlan {
     }
 }
 
-/// Whether this message is one this file may answer, without resolving anything.
-pub fn owns_remote_focus_message(message: &Value) -> bool {
-    text_field(message, "type").is_some_and(|kind| REMOTE_FOCUS_MESSAGE_TYPES.contains(&kind))
-}
-
 /// What a click on a remote row does, or `None` when this file does not own the payload and the old
 /// runtime must answer it whole.
 pub fn plan_remote_focus(
@@ -137,9 +133,15 @@ pub fn plan_remote_focus(
         return None;
     }
     let session = SessionKey::parse_remote_scoped_session_id(sidebar_session_id)?;
-    // A machine whose rows the store does not hold cannot answer the agent lookup below, and a
-    // missing agent is not the same answer as an agent with no override: it drops the field.
-    if core.presentation().loaded(&session.machine).is_none() {
+    // CDXC:RemoteMachines 2026-09-21 WHY:
+    // Only a machine THIS run's stream delivered is answered here. `sessionPreferredAgentInterface`
+    // reads the row out of `this.remotePresentations`, which holds only what a stream delivered and
+    // loses the machine on disconnect; it never reads the last-seen map it draws faded rows from.
+    // So for a machine that is offline and showing its last-seen rows, or connected with no snapshot
+    // yet, the old runtime still posts the open but WITHOUT `preferredInterface`, while the store's
+    // last-seen rows would name the agent and add the field. Handing the click back keeps the one
+    // payload that has always been sent, exactly as `loaded_live` does for the set planners.
+    if core.presentation().loaded_live(&session.machine).is_none() {
         return None;
     }
     let split_right = kind == "splitSessionRight";
@@ -233,11 +235,12 @@ fn focus_changes_active_project(core: &Core, session: &SessionKey) -> bool {
 }
 
 /// The agent id of the row on ITS machine, which is what `sessionPreferredAgentInterface` reads out
-/// of `remotePresentations.get(machineId)`. A row that machine does not list has none.
+/// of `remotePresentations.get(machineId)`: the live rows only, never the last-seen copy. A row that
+/// machine does not list has none.
 fn agent_id_of<'a>(core: &'a Core, session: &SessionKey) -> Option<&'a str> {
     let machine: &MachineId = &session.machine;
     core.presentation()
-        .loaded(machine)?
+        .loaded_live(machine)?
         .server_session(&session.project_id, &session.session_id)?
         .agent_id
         .as_deref()

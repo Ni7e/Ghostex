@@ -69,7 +69,7 @@ pub use crate::sidebar_actions::{
     apply_snooze_answer, bulk_request_summary, close_optimistic_follow_ups, iso_string_from_ms,
     local_project_group_project_id, owns_batch_command, owns_bulk_message, owns_close_message,
     owns_flags_message, owns_fork_message, owns_lifecycle_message, owns_modal_message,
-    owns_open_command, owns_reload_message, owns_reload_set_message, owns_remote_focus_message,
+    owns_open_command, owns_reload_message, owns_reload_set_message,
     owns_remote_session_message, owns_snooze_action,
     owns_snooze_message, owns_split_message, plan_batch, plan_bulk_request, plan_close_request,
     plan_flags_request, plan_fork_request, plan_full_reload, plan_lifecycle_request,
