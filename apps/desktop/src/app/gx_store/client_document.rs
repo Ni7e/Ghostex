@@ -16,18 +16,19 @@
 //! (or that it has none), its push path, the script that hands it back to the sidebar page, and
 //! where its host lives on the app.
 //!
-//! **K4 is not on this host yet, and that is named rather than left to look done.** The workspace
-//! session groups document keeps `workspace_groups.rs`, because on top of everything here it has
-//! four things no other document has: the hand-OFF (the sidebar page posts its own edits over
-//! `ghostexNativeHost`), the `requestWorkspaceGroups` recovery when a hand-off was refused while
-//! the read was in flight, the prune, and the ordering between those and the hand-back. Moving it
-//! would be a rewrite of a file that gained a real bug fix the same day, and **no gate drives any
-//! of the three hosts**: the guard gate and the prune gate drive gx-core, and the round-trip gate
-//! drives the page code against the message type and the script template, so a host refactor is
-//! covered by `cargo check` and by the live counters and by nothing else. What moves when it does:
-//! the read ladder, the owed write and its retry and quit flush, the push booking, the echo
-//! funnel, the hand-back delivery test, and the counters, leaving `workspace_groups.rs` with the
-//! four hooks above.
+//! **K4 is not on this host yet, and the list of what keeps it apart is now short enough to say
+//! exactly.** Three of the four things that did have moved here (2026-09-21): the hand-OFF is the
+//! same shape for all three, the refused-hand-off recovery is `page_holds_newer` plus
+//! [`ClientDocument::request_script`], and the ordering between the recovery and the hand-back is
+//! `gx_document_settle`. What is left is TWO: the PRUNE, which walks the loaded presentations and
+//! has no analogue for a document whose members are not sessions, and three counters
+//! (`reconcile_seen`, `reconcile_entered`, `side_state_held`, plus the process-wide
+//! `hostMessagesDropped`) that two live rounds were spent adding and that this host does not carry.
+//! So K4 CAN move now, and the reason it has not is that **no gate drives any of the three hosts**:
+//! the guard, launch and prune gates drive gx-core, and the round-trip gates drive the page code
+//! against the message type and the script template, so a host refactor is covered by `cargo check`
+//! and by the live counters and by nothing else. Whoever moves it moves the prune in as a hook and
+//! the three counters in as fields, and changes nothing else.
 //!
 //! SEE-ALSO: packages/gx-core/src/doc_sync/, apps/desktop/src/app/gx_store/workspace_groups.rs,
 //! apps/desktop/src/app/gx_store/project_docs.rs.
