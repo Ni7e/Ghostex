@@ -136,6 +136,12 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_modal(&command, cx) {
             return;
         }
+        // The More menu's rows, a machine's Configure, the Space editor and a project header's Add
+        // Worktree and History open an app modal and nothing else. Each is a RENDERER command at
+        // the TOP level, which is the envelope piece 3d got wrong (gx_store/sidebar_open.rs).
+        if self.gx_store_run_sidebar_open(&command, cx) {
+            return;
+        }
         // Snooze reads the clock and the local calendar here and posts the same two commands the
         // renderer posts; the call it sends back arrives at the arm below (gx_store/sidebar_snooze.rs).
         if self.gx_store_run_sidebar_snooze_action(&command, cx) {

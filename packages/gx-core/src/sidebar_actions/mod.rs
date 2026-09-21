@@ -16,7 +16,9 @@
 //! Full Reload is the sleep and the wake in order, and Split Right is a focus that carries where
 //! the pane goes, and `reload_set` is Full Reload over a project's rows or a user-made group's
 //! members. `remote` is every per-session payload when the row is on a remote machine, where an
-//! action is a call down that machine's tunnel and nothing local moves.
+//! action is a call down that machine's tunnel and nothing local moves. `open` holds the family
+//! whose whole answer is an app-modal-host message: the More menu's rows, a machine's Configure,
+//! the Space editor, and a project header's Add Worktree and History.
 
 mod bulk;
 mod close;
@@ -24,6 +26,7 @@ mod flags;
 mod fork;
 mod lifecycle;
 mod modals;
+mod open;
 mod plan;
 mod read_only;
 mod reload;
@@ -53,6 +56,7 @@ pub use lifecycle::{
     LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, LIFECYCLE_PATCH_TTL_MS,
 };
 pub use modals::{owns_modal_message, plan_modal_action, rename_seed_title, ModalAction};
+pub use open::{owns_open_command, plan_open_action, OPEN_COMMAND_TYPES};
 pub use plan::{ActionEffect, SidebarActionPlan, ToastLevel};
 pub use read_only::{plan_read_only_action, READ_ONLY_MESSAGE_TYPES};
 pub use reload::{

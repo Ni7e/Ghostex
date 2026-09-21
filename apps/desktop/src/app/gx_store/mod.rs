@@ -12,7 +12,9 @@
 //! `sidebar_actions.rs` performs what a menu row, hover button or header button does, and
 //! `sidebar_lifecycle.rs` the ones with a daemon round trip in the middle (sleep, wake, close
 //! and fork), `sidebar_flags.rs` the four that are one call with different fields,
-//! `sidebar_modals.rs` the two that only open a dialog and `sidebar_snooze.rs` the two that read
+//! `sidebar_modals.rs` the two that only open a dialog, `sidebar_open.rs` the family whose whole
+//! answer is an app-modal-host message (the More menu's rows, a machine's Configure, the Space
+//! editor, a project's Add Worktree and History), and `sidebar_snooze.rs` the two that read
 //! the clock and the local calendar, `sidebar_reload.rs` Full Reload and Split Right,
 //! `sidebar_bulk.rs` the plural payloads and the renderer's
 //! batch envelope, `sidebar_remote.rs` every per-session action of a row on a remote machine,
@@ -29,6 +31,7 @@
 mod burst;
 mod client_document;
 mod diagnostics;
+mod diagnostics_open;
 mod effects;
 mod host;
 mod layout_persist;
@@ -46,6 +49,7 @@ mod sidebar_list;
 mod sidebar_list_inputs;
 mod sidebar_menus;
 mod sidebar_modals;
+mod sidebar_open;
 mod sidebar_reload;
 mod sidebar_remote;
 mod sidebar_scratch_compare;

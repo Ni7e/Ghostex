@@ -259,6 +259,67 @@ function mutateFork(name: string | undefined, entry: Json): Json {
   }
 }
 
+/**
+ * The open half's mutations.
+ *
+ * What they have to be able to break is a PAYLOAD and an ORDER, neither of which a list comparison
+ * can see: a dialog opened on the wrong project, the Space editor in the wrong mode, and the close
+ * that must precede the open or leave a Settings window standing behind it.
+ */
+function mutateOpen(name: string | undefined, entry: Json): Json {
+  const clone = JSON.parse(JSON.stringify(entry)) as Json;
+  const calls = (clone.calls ?? []) as Json[];
+  switch (name) {
+    // The close dropped, which leaves whatever the user was in standing behind the dialog that is
+    // about to open. Nothing about the new dialog is wrong, which is why this needs its own probe.
+    case 'open-without-the-close':
+      clone.calls = calls.filter((call) => call.call !== 'closeAppModal');
+      return clone;
+    // The close run for the rows that return before it, which is the same mistake from the other
+    // side: a toggle that also dismisses Settings.
+    case 'close-on-every-row':
+      if (!calls.some((call) => call.call === 'closeAppModal')) clone.calls = [{ call: 'closeAppModal' }, ...calls];
+      return clone;
+    // The Space editor always in create mode, which is what reading the Space list off the wrong
+    // machine produces: the user clicks a Space they have and is offered a new one.
+    case 'space-editor-always-creates':
+      for (const call of calls) if (call.payload?.mode === 'edit') call.payload.mode = 'create';
+      return clone;
+    // The remote machine dropped from the payloads that carry it, which is the shape a port takes
+    // when it reads the selected machine as "local" everywhere.
+    case 'forget-the-remote-machine':
+      for (const call of calls) {
+        if (!call.payload) continue;
+        delete call.payload.machineId;
+        delete call.payload.remoteMachineId;
+        delete call.payload.remoteMachineName;
+        delete call.payload.initialRemoteMachineId;
+      }
+      return clone;
+    // The RAW project id where the workspace one belongs, which is the field this port had to look
+    // twice at: on this computer the two are the same string, so only a remote project row shows it.
+    case 'worktree-takes-the-raw-project-id':
+      for (const call of calls) {
+        const projectId = call.payload?.projectId ?? call.payload?.initialProjectId;
+        if (typeof projectId !== 'string' || !projectId.startsWith('remote:')) continue;
+        const raw = projectId.split(':project:')[1];
+        if (call.payload.projectId) call.payload.projectId = raw;
+        if (call.payload.initialProjectId) call.payload.initialProjectId = raw;
+      }
+      return clone;
+    default:
+      return clone;
+  }
+}
+
+const OPEN_MUTATIONS = [
+  'open-without-the-close',
+  'close-on-every-row',
+  'space-editor-always-creates',
+  'forget-the-remote-machine',
+  'worktree-takes-the-raw-project-id',
+];
+
 /** The flags half's mutations. */
 function mutateFlags(name: string | undefined, entry: Json): Json {
   const clone = JSON.parse(JSON.stringify(entry)) as Json;
@@ -749,6 +810,7 @@ async function compare([outDir, ...flags]: string[]) {
     ...LIFECYCLE_MUTATIONS,
     ...CLOSE_MUTATIONS,
     ...FORK_MUTATIONS,
+    ...OPEN_MUTATIONS,
     ...FLAGS_MUTATIONS,
     ...MODAL_MUTATIONS,
     ...SNOOZE_MUTATIONS,
@@ -766,6 +828,7 @@ async function compare([outDir, ...flags]: string[]) {
     runTypeScriptFork,
     runTypeScriptFlags,
     runTypeScriptModals,
+    runTypeScriptOpen,
     runTypeScriptTitleRule,
     runTypeScriptSnoozeClock,
     runTypeScriptSnoozeBoundary,
@@ -801,6 +864,9 @@ async function compare([outDir, ...flags]: string[]) {
   let flagCalls = 0;
   let modalOpens = 0;
   let modalRefusals = 0;
+  let openPlans = 0;
+  let openCalls = 0;
+  let openRefusals = 0;
   let titleCases = 0;
   let overlayKept = 0;
   let closesRestored = 0;
@@ -1138,6 +1204,48 @@ async function compare([outDir, ...flags]: string[]) {
       if (canonical(mineCalls) !== canonical(theirCalls))
         differences.push(`${where}: rust ${canonical(mineCalls)} ts ${canonical(theirCalls)}`);
     }
+    // The open family: one app-modal-host message per command, field by field.
+    const theirOpen = await runTypeScriptOpen(rust);
+    for (const [index, entry] of ((rust.open ?? []) as Json[]).entries()) {
+      const theirs = theirOpen[index];
+      const command = (entry.command ?? {}) as Json;
+      const where = `${name} open #${index} ${String(command.type)}:${String(command.action ?? command.spaceId ?? '-')} tab=${String(entry.tab)}`;
+      const mine = mutate ? mutateOpen(mutationName, entry) : entry;
+      const theirCalls = (theirs?.calls ?? []) as Json[];
+      const theirPosts = (theirs?.posts ?? []) as Json[];
+      if (mine.owned !== true) {
+        // A refusal is a hand-off: the old runtime answers it. The two that must reach nothing at
+        // all are the sort rows, which are `setActiveSessionsSortMode` and NOT a modal, and the
+        // two toggles, which move the sidebar's own state; a modal call for any of them would mean
+        // the close this family runs is reaching a row that returns before it.
+        openRefusals += 1;
+        if (
+          command.type === 'sidebarAction' &&
+          ['sortManual', 'sortLastActivity', 'showHidden', 'toggleProjects'].includes(String(command.action)) &&
+          theirCalls.length
+        )
+          differences.push(
+            `${where}: the TypeScript posted ${theirCalls.length} modal call(s) for a row that opens nothing`
+          );
+        continue;
+      }
+      openPlans += 1;
+      const mineCalls = ((mine.calls ?? []) as Json[]).map((call) => {
+        if (call.call === 'closeAppModal') return { call: 'close' };
+        if (call.call === 'openAppModal') return { call: 'open', open: call.payload };
+        return { call: String(call.call) };
+      });
+      openCalls += mineCalls.length;
+      if (canonical(mineCalls) !== canonical(theirCalls))
+        differences.push(`${where}: rust ${canonical(mineCalls)} ts ${canonical(theirCalls)}`);
+      // `loadSessions` is the one answered command that posts nothing to the modal host and is a
+      // host call instead, so the TypeScript's own runtime channel must stay empty for every one
+      // of them: a payload there is work the store dropped.
+      if (theirPosts.length)
+        differences.push(
+          `${where}: the TypeScript posted ${canonical(theirPosts)} to the runtime, which the store does not`
+        );
+    }
     const theirFlags = await runTypeScriptFlags(scenario, rust);
     for (const [index, entry] of ((rust.flags ?? []) as Json[]).entries()) {
       if (entry.owned !== true) continue;
@@ -1284,7 +1392,7 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} forkGroupWrites ${forkGroupWrites} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkTabsIgnored ${bulkTabsIgnored} bulkNotLoaded ${bulkNotLoaded} reloadPlans ${reloadPlans} reloadLegs ${reloadLegs} reloadHandOffs ${reloadHandOffs} reloadEarlyReturns ${reloadEarlyReturns} splitHandOffs ${splitHandOffs} splitEarlyReturns ${splitEarlyReturns} splitWakes ${splitWakes} splitFocuses ${splitFocuses} splitNothings ${splitNothings} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
+    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} forkGroupWrites ${forkGroupWrites} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} openPlans ${openPlans} openCalls ${openCalls} openRefusals ${openRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkTabsIgnored ${bulkTabsIgnored} bulkNotLoaded ${bulkNotLoaded} reloadPlans ${reloadPlans} reloadLegs ${reloadLegs} reloadHandOffs ${reloadHandOffs} reloadEarlyReturns ${reloadEarlyReturns} splitHandOffs ${splitHandOffs} splitEarlyReturns ${splitEarlyReturns} splitWakes ${splitWakes} splitFocuses ${splitFocuses} splitNothings ${splitNothings} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
@@ -1296,6 +1404,9 @@ async function compare([outDir, ...flags]: string[]) {
   // or a probe list that silently came back empty.
   const measured: [string, number][] = [
     ['forkGroupWrites', forkGroupWrites],
+    ['openPlans', openPlans],
+    ['openCalls', openCalls],
+    ['openRefusals', openRefusals],
     ['overlayKept', overlayKept],
     ['closesRestored', closesRestored],
     ['stoppedUnhidden', stoppedUnhidden],

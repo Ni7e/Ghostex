@@ -28,13 +28,13 @@ use ghostex_gx_core::{
     apply_close_answer, apply_flags_answer, apply_fork_answer, apply_lifecycle_answer,
     apply_snooze_answer, close_optimistic_follow_ups, encode_uri_component, iso_string_from_ms,
     plan_batch, plan_bulk_request, plan_close_request, plan_flags_request, plan_fork_request,
-    plan_full_reload, plan_lifecycle_request, plan_modal_action, plan_read_only_action,
-    plan_snooze_action, plan_snooze_request, plan_split_right, rename_seed_title,
-    session_is_snoozed, snooze_wake_ms, ActiveGroup, CloseAnswer, CloseFollowUp, Core, Event,
-    FlagsFollowUp, ForkFollowUp, Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, ProjectKey,
-    SectionCollapse, SessionKey, SideStateUpdate, SidebarInputs, SidebarView, SidebarViewModel,
-    SnoozeClock, SnoozeFollowUp, WorkspaceGroupsDocument, QUICK_AUTOMATIONS_PROJECT_ID,
-    READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS,
+    plan_full_reload, plan_lifecycle_request, plan_modal_action, plan_open_action,
+    plan_read_only_action, plan_snooze_action, plan_snooze_request, plan_split_right,
+    rename_seed_title, session_is_snoozed, snooze_wake_ms, ActiveGroup, CloseAnswer, CloseFollowUp,
+    Core, Event, FlagsFollowUp, ForkFollowUp, Intent, LifecycleAnswer, LifecycleFollowUp,
+    MachineId, ProjectKey, SectionCollapse, SessionKey, SideStateUpdate, SidebarInputs,
+    SidebarView, SidebarViewModel, SnoozeClock, SnoozeFollowUp, WorkspaceGroupsDocument,
+    QUICK_AUTOMATIONS_PROJECT_ID, READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS,
 };
 use serde_json::{json, Map, Value};
 
@@ -365,7 +365,8 @@ fn build(
     let flags = flags_entries(&core, scenario, menu_dump, now_ms);
     let flags_count = flags.len();
     let modals = modal_entries(model.view());
-    let modal_count = modals.len();
+    let opens = open_entries(model.view());
+    let modal_count = modals.len() + opens.len();
     let bulk = bulk_entries(&core, scenario);
     let batch = batch_entries();
     let reload = reload_entries(&core, scenario);
@@ -398,6 +399,7 @@ fn build(
             "fork": Value::Array(forks),
             "flags": Value::Array(flags),
             "modals": Value::Array(modals),
+            "open": Value::Array(opens),
             "titleRule": Value::Array(title_rule_entries()),
             "snoozeClock": Value::Array(snooze_clock),
             "snoozeBoundary": Value::Array(snooze_boundary),
@@ -1970,4 +1972,209 @@ fn title_rule_entries() -> Vec<Value> {
             })
         })
         .collect()
+}
+
+/// The open half of the gate.
+///
+/// What these nine payloads do is post ONE app-modal-host message, so that message is what is
+/// compared, field by field, against the one the shipped TypeScript posts for the same command.
+/// A wrong field here opens the right dialog on the wrong project or the Space editor in create
+/// mode over an existing Space, and neither moves a single row of the drawn list.
+///
+/// **Two branches are BUILT, because no scenario reaches them.** Every recording is a
+/// single-machine one with this computer selected, so the remote forms of Add Project, Configure
+/// This Machine and the Space editor, and a project header on another machine, would have been
+/// unreachable on both sides at once. The view is cloned and its `selected_machine_id` and its
+/// groups are overridden for those probes, which is sound because this planner reads exactly those
+/// fields; each probe records what it was planned against so the TypeScript half starts from the
+/// same machine id, the same Spaces and the same group facts rather than from a label.
+fn open_entries(view: &SidebarView) -> Vec<Value> {
+    let mut entries = Vec::new();
+    let remote_machine = "machine-1";
+    // This computer's tab, as every scenario has it, and the same tab with a remote machine
+    // selected. The Spaces travel with each one.
+    // The Space the editor must open in EDIT mode is BUILT, because no recording carries one: with
+    // an empty Space list every probe fell into create mode and the mutation that turns edit into
+    // create could not fail, which is the shape this port has thrown a mutation away for before.
+    let mut local_view = view.clone();
+    local_view.spaces.push(ghostex_gx_core::SpaceView {
+        id: "space-probe".to_string(),
+        name: "Probe Space".to_string(),
+        icon: "stack".to_string(),
+        color: "#4f5663".to_string(),
+        selected: false,
+        contains_active_session: false,
+        working_count: 0,
+        attention_count: 0,
+    });
+    let mut remote_view = local_view.clone();
+    remote_view.selected_machine_id = remote_machine.to_string();
+    let views = [("local", local_view), ("remote", remote_view)];
+    for (tab, probe) in &views {
+        for action in SIDEBAR_ACTIONS {
+            entries.push(open_entry(
+                probe,
+                tab,
+                json!({ "type": "sidebarAction", "action": action }),
+            ));
+        }
+        for machine_action in ["configure", "disable"] {
+            entries.push(open_entry(
+                probe,
+                tab,
+                json!({
+                    "type": "machineAction",
+                    "action": machine_action,
+                    "machineId": probe.selected_machine_id,
+                }),
+            ));
+        }
+        // A Space the machine has, one it does not, and the row that carries no id at all, which
+        // is New Space and must open in create mode.
+        let known = probe.spaces.first().map(|space| space.id.clone());
+        for space_id in [known, Some("not-a-space".to_string()), None] {
+            let mut command = json!({ "type": "editSpace" });
+            if let Some(space_id) = space_id {
+                command["spaceId"] = Value::String(space_id);
+            }
+            entries.push(open_entry(probe, tab, command));
+        }
+    }
+    // The project header's two rows, on the groups the list really draws, plus a group id it does
+    // not hold and a REMOTE project group, which no scenario has: both ids that the worktree
+    // dialog must carry come out differently there (the workspace project id, and the machine).
+    let mut project_view = view.clone();
+    if let Some(first) = project_view.groups.first().cloned() {
+        project_view
+            .groups
+            .push(remote_group_probe(&first, remote_machine));
+    }
+    let mut group_ids: Vec<String> = project_view
+        .groups
+        .iter()
+        .filter(|group| group.core.project_context.is_some())
+        .map(|group| group.core.group_id.clone())
+        .take(OPEN_PROJECTS_PER_SCENARIO)
+        .collect();
+    if let Some(remote) = project_view
+        .groups
+        .last()
+        .map(|group| group.core.group_id.clone())
+    {
+        group_ids.push(remote);
+    }
+    group_ids.push("combined-project:not-a-project".to_string());
+    for group_id in group_ids {
+        for action in ["worktree", "history", "agent"] {
+            entries.push(open_entry(
+                &project_view,
+                "local",
+                json!({ "type": "projectAction", "action": action, "groupId": group_id }),
+            ));
+        }
+    }
+    entries
+}
+
+/// Every action the `sidebarAction` union has, so a row that stops being answered here is a
+/// difference rather than a probe nobody wrote.
+const SIDEBAR_ACTIONS: [&str; 17] = [
+    "newTag",
+    "loadSessions",
+    "accounts",
+    "addProject",
+    "editMachine",
+    "sessions",
+    "commands",
+    "importSessions",
+    "agentsHub",
+    "remoteSetup",
+    "hotkeys",
+    "settings",
+    "powerSettings",
+    "sortManual",
+    "sortLastActivity",
+    "showHidden",
+    "toggleProjects",
+];
+
+/// Enough project headers to cover the shapes; the payload reads only the group's own facts.
+const OPEN_PROJECTS_PER_SCENARIO: usize = 3;
+
+/// One probe, with the facts the TypeScript half is handed for the same entry.
+fn open_entry(view: &SidebarView, tab: &str, command: Value) -> Value {
+    let group = command
+        .get("groupId")
+        .and_then(Value::as_str)
+        .and_then(|group_id| view.group(group_id));
+    let mut entry = json!({
+        "command": command.clone(),
+        "tab": tab,
+        "selectedMachineId": view.selected_machine_id,
+        "spaces": Value::Array(
+            view.spaces
+                .iter()
+                .map(|space| json!({
+                    "spaceId": space.id,
+                    "name": space.name,
+                    "icon": space.icon,
+                    "color": space.color,
+                }))
+                .collect(),
+        ),
+        // The drawn group's own facts, handed over rather than re-derived: which groups the list
+        // draws is M4a's gate, and re-deriving them here would let a port that read the wrong
+        // list pass both.
+        "group": match group {
+            Some(group) => json!({
+                "groupId": group.core.group_id,
+                "title": group.core.title,
+                "projectPath": group.core.project_context.as_ref().map(|project| project.path.clone()),
+                "hasProjectContext": group.core.project_context.is_some(),
+                "remoteMachine": group.core.remote_machine.as_ref().map(|machine| json!({
+                    "machineId": machine.machine_id,
+                    "machineName": machine.machine_name,
+                    "projectId": machine.project_id,
+                })),
+            }),
+            None => Value::Null,
+        },
+    });
+    let object = entry.as_object_mut().expect("object");
+    match plan_open_action(view, &command) {
+        Some(plan) => {
+            object.insert("owned".to_string(), Value::Bool(true));
+            object.insert("calls".to_string(), plan.to_json());
+        }
+        None => {
+            object.insert("owned".to_string(), Value::Bool(false));
+        }
+    }
+    entry
+}
+
+/// A copy of a drawn project group, moved onto another machine. The group id is what carries the
+/// workspace project id, so it is rebuilt the way the store builds one for a remote project.
+fn remote_group_probe(
+    group: &ghostex_gx_core::GroupView,
+    machine_id: &str,
+) -> ghostex_gx_core::GroupView {
+    let raw_project_id = group
+        .core
+        .project_context
+        .as_ref()
+        .map(|project| project.project_id.clone())
+        .unwrap_or_default();
+    let project = ProjectKey::remote(machine_id, &raw_project_id);
+    let mut core = (*group.core).clone();
+    core.group_id = project.to_sidebar_group_id();
+    core.remote_machine = Some(ghostex_gx_core::RemoteMachineView {
+        machine_id: machine_id.to_string(),
+        machine_name: "Windows Remote".to_string(),
+        project_id: Some(raw_project_id),
+    });
+    ghostex_gx_core::GroupView {
+        core: std::sync::Arc::new(core),
+        ..group.clone()
+    }
 }

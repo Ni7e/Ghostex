@@ -24,7 +24,7 @@ const MAX_NEVER_SETTLED_RECORDS: u32 = 4;
 const MAX_SCRATCH_RECORDS: u32 = 4;
 /// Records of a sidebar action. One per click is the whole rate, and the totals ride in each one,
 /// so the cap only stops a renderer that repeats a command from filling the log.
-const MAX_SIDEBAR_ACTION_RECORDS: u32 = 200;
+pub(super) const MAX_SIDEBAR_ACTION_RECORDS: u32 = 200;
 /// Records of an update slow enough to drop a frame. Enough to see whether the spikes are one
 /// shape or several; the max in the summary carries the size.
 const MAX_SLOW_UPDATE_RECORDS: u32 = 8;
@@ -94,7 +94,7 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_slow_update_records: u32,
     sidebar_storage_warnings: u32,
     sidebar_action_records: u32,
-    sidebar_lifecycle_records: u32,
+    pub(super) sidebar_lifecycle_records: u32,
     sidebar_drag_records: u32,
 }
 
@@ -1630,6 +1630,21 @@ impl GxStoreDiagnostics {
                     ghostex_gx_core::ActionEffect::Toast { level, .. } => {
                         format!("toast={}", level.as_str())
                     }
+                    // The open family never reaches this line, which is the read-only one's, but
+                    // naming the effects here keeps a planner that started emitting one from
+                    // being dropped silently. The modal NAME is a fixed word this store builds;
+                    // the payload beside it carries project paths and is never named.
+                    ghostex_gx_core::ActionEffect::CloseAppModal => "closeAppModal".to_string(),
+                    ghostex_gx_core::ActionEffect::OpenAppModal { payload } => format!(
+                        "openAppModal={}",
+                        payload
+                            .get("modal")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?")
+                    ),
+                    ghostex_gx_core::ActionEffect::StartLocalGxserver => {
+                        "startLocalGxserver".to_string()
+                    }
                 }))
             })
             .collect();
@@ -1731,7 +1746,7 @@ fn debug_assert_loggable(_value: &serde_json::Value, _depth: usize, _event: &str
 /// The depth rule is the other half and is not something a helper can enforce: a value must sit at
 /// depth 4 or less, counting `details` as 0. An array of short strings under `details` is depth 2,
 /// and `details.<key>[i].<k>[j]` is depth 4, which is the deepest shape any record here uses.
-fn log_text(value: impl Into<String>) -> String {
+pub(super) fn log_text(value: impl Into<String>) -> String {
     let value: String = value.into();
     let value = value.replace(['/', '\\'], "|");
     let value: String = value

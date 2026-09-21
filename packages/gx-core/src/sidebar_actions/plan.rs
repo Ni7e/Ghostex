@@ -49,6 +49,16 @@ pub enum ActionEffect {
         title: String,
         description: Option<String>,
     },
+    /// `closeAppModal(...)`: `postAppModalHostMessage({ type: 'close' })`. The area string the
+    /// TypeScript passes is a log label for its own error path and never reaches the host, so it is
+    /// not carried here.
+    CloseAppModal,
+    /// `openAppModal(payload)`, which is `postAppModalHostMessage(payload)` with the payload
+    /// already built. Quick Access is one of these too: `openQuickAccess` is a translation table
+    /// over the same call, so the store does the translating and the host opens one thing.
+    OpenAppModal { payload: Value },
+    /// `runtime.startLocalGxserver()`: the one payload of the open family that opens nothing.
+    StartLocalGxserver,
 }
 
 impl ActionEffect {
@@ -80,6 +90,11 @@ impl ActionEffect {
                 }
                 Value::Object(object)
             }
+            Self::CloseAppModal => json!({ "call": "closeAppModal" }),
+            Self::OpenAppModal { payload } => {
+                json!({ "call": "openAppModal", "payload": payload })
+            }
+            Self::StartLocalGxserver => json!({ "call": "startLocalGxserver" }),
         }
     }
 }

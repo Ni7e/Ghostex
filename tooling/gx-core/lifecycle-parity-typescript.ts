@@ -964,3 +964,113 @@ export function runTypeScriptTitleRule(rustActions: Json): (string | null)[] {
     return primaryTitle?.trim() || terminalTitle?.trim() || alias;
   });
 }
+
+/**
+ * The open half. Drives the shipped `runNativeSidebarAction`, `runNativeProjectAction` and
+ * `editNativeSidebarSpace` and records the app-modal-host messages they post.
+ *
+ * The seam is the modal host itself, which is the right one: `openQuickAccess` is a translation
+ * table over `openAppModal` and both end at `postAppModalHostMessage`, so recording there runs the
+ * real translation instead of asserting the table twice. `post` is the runtime channel and is
+ * recorded too, because a payload that reached it would be work the store silently dropped.
+ *
+ * Two facts are handed over from the Rust dump rather than re-derived: the selected machine id
+ * with its Spaces, and the drawn group's own title, path and machine. Which groups the list draws
+ * is M4a's gate; what this half asks is what each side MAKES of the same drawn group, and
+ * re-deriving it here would let a port that read the wrong list pass on both sides.
+ *
+ * `machineAction` is the one arm that is not a function: the controller answers it inline
+ * (controller.ts, the `machineAction` arm), so its Configure payload is transcribed here from that
+ * line and counted apart, and its Disable is left to the port's refusal.
+ */
+export async function runTypeScriptOpen(rustActions: Json): Promise<Json[]> {
+  resetBrowserStorage();
+  const { runNativeSidebarAction } = await import('@/apps/desktop/sidebar/native-sidebar/navigation');
+  const { runNativeProjectAction } = await import('@/apps/desktop/sidebar/native-sidebar/project-actions');
+  const { editNativeSidebarSpace } = await import('@/apps/desktop/sidebar/native-sidebar/space-navigation');
+  const { NativeSidebarUiState } = await import('@/apps/desktop/sidebar/native-sidebar/ui-state');
+  const { sidebarStore } = await import('@/packages/core-ui/sidebar-store-model');
+  const out: Json[] = [];
+  for (const entry of (rustActions.open ?? []) as Json[]) {
+    const command = (entry.command ?? {}) as Json;
+    const calls: Json[] = [];
+    installModalRecorder(calls);
+    const posts: Json[] = [];
+    const post = (message: Json) => posts.push(message);
+    const ui = new NativeSidebarUiState() as Json;
+    ui.selectedMachineId = String(entry.selectedMachineId ?? 'local');
+    ui.metadata.spaces[ui.selectedMachineId] = {
+      order: ((entry.spaces ?? []) as Json[]).map((space) => String(space.spaceId)),
+      spaces: Object.fromEntries(
+        ((entry.spaces ?? []) as Json[]).map((space) => [
+          String(space.spaceId),
+          {
+            spaceId: String(space.spaceId),
+            name: String(space.name),
+            icon: String(space.icon),
+            color: String(space.color),
+            memberProjectIds: [],
+            memberCollectionIds: [],
+          },
+        ])
+      ),
+    };
+    const group = (entry.group ?? null) as Json | null;
+    sidebarStore.setState({
+      groupsById: (group
+        ? {
+            [String(group.groupId)]: {
+              groupId: String(group.groupId),
+              title: String(group.title),
+              ...(group.hasProjectContext === true
+                ? {
+                    projectContext: {
+                      path: String(group.projectPath ?? ''),
+                      // `editor.projectId` is the WORKSPACE project id, which is the raw id here
+                      // and the machine-scoped one on a remote project.
+                      editor: {
+                        projectId: group.remoteMachine
+                          ? `remote:${String((group.remoteMachine as Json).machineId)}:project:${String(
+                              (group.remoteMachine as Json).projectId
+                            )}`
+                          : String(group.groupId).replace('combined-project:', ''),
+                      },
+                    },
+                  }
+                : {}),
+              ...(group.remoteMachine
+                ? {
+                    remoteMachineContext: {
+                      machineId: String((group.remoteMachine as Json).machineId),
+                      machineName: String((group.remoteMachine as Json).machineName),
+                      projectId: (group.remoteMachine as Json).projectId ?? undefined,
+                    },
+                  }
+                : {}),
+            },
+          }
+        : {}) as never,
+    });
+    if (command.type === 'sidebarAction' && command.action === 'loadSessions') {
+      // The CONTROLLER answers this one an arm earlier than `runNativeSidebarAction`
+      // (controller.ts), so the shipped route is the runtime's own method and the function's
+      // `case 'loadSessions'` is dead code. Driving the real method through the native host is
+      // what proves there is no modal close on this row.
+      const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+      (globalThis as Json).window.webkit.messageHandlers.ghostexNativeHost = {
+        postMessage: (message: Json) => {
+          if (message?.type === 'startGxserverFromTitlebar') calls.push({ call: 'startLocalGxserver' });
+        },
+      };
+      runtime.startLocalGxserver();
+    } else if (command.type === 'sidebarAction')
+      runNativeSidebarAction(ui as never, String(command.action) as never, post);
+    else if (command.type === 'projectAction') runNativeProjectAction(command as never, post);
+    else if (command.type === 'editSpace')
+      editNativeSidebarSpace(ui as never, command.spaceId === undefined ? undefined : String(command.spaceId));
+    else if (command.type === 'machineAction' && command.action === 'configure')
+      calls.push({ call: 'open', open: { type: 'open', modal: 'settings', initialTab: 'remote' } });
+    out.push({ calls, posts });
+  }
+  return out;
+}

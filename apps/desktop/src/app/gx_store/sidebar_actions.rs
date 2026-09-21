@@ -134,6 +134,10 @@ impl GhostexGpuiApp {
                     }
                     self.receive_gpui_app_toast_bridge_message(&request, cx);
                 }
+                // The open family has its own host (gx_store/sidebar_open.rs) and its own
+                // dispatcher arm; a read-only payload that planned one would be a planner that
+                // had drifted, so it is asserted rather than performed here.
+                other => debug_assert!(false, "unexpected read-only effect: {other:?}"),
             }
         }
     }
