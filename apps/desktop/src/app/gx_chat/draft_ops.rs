@@ -151,9 +151,9 @@ pub(super) fn receive(session_key: &str, value: &Value, now_ms: i64) -> Result<(
 ///
 /// The marker is `JSON.stringify([sessionKey, draftId, revision])` written OVER the checkpoint,
 /// which is what `draftRecoveryDismissalMarker` writes and what `decode_recovery` already refuses
-/// to read back as a checkpoint. The background compaction that later folds a run of markers into
-/// `recoveryDismissed` ranges is not ported: it is a quota optimisation for a page that had
-/// accumulated 16,000 of them, and a marker left uncompacted still reads as dismissed.
+/// to read back as a checkpoint. `dismissDraftRecovery` then compacts, and so does this: the
+/// markers become `recoveryDismissed` ranges and their records are removed
+/// (`super::dismissals`).
 fn retire_recovery(
     session_key: &str,
     version: &DraftVersion,
@@ -185,7 +185,7 @@ fn retire_recovery(
             now_ms,
         )?;
     }
-    Ok(())
+    super::dismissals::compact(session_key, now_ms)
 }
 
 /// The stored draft record of one session, or `None` when nothing is stored.
