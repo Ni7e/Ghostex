@@ -3,6 +3,7 @@
 //! SEE-ALSO: apps/desktop/sidebar/native-sidebar/project-actions.ts and
 //! apps/desktop/sidebar/native-sidebar/agent-launcher.ts.
 
+use crate::sidebar_accounts::AccountsState;
 use crate::sidebar_view::SidebarSettings;
 
 use super::agent_logos::colored_agent_logo;
@@ -121,9 +122,19 @@ pub fn project_header_actions(
     actions
 }
 
-/// `nativeAgentLauncherItems(groupId)`, the state before any account list has been read. The
-/// account pages themselves stay with the runtime that fetches them.
+/// `nativeAgentLauncherItems(groupId)`, the state before any account list has been read.
 pub fn agent_launcher_items(group_id: &str, host: &MenuHost) -> Vec<MenuItem> {
+    agent_launcher_items_with_accounts(group_id, host, None)
+}
+
+/// `nativeAgentLauncherItems(groupId, data)`: with an account list read, each account button
+/// carries how many registered accounts its provider has. The pages behind the buttons are
+/// `sidebar_accounts/`.
+pub fn agent_launcher_items_with_accounts(
+    group_id: &str,
+    host: &MenuHost,
+    accounts: Option<&AccountsState>,
+) -> Vec<MenuItem> {
     let primary_id = host.primary_agent().map(|agent| agent.agent_id.as_str());
     let mut items: Vec<MenuItem> = host
         .agents
@@ -143,11 +154,15 @@ pub fn agent_launcher_items(group_id: &str, host: &MenuHost) -> Vec<MenuItem> {
                     "launch",
                     Some(&agent.agent_id),
                 )),
-                secondary: account_provider(agent.agent_id.as_str(), icon).map(|_| {
+                secondary: account_provider(agent.agent_id.as_str(), icon).map(|provider| {
                     super::item::MenuSecondary {
                         icon: "user".to_string(),
                         // The count arrives with the account list; until then the pill is blank.
-                        label: String::new(),
+                        label: accounts
+                            .map(|accounts| {
+                                accounts.registered_for(Some(provider)).count().to_string()
+                            })
+                            .unwrap_or_default(),
                         command: MenuCommand::agent_accounts(
                             group_id,
                             "accounts",
@@ -176,7 +191,7 @@ pub fn agent_launcher_items(group_id: &str, host: &MenuHost) -> Vec<MenuItem> {
 }
 
 /// `providerFor`: only Claude and Codex have an account switcher.
-fn account_provider(agent_id: &str, icon: Option<&str>) -> Option<&'static str> {
+pub(crate) fn account_provider(agent_id: &str, icon: Option<&str>) -> Option<&'static str> {
     match icon.unwrap_or(agent_id) {
         "claude" => Some("claude"),
         "codex" => Some("codex"),

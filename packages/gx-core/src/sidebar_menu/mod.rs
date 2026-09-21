@@ -34,7 +34,10 @@ mod text;
 pub use agent_logos::{agent_logo_icons, colored_agent_logo};
 pub use commands::MenuCommand;
 pub use group::MenuGroup;
-pub use header::{agent_launcher_items, project_header_actions};
+pub(crate) use header::account_provider;
+pub use header::{
+    agent_launcher_items, agent_launcher_items_with_accounts, project_header_actions,
+};
 pub use host::{HeaderCommand, LauncherAgent, MenuHost};
 pub use hover::{hover_strip, HoverAction, HoverStrip};
 pub use item::{menu_to_json, MenuItem, MenuSecondary, MenuSplit};

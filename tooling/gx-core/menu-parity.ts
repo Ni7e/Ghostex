@@ -27,6 +27,65 @@ import { join } from 'node:path';
 type Json = Record<string, unknown>;
 type Scenario = { name: string; settings: Json; ui: Json; host: Json; snapshot?: Json };
 
+/**
+ * A built account list for the launcher's agent list with its account counts
+ * (`nativeAgentLauncherItems(groupId, data)`): two registered Claude accounts, one registered and
+ * one unregistered Codex account, and one of a provider no agent has. The pages behind the counts
+ * are `account-menu-parity.ts`'s. Nothing here is a real account.
+ */
+const SYNTHETIC_ACCOUNTS = {
+  accounts: [
+    {
+      id: 'a1',
+      provider: 'claude',
+      name: 'One',
+      email: 'one@example.test',
+      registered: true,
+      status: 'ready',
+      usage: [],
+    },
+    {
+      id: 'a2',
+      provider: 'claude',
+      name: 'Two',
+      email: 'two@example.test',
+      registered: true,
+      status: 'ready',
+      usage: [],
+    },
+    {
+      id: 'a3',
+      provider: 'codex',
+      name: 'Three',
+      email: 'three@example.test',
+      registered: true,
+      status: 'ready',
+      usage: [],
+    },
+    {
+      id: 'a4',
+      provider: 'codex',
+      name: 'Four',
+      email: 'four@example.test',
+      registered: false,
+      status: 'ready',
+      usage: [],
+    },
+    {
+      id: 'a5',
+      provider: 'gemini',
+      name: 'Five',
+      email: 'five@example.test',
+      registered: true,
+      status: 'ready',
+      usage: [],
+    },
+  ],
+  helpers: [],
+  defaults: {},
+  defaultAccounts: { claude: 'a1' },
+};
+
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === 'scenarios') await writeScenarios(rest);
 else if (mode === 'compare') await compare(rest);
@@ -642,9 +701,13 @@ async function writeScenarios([framesPath, outDir, settingsPath]: string[]) {
   const nowMs = Date.now();
   scenarios.forEach((scenario, index) => {
     const body = scenario.snapshot ? scenario : { ...scenario, snapshot };
-    writeFileSync(join(outDir, `scenario-${String(index).padStart(2, '0')}.json`), JSON.stringify({ ...body, nowMs }), {
-      mode: 0o600,
-    });
+    writeFileSync(
+      join(outDir, `scenario-${String(index).padStart(2, '0')}.json`),
+      JSON.stringify({ ...body, nowMs, accounts: SYNTHETIC_ACCOUNTS }),
+      {
+        mode: 0o600,
+      }
+    );
   });
   console.log(
     `${scenarios.length} scenarios, ${(snapshot.sessions as Json[]).length} sessions, ${(snapshot.projects as Json[]).length} projects`
@@ -744,7 +807,7 @@ function diffScenario(
       out.push(`${name} group ${id}: the TypeScript side built no menus`);
       continue;
     }
-    for (const key of ['menu', 'headerActions']) {
+    for (const key of ['menu', 'headerActions', 'launcherWithAccounts']) {
       counted.menus += 1;
       counted.items += diffMenu(`${name} group ${id} ${key}`, rustGroups[id]![key], theirs[key], out);
     }

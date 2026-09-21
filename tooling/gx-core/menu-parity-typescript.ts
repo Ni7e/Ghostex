@@ -31,6 +31,7 @@ import { createNativeProjectMenu } from '@/apps/desktop/sidebar/native-sidebar/p
 import { createNativeCollectionMenu } from '@/apps/desktop/sidebar/native-sidebar/collection-menu';
 import { createNativeBulkMenu } from '@/apps/desktop/sidebar/native-sidebar/bulk-menu';
 import { createNativeProjectHeaderActions } from '@/apps/desktop/sidebar/native-sidebar/project-actions';
+import { nativeAgentLauncherItems } from '@/apps/desktop/sidebar/native-sidebar/agent-launcher';
 import { createNativeNavigation } from '@/apps/desktop/sidebar/native-sidebar/navigation';
 import { nativeSidebarSettings } from '@/apps/desktop/sidebar/native-sidebar/settings';
 import type { SidebarSessionGroup, SidebarSessionItem } from '@/packages/shared/session-grid-contract';
@@ -56,6 +57,7 @@ export function buildTypeScriptMenus(scenario: Json, rust: Json): Json {
     groups[groupId] = {
       menu: createNativeProjectMenu(withSessions, ui),
       headerActions: createNativeProjectHeaderActions(withSessions),
+      launcherWithAccounts: nativeAgentLauncherItems(groupId, scenario.accounts),
     };
     const visible = new Set(group.visibleSessionIds as string[]);
     const visibleIds = sessions.filter((session) => visible.has(session.sessionId)).map((s) => s.sessionId);

@@ -83,6 +83,45 @@ impl MenuCommand {
         Self(json!({ "type": "sessionAccounts", "action": "load", "sessionId": session_id }))
     }
 
+    /// `{ type: 'sessionAccounts', sessionId, action, accountId? }`: the account flyout's own
+    /// rows (a pick, Try Again).
+    pub(crate) fn session_accounts(
+        session_id: &str,
+        action: &str,
+        account_id: Option<&str>,
+    ) -> Self {
+        let mut object = Map::new();
+        object.insert(
+            "type".to_string(),
+            Value::String("sessionAccounts".to_string()),
+        );
+        object.insert(
+            "sessionId".to_string(),
+            Value::String(session_id.to_string()),
+        );
+        object.insert("action".to_string(), Value::String(action.to_string()));
+        if let Some(account_id) = account_id {
+            object.insert(
+                "accountId".to_string(),
+                Value::String(account_id.to_string()),
+            );
+        }
+        Self(Value::Object(object))
+    }
+
+    /// `{ type: 'projectAction', action: 'agent', groupId, agentId, accountId? }`: a launcher
+    /// account row, which launches the agent signed in as that account.
+    pub(crate) fn agent_run_as(group_id: &str, agent_id: &str, account_id: Option<&str>) -> Self {
+        let mut command = Self::project_action(group_id, "agent", Some(agent_id));
+        if let (Some(account_id), Value::Object(object)) = (account_id, &mut command.0) {
+            object.insert(
+                "accountId".to_string(),
+                Value::String(account_id.to_string()),
+            );
+        }
+        command
+    }
+
     pub(crate) fn sidebar_action(action: &str) -> Self {
         Self(json!({ "type": "sidebarAction", "action": action }))
     }

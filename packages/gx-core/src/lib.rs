@@ -23,6 +23,7 @@ mod overlay;
 mod presentation_store;
 mod project_docs;
 mod selectors;
+mod sidebar_accounts;
 mod sidebar_actions;
 mod sidebar_drag;
 mod sidebar_menu;
@@ -99,6 +100,15 @@ pub use crate::sidebar_actions::{
     owns_machine_disable_command, plan_agent_run, plan_delayed_send_action, plan_machine_disable,
     MACHINE_DISABLE_SETTINGS_SOURCE,
 };
+pub use crate::sidebar_accounts::{
+    account_headline_windows, account_session_working, account_usage_detail, account_usage_label,
+    agent_accounts_http_answer, group_accounts_target, is_five_hour_window, is_weekly_window,
+    js_round, mask_account_text, session_accounts_target, AccountAnswer, AccountMenuHost,
+    AccountMenuStep, AccountSession, AccountUsageWindow, AccountsRequest, AccountsState,
+    AccountsTarget, AgentAccount, LauncherAccounts, LauncherCommand, ResetCredits,
+    SessionAccounts, SessionAccountsCommand, SidebarAccountMenus, AGENT_ACCOUNTS_PATH,
+    INVALID_ACCOUNTS_ANSWER, SESSION_COMPUTER_UNAVAILABLE,
+};
 pub use crate::sidebar_drag::{
     owns_order_write_message, owns_project_move_command, owns_project_order_message,
     owns_session_move_command, plan_order_write, plan_project_move, plan_project_order_write,
@@ -108,7 +118,8 @@ pub use crate::sidebar_drag::{
     PROJECT_ORDER_MESSAGE_TYPE,
 };
 pub use crate::sidebar_menu::{
-    agent_launcher_items, agent_logo_icons, colored_agent_logo, hover_strip, menu_to_json,
+    agent_launcher_items, agent_launcher_items_with_accounts, agent_logo_icons, colored_agent_logo,
+    hover_strip, menu_to_json,
     project_header_actions, HeaderCommand, HoverAction, HoverStrip, LauncherAgent, MenuCommand,
     MenuGroup, MenuHost, MenuItem, MenuSecondary, MenuSplit, SessionActions, SidebarMenus,
 };

@@ -18,10 +18,10 @@ use std::time::Instant;
 
 use ghostex_gx_core::protocol::ServerEvent;
 use ghostex_gx_core::{
-    agent_logo_icons, colored_agent_logo, menu_to_json, Core, Event, HeaderCommand, HoverAction,
-    LauncherAgent, MachineId, MenuHost, SectionCollapse, SectionId, SessionSortMode,
-    SidebarCollapseState, SidebarHiddenItems, SidebarInputs, SidebarMenus, SidebarSettings,
-    SidebarUiState, SidebarView, SidebarViewModel,
+    agent_launcher_items_with_accounts, agent_logo_icons, colored_agent_logo, menu_to_json,
+    AccountsState, Core, Event, HeaderCommand, HoverAction, LauncherAgent, MachineId, MenuHost,
+    SectionCollapse, SectionId, SessionSortMode, SidebarCollapseState, SidebarHiddenItems,
+    SidebarInputs, SidebarMenus, SidebarSettings, SidebarUiState, SidebarView, SidebarViewModel,
 };
 use serde_json::{json, Map, Value};
 
@@ -167,6 +167,10 @@ fn build(scenario: &Value) -> Option<Dump> {
     let view = model.view();
     let host = menu_host(scenario.get("host")?);
     let menus = SidebarMenus::new(&core, view, &inputs, &host, now_ms);
+    // The launcher's agent list once an account list has been read (the counts on its buttons).
+    let accounts = scenario
+        .get("accounts")
+        .map(|accounts| AccountsState::from_json(accounts).expect("the built account list parses"));
 
     let mut rows_out = Map::new();
     let mut count = 0usize;
@@ -234,6 +238,11 @@ fn build(scenario: &Value) -> Option<Dump> {
             json!({
                 "menu": menu_to_json(&menus.project_menu(group)),
                 "headerActions": menu_to_json(&menus.header_actions(group)),
+                "launcherWithAccounts": menu_to_json(&agent_launcher_items_with_accounts(
+                    &group.core.group_id,
+                    &host,
+                    accounts.as_ref(),
+                )),
                 "title": group.core.title,
                 "storageId": group.core.storage_id,
                 "projectId": group.core.project_context.as_ref().map(|project| project.project_id.clone()),

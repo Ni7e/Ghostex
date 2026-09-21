@@ -122,7 +122,7 @@ fn write_number(out: &mut String, number: &Number) {
 /// both round the last digit to even while Rust's rounds away from zero, so `{:e}` writes
 /// `1658206780088562.3` where JavaScript writes `1658206780088562.2`. What this function adds on
 /// top of `ryu` is only where ECMAScript puts the decimal point.
-fn js_number(value: f64) -> String {
+pub(crate) fn js_number(value: f64) -> String {
     // `JSON.stringify` writes a non-finite number as `null`; `serde_json` cannot hold one in a
     // `Value` at all, so this is the shape of the answer rather than a case that arises.
     if !value.is_finite() {
