@@ -20,6 +20,41 @@ use super::diagnostics::{GxStoreDiagnostics, log_text, record, routine_logging_e
 use super::runtime_facts::RuntimeFactsCounters;
 use super::sidebar_runtime_route::SidebarRuntimeRouteCounters;
 
+/// How many differences a run spells out before it goes back to counting them. Twenty is enough to
+/// see that one family repeats and whether the kind is always the same, and small enough that a run
+/// where the channel is badly wrong does not fill the log.
+const MAX_DIFFERENCE_DETAILS: u32 = 20;
+
+/// CDXC:Sidebar 2026-09-21 WHY:
+/// The counters alone said "per-project diff stats disagree about three times per comparison" and
+/// nothing else, which cost a live round: a count cannot say whether an entry was missing on one
+/// side or held a different number, and those two have opposite fixes. Each difference is named
+/// once here by its family, by which side lacked it, and by the field that moved, all of them fixed
+/// words chosen in this file. No id, title or path is ever passed in, so the payload of the channel
+/// still never reaches the log.
+pub(super) fn runtime_facts_difference(
+    emitted: &mut u32,
+    family: &'static str,
+    kind: &'static str,
+    field: Option<&'static str>,
+) {
+    if !routine_logging_enabled() || *emitted >= MAX_DIFFERENCE_DETAILS {
+        return;
+    }
+    *emitted += 1;
+    record(
+        "gxStore.runtimeFacts.difference",
+        json!({
+            "family": family,
+            // `missingInChannel`: the publish carries the entry and the channel does not.
+            // `missingInPublish`: the channel carries it and the publish does not.
+            // `valueDiffers`: both carry it and `field` names the first one that moved.
+            "kind": kind,
+            "field": log_text(field.unwrap_or("none")),
+        }),
+    );
+}
+
 impl GxStoreDiagnostics {
     /// The channel's totals and the differences against the publish, at most once a minute and
     /// only when they moved.
@@ -61,6 +96,10 @@ impl GxStoreDiagnostics {
                 // Not a difference: the daemon's own delayed sends ride the presentation and this
                 // app's timers never hold them.
                 "delayedSendPublishOnly": counters.delayed_send_publish_only,
+                // The other direction of the diff-stats check: a project the channel offers and no
+                // published group asks about. Harmless for the step 3 reader, which looks entries
+                // up per drawn row, and the only thing that would show the channel over-posting.
+                "projectDiffStatsChannelOnly": counters.project_diff_stats_channel_only,
                 // The other half of "no page in the route": what the sidebar dispatch's
                 // fall-through did with a command the store did not perform itself.
                 "runtimeRoute": {

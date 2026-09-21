@@ -45,10 +45,23 @@ export function postGpuiSidebarRuntimeFactsHud(): void {
  * `remainingMs` and `remainingLabel` are derived from the host clock at the moment they are read,
  * so they are carried for the reader but are NOT what the comparison judges; `armed`, the deadline
  * and the two send-when flags are.
+ *
+ * CDXC:Sidebar 2026-09-21 WHY:
+ * The git numbers are read off the groups the projection just built, NOT off
+ * `projectDiffStatsByProjectId`. The probe map holds only the projects the background cycle polls
+ * (`getVisibleProjectDiffStatsRefreshTargets` skips Quick projects, parked Recent Projects, a
+ * project with no path and a remote machine with no live presentation), while `overlayProjectDiffStats`
+ * gives every OTHER project group the default stats and publishes those. Posting the map therefore
+ * left one channel entry missing per unpolled project, which Rust read as a difference on every
+ * single comparison; taking the published object is also the only spelling whose value the step 3
+ * reader can use in place of the publish with no behaviour change.
  */
 export function postGpuiSidebarRuntimeFactsRows(runtime: GpuiSidebarRuntime): void {
   const projectDiffStats: Record<string, unknown> = {};
-  for (const [projectId, stats] of runtime.projectDiffStatsByProjectId) projectDiffStats[projectId] = stats;
+  for (const group of runtime.latestGroups) {
+    const editor = group.projectContext?.editor;
+    if (editor) projectDiffStats[editor.projectId] = editor.diffStats;
+  }
   const closeAfterDone: Record<string, unknown> = {};
   for (const sessionId of runtime.closeAfterDoneTimersBySessionId.keys()) {
     const projection = runtime.getCloseAfterDoneProjection(sessionId);
