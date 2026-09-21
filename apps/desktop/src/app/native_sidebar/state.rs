@@ -141,7 +141,9 @@ impl GhostexGpuiApp {
                 close,
             } => {
                 // One body with the store's own account pages (gx_store/sidebar_accounts.rs).
-                self.apply_native_sidebar_menu_page(&owner_id, items, close, cx);
+                if !self.apply_native_sidebar_menu_page(&owner_id, items, close, cx) {
+                    return;
+                }
             }
             NativeSidebarUpdate::Clock { version: 1, rows } => {
                 for row in &rows {

@@ -50,7 +50,8 @@ use crate::app::remote_conn::sidebar_rpc::{
 };
 
 /// The runtime's local call had no timeout of its own; a refresh reads every account's usage, so
-/// this is the titlebar usage read's bound (titlebar/account_usage.rs).
+/// this is the titlebar usage read's bound (titlebar/account_usage.rs). It bounds each socket read
+/// and write, not the whole call (declared difference 44).
 const LOCAL_ACCOUNTS_TIMEOUT: Duration = Duration::from_secs(60);
 /// `requestRemoteGxserver`'s default.
 const REMOTE_ACCOUNTS_TIMEOUT: Duration = Duration::from_secs(20);
@@ -152,6 +153,12 @@ impl GhostexGpuiApp {
                         (false, _) => counters.pages_without_panel += 1,
                         (true, true) => counters.closes += 1,
                         (true, false) => counters.pages += 1,
+                    }
+                    // A page published at once (a cached count button, or Right on it) arrives
+                    // through a caller that does not redraw, so the page asks for its own frame,
+                    // as the `NativeSidebarUpdate::Menu` arm did.
+                    if applied {
+                        cx.notify();
                     }
                 }
                 AccountMenuStep::Request(request) => {

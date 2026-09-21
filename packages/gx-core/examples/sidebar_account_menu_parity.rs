@@ -165,8 +165,14 @@ fn main() -> ExitCode {
                 run.hide = hide;
             } else if let Some(index) = step.get("answer").and_then(Value::as_u64) {
                 let index = index as usize;
+                // A request this side never made (a source mutation that skips one) answers
+                // nothing here; the compare sees the missing request.
+                let Some(slot) = run.pending.get_mut(index) else {
+                    shaped_steps.push(step);
+                    continue;
+                };
                 // Only the late-answer mutation can have consumed a request already.
-                let Some(mut request) = run.pending[index].take() else {
+                let Some(mut request) = slot.take() else {
                     assert_eq!(inject, "late-answer", "each request is answered once");
                     shaped_steps.push(step);
                     continue;
@@ -529,6 +535,16 @@ fn scripts() -> Vec<Value> {
             launcher(P1, "accounts", Some("house-agent")),
             launcher(P1, "launch", Some("codex")),
             launcher(P1, "root", None),
+        ]),
+        // Reopening the launcher drops the list it cached and asks again, so the counts are
+        // never the previous opening's; a cached page in between asks nothing.
+        script("launcher-reopen-reloads", "local", vec![
+            launcher(P1, "load", None),
+            answer(0, ok(accounts(Value::Null))),
+            launcher(P1, "accounts", Some("claude")),
+            launcher(P1, "load", None),
+            answer(1, ok(empty_accounts())),
+            launcher(P1, "accounts", Some("claude")),
         ]),
         // A page opened before the list: the hint, then the page.
         script("launcher-reading-hint", "local", vec![

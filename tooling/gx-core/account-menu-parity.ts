@@ -275,10 +275,15 @@ function normalizeEvents(list: Json[], counters: Record<string, number>, side: '
 }
 
 function countCoverage(list: Json[], counters: Record<string, number>): void {
+  // A launcher list asked again after its counts were already on a page: reopening the launcher
+  // must not reuse the cached list.
+  let countsShown = false;
   for (const event of list) {
     counters.events += 1;
     if (event.event === 'request') {
       counters.requests += 1;
+      if (countsShown && event.params?.operation === 'list' && event.params?.refresh !== true)
+        counters.reopenReloads += 1;
       counters[String(event.target).startsWith('remote:') ? 'remoteRequests' : 'localRequests'] += 1;
       if (event.params?.refresh === true) counters.refreshes += 1;
       if (event.params?.operation === 'select') counters.selects += 1;
@@ -301,7 +306,10 @@ function countCoverage(list: Json[], counters: Record<string, number>): void {
         if (label === 'Try Again') counters.errorPairs += 1;
         if (label === 'No saved accounts.') counters.noSavedAccounts += 1;
         if (item.checked === true) counters.checkedAccounts += 1;
-        if (item.secondary && String(item.secondary.label) !== '') counters.accountCounts += 1;
+        if (item.secondary && String(item.secondary.label) !== '') {
+          counters.accountCounts += 1;
+          countsShown = true;
+        }
         if (typeof item.detail === 'string' && item.detail !== '') counters.detailLines += 1;
       }
     }
@@ -384,6 +392,7 @@ async function compare(args: string[]): Promise<void> {
       'scripts',
       'events',
       'requests',
+      'reopenReloads',
       'localRequests',
       'remoteRequests',
       'refreshes',

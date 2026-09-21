@@ -181,7 +181,7 @@ impl GhostexGpuiApp {
                     .chain(children.clone())
                     .collect(),
                 );
-                menu.panels.truncate(panel_index + 1);
+                truncate_panels(menu, panel_index + 1);
             } else if owns_open_child {
                 if toggle {
                     close_child_panel(menu, panel_index, item_index);
@@ -189,7 +189,7 @@ impl GhostexGpuiApp {
             } else {
                 panel.selected = Some(item_index);
                 panel.child_item = Some(item_index);
-                menu.panels.truncate(panel_index + 1);
+                truncate_panels(menu, panel_index + 1);
                 menu.panels.push(SidebarMenuPanel::new(
                     children.clone(),
                     Point::new(
@@ -204,20 +204,13 @@ impl GhostexGpuiApp {
                     // The accounts flyout is already up; this click only takes it back down.
                     if toggle {
                         close_child_panel(menu, panel_index, item_index);
-                        if menu
-                            .account_panel
-                            .as_ref()
-                            .is_some_and(|(_, index)| *index == panel_index + 1)
-                        {
-                            menu.account_panel = None;
-                        }
                         cx.notify();
                     }
                     return;
                 }
                 panel.selected = Some(item_index);
                 panel.child_item = Some(item_index);
-                menu.panels.truncate(panel_index + 1);
+                truncate_panels(menu, panel_index + 1);
                 menu.account_panel = command["sessionId"]
                     .as_str()
                     .map(|id| (id.to_owned(), panel_index + 1));
@@ -321,7 +314,8 @@ impl GhostexGpuiApp {
                     }
                     "left" => {
                         if menu.panels.len() > 1 {
-                            menu.panels.pop();
+                            let len = menu.panels.len() - 1;
+                            truncate_panels(menu, len);
                             // The parent row keeps the keyboard cursor but no longer owns a panel,
                             // so Right reopens the submenu instead of finding it already open.
                             if let Some(panel) = menu.panels.last_mut() {
@@ -627,7 +621,21 @@ fn close_child_panel(menu: &mut SidebarMenuState, panel_index: usize, item_index
             panel.selected = None;
         }
     }
-    menu.panels.truncate(panel_index + 1);
+    truncate_panels(menu, panel_index + 1);
+}
+
+/// Every panel stack cut goes through here: an answer still on its way to a panel that is gone
+/// (closed, popped with Left, or replaced by another row's submenu at the same index) would
+/// otherwise land in whatever panel sits at that index now.
+fn truncate_panels(menu: &mut SidebarMenuState, len: usize) {
+    menu.panels.truncate(len);
+    if menu
+        .account_panel
+        .as_ref()
+        .is_some_and(|(_, index)| *index >= len)
+    {
+        menu.account_panel = None;
+    }
 }
 
 /// Records the rendered rows' height (plus `chrome`: vertical padding and border) so the panel's next frame fits them exactly.
