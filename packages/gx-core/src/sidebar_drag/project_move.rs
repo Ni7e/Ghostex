@@ -60,9 +60,6 @@ pub enum ProjectWrite {
     /// `ui.renameRequest`: the Rename dialog opens on the collection that was just created, so the
     /// user names it instead of living with "Group 7".
     RequestCollectionRename { collection_id: String },
-    /// `ui.hiddenItems.groupIds` after the toggle. `hidden` is which way it went, so the host
-    /// picks the intent rather than recomputing the toggle and possibly disagreeing.
-    HiddenGroup { group_id: String, hidden: bool },
     /// `openAppModal({ type: 'open', modal: 'sidebarSpaceEditor', mode: 'create', ... })`: the New
     /// Space item of a membership menu, which creates the Space AND puts the member in it.
     OpenSpaceEditor {
@@ -90,9 +87,6 @@ impl ProjectWrite {
             }
             Self::RequestCollectionRename { collection_id } => {
                 json!({ "write": "renameCollection", "collectionId": collection_id })
-            }
-            Self::HiddenGroup { group_id, hidden } => {
-                json!({ "write": "hiddenGroup", "groupId": group_id, "hidden": hidden })
             }
             Self::OpenSpaceEditor {
                 section_key,
@@ -141,11 +135,22 @@ impl ProjectMovePlan {
 }
 
 /// Whether this payload is one this file answers, without building anything.
+///
+/// CDXC:Projects 2026-09-21 WHY:
+/// **`projectMembership` with `action: 'hide'` is NOT one of them**, even though every other
+/// `projectMembership` is. It writes no document at all: it toggles `ui.hiddenItems.groupIds`, which
+/// is K3, the sidebar's own state, and the store already answers it as a sidebar-UI intent
+/// (`apps/desktop/src/app/gx_store/sidebar_ui_commands.rs`). Claiming it here took the command out
+/// of the dispatch before that arm ran and before the command was forwarded, so the toggle was
+/// applied once and correctly while the sidebar PAGE's copy of the hidden items stopped moving, and
+/// which of the two arms ran depended on whether a stored key had been read yet. One owner, and it
+/// is the one that also tells the page.
 pub fn owns_project_move_command(command: &Value) -> bool {
-    command
-        .get("type")
-        .and_then(Value::as_str)
-        .is_some_and(|kind| PROJECT_MOVE_COMMAND_TYPES.contains(&kind))
+    let kind = command.get("type").and_then(Value::as_str);
+    if kind == Some("projectMembership") && command.get("action") == Some(&Value::from("hide")) {
+        return false;
+    }
+    kind.is_some_and(|kind| PROJECT_MOVE_COMMAND_TYPES.contains(&kind))
 }
 
 /// What a project move does, or `None` when the store must not answer it.
@@ -196,9 +201,7 @@ pub fn plan_project_move(
         "moveToSpace" => plan_move_to_space(&section, collections, section_spaces, command),
         "moveToCollection" => plan_move_to_collection(&section, collections, command),
         "moveCollection" => plan_move_collection(&section, collections, command),
-        "projectMembership" => {
-            plan_project_membership(&section, inputs, collections, command, now_ms)
-        }
+        "projectMembership" => plan_project_membership(&section, collections, command, now_ms),
         "spaceMembership" => plan_space_membership(&section, inputs, section_spaces, command),
         _ => None,
     }
@@ -435,28 +438,17 @@ fn plan_move_space(spaces: Option<&SpacesDocument>, command: &Value) -> Option<P
     }]))
 }
 
-/// `runNativeMembershipAction`'s `projectMembership` arm: the Add to Group menu, and Hide.
+/// `runNativeMembershipAction`'s `projectMembership` arm: the Add to Group menu.
+///
+/// Hide is not here: it writes no document, and `owns_project_move_command` says why.
 fn plan_project_membership(
     section: &ProjectSection,
-    inputs: &SidebarInputs,
     collections: &CollectionsDocument,
     command: &Value,
     now_ms: i64,
 ) -> Option<ProjectMovePlan> {
     let group_id = command.get("groupId")?.as_str()?;
     let action = command.get("action")?.as_str()?;
-    if action == "hide" {
-        let hidden = !inputs
-            .ui
-            .hidden_items
-            .group_ids
-            .iter()
-            .any(|candidate| candidate == group_id);
-        return Some(ProjectMovePlan::of(vec![ProjectWrite::HiddenGroup {
-            group_id: group_id.to_string(),
-            hidden,
-        }]));
-    }
     // `sidebarStore.getState().groupsById[groupId]?.projectContext?.editor.projectId`, which is the
     // WORKSPACE project id on either machine, where `section.resolveProjectId` gives the RAW one on
     // a remote machine. They are the same string here, because a remote gesture is refused above.

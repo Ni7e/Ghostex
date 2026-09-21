@@ -21,7 +21,7 @@
 //! apps/desktop/sidebar/native-sidebar/membership.ts.
 
 use ghostex_gx_core::{
-    CollectionsDocument, MachineId, ProjectWrite, SideStateUpdate, SidebarUiIntent, SpacesDocument,
+    CollectionsDocument, MachineId, ProjectWrite, SideStateUpdate, SpacesDocument,
     owns_project_move_command, plan_project_move,
 };
 use serde_json::{Value, json};
@@ -44,7 +44,6 @@ pub(crate) struct ProjectMoveCounters {
     pub(crate) space_edits: u64,
     pub(crate) group_orders: u64,
     pub(crate) rename_requests: u64,
-    pub(crate) hidden_toggles: u64,
     pub(crate) space_editors: u64,
     /// Payloads the store owns but did not answer because the renderer is not drawing its list.
     pub(crate) declined_source: u64,
@@ -245,14 +244,6 @@ impl GhostexGpuiApp {
                 let request_id = super::host::now_ms();
                 self.gx_store.pending_collection_rename = Some((collection_id, request_id));
                 self.gx_store_update_sidebar_list(cx);
-            }
-            ProjectWrite::HiddenGroup { group_id, hidden } => {
-                self.gx_store.project_moves.hidden_toggles += 1;
-                let intent = match hidden {
-                    true => SidebarUiIntent::HideGroup { group_id },
-                    false => SidebarUiIntent::UnhideGroup { group_id },
-                };
-                self.gx_store_apply_sidebar_ui_intent(intent, cx);
             }
             ProjectWrite::OpenSpaceEditor {
                 section_key,

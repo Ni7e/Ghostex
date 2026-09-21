@@ -399,10 +399,10 @@ async function main(): Promise<void> {
     spaceEdits: 0,
     orderWrites: 0,
     renameRequests: 0,
-    hiddenToggles: 0,
     spaceEditors: 0,
     refusals: 0,
     handOffs: 0,
+    handOffsPerformed: 0,
     collectionsEmptied: 0,
     orderDiffers: 0,
   };
@@ -412,10 +412,14 @@ async function main(): Promise<void> {
     if (entry.orderDiffersFromDrawn) counters.orderDiffers += 1;
     // A HAND-OFF is compared by what the TypeScript does with it, not skipped: the old runtime
     // performs the whole gesture, so the two sides really do differ there and the difference is the
-    // point. What is asserted is that the TypeScript performs SOMETHING, because a refusal that is
-    // unreachable on both sides at once is a refusal nothing covers (this port has shipped one).
+    // point. That the TypeScript performs SOMETHING is now COUNTED rather than claimed in a
+    // comment, because a refusal unreachable on both sides at once is a refusal nothing covers and
+    // this port has shipped one. `projectMembership: hide` is the hand-off that made this worth
+    // measuring: it writes no document, so the store leaves it to the sidebar-UI command path, which
+    // is also what forwards it to the page.
     if (entry.handedOff) {
       counters.handOffs += 1;
+      if (((ours[index] ?? {}).writes ?? []).length > 0) counters.handOffsPerformed += 1;
       return;
     }
     const theirs = ours[index] ?? {};
@@ -431,7 +435,6 @@ async function main(): Promise<void> {
       if (step.write.write === 'editSpaces') counters.spaceEdits += 1;
       if (step.write.write === 'groupOrder') counters.orderWrites += 1;
       if (step.write.write === 'renameCollection') counters.renameRequests += 1;
-      if (step.write.write === 'hiddenGroup') counters.hiddenToggles += 1;
       if (step.write.write === 'openSpaceEditor') counters.spaceEditors += 1;
       if (step.collectionsEmptied) counters.collectionsEmptied += 1;
     }

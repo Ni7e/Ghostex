@@ -1032,7 +1032,6 @@ impl GxStoreDiagnostics {
                 "spaceEdits": counters.space_edits,
                 "groupOrders": counters.group_orders,
                 "renameRequests": counters.rename_requests,
-                "hiddenToggles": counters.hidden_toggles,
                 "spaceEditors": counters.space_editors,
                 "collectionHandOffs": counters.collection_hand_offs,
                 "spaceHandOffs": counters.space_hand_offs,
