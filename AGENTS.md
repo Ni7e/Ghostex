@@ -28,7 +28,7 @@ Ghostex/
 ├── apps/
 │   ├── desktop/       # Rust/GPUI desktop app (crate ghostex-gpui)
 │   │   ├── src/       # Rust
-│   │   ├── sidebar/   # CEF entry modules (main, chat, find, kanban, manage)
+│   │   ├── sidebar/   # QuickJS service + CEF entries (find, kanban, manage)
 │   │   └── views/     # embedded pages: modal-host, titlebar-host, manage, kanban, meo
 │   ├── web/           # ghostex-web submodule; static browser build of the shared workspace UI
 │   ├── mobile/
@@ -139,10 +139,12 @@ rg -n "pattern" apps/desktop/src apps/desktop/sidebar packages/core-ui packages/
 
 gxserver installs the bundled skills under `skills/` by downloading them from this repository's `main` branch (verified against git blob shas, app-bundle copy as the offline source) and refreshes installed skills that differ from `main` on every start (`server/src/agent_skills_remote.rs`, `server/src/agent_skills.rs`). So a push to `main` touching `skills/**` reaches every installed Ghostex on its next start: treat skill edits as customer-facing and never push a half-finished skill. A skill must keep working with the CLI verbs of the oldest release still in use; when it needs a new verb, say so in the skill text and prefer `ghostex guide` over copying details in. `bundled_cli_skill_assets` in `apps/desktop/scripts/build-macos-app.sh` still needs every skill name for offline installs. `GHOSTEX_AGENT_SKILLS_REMOTE=off` (or `gxserver agent-skills install --offline` for one command) turns the download off; use it when testing local skill edits so a Reinstall does not fetch `main` over them.
 
-### Chat and sidebar parity across GPUI and React
+### Chat parity across GPUI and React
 
-- Desktop chat is GPUI only (`apps/desktop/src/app/native_chat/`); the desktop app no longer ships the React `chat.html` page or a setting to switch renderers. React chat (`packages/core-ui/chat/`) remains for mobile and web. The sidebar remains GPUI.
-- Chat and sidebar behaviour runs in shared TypeScript through QuickJS on desktop. Their rendering, background controllers, subscriptions, timers, and persistence must work without a CEF page. A future Rust migration is a separate change.
+This section is about CHAT only. The sidebar left it on 2026-09-21: its behaviour is Rust (`packages/gx-core/` for the rules, `apps/desktop/src/app/gx_store/` for the store, `apps/desktop/src/app/native_sidebar/` for the renderer), and the only half still in QuickJS is the gxserver runtime that feeds it (`apps/desktop/sidebar/gxserver-runtime/`). Chat is NOT being ported: that is the user's decision.
+
+- Desktop chat is GPUI only (`apps/desktop/src/app/native_chat/`); the desktop app no longer ships the React `chat.html` page or a setting to switch renderers. React chat (`packages/core-ui/chat/`) remains for mobile and web.
+- Chat behaviour runs in shared TypeScript through QuickJS on desktop. Its rendering, background controllers, subscriptions, timers, and persistence must work without a CEF page.
 - Put chat behaviour in `packages/shared/session-chat-controller/` and transcript presentation decisions in `packages/shared/session-chat-presentation/`. React and GPUI must consume the same rules for messages, streaming, tool grouping, questions, approvals, drafts, queues, errors, and settings. Platform adapters own I/O; renderers own layout and input.
 - Every chat feature, bug fix, setting, interaction, or visual change updates both `packages/core-ui/chat/` and `apps/desktop/src/app/native_chat/` in the same change, and a shared change is checked in both consumers. Never declare one implementation complete while the other has different behaviour or missing controls.
 - Keep shared storage ownership, validation, budgets, revision checks, and recovery rules in `packages/client-storage/`. Native persistence uses the native adapter and must preserve existing saved data when migrating from browser storage.

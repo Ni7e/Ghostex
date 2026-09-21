@@ -12,10 +12,10 @@
 #                                         browser_subprocess_path (sibling)
 #     libcef.dll, chrome_elf.dll, ...  <- CEF Release/ payload
 #     icudtl.dat, *.pak, locales/      <- CEF Resources/ payload
-#     dist/sidebar/                    <- sidebar bundle; the /dist/sidebar/
-#                                         path segment is load-bearing for the
-#                                         CEF helper first-party URL check and
-#                                         the sidebar_url() Windows arm.
+#     dist/sidebar/                    <- the CEF page bundles; the
+#                                         /dist/sidebar/ path segment is
+#                                         load-bearing for the CEF helper's
+#                                         first-party URL check.
 
 $ErrorActionPreference = "Stop"
 

@@ -24,10 +24,10 @@
 #     libcef.so, libEGL.so, ...        <- CEF Release/ payload
 #     icudtl.dat, *.pak, *.bin,
 #     locales/                         <- CEF Resources/ payload
-#     dist/sidebar/                    <- sidebar bundle; the /dist/sidebar/
-#                                         path segment is load-bearing for the
-#                                         CEF helper first-party URL check and
-#                                         the sidebar_url() Linux arm.
+#     dist/sidebar/                    <- the CEF page bundles; the
+#                                         /dist/sidebar/ path segment is
+#                                         load-bearing for the CEF helper's
+#                                         first-party URL check.
 #
 # Runtime notes:
 # - The app forces X11 app-wide (XWayland on Wayland desktops) and appends
