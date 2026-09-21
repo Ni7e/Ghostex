@@ -24,31 +24,47 @@ use crate::wire::ChatRpcMethod;
 ///
 /// Returns the effects the host must perform: the periodic accounts read, and the timer the grace
 /// window and the switch card need.
-pub fn observe(state: &mut ChatState, context: &ChatContext, next_request_id: &mut u64) -> Vec<Effect> {
+pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
     let now_ms = context.now_millis();
     let mut effects = Vec::new();
     rebuild_option_store(state, now_ms);
     apply_detection(state);
     state.menus.options.expire(now_ms);
-    effects.extend(poll_accounts(state, now_ms, next_request_id));
+    effects.extend(poll_accounts(state, now_ms));
     let progress = switch_progress(state);
     let ready = switch_ready(state);
-    let switch_wake = state
-        .menus
-        .account_switch
-        .observe(progress.as_ref(), ready, now_ms);
+    // The switch card's own clock starts when the controller first renders, which is the frame
+    // after the composer boot read lands; before that there is nothing to draw a card from.
+    let switch_wake = if state.menus.options_seeded {
+        state
+            .menus
+            .account_switch
+            .observe(progress.as_ref(), ready, now_ms)
+    } else {
+        None
+    };
+    arm(state, "menus.switchCard", switch_wake, context);
     let option_wake = state.menus.options.next_wake_ms();
-    let wake = [switch_wake, option_wake]
-        .into_iter()
-        .flatten()
-        .min()
-        .map(|due| (due - now_ms).max(0) as u64);
-    if let Some(delay_ms) = wake {
-        effects.push(Effect::SetTimer {
-            delay_ms: Some(delay_ms),
-        });
-    }
+    arm(state, "menus.optionGrace", option_wake, context);
+    let accounts_wake = state
+        .menus
+        .accounts_polled_at_ms
+        .map(|at| at + ACCOUNTS_POLL_MS);
+    arm(state, "menus.accountsPoll", accounts_wake, context);
     effects
+}
+
+/// Moves one of family e1's rows in the core's timer table, or drops it.
+fn arm(state: &mut ChatState, key: &str, due_at_ms: Option<i64>, context: &ChatContext) {
+    match due_at_ms {
+        Some(due_at_ms) => {
+            let delay = (due_at_ms as f64 - context.now_ms).max(0.0);
+            state.core.timers.arm(key, context.now_ms, delay);
+        }
+        None => {
+            state.core.timers.cancel(key);
+        }
+    }
 }
 
 /// The `useMemo` on `[catalog, storageKey]`: a different agent, catalog document or storage key
@@ -101,7 +117,7 @@ fn apply_detection(state: &mut ChatState) {
 ///
 /// One request path for the periodic read and the panel's own requests: a newer request wins, and
 /// polls skip while one is pending so an older read cannot land after a switch or policy change.
-fn poll_accounts(state: &mut ChatState, now_ms: i64, next_request_id: &mut u64) -> Vec<Effect> {
+fn poll_accounts(state: &mut ChatState, now_ms: i64) -> Vec<Effect> {
     let key = accounts_poll_key(state);
     let Some(key) = key else {
         // `if (!provider && !panelProvider) { setAccounts(undefined); return; }`
@@ -127,9 +143,8 @@ fn poll_accounts(state: &mut ChatState, now_ms: i64, next_request_id: &mut u64) 
     state.menus.accounts_generation += 1;
     state.menus.accounts_busy = true;
     state.menus.account_error = None;
-    *next_request_id += 1;
     vec![Effect::SendRpc {
-        request_id: *next_request_id,
+        request_id: state.menus.accounts_generation,
         method: ChatRpcMethod::AgentAccounts,
         params: Box::new(session_accounts_request()),
     }]

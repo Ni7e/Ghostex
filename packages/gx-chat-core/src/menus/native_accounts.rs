@@ -11,7 +11,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::menus::accounts_data::{
-    account_usage_label, js_number_text, js_round, mask_account_text, Account, AccountsState,
+    account_usage_label, js_number_text, js_number_value, js_round, mask_account_text, Account,
+    AccountsState,
 };
 use crate::menus::accounts_presentation::{
     account_figures, account_policy_at_limit_description, account_reset_label,
@@ -55,7 +56,8 @@ fn identity(account: &Account) -> AccountIdentity {
 #[serde(rename_all = "camelCase")]
 pub struct PanelUsageBar {
     pub label: String,
-    pub percent: f64,
+    /// `Math.max(0, Math.min(100, usedPercent))`, written as the engine writes a number.
+    pub percent: Value,
     pub reset: String,
 }
 
@@ -63,7 +65,7 @@ pub struct PanelUsageBar {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PanelContext {
-    pub percent: f64,
+    pub percent: Value,
     pub value: String,
     pub tokens: String,
 }
@@ -263,12 +265,12 @@ pub fn native_account_panel(
                         account_usage_label(window),
                         js_number_text(js_round(window.used_percent.unwrap_or(f64::NAN)))
                     ),
-                    percent: window.used_percent.unwrap_or(f64::NAN).clamp(0.0, 100.0),
+                    percent: js_number_value(window.used_percent.unwrap_or(f64::NAN).clamp(0.0, 100.0)),
                     reset: account_reset_label(window.resets_at.as_deref(), now_ms),
                 })
                 .collect(),
             context: context.map(|context| PanelContext {
-                percent: context.used_percentage.unwrap_or(0.0),
+                percent: js_number_value(context.used_percentage.unwrap_or(0.0)),
                 value: match context.used_percentage {
                     None => "Usage unavailable".to_string(),
                     Some(percent) => format!("{}%", js_number_text(js_round(percent))),

@@ -8,7 +8,8 @@ use serde::Serialize;
 
 use crate::menus::accounts_data::{
     account_headline_windows, fable_window, format_reset_countdown, is_five_hour_window,
-    is_weekly_window, js_number_text, js_round, Account, AccountSession, UsageWindow,
+    is_weekly_window, js_number_text, js_number_value, js_round, Account, AccountSession,
+    UsageWindow,
 };
 use crate::menus::time::parse_iso_millis;
 
@@ -231,7 +232,7 @@ pub struct SwitchUsageCard {
     pub label: String,
     /// 0 to 100, or absent when the limit has no reading.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub used: Option<f64>,
+    pub used: Option<serde_json::Value>,
     pub level: UsageLevel,
     /// Countdown to the reset, `Due` once passed, or `null` without a reset time.
     pub reset: Option<String>,
@@ -340,7 +341,7 @@ fn switch_usage_card(label: &str, usage: Option<&UsageWindow>, now_ms: i64) -> S
         });
     SwitchUsageCard {
         label: label.to_string(),
-        used,
+        used: used.map(js_number_value),
         level,
         reset,
     }

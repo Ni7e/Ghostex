@@ -236,6 +236,18 @@ pub fn js_number_text(value: f64) -> String {
     text
 }
 
+/// A number as `JSON.stringify` writes it: an integral double has no decimal point, and `NaN` and
+/// the infinities are `null`.
+pub fn js_number_value(value: f64) -> serde_json::Value {
+    if !value.is_finite() {
+        return serde_json::Value::Null;
+    }
+    if value == value.trunc() && value.abs() < 9_007_199_254_740_992.0 {
+        return serde_json::Value::from(value as i64);
+    }
+    serde_json::Number::from_f64(value).map_or(serde_json::Value::Null, serde_json::Value::Number)
+}
+
 /// `Math.round`: halves go up, towards positive infinity.
 pub fn js_round(value: f64) -> f64 {
     if !value.is_finite() {

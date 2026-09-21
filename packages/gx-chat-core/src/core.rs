@@ -50,6 +50,11 @@ impl ChatCore {
     pub fn handle(&mut self, event: Event, context: ChatContext) -> Vec<Effect> {
         self.context = context;
         let mut effects = events::dispatch(&mut self.state, &event, &self.context);
+        // Family e1's surfaces have no event of their own: the option pills rebuild from the
+        // catalog and the agent, the accounts poll runs on the clock, and the switch card advances
+        // on every frame. That is `useMemo` and `useEffect` work in the TypeScript, so it runs once
+        // per event here rather than being routed by kind.
+        effects.extend(crate::menus::observe(&mut self.state, &self.context));
         self.republish();
         // One wake for the whole core, not one per timer: the table knows which key is earliest,
         // and the host only has to be asked again when that answer changed.
