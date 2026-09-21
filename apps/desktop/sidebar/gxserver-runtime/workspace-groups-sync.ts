@@ -18,12 +18,8 @@ import {
   syncGpuiWorkspaceSessionSubgroupOrder,
 } from '../workspace-session-groups';
 import {
-  GPUI_PROJECT_COLLECTIONS_SERVER_SYNC_DELAY_MS,
-  GPUI_PROJECT_COLLECTIONS_SERVER_SYNC_RETRY_DELAY_MS,
   GPUI_CUSTOM_SESSION_TAGS_SERVER_SYNC_DELAY_MS,
   GPUI_CUSTOM_SESSION_TAGS_SERVER_SYNC_RETRY_DELAY_MS,
-  GPUI_SIDEBAR_SPACES_SERVER_SYNC_DELAY_MS,
-  GPUI_SIDEBAR_SPACES_SERVER_SYNC_RETRY_DELAY_MS,
 } from './constants';
 import type { GpuiWorkspaceSessionGroupsState } from '../workspace-session-groups';
 import type { GpuiSidebarRuntime } from './core';
@@ -68,9 +64,6 @@ at the bottom of this file is what keeps the two in step.
 export interface GpuiSidebarRuntimeWorkspaceGroupMethods {
   persistWorkspaceGroups(): void;
   applyWorkspaceGroupsFromHost(state: unknown): void;
-  queueSidebarProjectCollectionsServerSync(state: GxserverSidebarProjectCollectionsState): void;
-  pushSidebarProjectCollectionsToGxserver(): Promise<void>;
-  forwardSidebarProjectCollectionsFromGxserver(state: GxserverSidebarProjectCollectionsState): void;
   forwardRemoteSidebarProjectCollectionsFromGxserver(
     remoteMachineId: string,
     state: GxserverSidebarProjectCollectionsState
@@ -79,9 +72,6 @@ export interface GpuiSidebarRuntimeWorkspaceGroupMethods {
     remoteMachineId: string,
     state: GxserverSidebarProjectCollectionsState
   ): Promise<void>;
-  queueSidebarSpacesServerSync(state: GxserverSidebarSpacesState): void;
-  pushSidebarSpacesToGxserver(): Promise<void>;
-  forwardSidebarSpacesFromGxserver(state: GxserverSidebarSpacesState): void;
   forwardRemoteSidebarSpacesFromGxserver(remoteMachineId: string, state: GxserverSidebarSpacesState): void;
   updateRemoteSidebarSpaces(remoteMachineId: string, state: GxserverSidebarSpacesState): Promise<void>;
   queueCustomSessionTagsServerSync(state: GxserverCustomSessionTagsState): void;
@@ -188,77 +178,18 @@ export const gpuiSidebarRuntimeWorkspaceGroupMethods = {
   },
 
   /*
-  CDXC:Projects 2026-07-18-00:00:
-  Colored "Group N" project collections mirror the workspace-groups sync shape,
-  but SidebarApp owns the localStorage overlay and the editing UI, so this
-  runtime only relays: sidebar `updateSidebarProjectCollections` commands are
-  debounced into gxserver write-throughs, and server state (startup snapshot,
-  live sidebarProjectCollectionsChanged events, update acks) is forwarded back
-  to SidebarApp for reconciliation. While a push is pending or failed, server
-  forwards are suppressed so older server state cannot clobber newer local
-  edits.
+  CDXC:Projects 2026-09-21 WHY:
+  The LOCAL half of this relay is gone, for both documents. `queueSidebarProjectCollectionsServerSync`,
+  its debounced `pushSidebarProjectCollectionsToGxserver`, the forward suppression in
+  `forwardSidebarProjectCollectionsFromGxserver` and the identical Spaces trio were what the
+  2026-07-18-00:00 and 2026-08-27 notes described, and they stopped being reachable when Rust became
+  the only desktop writer of this computer's copies (apps/desktop/src/app/gx_store/project_docs.rs,
+  M4d part 2 blocker 3): nothing posts an `updateSidebarProjectCollections` or
+  `updateSidebarSpaces` without a `remoteMachineId`, and the page that adopted the forward is
+  deleted. Only the REMOTE methods are left, and they are direct tunnel calls with no queue and no
+  pending flag. The deleted bodies are frozen for the gates in
+  tooling/gx-core/project-docs-server-sync-typescript.ts.
   */
-  queueSidebarProjectCollectionsServerSync(
-    this: GpuiSidebarRuntime,
-    state: GxserverSidebarProjectCollectionsState
-  ): void {
-    this.latestSidebarProjectCollectionsUpdate = state;
-    this.sidebarProjectCollectionsServerSyncPending = true;
-    if (this.sidebarProjectCollectionsServerSyncTimeoutId !== undefined) {
-      window.clearTimeout(this.sidebarProjectCollectionsServerSyncTimeoutId);
-    }
-    this.sidebarProjectCollectionsServerSyncTimeoutId = window.setTimeout(() => {
-      this.sidebarProjectCollectionsServerSyncTimeoutId = undefined;
-      void this.pushSidebarProjectCollectionsToGxserver();
-    }, GPUI_PROJECT_COLLECTIONS_SERVER_SYNC_DELAY_MS);
-  },
-
-  async pushSidebarProjectCollectionsToGxserver(this: GpuiSidebarRuntime): Promise<void> {
-    const client = this.client;
-    const pushed = this.latestSidebarProjectCollectionsUpdate;
-    if (!client || !pushed) {
-      return;
-    }
-    try {
-      const normalized = await client.updateSidebarProjectCollections(pushed);
-      if (this.latestSidebarProjectCollectionsUpdate === pushed) {
-        this.sidebarProjectCollectionsServerSyncPending = false;
-        if (isSidebarProjectCollectionsState(normalized)) {
-          this.forwardSidebarProjectCollectionsFromGxserver(normalized);
-        }
-      }
-    } catch {
-      if (
-        this.client === client &&
-        this.sidebarProjectCollectionsServerSyncTimeoutId === undefined &&
-        this.sidebarProjectCollectionsServerSyncPending
-      ) {
-        this.sidebarProjectCollectionsServerSyncTimeoutId = window.setTimeout(() => {
-          this.sidebarProjectCollectionsServerSyncTimeoutId = undefined;
-          void this.pushSidebarProjectCollectionsToGxserver();
-        }, GPUI_PROJECT_COLLECTIONS_SERVER_SYNC_RETRY_DELAY_MS);
-      }
-    }
-  },
-
-  forwardSidebarProjectCollectionsFromGxserver(
-    this: GpuiSidebarRuntime,
-    state: GxserverSidebarProjectCollectionsState
-  ): void {
-    if (this.sidebarProjectCollectionsServerSyncPending) {
-      return;
-    }
-    const stateJson = JSON.stringify(state);
-    if (stateJson === this.lastForwardedSidebarProjectCollectionsJson) {
-      return;
-    }
-    this.lastForwardedSidebarProjectCollectionsJson = stateJson;
-    this.messageSource.postMessage({
-      sidebarProjectCollections: state,
-      type: 'sidebarProjectCollectionsChanged',
-    });
-  },
-
   forwardRemoteSidebarProjectCollectionsFromGxserver(
     this: GpuiSidebarRuntime,
     remoteMachineId: string,
@@ -295,72 +226,6 @@ export const gpuiSidebarRuntimeWorkspaceGroupMethods = {
       });
     }
     this.forwardRemoteSidebarProjectCollectionsFromGxserver(remoteMachineId, response.sidebarProjectCollections);
-  },
-
-  /*
-  CDXC:Spaces 2026-08-27:
-  Spaces relay exactly like project collections: SidebarApp owns the editing UI
-  and sends the whole normalized Space document, this runtime debounces it into
-  a gxserver write-through, and server state (startup snapshot, live
-  sidebarSpacesChanged events, update acks) is forwarded back for
-  reconciliation. While a push is pending or failed, server forwards are
-  suppressed so older server state cannot clobber newer local edits. Each
-  gxserver owns its own Space set, so remote machines take the remote path and
-  never merge into the local document.
-  */
-  queueSidebarSpacesServerSync(this: GpuiSidebarRuntime, state: GxserverSidebarSpacesState): void {
-    this.latestSidebarSpacesUpdate = state;
-    this.sidebarSpacesServerSyncPending = true;
-    if (this.sidebarSpacesServerSyncTimeoutId !== undefined) {
-      window.clearTimeout(this.sidebarSpacesServerSyncTimeoutId);
-    }
-    this.sidebarSpacesServerSyncTimeoutId = window.setTimeout(() => {
-      this.sidebarSpacesServerSyncTimeoutId = undefined;
-      void this.pushSidebarSpacesToGxserver();
-    }, GPUI_SIDEBAR_SPACES_SERVER_SYNC_DELAY_MS);
-  },
-
-  async pushSidebarSpacesToGxserver(this: GpuiSidebarRuntime): Promise<void> {
-    const client = this.client;
-    const pushed = this.latestSidebarSpacesUpdate;
-    if (!client || !pushed) {
-      return;
-    }
-    try {
-      const normalized = await client.updateSidebarSpaces(pushed);
-      if (this.latestSidebarSpacesUpdate === pushed) {
-        this.sidebarSpacesServerSyncPending = false;
-        if (isSidebarSpacesState(normalized)) {
-          this.forwardSidebarSpacesFromGxserver(normalized);
-        }
-      }
-    } catch {
-      if (
-        this.client === client &&
-        this.sidebarSpacesServerSyncTimeoutId === undefined &&
-        this.sidebarSpacesServerSyncPending
-      ) {
-        this.sidebarSpacesServerSyncTimeoutId = window.setTimeout(() => {
-          this.sidebarSpacesServerSyncTimeoutId = undefined;
-          void this.pushSidebarSpacesToGxserver();
-        }, GPUI_SIDEBAR_SPACES_SERVER_SYNC_RETRY_DELAY_MS);
-      }
-    }
-  },
-
-  forwardSidebarSpacesFromGxserver(this: GpuiSidebarRuntime, state: GxserverSidebarSpacesState): void {
-    if (this.sidebarSpacesServerSyncPending) {
-      return;
-    }
-    const stateJson = JSON.stringify(state);
-    if (stateJson === this.lastForwardedSidebarSpacesJson) {
-      return;
-    }
-    this.lastForwardedSidebarSpacesJson = stateJson;
-    this.messageSource.postMessage({
-      sidebarSpaces: state,
-      type: 'sidebarSpacesChanged',
-    });
   },
 
   forwardRemoteSidebarSpacesFromGxserver(

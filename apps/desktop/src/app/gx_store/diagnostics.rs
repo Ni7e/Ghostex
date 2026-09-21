@@ -832,10 +832,7 @@ impl GxStoreDiagnostics {
                 "echoesPushedBack": counters.echoes_pushed_back,
                 "echoesDeferred": counters.echoes_deferred,
                 "deferredRecovered": counters.deferred_recovered,
-                "handBacks": counters.hand_backs,
-                "handBacksDropped": counters.hand_backs_dropped,
                 "readFailures": counters.read_failures,
-                "handOffsRequested": counters.hand_offs_requested,
             }),
         );
     }
@@ -888,10 +885,6 @@ impl GxStoreDiagnostics {
                 "groupOrders": counters.group_orders,
                 "renameRequests": counters.rename_requests,
                 "spaceEditors": counters.space_editors,
-                "collectionHandOffs": counters.collection_hand_offs,
-                "spaceHandOffs": counters.space_hand_offs,
-                "handOffsRefused": counters.hand_offs_refused,
-                "handOffsUnparsable": counters.hand_offs_unparsable,
             }),
         );
     }

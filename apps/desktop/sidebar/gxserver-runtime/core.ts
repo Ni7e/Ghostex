@@ -551,15 +551,7 @@ export class GpuiSidebarRuntime {
   didConnectSavedRemoteMachinesOnStartup = false;
   enabledRemoteMachineIdsForReconnect = new Set<string>();
   workspaceGroups: GpuiWorkspaceSessionGroupsState = createEmptyGpuiWorkspaceSessionGroupsState();
-  latestSidebarProjectCollectionsUpdate: GxserverSidebarProjectCollectionsState | undefined;
-  sidebarProjectCollectionsServerSyncTimeoutId: number | undefined;
-  sidebarProjectCollectionsServerSyncPending = false;
-  lastForwardedSidebarProjectCollectionsJson: string | undefined;
   lastForwardedRemoteSidebarProjectCollectionsJsonByMachineId = new Map<string, string>();
-  latestSidebarSpacesUpdate: GxserverSidebarSpacesState | undefined;
-  sidebarSpacesServerSyncTimeoutId: number | undefined;
-  sidebarSpacesServerSyncPending = false;
-  lastForwardedSidebarSpacesJson: string | undefined;
   lastForwardedRemoteSidebarSpacesJsonByMachineId = new Map<string, string>();
   latestCustomSessionTagsUpdate: GxserverCustomSessionTagsState | undefined;
   customSessionTagsServerSyncTimeoutId: number | undefined;
@@ -1430,19 +1422,23 @@ export class GpuiSidebarRuntime {
       case 'syncGroupOrder':
         await this.syncWorkspaceGroupOrder(message.groupIds);
         return;
+      /*
+      CDXC:Projects 2026-09-21 WHY:
+      REMOTE only. This computer's copies of both documents are written and pushed by Rust
+      (apps/desktop/src/app/gx_store/project_docs.rs), which is why the local arms and the
+      debounced write-through behind them were deleted on 2026-09-21: nothing has posted either
+      message without a `remoteMachineId` since M4d part 2 blocker 3, and a queue nothing fills
+      would be a second writer waiting to happen.
+      */
       case 'updateSidebarProjectCollections':
         if (message.remoteMachineId) {
           await this.updateRemoteSidebarProjectCollections(message.remoteMachineId, message.state);
-          return;
         }
-        this.queueSidebarProjectCollectionsServerSync(message.state);
         return;
       case 'updateSidebarSpaces':
         if (message.remoteMachineId) {
           await this.updateRemoteSidebarSpaces(message.remoteMachineId, message.state);
-          return;
         }
-        this.queueSidebarSpacesServerSync(message.state);
         return;
       case 'updateCustomSessionTags':
         if (message.remoteMachineId) {

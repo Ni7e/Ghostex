@@ -1,5 +1,11 @@
-//! The interleaving, launch and bridge gate for the two PROJECT documents: collections (K5) and
-//! Spaces (K6).
+//! The interleaving and launch gate for the two PROJECT documents: collections (K5) and Spaces
+//! (K6).
+//!
+//! **The bridge half is gone, with the machinery it drove.** Until 2026-09-21 this also exported
+//! the two `persist*` message types, the hand-back script as a template and the collections request
+//! script, so the TypeScript half could run the REAL script text against the page's own controller.
+//! The page was deleted in M4d part 2 step 8 and the scripts, the message types and the host's
+//! routing arms followed it on 2026-09-21: there is no second end left for a round trip to reach.
 //!
 //! **Why this exists beside `workspace_groups_guard`.** The guard was generalised into
 //! `doc_sync::DocumentSync<D>` for these two documents, and the only instance any gate drove was
@@ -24,10 +30,8 @@
 //!   bun tooling/gx-core/project-docs-guard.ts <out-dir> [--inject <mutation>]
 
 use ghostex_gx_core::{
-    collections_hand_back_script, collections_request_script, document_reconcile_wanted,
-    spaces_hand_back_script, AdoptOutcome, CollectionsDocument, DocumentSync, SpacesDocument,
-    SyncEffect, SyncedDocument, COLLECTIONS_HAND_OFF_MESSAGE_TYPE, COLLECTIONS_SCRIPT_PLACEHOLDER,
-    SPACES_HAND_OFF_MESSAGE_TYPE, SPACES_SCRIPT_PLACEHOLDER,
+    document_reconcile_wanted, AdoptOutcome, CollectionsDocument, DocumentSync, SpacesDocument,
+    SyncEffect, SyncedDocument,
 };
 use serde_json::{json, Value};
 
@@ -86,13 +90,11 @@ fn main() {
             "stored": collections.iter().map(CollectionsDocument::to_storage_json).collect::<Vec<_>>(),
             "cases": collection_cases,
             "launch": collection_launch,
-            "bridge": collections_bridge(&collections[1]),
         },
         "spaces": {
             "documents": spaces.iter().map(SpacesDocument::to_wire_json).collect::<Vec<_>>(),
             "cases": space_cases,
             "launch": space_launch,
-            "bridge": spaces_bridge(&spaces[1]),
         },
     });
     let path = std::path::Path::new(&out_dir).join("rust-project-docs.json");
@@ -463,46 +465,6 @@ fn launch_cases<D: SyncedDocument>(documents: &[D], wire: fn(&D) -> Value) -> Ve
         }
     }
     cases
-}
-
-/// The bridge edges, so the TypeScript half drives the REAL text: the message type the host's
-/// routing arm matches on, the hand-back script as a template, and, for the collections document,
-/// the request script that recovers a hand-off the app had to refuse.
-///
-/// The substitution is asserted rather than assumed: a template that did not rebuild byte for byte
-/// would make the gate run against text the app never sends, which is the shape of every gate
-/// failure this port has had.
-fn collections_bridge(sample: &CollectionsDocument) -> Value {
-    let placeholder = json!(COLLECTIONS_SCRIPT_PLACEHOLDER).to_string();
-    let template = collections_hand_back_script(&json!(COLLECTIONS_SCRIPT_PLACEHOLDER));
-    let value = sample.to_wire_json();
-    assert_eq!(
-        template.replace(&placeholder, &value.to_string()),
-        collections_hand_back_script(&value),
-        "the collections script template must rebuild the real script byte for byte"
-    );
-    json!({
-        "messageType": COLLECTIONS_HAND_OFF_MESSAGE_TYPE,
-        "scriptTemplate": template,
-        "placeholder": placeholder,
-        "requestScript": collections_request_script(),
-    })
-}
-
-fn spaces_bridge(sample: &SpacesDocument) -> Value {
-    let placeholder = json!(SPACES_SCRIPT_PLACEHOLDER).to_string();
-    let template = spaces_hand_back_script(&json!(SPACES_SCRIPT_PLACEHOLDER));
-    let value = sample.to_wire_json();
-    assert_eq!(
-        template.replace(&placeholder, &value.to_string()),
-        spaces_hand_back_script(&value),
-        "the spaces script template must rebuild the real script byte for byte"
-    );
-    json!({
-        "messageType": SPACES_HAND_OFF_MESSAGE_TYPE,
-        "scriptTemplate": template,
-        "placeholder": placeholder,
-    })
 }
 
 fn collections_wire(document: &CollectionsDocument) -> Value {

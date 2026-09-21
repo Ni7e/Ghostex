@@ -1,13 +1,13 @@
-//! The two scripts the hand-back bridge to the sidebar page is made of.
+//! The two scripts the hand-back bridge to the QuickJS runtime is made of.
 //!
 //! CDXC:Sessions 2026-09-21 WHY:
 //! Here rather than in the desktop crate so a harness can evaluate the REAL text against the real
 //! page code: the function name, the parking branch and the guard on a bridge that is not there yet
 //! are all things only an end-to-end run can check, and everything else about a document host is
 //! gateable without it. The workspace session groups document learned that in its own review round
-//! (`workspace_groups_hand_back_script`), and the two project documents built their script in the
-//! desktop crate, where a TypeScript harness cannot reach it; these are the same two shapes with
-//! the names as arguments, so there is one text and not three.
+//! (`workspace_groups_hand_back_script`) and is the ONLY caller left: the two project documents had
+//! their own hand-back and request scripts here until 2026-09-21, when they were deleted with the
+//! sidebar page that was their only other end.
 //!
 //! The parking branch is not a fallback that hides a failure: the controller drains the pending
 //! field when it installs its hook, so a document that arrives before the page has connected its

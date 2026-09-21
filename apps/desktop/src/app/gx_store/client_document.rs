@@ -8,27 +8,26 @@
 //! done before it succeeds leaves an empty document that then adopts the daemon's copy over the
 //! user's; a read on the render thread takes the connection mutex the write paths hold across
 //! `BEGIN IMMEDIATE`; a write that loses the lock race and is only counted is a rename that died
-//! with the app; a retry ladder that gives up refuses every edit for the rest of the run; and a
-//! hand-back marked delivered when the script was QUEUED leaves the page computing its next edit
-//! from a stale base. Writing that three times is how one of the three ends up without the fix.
+//! with the app; and a retry ladder that gives up refuses every edit for the rest of the run.
+//! Writing that three times is how one of the three ends up without the fix.
 //!
-//! What a document still says for itself is the four things in [`ClientDocument`]: its stored key
-//! (or that it has none), its push path, the script that hands it back to the sidebar page, and
-//! where its host lives on the app.
+//! What a document still says for itself is the three things in [`ClientDocument`]: its stored key
+//! (or that it has none), its push path, and where its host lives on the app.
 //!
-//! **K4 is not on this host yet, and the list of what keeps it apart is now short enough to say
-//! exactly.** Three of the four things that did have moved here (2026-09-21): the hand-OFF is the
-//! same shape for all three, the refused-hand-off recovery is `page_holds_newer` plus
-//! [`ClientDocument::request_script`], and the ordering between the recovery and the hand-back is
-//! `gx_document_settle`. What is left is TWO: the PRUNE, which walks the loaded presentations and
-//! has no analogue for a document whose members are not sessions, and three counters
-//! (`reconcile_seen`, `reconcile_entered`, `side_state_held`, plus the process-wide
+//! **The hand-BACK is gone (2026-09-21).** It told the deleted sidebar page the document this app
+//! held, so the page's next edit was never computed from a stale base, and `page_holds_newer` plus
+//! a request script recovered a hand-off this app had to refuse. The page is deleted and so is
+//! everything that posted one of those documents to this app, so the scripts, the hand-off routing
+//! arms, the refusal recovery and their counters went with it.
+//!
+//! **K4 is not on this host yet.** What keeps it apart is the PRUNE, which walks the loaded
+//! presentations and has no analogue for a document whose members are not sessions, and three
+//! counters (`reconcile_seen`, `reconcile_entered`, `side_state_held`, plus the process-wide
 //! `hostMessagesDropped`) that two live rounds were spent adding and that this host does not carry.
-//! So K4 CAN move now, and the reason it has not is that **no gate drives any of the three hosts**:
-//! the guard, launch and prune gates drive gx-core, and the round-trip gates drive the page code
-//! against the message type and the script template, so a host refactor is covered by `cargo check`
-//! and by the live counters and by nothing else. Whoever moves it moves the prune in as a hook and
-//! the three counters in as fields, and changes nothing else.
+//! So K4 CAN move, and the reason it has not is that **no gate drives any of the three hosts**: the
+//! guard, launch and prune gates drive gx-core, so a host refactor is covered by `cargo check` and
+//! by the live counters and by nothing else. Whoever moves it moves the prune in as a hook and the
+//! three counters in as fields, and changes nothing else.
 //!
 //! SEE-ALSO: packages/gx-core/src/doc_sync/, apps/desktop/src/app/gx_store/workspace_groups.rs,
 //! apps/desktop/src/app/gx_store/project_docs.rs.
@@ -75,16 +74,6 @@ pub(crate) trait ClientDocument: SyncedDocument + 'static {
     /// sites and to the trait at others, and the impl that wrote `Self::from_storage_json(value)`
     /// inside `fn from_storage_json` would have been a silent infinite recursion.
     fn parse_storage(value: &Value) -> Self;
-
-    /// The script that hands the held document back to the sidebar page, so the page's own copy is
-    /// never the stale base of its next edit.
-    fn hand_back_script(&self) -> String;
-
-    /// The script that asks the page to post the document it holds, for a document that can refuse
-    /// a hand-off. `None` for one that cannot: a document with no stored key is ready from the
-    /// first frame, so there is no window in which the page is the only holder of an edit, and a
-    /// request path nothing can reach would be a second way for a document to cross.
-    fn request_script() -> Option<String>;
 
     /// Where this document's host lives on the app.
     fn host(app: &mut GhostexGpuiApp) -> &mut ClientDocumentHost<Self>
@@ -137,18 +126,9 @@ pub(crate) struct ClientDocumentCounters {
     pub(crate) echoes_equal: u64,
     pub(crate) echoes_pushed_back: u64,
     /// Times the held document was handed back to the sidebar page.
-    pub(crate) hand_backs: u64,
-    /// Hand-backs whose script the service refused to evaluate. The page's copy is then the stale
-    /// base of its next edit, so the record of what it was told is NOT advanced and the next change
-    /// tells it again.
-    pub(crate) hand_backs_dropped: u64,
     /// Reads of the stored key that failed. Until one succeeds nothing is adopted and nothing is
     /// edited, so a non-zero value here beside a zero `edits` is this app refusing to guess.
     pub(crate) read_failures: u64,
-    /// Times the page was asked to hand its document over again after a refusal. Read beside the
-    /// document's own `hand_offs_refused`: a refusal with no request behind it is an edit this app
-    /// refused and never went back for.
-    pub(crate) hand_offs_requested: u64,
     /// Daemon echoes left unjudged because the read had not landed. Read beside
     /// `deferred_recovered`: equal means every deferral was judged when the read landed.
     pub(crate) echoes_deferred: u64,
@@ -176,16 +156,10 @@ pub(crate) struct ClientDocumentHost<D: ClientDocument> {
     /// document that spent the first-echo push-back token on a self-echo and left the daemon's copy
     /// unjudged for the whole run.
     deferred_echo: Option<Option<Value>>,
-    /// The page holds an edit this app refused and has not handed over again yet, so nothing may be
-    /// told to the page until it does: a hand-back would replace that edit.
-    page_holds_newer: bool,
     /// The storage write that has not landed yet: `None` is the REMOVE, `Some(raw)` the value, and
     /// the whole field absent is "nothing owed".
     owed_write: Option<Option<String>>,
     write_retries: u32,
-    /// The document the page was last told about, so it is told again only when the held document
-    /// really moved.
-    handed_back: Option<D>,
 }
 
 impl<D: ClientDocument> Default for ClientDocumentHost<D> {
@@ -200,10 +174,8 @@ impl<D: ClientDocument> Default for ClientDocumentHost<D> {
             read_retries: 0,
             read_retry_scheduled: false,
             deferred_echo: None,
-            page_holds_newer: false,
             owed_write: None,
             write_retries: 0,
-            handed_back: None,
         }
     }
 }
@@ -329,7 +301,6 @@ impl GhostexGpuiApp {
         let effects = D::host(self).sync.edit(document.clone());
         self.gx_document_run_effects::<D>(effects, cx);
         D::apply_to_store(self, &document, cx);
-        self.gx_document_hand_back::<D>(cx);
     }
 
     /// The daemon's copy just landed in the store. Asks the guard what it means and, when the guard
@@ -380,14 +351,13 @@ impl GhostexGpuiApp {
         if echoed.as_ref() != Some(&held) {
             D::apply_to_store(self, &held, cx);
         }
-        self.gx_document_hand_back::<D>(cx);
         let counters = D::host(self).counters;
         self.gx_store
             .diagnostics
             .client_document_record(D::NAME, None, counters);
     }
 
-    /// Runs whatever a deferred echo owes, once the read has landed, and then settles with the page.
+    /// Runs whatever a deferred echo owes, once the read has landed.
     ///
     /// This is the deferral's only other chance: `side_state` reports a change on the frame that
     /// moved the document and on no later one, and on a normal launch that frame is the initial
@@ -403,72 +373,6 @@ impl GhostexGpuiApp {
             // that got us here put this app's own document there a moment ago.
             self.gx_document_reconcile::<D>(server_state, cx);
         }
-        // An edit the page made while the read was on its way is only in the page's copy, and
-        // handing the stored document back would replace it: the user would watch the rename they
-        // just made revert. So the page is asked to hand its own document over again instead, which
-        // is one ordinary hand-off and therefore the same path every other edit takes.
-        if D::host(self).page_holds_newer {
-            self.gx_document_ask_page::<D>(cx);
-            return;
-        }
-        self.gx_document_hand_back::<D>(cx);
-    }
-
-    /// Asks the page to post the document it holds. Dropped rather than retried when the page is
-    /// not there: it has not edited anything in that state either.
-    fn gx_document_ask_page<D: ClientDocument>(&mut self, cx: &mut gpui::Context<Self>) {
-        let Some(script) = D::request_script() else {
-            return;
-        };
-        let Some(service) = self.sidebar.clone() else {
-            return;
-        };
-        if service.update(cx, |surface, _| surface.execute_app_owned_script(&script)) {
-            D::host(self).counters.hand_offs_requested += 1;
-        }
-    }
-
-    /// Whether the page is holding an edit this app could not take. Set when a hand-off is refused
-    /// and cleared when the page's document finally arrives, so a hand-back in between cannot
-    /// replace it.
-    pub(crate) fn gx_document_page_holds_newer<D: ClientDocument>(&mut self, holds: bool) {
-        D::host(self).page_holds_newer = holds;
-    }
-
-    /// Hands the held document to the sidebar page, which no longer reads the daemon's copy itself.
-    ///
-    /// Told only when the document really moved, and the record of what it was told is updated ONLY
-    /// when the script was dispatched, so a page that was not there yet is told on the next change
-    /// rather than never.
-    pub(crate) fn gx_document_hand_back<D: ClientDocument>(
-        &mut self,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        // While the page is the only holder of an edit this app had to refuse, telling it anything
-        // would replace that edit. It is asked for its document instead, and told again once it
-        // arrives.
-        if D::host(self).page_holds_newer {
-            return;
-        }
-        let held = D::host(self).sync.document().clone();
-        if D::host(self).handed_back.as_ref() == Some(&held) {
-            return;
-        }
-        let Some(service) = self.sidebar.clone() else {
-            return;
-        };
-        let script = held.hand_back_script();
-        // The return value decides whether this counts as told. `evaluate` reports an error and
-        // discards the script, so recording it as handed back from the CALL rather than from the
-        // answer would leave the page holding a stale base for ever.
-        let sent = service.update(cx, |surface, _| surface.execute_app_owned_script(&script));
-        let host = D::host(self);
-        if !sent {
-            host.counters.hand_backs_dropped += 1;
-            return;
-        }
-        host.counters.hand_backs += 1;
-        host.handed_back = Some(held);
     }
 
     fn gx_document_run_effects<D: ClientDocument>(

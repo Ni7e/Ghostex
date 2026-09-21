@@ -27,17 +27,11 @@ impl GhostexGpuiApp {
         // This reveal is this app's own, so the runtime never posts it on the facts channel: the
         // store records it as the newest request (which is what the installed list carries and what
         // scrolls the row into view) and answers it here rather than waiting for the publish that
-        // used to carry it back (gx_store/runtime_facts.rs).
+        // used to carry it back (gx_store/runtime_facts.rs). Those two calls are the WHOLE reveal:
+        // the `revealSidebarSession` message that went out beside them until 2026-09-21 was read by
+        // the sidebar page, which is deleted, and by nothing since.
         self.gx_store_note_local_sidebar_reveal(session_id, request_id);
         self.gx_store_note_sidebar_reveal(session_id, request_id, cx);
-        self.dispatch_gpui_sidebar_host_message(
-            serde_json::json!({
-                "type": "revealSidebarSession",
-                "sessionId": session_id,
-                "requestId": request_id,
-            }),
-            cx,
-        );
     }
 
     fn active_sidebar_session_reveal_id(&self) -> Option<String> {

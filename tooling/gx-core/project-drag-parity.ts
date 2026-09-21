@@ -27,6 +27,7 @@
  */
 // First, so the client-storage adapter finds a `Storage` before any module reads one.
 import { resetBrowserStorage, writeStorageItem } from './browser-shim';
+import { FrozenProjectDocServerSync } from './project-docs-server-sync-typescript';
 import { GpuiSidebarRuntime } from '@/apps/desktop/sidebar/gxserver-runtime/core';
 import { reorderNativeSidebar } from '@/tooling/gx-core/sidebar-page-frozen/reorder';
 import { runNativeProjectDrop } from '@/tooling/gx-core/sidebar-page-frozen/project-drag';
@@ -300,15 +301,18 @@ async function runCases(dump: Json): Promise<Json[]> {
  * `Math.max(parsed, previous)` is the monotonic counter.
  *
  * FROZEN rather than shipped since the day the page stopped adopting this computer's echoes, and
- * `project-collections-typescript.ts` says what that costs. The pending half is still live: the
- * runtime's `queueSidebarProjectCollectionsServerSync` suppresses the forward while a push is
- * outstanding, and driving the page alone is the harness bug this gate found on its first run.
+ * `project-collections-typescript.ts` says what that costs. The pending half is frozen too since
+ * 2026-09-21: `queueSidebarProjectCollectionsServerSync` and
+ * `forwardSidebarProjectCollectionsFromGxserver` were deleted from the runtime as dead code and
+ * live in `project-docs-server-sync-typescript.ts`. Driving the page alone is still the harness bug
+ * this gate found on its first run, so the frozen pending half is still what suppresses the
+ * forward.
  */
 async function runTypeScriptLaunchCases(dump: Json): Promise<{ launch: Json[]; monotonic: Json[] }> {
   const { createFrozenCollectionsHolder, frozenAdoptCollections } = await import('./project-collections-typescript');
   const { readSidebarProjectCollections } = await import('@/packages/core-ui/project-collections');
   const launch: Json[] = [];
-  // `queueSidebarProjectCollectionsServerSync` books a real timer. The push must NEVER fire here:
+  // The frozen `queue` books a real timer. The push must NEVER fire here:
   // "a push is outstanding" is exactly the state these cases are about, and a timer that resolved
   // would clear the flag the guard is being asked about.
   const win = globalThis as Json;
@@ -318,28 +322,31 @@ async function runTypeScriptLaunchCases(dump: Json): Promise<{ launch: Json[]; m
     resetBrowserStorage();
     seedStoredCollections(entry.stored as Json);
     const holder = createFrozenCollectionsHolder(readSidebarProjectCollections());
-    // **The TypeScript twin of K5's guard is NOT the adopt alone.** The pending flag lives in the
-    // gxserver runtime, which suppresses a forward while a push is outstanding, and the page adopted
-    // whatever reached it. Driving only the page made the SECOND empty echo look adopted where the
-    // real app never delivers it, which is the harness bug this gate found on its first run: the
-    // first cut would have reported a port bug that was not there.
-    const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+    // **The TypeScript twin of K5's guard is NOT the adopt alone.** The pending flag lived in the
+    // gxserver runtime, which suppressed a forward while a push was outstanding, and the page
+    // adopted whatever reached it. Driving only the page made the SECOND empty echo look adopted
+    // where the real app never delivers it, which is the harness bug this gate found on its first
+    // run: the first cut would have reported a port bug that was not there.
     const pushed: Json[] = [];
-    runtime.sidebarProjectCollectionsServerSyncPending = false;
-    runtime.sidebarProjectCollectionsServerSyncTimeoutId = undefined;
-    runtime.lastForwardedSidebarProjectCollectionsJson = undefined;
-    runtime.messageSource = {
-      postMessage: (message: Json) => frozenAdoptCollections(holder, 'local', message.sidebarProjectCollections, post),
-    };
+    const sync = new FrozenProjectDocServerSync({
+      client: undefined,
+      isState: () => true,
+      messageSource: {
+        postMessage: (message: Json) =>
+          frozenAdoptCollections(holder, 'local', message.sidebarProjectCollections, post),
+      },
+      messageType: 'sidebarProjectCollectionsChanged',
+      stateKey: 'sidebarProjectCollections',
+    });
     const post = (message: Json) => {
       if (message.type !== 'updateSidebarProjectCollections') return;
       pushed.push(message);
-      runtime.queueSidebarProjectCollectionsServerSync(message.state);
+      sync.queue(message.state);
     };
     const steps: Json[] = [];
     for (const step of entry.steps as Json[]) {
       const before = pushed.length;
-      runtime.forwardSidebarProjectCollectionsFromGxserver(step.echo);
+      sync.forward(step.echo);
       steps.push({
         held: storageShape(holder.collections.local),
         pushedBack: pushed.length - before,

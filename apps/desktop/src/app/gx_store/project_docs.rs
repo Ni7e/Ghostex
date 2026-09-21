@@ -5,11 +5,15 @@
 //! projects. For these two documents that decision lands as OWNERSHIP: this app is the only desktop
 //! writer of `ghostex.sidebar.projectCollections.v1` and the only caller of
 //! `/api/updateSidebarProjectCollections` and `/api/updateSidebarSpaces` for this computer. The
-//! sidebar page keeps its in-memory copy and its menus, and is handed the held document back after
-//! every change so its next edit is never computed from a stale base. Supersedes the placement, not
+//! Supersedes the placement, not
 //! the intent, of `CDXC:Projects 2026-07-18-00:00` and `CDXC:Spaces 2026-08-27`: localStorage is
 //! still the instant-edit overlay and the write-through is still debounced with an indefinite retry
 //! and an echo guard, all of it now in Rust.
+//!
+//! **The hand-OFF is gone (2026-09-21).** The page kept an in-memory copy, edited it for the paths
+//! the store did not own, and handed the result over; this app handed the held document back after
+//! every change so that copy was never a stale base. The page is deleted, so nothing posts
+//! `persistProjectCollections` or `persistSidebarSpaces` any more and nothing reads a hand-back.
 //!
 //! **A REMOTE machine's copies are held, not owned.** `updateRemoteSidebarProjectCollections` and
 //! `updateRemoteSidebarSpaces` are direct calls down that machine's tunnel, with no debounce and no
@@ -52,17 +56,6 @@ pub(crate) struct ProjectMoveCounters {
     /// Payloads handed to the old runtime: a shape this store cannot see the whole of, or a
     /// machine tab whose presentation the store holds nothing for.
     pub(crate) hand_offs: u64,
-    /// Documents the sidebar page edited and handed over, one per `saveNativeCollections` and one
-    /// per `updateSpaces` it makes for this computer. A run with a collection renamed, recoloured
-    /// or ungrouped in it and a zero here means that edit was never stored.
-    pub(crate) collection_hand_offs: u64,
-    pub(crate) space_hand_offs: u64,
-    /// Hand-offs refused because the stored key had not been read yet. The page keeps the document
-    /// it edited and its next edit carries it.
-    pub(crate) hand_offs_refused: u64,
-    /// Hand-offs whose payload was not a document. Its own counter for the same reason
-    /// `echoesUnparsable` has one: a silent drop here is an edit the user made and never got back.
-    pub(crate) hand_offs_unparsable: u64,
 }
 
 impl ClientDocument for CollectionsDocument {
@@ -72,14 +65,6 @@ impl ClientDocument for CollectionsDocument {
 
     fn parse_storage(value: &Value) -> Self {
         Self::from_storage_json(value)
-    }
-
-    fn hand_back_script(&self) -> String {
-        ghostex_gx_core::collections_hand_back_script(&self.to_wire_json())
-    }
-
-    fn request_script() -> Option<String> {
-        Some(ghostex_gx_core::collections_request_script())
     }
 
     fn host(app: &mut GhostexGpuiApp) -> &mut ClientDocumentHost<Self> {
@@ -115,16 +100,6 @@ impl ClientDocument for SpacesDocument {
     fn parse_storage(_value: &Value) -> Self {
         // Unreachable: `STORAGE_KEY` is `None`, so nothing reads a stored copy.
         Self::default()
-    }
-
-    fn hand_back_script(&self) -> String {
-        ghostex_gx_core::spaces_hand_back_script(&self.to_wire_json())
-    }
-
-    /// None: with no stored key this host is ready from the first frame, so it never refuses a
-    /// hand-off and there is nothing for a request to recover.
-    fn request_script() -> Option<String> {
-        None
     }
 
     fn host(app: &mut GhostexGpuiApp) -> &mut ClientDocumentHost<Self> {
@@ -328,52 +303,6 @@ impl GhostexGpuiApp {
                 self.open_app_modal_from_bridge(open, cx);
             }
         }
-    }
-
-    /// The sidebar page edited one of the two documents and handed it over instead of writing it.
-    /// Applied as a local edit, which is exactly what `saveNativeCollections` and `updateSpaces`
-    /// used to do by themselves: write the key, book the push.
-    ///
-    /// The document is taken WHOLE rather than merged, because the page computed it from the
-    /// document this file handed it and a merge would invent a third answer neither side made.
-    /// Taken as an edit even when it is equal to the held one, because that is what the page did:
-    /// it wrote and posted unconditionally, and swallowing an equal hand-off here would be the same
-    /// silent simplification one layer up.
-    pub(crate) fn gx_store_receive_project_doc_hand_off(
-        &mut self,
-        collections: bool,
-        state: &Value,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if collections {
-            // The stored key has to be in hand before an edit lands on top of it, for the same
-            // reason the echo path reads it first: a cold start must not write a document built on
-            // nothing. A read that has not landed refuses the edit and REMEMBERS that the page is
-            // the only holder of it, so nothing is handed back in the meantime and the page is
-            // asked to post it again when the read lands. Relying on "its next edit carries it" is
-            // what K4's review round proved false: the restore hands the stored document over and
-            // the page's copy, with the user's rename in it, is replaced.
-            if !self.gx_document_restored::<CollectionsDocument>(cx) {
-                self.gx_store.project_moves.hand_offs_refused += 1;
-                self.gx_document_page_holds_newer::<CollectionsDocument>(true);
-                return;
-            }
-            let Some(document) = CollectionsDocument::from_echo_json(state) else {
-                self.gx_store.project_moves.hand_offs_unparsable += 1;
-                return;
-            };
-            self.gx_store.project_moves.collection_hand_offs += 1;
-            // The page's document is here; this app is the holder again.
-            self.gx_document_page_holds_newer::<CollectionsDocument>(false);
-            self.gx_document_edit::<CollectionsDocument>(document, cx);
-            return;
-        }
-        let Some(document) = SpacesDocument::from_echo_json(state) else {
-            self.gx_store.project_moves.hand_offs_unparsable += 1;
-            return;
-        };
-        self.gx_store.project_moves.space_hand_offs += 1;
-        self.gx_document_edit::<SpacesDocument>(document, cx);
     }
 
     /// The collection a project move just created, for the renderer's inline Rename. Read once:

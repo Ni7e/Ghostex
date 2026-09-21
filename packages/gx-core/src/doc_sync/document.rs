@@ -5,11 +5,12 @@
 //! (K4), the project collections document and the Spaces document. Each is edited locally, written
 //! to a stored key (the Spaces document is the exception and has none), and pushed to gxserver as a
 //! debounced write-through with an indefinite retry, and each refuses the daemon's echo while its
-//! push is outstanding. The shipped TypeScript writes that machine out three times,
+//! push is outstanding. The TypeScript this replaced wrote that machine out three times,
 //! `queueSidebarProjectCollectionsServerSync` / `pushSidebarProjectCollectionsToGxserver` /
 //! `forwardSidebarProjectCollectionsFromGxserver` being a copy of the Spaces trio being a copy of
 //! the workspace-groups trio, and this port has hit "a fix in one function left its twin unfixed"
-//! five times already. So the guard is ONE generic, and what really differs between the three is
+//! five times already. (The two project trios were deleted as dead code on 2026-09-21 and are
+//! frozen in tooling/gx-core/project-docs-server-sync-typescript.ts.) So the guard is ONE generic, and what really differs between the three is
 //! named here as data rather than duplicated as code:
 //!
 //! - **Whether a stored key is written at all**, and what it holds. The workspace groups document

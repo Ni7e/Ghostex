@@ -19,43 +19,14 @@
 //!
 //! SEE-ALSO: packages/core-ui/project-collections.ts,
 //! tooling/gx-core/sidebar-page-frozen/metadata.ts (`adoptCollections`),
-//! apps/desktop/sidebar/gxserver-runtime/workspace-groups-sync.ts
-//! (`queueSidebarProjectCollectionsServerSync`), packages/gx-core/src/doc_sync/sync.rs.
+//! tooling/gx-core/project-docs-server-sync-typescript.ts (the runtime's frozen
+//! `queueSidebarProjectCollectionsServerSync`), packages/gx-core/src/doc_sync/sync.rs.
 
 use ghostex_gx_protocol::SidebarProjectCollectionsState as WireCollectionsState;
 use serde_json::{json, Map, Value};
 
-use crate::doc_sync::{
-    document_hand_back_script, document_request_script, EmptyEchoRule, SyncPolicy, SyncedDocument,
-};
+use crate::doc_sync::{EmptyEchoRule, SyncPolicy, SyncedDocument};
 use crate::sidebar_view::CollectionsState;
-
-/// The `type` of the message the sidebar page posts when it hands an edited document over.
-///
-/// A constant shared by the host's routing arm and any harness, because the two ends of a bridge
-/// agreeing on a string is the one thing neither side can check alone: piece 3d shipped an entire
-/// dialog port dead on exactly that, with a clean gate beside it.
-pub const COLLECTIONS_HAND_OFF_MESSAGE_TYPE: &str = "persistProjectCollections";
-
-/// The placeholder a harness substitutes a document into, so it can assert that the text it drives
-/// is the text the app sends. A JSON string, so [`collections_hand_back_script`] serializes it with
-/// quotes and the substitution is exact.
-pub const COLLECTIONS_SCRIPT_PLACEHOLDER: &str = "__GX_PROJECT_COLLECTIONS_STATE__";
-
-/// The script the host runs in the sidebar page to hand the held document back.
-pub fn collections_hand_back_script(state: &Value) -> String {
-    document_hand_back_script(
-        "applyProjectCollections",
-        "pendingProjectCollections",
-        state,
-    )
-}
-
-/// The script the host runs to ask the page to post the document it holds, after a hand-off that
-/// was refused because the stored key had not been read yet.
-pub fn collections_request_script() -> String {
-    document_request_script("requestProjectCollections")
-}
 
 /// `GPUI_PROJECT_COLLECTIONS_SERVER_SYNC_DELAY_MS`.
 pub const COLLECTIONS_SYNC_DELAY_MS: u64 = 400;

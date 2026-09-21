@@ -234,9 +234,9 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
       owns both, and its pending-push guard is the only thing that knows whether a local edit is
       still on its way to the daemon; forwarding the daemon's echo straight into the page put a
       document the guard had refused back into the page's copy, which is the base its next edit is
-      computed from. The app hands the held document back instead
-      (`applyProjectCollections`, `applySidebarSpaces`). A REMOTE machine's copies still arrive
-      through `forwardRemoteSidebar*FromGxserver`, because this page still owns those.
+      computed from. Nothing in this runtime holds either document now: the local relay and the
+      hand-back that replaced it were both deleted on 2026-09-21. A REMOTE machine's copies still
+      arrive through `forwardRemoteSidebar*FromGxserver`, because this runtime still owns those.
       SEE-ALSO: apps/desktop/src/app/gx_store/project_docs.rs,
       tooling/gx-core/sidebar-page-frozen/metadata.ts.
       */

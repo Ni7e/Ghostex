@@ -1,23 +1,30 @@
 /**
- * The TypeScript half of the project-documents gate: the interleavings, the launch orders and the
- * hand-off bridge for the collections document (K5) and the Spaces document (K6).
+ * The TypeScript half of the project-documents gate: the interleavings and the launch orders for
+ * the collections document (K5) and the Spaces document (K6).
  *
- * **What is real here and what is frozen.** The pending-push guard the app had on 2026-09-21 was
- * two halves in two files: the gxserver runtime's `sidebarProjectCollectionsServerSyncPending` /
- * `sidebarSpacesServerSyncPending`, which suppress a forward while a push is outstanding, and the
- * sidebar page's adopt, which took whatever reached it. The runtime half is DRIVEN LIVE from the
- * shipped `queueSidebar*ServerSync` and `pushSidebar*ToGxserver`; the page half is FROZEN in
- * `project-collections-typescript.ts` and below, because the `local` legs were deleted the day this
- * file was written (the app adopts those echoes now, behind its own guard). What a clean run proves
- * from here is that Rust still matches the behaviour the app had on that date, not that it matches
- * the app.
+ * **Everything here is FROZEN, and the header used to say only half of it was.** The pending-push
+ * guard the app had on 2026-09-21 was two halves in two files: the gxserver runtime's
+ * `queueSidebar*ServerSync` / `pushSidebar*ToGxserver` / `forwardSidebar*FromGxserver`, which
+ * suppress a forward while a push is outstanding, and the sidebar page's adopt, which took whatever
+ * reached it. The page half was frozen in `project-collections-typescript.ts` that day; the runtime
+ * half was deleted on 2026-09-21 as dead code (Rust is the only desktop writer of both documents
+ * and nothing posts a local `updateSidebar*` message any more) and is frozen in
+ * `project-docs-server-sync-typescript.ts`. What a clean run proves from here is that Rust still
+ * matches the behaviour the app shipped on 2026-09-21, not that it matches the app.
  *
- * **One deliberate deviation, named rather than left to be discovered.** The shipped
+ * **The hand-off bridge half is gone with the machinery it drove.** The page posted its edited
+ * document, the app took it and handed its held one back through a generated script, and the page's
+ * next edit was computed from what came back. Every part of that (the two `persist*` message types,
+ * the hand-back and request scripts, the routing arms and the `page_holds_newer` recovery) was
+ * deleted on 2026-09-21 with the page that was its only other end, so the round trip is not
+ * something this gate can still be asked about.
+ *
+ * **One deliberate deviation, named rather than left to be discovered.** The frozen
  * `forwardSidebar*FromGxserver` also drops an echo whose JSON equals the last one it forwarded.
  * That dedupe is not part of the guard, is invisible to the user, and is gone from the product for
  * these two documents; driving it here would compare Rust against a cache rather than against the
- * rule. The forward is therefore expressed as its two real parts: the pending suppression (the live
- * field) and the adopt (the frozen page code).
+ * rule. The forward is therefore expressed as its two real parts: the pending suppression and the
+ * adopt.
  *
  * **`stores: false` is gated by an ASSERTION, not by a comparison, and that is deliberate.** This
  * half models what the page and the runtime do with a document, not what the host writes to disk,
@@ -37,7 +44,7 @@
 // First, so the client-storage adapter finds a `Storage` before any module reads one.
 import { resetBrowserStorage } from './browser-shim';
 import { createFrozenCollectionsHolder, frozenAdoptCollections } from './project-collections-typescript';
-import { GpuiSidebarRuntime } from '@/apps/desktop/sidebar/gxserver-runtime/core';
+import { FrozenProjectDocServerSync } from './project-docs-server-sync-typescript';
 import {
   parseSidebarProjectCollectionsFromGxserver,
   serializeSidebarProjectCollectionsForGxserver,
@@ -98,30 +105,32 @@ function installTimerQueue(): void {
   win.window.clearTimeout = () => {};
 }
 
-/** The collections half: the live runtime fields and push, the frozen page adopt. */
+/** The collections half: the frozen server-sync fields and push, the frozen page adopt. */
 function collectionsHarness(start: Json): DocumentHarness {
   resetBrowserStorage();
   const holder = createFrozenCollectionsHolder(parseSidebarProjectCollectionsFromGxserver(start)!);
-  const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
-  runtime.sidebarProjectCollectionsServerSyncPending = false;
-  runtime.sidebarProjectCollectionsServerSyncTimeoutId = undefined;
-  runtime.latestSidebarProjectCollectionsUpdate = undefined;
-  runtime.client = {
-    updateSidebarProjectCollections: () =>
-      new Promise((resolve, reject) => {
-        pushResolve = resolve;
-        pushReject = reject;
-      }),
-  };
-  const post = (message: Json) => runtime.queueSidebarProjectCollectionsServerSync(message.state);
+  const sync = new FrozenProjectDocServerSync({
+    client: {
+      update: () =>
+        new Promise((resolve, reject) => {
+          pushResolve = resolve;
+          pushReject = reject;
+        }),
+    },
+    isState: () => true,
+    messageSource: { postMessage: () => {} },
+    messageType: 'sidebarProjectCollectionsChanged',
+    stateKey: 'sidebarProjectCollections',
+  });
+  const post = (message: Json) => sync.queue(message.state);
   return {
     held: () => serializeSidebarProjectCollectionsForGxserver(holder.collections.local),
     edit: (wire: Json) => {
       holder.collections.local = parseSidebarProjectCollectionsFromGxserver(wire)!;
-      runtime.queueSidebarProjectCollectionsServerSync(wire);
+      sync.queue(wire);
     },
     echo: (wire: Json) => {
-      if (runtime.sidebarProjectCollectionsServerSyncPending) return 'IgnoredPending';
+      if (sync.pending) return 'IgnoredPending';
       const before = JSON.stringify(serializeSidebarProjectCollectionsForGxserver(holder.collections.local));
       const bookedBefore = bookings.length;
       frozenAdoptCollections(holder, 'local', wire, post as Json);
@@ -133,7 +142,7 @@ function collectionsHarness(start: Json): DocumentHarness {
     // pushes. Calling the push directly instead left the runtime believing a push was still booked,
     // so a failed one never re-booked its retry.
     pushStart: () => firePush(),
-    pending: () => runtime.sidebarProjectCollectionsServerSyncPending === true,
+    pending: () => sync.pending === true,
   };
 }
 
@@ -145,32 +154,34 @@ function collectionsHarness(start: Json): DocumentHarness {
 function spacesHarness(start: Json): DocumentHarness {
   resetBrowserStorage();
   let held: SidebarSpacesState = parseSidebarSpacesFromGxserver(start) ?? { order: [], spaces: {} };
-  const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
-  runtime.sidebarSpacesServerSyncPending = false;
-  runtime.sidebarSpacesServerSyncTimeoutId = undefined;
-  runtime.latestSidebarSpacesUpdate = undefined;
-  runtime.client = {
-    updateSidebarSpaces: () =>
-      new Promise((resolve, reject) => {
-        pushResolve = resolve;
-        pushReject = reject;
-      }),
-  };
+  const sync = new FrozenProjectDocServerSync({
+    client: {
+      update: () =>
+        new Promise((resolve, reject) => {
+          pushResolve = resolve;
+          pushReject = reject;
+        }),
+    },
+    isState: () => true,
+    messageSource: { postMessage: () => {} },
+    messageType: 'sidebarSpacesChanged',
+    stateKey: 'sidebarSpaces',
+  });
   return {
     held: () => serializeSidebarSpacesForGxserver(held),
     edit: (wire: Json) => {
       held = parseSidebarSpacesFromGxserver(wire) ?? held;
-      runtime.queueSidebarSpacesServerSync(wire);
+      sync.queue(wire);
     },
     echo: (wire: Json) => {
-      if (runtime.sidebarSpacesServerSyncPending) return 'IgnoredPending';
+      if (sync.pending) return 'IgnoredPending';
       const before = JSON.stringify(serializeSidebarSpacesForGxserver(held));
       const parsed = parseSidebarSpacesFromGxserver(wire);
       if (parsed) held = parsed;
       return JSON.stringify(serializeSidebarSpacesForGxserver(held)) === before ? 'IgnoredEqual' : 'Adopted';
     },
     pushStart: () => firePush(),
-    pending: () => runtime.sidebarSpacesServerSyncPending === true,
+    pending: () => sync.pending === true,
   };
 }
 
@@ -272,197 +283,6 @@ async function referenceLaunch(
   return { afterFirst, afterSecond: { document: harness.held(), outcome: second } };
 }
 
-/**
- * The bridge, end to end, against the SHIPPED page code: the page edits and posts, the app takes
- * the post and hands its held document back through the REAL script text, and the page's next edit
- * is computed from what came back. The refusal path is here too, which is the one K4 has and K5's
- * host did not: the app refuses a hand-off while its read is outstanding, asks for the document
- * with the real request script, and the page posts it again.
- */
-async function runRoundTrip(
-  bridge: Json,
-  kind: 'collections' | 'spaces'
-): Promise<{
-  posts: number;
-  handBacks: number;
-  parked: number;
-  carried: number;
-  requested: number;
-  differences: string[];
-}> {
-  const { NativeSidebarMetadata } = await import('@/tooling/gx-core/sidebar-page-frozen/metadata');
-  const { saveNativeCollections } = await import('@/tooling/gx-core/sidebar-page-frozen/membership');
-  const differences: string[] = [];
-  resetBrowserStorage();
-  const posts: Json[] = [];
-  const previousWebkit = (globalThis.window as Json).webkit;
-  (globalThis.window as Json).webkit = {
-    messageHandlers: { ghostexNativeHost: { postMessage: (message: Json) => posts.push(message) } },
-  };
-  const gpuiBridge: Json = {};
-  const previousGpui = (globalThis.window as Json).ghostexGpui;
-  (globalThis.window as Json).ghostexGpui = gpuiBridge;
-  const metadata = new NativeSidebarMetadata() as Json;
-  const ui: Json = { selectedMachineId: 'local', metadata };
-  let handBacks = 0;
-  let parked = 0;
-  let carried = 0;
-  let requested = 0;
-  // The controller's own wiring, including the parking drain and, for collections, the request hook.
-  const installHook = () => {
-    if (kind === 'collections') {
-      gpuiBridge.applyProjectCollections = (state: unknown) => metadata.applyCollectionsFromHost(state);
-      gpuiBridge.requestProjectCollections = () => {
-        requested += 1;
-        metadata.requestCollections();
-      };
-      if (gpuiBridge.pendingProjectCollections !== undefined) {
-        const held = gpuiBridge.pendingProjectCollections;
-        delete gpuiBridge.pendingProjectCollections;
-        metadata.applyCollectionsFromHost(held);
-      }
-      return;
-    }
-    gpuiBridge.applySidebarSpaces = (state: unknown) => metadata.applySpacesFromHost(state);
-    if (gpuiBridge.pendingSidebarSpaces !== undefined) {
-      const held = gpuiBridge.pendingSidebarSpaces;
-      delete gpuiBridge.pendingSidebarSpaces;
-      metadata.applySpacesFromHost(held);
-    }
-  };
-  /** The host's hand-back, evaluated as the real script text rather than described. */
-  const handBack = (held: Json) => {
-    const source = String(bridge.scriptTemplate).replace(String(bridge.placeholder), JSON.stringify(held));
-    // eslint-disable-next-line no-new-func
-    new Function(source)();
-    handBacks += 1;
-  };
-  /**
-   * The app's own edit of the document it was handed: it DROPS a member, which is a change the page
-   * cannot make, so a hand-back that never arrived is visible instead of looking identical to one
-   * that did. K4's round trip learned this: with the app holding exactly what the page posted, a
-   * mutation that never evaluated the script produced zero differences.
-   */
-  const appTake = (state: Json): Json => {
-    if (kind === 'collections') {
-      const parsed = parseSidebarProjectCollectionsFromGxserver(state)!;
-      return serializeSidebarProjectCollectionsForGxserver({
-        ...parsed,
-        collections: parsed.collections.map((collection) => ({ ...collection, title: `${collection.title} (app)` })),
-      });
-    }
-    const parsed = parseSidebarSpacesFromGxserver(state)!;
-    const spaces: Json = {};
-    for (const [id, space] of Object.entries(parsed.spaces)) spaces[id] = { ...space, name: `${space.name} (app)` };
-    return serializeSidebarSpacesForGxserver({ ...parsed, spaces });
-  };
-  /**
-   * `title` undefined keeps whatever the page holds, which is how the second edit CARRIES the
-   * app's own change: an edit that rewrote the title would destroy the evidence it is meant to
-   * show, and the check would fail for the wrong reason.
-   */
-  const edit = (title: string | undefined, extraProject: string) => {
-    if (kind === 'collections') {
-      const current: SidebarProjectCollectionsState = metadata.collections.local;
-      const next: SidebarProjectCollectionsState = {
-        ...current,
-        collections: current.collections.length
-          ? current.collections.map((collection, index) =>
-              index === 0
-                ? {
-                    ...collection,
-                    title: title ?? collection.title,
-                    projectIds: [...collection.projectIds, extraProject],
-                  }
-                : collection
-            )
-          : [{ collectionId: 'C1', color: '#7c6df2', projectIds: [extraProject], title: title ?? 'Group 1' }],
-      };
-      saveNativeCollections(ui as Json, next, (() => {}) as Json);
-      return;
-    }
-    const current: SidebarSpacesState = metadata.spaces.local ?? { order: ['S1'], spaces: {} };
-    const space = current.spaces.S1 ?? {
-      spaceId: 'S1',
-      name: 'Space',
-      icon: 'stack',
-      memberCollectionIds: [],
-      memberProjectIds: [],
-    };
-    metadata.updateSpaces(
-      'local',
-      {
-        order: ['S1'],
-        spaces: {
-          S1: { ...space, name: title ?? space.name, memberProjectIds: [...space.memberProjectIds, extraProject] },
-        },
-      },
-      (() => {}) as Json
-    );
-  };
-  try {
-    installHook();
-    // 1. An ordinary edit: the page posts, the app takes it whole, the page holds what came back.
-    posts.length = 0;
-    edit('First', 'P9');
-    if (!posts.length) differences.push(`${kind}: the page's edit posted nothing`);
-    if (posts[0] && posts[0].type !== bridge.messageType)
-      differences.push(`${kind}: posted ${String(posts[0].type)}, the host routes ${String(bridge.messageType)}`);
-    const firstHeld = appTake(posts[0].state as Json);
-    handBack(firstHeld);
-    const pageAfterFirst = kind === 'collections' ? metadata.collections.local : metadata.spaces.local;
-    if (JSON.stringify(serialize(kind, pageAfterFirst)) !== JSON.stringify(firstHeld))
-      differences.push(`${kind}: the page does not hold what the app handed back`);
-    // 2. The NEXT edit must be computed from what came back, which is what makes the hand-off safe.
-    posts.length = 0;
-    edit(undefined, 'P8');
-    const second = posts[0]?.state as Json;
-    if (!second) differences.push(`${kind}: the second edit posted nothing`);
-    else if (!JSON.stringify(second).includes('(app)'))
-      differences.push(`${kind}: the next edit was computed from the page's own copy, not the hand-back`);
-    else carried += 1;
-    handBack(appTake(second));
-    // 3. A hand-back that arrives before the hook is installed is PARKED and drained.
-    delete gpuiBridge.applyProjectCollections;
-    delete gpuiBridge.applySidebarSpaces;
-    delete gpuiBridge.requestProjectCollections;
-    const parkedDocument = appTake(second);
-    handBack(parkedDocument);
-    const pendingField = kind === 'collections' ? 'pendingProjectCollections' : 'pendingSidebarSpaces';
-    if (gpuiBridge[pendingField] === undefined) differences.push(`${kind}: the hand-back was not parked`);
-    else parked += 1;
-    installHook();
-    if (gpuiBridge[pendingField] !== undefined) differences.push(`${kind}: the parked document was not drained`);
-    // 4. The refusal and its recovery, collections only: the app refuses the hand-off because its
-    //    read has not landed, runs the REQUEST script, and the page posts its document again.
-    if (kind === 'collections') {
-      posts.length = 0;
-      edit(undefined, 'P7');
-      const refused = posts[0]?.state as Json;
-      posts.length = 0;
-      // eslint-disable-next-line no-new-func
-      new Function(String(bridge.requestScript))();
-      if (requested !== 1) differences.push(`${kind}: the request script did not reach the page`);
-      const reposted = posts[0]?.state as Json;
-      if (!reposted) differences.push(`${kind}: the page did not post its document when asked`);
-      else if (JSON.stringify(reposted) !== JSON.stringify(refused))
-        differences.push(`${kind}: the document the page re-posted is not the one the app refused`);
-      if (posts[0] && posts[0].type !== bridge.messageType)
-        differences.push(`${kind}: the recovery posted ${String(posts[0].type)}`);
-    }
-  } finally {
-    (globalThis.window as Json).webkit = previousWebkit;
-    (globalThis.window as Json).ghostexGpui = previousGpui;
-  }
-  return { posts: 2, handBacks, parked, carried, requested, differences };
-}
-
-function serialize(kind: 'collections' | 'spaces', state: Json): Json {
-  return kind === 'collections'
-    ? serializeSidebarProjectCollectionsForGxserver(state as SidebarProjectCollectionsState)
-    : serializeSidebarSpacesForGxserver(state as SidebarSpacesState);
-}
-
 /** A key-order-insensitive comparison, because the two sides build their objects differently. */
 function canonical(value: unknown): string {
   return JSON.stringify(value, (_key, entry) =>
@@ -546,11 +366,6 @@ async function main(): Promise<void> {
     cases: 0,
     steps: 0,
     launchCases: 0,
-    roundTripPosts: 0,
-    roundTripHandBacks: 0,
-    roundTripParked: 0,
-    roundTripCarried: 0,
-    roundTripRequested: 0,
   };
   for (const kind of ['collections', 'spaces'] as const) {
     const documents = dump[kind].documents as Json[];
@@ -611,16 +426,6 @@ async function main(): Promise<void> {
         shown.push(
           `${kind} launch ${entry.name}: rust ${canonical(rust).slice(0, 260)} ts ${canonical(ours).slice(0, 260)}`
         );
-    }
-    const roundTrip = await runRoundTrip(dump[kind].bridge as Json, kind);
-    counters.roundTripPosts += roundTrip.posts;
-    counters.roundTripHandBacks += roundTrip.handBacks;
-    counters.roundTripParked += roundTrip.parked;
-    counters.roundTripCarried += roundTrip.carried;
-    counters.roundTripRequested += roundTrip.requested;
-    for (const difference of roundTrip.differences) {
-      differences += 1;
-      if (shown.length < 14) shown.push(difference);
     }
   }
 
