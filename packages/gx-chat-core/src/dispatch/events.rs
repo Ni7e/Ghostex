@@ -22,10 +22,10 @@ pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> 
         | Event::Frame(_)
         | Event::Connection(_)
         | Event::RpcSettled { .. }
-        | Event::Tick
+        | Event::SettingsChanged(_) => crate::session::handle_event(state, event, context),
+        Event::Tick
         | Event::StorageLoaded { .. }
         | Event::StorageWritten { .. }
-        | Event::SettingsChanged(_)
         | Event::ContextPreferencesChanged { .. }
         | Event::ModelCatalogChanged { .. }
         | Event::Measured(_)

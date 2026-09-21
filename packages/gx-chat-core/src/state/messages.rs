@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 use ghostex_gx_protocol::ChatMessage;
 
+use crate::session::fold::FoldedSnapshot;
 use crate::wire::StreamPosition;
 
 /// The transcript and its bookkeeping.
@@ -23,6 +24,11 @@ pub struct MessagesState {
     /// The list the renderer sees: the transcript plus markers, terminal statuses, the streaming
     /// bubble and the pending echoes, in the composition order of `controller.ts`.
     pub composed: Vec<ChatMessage>,
+    /// The retained fold: every frame and read merged into one read result.
+    ///
+    /// This is what the store keeps and what persistence writes, so it stays a wire value rather
+    /// than being flattened into the fields above.
+    pub snapshot: Option<FoldedSnapshot>,
     /// Where the accepted stream stands.
     pub position: FramePosition,
     /// The window the next read asks for. Grows with the live list so a reconnect's snapshot never

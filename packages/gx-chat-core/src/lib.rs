@@ -51,8 +51,7 @@ pub use crate::document::{
 pub use crate::state::{
     ChatContext, ChatState, CommandMarker, ComposerState, CoreState, ExtrasState, FramePosition,
     LoadEarlierRequest, MenusState, MessagesState, PendingSend, PendingState, QuestionsState,
-    ResyncState, SessionIdentity, SessionState, StartupDelivery, TerminalStream,
-    TranscriptViewState,
+    ResyncState, SessionIdentity, SessionState, TerminalStream, TranscriptViewState,
 };
 pub use crate::effect::{Effect, HostRequest, OpenTarget, RequestKind};
 pub use crate::event::{

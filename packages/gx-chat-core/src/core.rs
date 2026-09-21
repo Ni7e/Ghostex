@@ -103,6 +103,16 @@ impl ChatCore {
     /// Only a real change bumps, because the revision is what the host's change gate reads: a bump
     /// with identical content would ship the whole document once a second for nothing.
     pub fn republish(&mut self) {
+        crate::session::working::stamp_working_started(&mut self.state, self.context.now_ms);
+        self.state.messages.composed = crate::session::composition::compose(
+            &self.state,
+            &crate::session::constants::DEFAULT_COMMAND_CATALOG
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect::<Vec<_>>(),
+            None,
+            crate::session::working::is_working(&self.state),
+        );
         let document = assemble(&self.state, &self.context);
         let parts = frame_parts(&self.state, &self.context);
         if document == self.document && parts == self.parts {

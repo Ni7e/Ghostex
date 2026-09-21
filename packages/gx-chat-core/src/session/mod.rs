@@ -6,7 +6,25 @@
 //! document keys listed for family a in `docs/2026-09-21/rust-chat/FAMILIES.md`.
 
 pub mod actions;
+pub mod apply;
+pub mod assembler;
+pub mod composition;
+pub mod constants;
 pub mod document;
+pub mod events;
+pub mod fold;
+pub mod markers;
+pub mod merge;
+pub mod pagination;
+pub mod pending;
+pub mod persistence;
+pub mod startup_sends;
+pub mod stream;
+pub mod streaming;
+pub mod text;
+pub mod view_state;
+pub mod working;
 
 pub use crate::session::actions::handle;
 pub use crate::session::document::document;
+pub use crate::session::events::handle as handle_event;

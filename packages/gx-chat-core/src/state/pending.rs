@@ -4,7 +4,7 @@
 //! Owned by family a. It is the half of the composed list that has no authoritative record yet,
 //! and every entry here is retired by the transcript row that replaces it.
 
-use ghostex_gx_protocol::ChatMessage;
+use ghostex_gx_protocol::{ChatMessage, StartupDelivery};
 
 /// The optimistic half of the transcript.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -52,15 +52,6 @@ pub struct PendingSend {
     /// The agent was already mid-response, so the prompt sits in the agent's own queue rather than
     /// starting a turn. The echo carries `queued` then, matching the server's own queued row.
     pub sent_while_working: bool,
-}
-
-/// The queue row's state, as a startup-reconstructed send sees it.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct StartupDelivery {
-    pub prompt_id: String,
-    /// `queued`, `sending`, `failed` or `delivered`.
-    pub state: String,
-    pub error_message: Option<String>,
 }
 
 /// A command Ghostex typed into the agent, shown as its own row until the transcript covers it.

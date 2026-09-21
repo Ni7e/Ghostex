@@ -7,12 +7,34 @@
 use ghostex_gx_protocol::Tri;
 
 use crate::document::Document;
+use crate::session::composition::compose;
+use crate::session::constants::DEFAULT_COMMAND_CATALOG;
+use crate::session::view_state::select_view_state;
+use crate::session::working::{is_working, publish_status, working_signal};
 use crate::state::{ChatContext, ChatState};
 
 /// Writes family a's keys into `into`.
-pub fn document(state: &ChatState, _context: &ChatContext, into: &mut Document) {
+pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
     let session = &state.session;
-    into.status = session.server_status.as_str().to_string();
+    let catalog: Vec<String> = DEFAULT_COMMAND_CATALOG
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect();
+
+    // A locally accepted send owns the working presentation immediately. It stays pending until
+    // the authoritative transcript advances past that user turn, bridging the gap before host or
+    // server activity arrives.
+    let signal = working_signal(state);
+    let working = is_working(state);
+
+    let composed = compose(state, &catalog, None, working);
+    let status = publish_status(&session.server_status, working, session.error.is_some());
+
+    into.view = select_view_state(&status, composed.len(), session.error.as_deref());
+    into.status = status.as_str().to_string();
+    into.working = working;
+    into.working_signal = signal && !session.interrupted;
+    into.session_working = session.session_activity_working || session.external_working;
     into.error = tri_string(session.error.clone());
     into.lifecycle = match &session.lifecycle {
         Some(lifecycle) => serde_json::to_value(lifecycle)
@@ -35,6 +57,7 @@ pub fn document(state: &ChatState, _context: &ChatContext, into: &mut Document) 
         .preview_settings
         .as_ref()
         .and_then(|value| serde_json::from_value(value.clone()).ok());
+    let _ = context;
 }
 
 /// `None` is a key present with `null`, which is what the TypeScript producer writes for every one

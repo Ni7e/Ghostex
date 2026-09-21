@@ -20,9 +20,7 @@ pub use crate::state::context::ChatContext;
 pub use crate::state::extras::ExtrasState;
 pub use crate::state::menus::MenusState;
 pub use crate::state::messages::{FramePosition, LoadEarlierRequest, MessagesState, ResyncState};
-pub use crate::state::pending::{
-    CommandMarker, PendingSend, PendingState, StartupDelivery, TerminalStream,
-};
+pub use crate::state::pending::{CommandMarker, PendingSend, PendingState, TerminalStream};
 pub use crate::state::questions::QuestionsState;
 pub use crate::state::session::{SessionIdentity, SessionState};
 pub use crate::state::transcript_view::TranscriptViewState;
