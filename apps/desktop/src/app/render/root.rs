@@ -1233,7 +1233,7 @@ impl Render for GhostexGpuiApp {
                                         this.disarm_floating_reveal_edge();
                                     }
                                 }))
-                                .child(self.render_native_sidebar(window, cx)),
+                                .child(self.render_docked_native_sidebar(cx)),
                         )
                     })
                     .when(sidebar_chrome_visible, |this| {

@@ -26,6 +26,8 @@ pub(crate) struct NativeSidebarState {
     /// renderer draws that projection; the source of the menus, the HUD and the machine tabs while
     /// it draws the store's list instead (gx_store/sidebar_snapshot.rs).
     pub(crate) projection: Option<Arc<NativeSidebarSnapshot>>,
+    /// The docked sidebar's cached view, created on its first draw (native_sidebar/host.rs).
+    pub(crate) host: Option<gpui::Entity<super::host::NativeSidebarHost>>,
     pub(crate) scroll: ScrollHandle,
     pub(crate) scroll_offsets: std::collections::HashMap<String, gpui::Point<gpui::Pixels>>,
     pub(crate) pending_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
