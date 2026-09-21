@@ -279,8 +279,10 @@ impl GhostexGpuiApp {
     /// zero.
     ///
     /// `remoteFocus` carries the row clicks the store opened itself, which have no periodic line
-    /// of their own: `opens` and `splits` are the proof the path fires, and `duplicatesDropped` the
-    /// proof the old runtime's second copy of the same open is being caught.
+    /// of their own: `opens` and `splits` are the proof the path fires, `echoesDropped` the proof
+    /// the old runtime's copy of the same open is being caught, `markersExpired` a copy that never
+    /// came, and `unmatchedOpens` a copy that came late or in another shape, so the machine was
+    /// asked twice.
     ///
     /// `local` carries the counters of the three LOCAL paths this same change made measurable and
     /// that have no periodic line of their own: `reloadsStopped` (a Full Reload whose sleep call

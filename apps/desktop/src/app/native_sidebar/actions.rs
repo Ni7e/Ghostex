@@ -164,12 +164,6 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_split(&command, cx) {
             return;
         }
-        // A click on a row of a REMOTE machine, and its Split Right: the store builds the same
-        // `openRemoteSessionTerminal` payload the old runtime posts and hands it to the entry point
-        // that bridge message lands on, so the pane opens in this frame. It does NOT return: the
-        // command still reaches the old runtime, which keeps the attention acknowledgement and the
-        // remote focus marks until those move too (gx_store/sidebar_remote_focus.rs).
-        self.gx_store_note_remote_row_focus(&command, cx);
         // A drag writes an order rather than calling the daemon in the moment: the drop decides the
         // set and the order, and the message it posts edits the workspace session groups document
         // or sends the project's manual order (gx_store/sidebar_drag.rs). `moveSession` is a
@@ -202,7 +196,19 @@ impl GhostexGpuiApp {
         // command is on its way to; the cached copy is dropped so the redraw that follows reads
         // the new value instead of waiting out its second.
         self.gx_store_note_menu_host_write(&command);
+        // A click on a row of a REMOTE machine, and its Split Right: the store builds the same
+        // `openRemoteSessionTerminal` payload the old runtime posts and performs it in this frame.
+        // The command still reaches the old runtime, which keeps the attention acknowledgement and
+        // the remote focus marks until those move too, and it reaches it BEFORE the store's open,
+        // so the runtime computes `keepView` from the group the store read and its copy of the open
+        // equals the store's, which is what lets that copy be dropped
+        // (gx_store/sidebar_remote_focus.rs).
+        let remote_open = self.gx_store_plan_remote_row_focus(&command);
         let Some(service) = self.sidebar.clone() else {
+            // No old runtime: nothing to send on and no copy to expect.
+            if let Some(plan) = &remote_open {
+                self.gx_store_open_remote_row(plan, cx);
+            }
             return;
         };
         if command["type"] == "selectSession" && command["mode"] == "focus" {
@@ -223,9 +229,15 @@ impl GhostexGpuiApp {
         self.gx_store_note_sidebar_command(&command, cx);
         // A sidebar command can change focus in the runtime, so it must not be handled while the runtime still holds an older focus stamp than the store (gx_store/burst.rs).
         self.gx_store_flush_old_runtime_tell(cx);
+        if let Some(plan) = &remote_open {
+            self.gx_store_expect_remote_open_copy(plan);
+        }
         let script = format!("window.ghostexGpui.onNativeSidebarCommand({command}); undefined;");
         service.update(cx, |surface, _| {
             surface.execute_app_owned_script(&script);
         });
+        if let Some(plan) = &remote_open {
+            self.gx_store_open_remote_row(plan, cx);
+        }
     }
 }

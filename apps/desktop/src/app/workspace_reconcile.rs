@@ -472,6 +472,10 @@ impl GhostexGpuiApp {
         );
     }
 
+    /// Performs a native project-path action. UNGUARDED: the store's own opens call this
+    /// directly, and the page's bridge message reaches it only through
+    /// `gx_store_receive_page_native_project_path_action`, which drops the old runtime's copy of
+    /// a remote open the store already performed (gx_store/sidebar_remote_focus.rs).
     pub(crate) fn receive_sidebar_native_project_path_action_payload(
         &mut self,
         payload: &str,
@@ -500,15 +504,6 @@ impl GhostexGpuiApp {
             return;
         };
         if message.action.is_remote_session_action() {
-            // The old runtime's own copy of an open the store has already performed, which would
-            // ask the machine for the same session a second time and prepare a second SSH attach
-            // plan. Only an open the store recorded a moment ago is dropped, and only once
-            // (gx_store/sidebar_remote_focus.rs).
-            if message.action == GpuiSidebarNativeProjectPathAction::OpenRemoteSessionTerminal
-                && self.gx_store_remote_open_is_duplicate(message.project_id.as_str())
-            {
-                return;
-            }
             self.handle_gpui_remote_session_native_action(message, cx);
             return;
         }
