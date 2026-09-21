@@ -290,7 +290,7 @@ pub(crate) fn run_remote_manage_files_bridge_request_for_project_snapshot(
                 | "addToSessionContext"
         ) {
             return if action == "revealInFinder" {
-                Err("Open File/Folder Location is unavailable for remote Docs items.".to_string())
+                Err("Open Location is unavailable for remote Docs items.".to_string())
             } else {
                 Err("Unsupported Docs file action.".to_string())
             };
