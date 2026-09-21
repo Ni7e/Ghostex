@@ -16,7 +16,9 @@
 //! Full Reload is the sleep and the wake in order, and Split Right is a focus that carries where
 //! the pane goes, and `reload_set` is Full Reload over a project's rows or a user-made group's
 //! members. `remote` is every per-session payload when the row is on a remote machine, where an
-//! action is a call down that machine's tunnel and nothing local moves. `open` holds the family
+//! action is a call down that machine's tunnel and nothing local moves, and `remote_focus` the one
+//! remote payload that is not a call at all: a row click, which opens a pane through the fixed
+//! native project-path bridge. `open` holds the family
 //! whose whole answer is an app-modal-host message: the More menu's rows, a machine's Configure,
 //! the Space editor, and a project header's Add Worktree and History.
 
@@ -32,6 +34,7 @@ mod read_only;
 mod reload;
 mod reload_set;
 mod remote;
+mod remote_focus;
 mod resolve;
 mod snooze;
 mod split;
@@ -69,6 +72,10 @@ pub use remote::{
     owns_remote_session_message, plan_remote_session_action, RemoteActionKind, RemoteCallMode,
     RemoteFailureToast, RemoteLeg, RemoteSessionPlan, RemoteStep, REMOTE_AWAITED_TIMEOUT_MS,
     REMOTE_FIRE_AND_FORGET_TIMEOUT_MS, REMOTE_SESSION_MESSAGE_TYPES,
+};
+pub use remote_focus::{
+    owns_remote_focus_message, plan_remote_focus, PreferredInterfaceSettings, RemoteFocusPlan,
+    REMOTE_FOCUS_MESSAGE_TYPES,
 };
 pub use resolve::{
     local_project_group_project_id, NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,

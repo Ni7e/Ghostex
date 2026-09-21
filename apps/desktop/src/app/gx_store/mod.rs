@@ -22,6 +22,7 @@
 //! the clock and the local calendar, `sidebar_reload.rs` Full Reload and Split Right,
 //! `sidebar_bulk.rs` the plural payloads and the renderer's
 //! batch envelope, `sidebar_remote.rs` every per-session action of a row on a remote machine,
+//! `sidebar_remote_focus.rs` the one remote payload that is not a call at all, a row click,
 //! `sidebar_drag.rs` the session moves and what their order messages write, and
 //! `workspace_groups.rs` the client-owned groups document those writes land in, with its stored
 //! key, its debounced push and the guard that refuses the daemon's echo while one is outstanding;
@@ -59,6 +60,7 @@ mod sidebar_modals;
 mod sidebar_open;
 mod sidebar_reload;
 mod sidebar_remote;
+mod sidebar_remote_focus;
 mod sidebar_scratch_compare;
 mod sidebar_shadow;
 mod sidebar_shadow_compare;

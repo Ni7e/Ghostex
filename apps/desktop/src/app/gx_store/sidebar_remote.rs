@@ -83,7 +83,11 @@ pub(crate) struct SidebarRemoteHost {
     records: u32,
     summary_records: u32,
     summary_at: Option<Instant>,
-    summary_written: Option<(SidebarRemoteCounters, [u64; 5])>,
+    summary_written: Option<(
+        SidebarRemoteCounters,
+        [u64; 5],
+        super::sidebar_remote_focus::SidebarRemoteFocusCounters,
+    )>,
 }
 
 impl GhostexGpuiApp {
@@ -274,6 +278,10 @@ impl GhostexGpuiApp {
     /// proved to reach the log in a quiet run, and its first line goes out with every counter at
     /// zero.
     ///
+    /// `remoteFocus` carries the row clicks the store opened itself, which have no periodic line
+    /// of their own: `opens` and `splits` are the proof the path fires, and `duplicatesDropped` the
+    /// proof the old runtime's second copy of the same open is being caught.
+    ///
     /// `local` carries the counters of the three LOCAL paths this same change made measurable and
     /// that have no periodic line of their own: `reloadsStopped` (a Full Reload whose sleep call
     /// failed, so the wake was never asked for), `pacedLegsWaited` (a paced bulk sleep whose next
@@ -289,9 +297,10 @@ impl GhostexGpuiApp {
             lifecycle.reload_set_rows,
             lifecycle.reload_sets_stopped,
         ];
+        let focus = self.gx_store_remote_focus_counters();
         let host = &mut self.gx_store.sidebar_remote;
         let now = (host.counters, local);
-        if host.summary_written == Some(now)
+        if host.summary_written == Some((now.0, now.1, focus))
             || host
                 .summary_at
                 .is_some_and(|at| at.elapsed() < REMOTE_SUMMARY_INTERVAL)
@@ -303,7 +312,7 @@ impl GhostexGpuiApp {
             return;
         }
         host.summary_records += 1;
-        host.summary_written = Some(now);
+        host.summary_written = Some((now.0, now.1, focus));
         let [
             reloads_stopped,
             paced_legs_waited,
@@ -315,6 +324,7 @@ impl GhostexGpuiApp {
             "gxStore.sidebarActions.summary",
             json!({
                 "remote": remote_counters_json(&host.counters),
+                "remoteFocus": super::sidebar_remote_focus::remote_focus_counters_json(&focus),
                 "local": {
                     "reloadsStopped": reloads_stopped,
                     "pacedLegsWaited": paced_legs_waited,

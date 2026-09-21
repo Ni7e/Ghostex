@@ -164,6 +164,12 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_split(&command, cx) {
             return;
         }
+        // A click on a row of a REMOTE machine, and its Split Right: the store builds the same
+        // `openRemoteSessionTerminal` payload the old runtime posts and hands it to the entry point
+        // that bridge message lands on, so the pane opens in this frame. It does NOT return: the
+        // command still reaches the old runtime, which keeps the attention acknowledgement and the
+        // remote focus marks until those move too (gx_store/sidebar_remote_focus.rs).
+        self.gx_store_note_remote_row_focus(&command, cx);
         // A drag writes an order rather than calling the daemon in the moment: the drop decides the
         // set and the order, and the message it posts edits the workspace session groups document
         // or sends the project's manual order (gx_store/sidebar_drag.rs). `moveSession` is a

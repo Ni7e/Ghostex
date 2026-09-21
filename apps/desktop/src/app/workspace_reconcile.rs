@@ -500,6 +500,15 @@ impl GhostexGpuiApp {
             return;
         };
         if message.action.is_remote_session_action() {
+            // The old runtime's own copy of an open the store has already performed, which would
+            // ask the machine for the same session a second time and prepare a second SSH attach
+            // plan. Only an open the store recorded a moment ago is dropped, and only once
+            // (gx_store/sidebar_remote_focus.rs).
+            if message.action == GpuiSidebarNativeProjectPathAction::OpenRemoteSessionTerminal
+                && self.gx_store_remote_open_is_duplicate(message.project_id.as_str())
+            {
+                return;
+            }
             self.handle_gpui_remote_session_native_action(message, cx);
             return;
         }
@@ -2041,11 +2050,14 @@ impl GhostexGpuiApp {
             return false;
         }
         self.reconcile_browser_address_inputs();
-        // CDXC:Browser 2026-09-08 DECISION:
-        // User: closing the last browser session while Browser is active switches back to Agents.
-        // The tab model retains an address-only placeholder, so count tabs before closing.
-        if closing_last_browser_tab && self.active_mode == TitlebarMode::Browser {
-            self.set_active_mode(TitlebarMode::Agents, window, cx);
+        // CDXC:Browser 2026-09-21 DECISION:
+        // User: closing the last browser tab closes the Browser view, the way closing any view's tab
+        // does, so the panel moves on to the neighbouring open view and closes only when Browser was
+        // the last one. Supersedes the 2026-09-08 rule that it always switched back to Agents, which
+        // closed the whole panel even with Docs or Code still open beside it. The tab model retains
+        // an address-only placeholder, so count tabs before closing; New Browser Tab reopens from it.
+        if closing_last_browser_tab {
+            self.close_view_tab(TitlebarMode::Browser, window, cx);
             return true;
         }
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
