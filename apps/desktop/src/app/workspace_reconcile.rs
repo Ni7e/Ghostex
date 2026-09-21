@@ -472,10 +472,8 @@ impl GhostexGpuiApp {
         );
     }
 
-    /// Performs a native project-path action. UNGUARDED: the store's own opens call this
-    /// directly, and the page's bridge message reaches it only through
-    /// `gx_store_receive_page_native_project_path_action`, which drops the old runtime's copy of
-    /// a remote open the store already performed (gx_store/sidebar_remote_focus.rs).
+    /// Performs a native project-path action: the page's bridge message and the store's own remote
+    /// opens (gx_store/sidebar_remote_focus.rs) both end here.
     pub(crate) fn receive_sidebar_native_project_path_action_payload(
         &mut self,
         payload: &str,

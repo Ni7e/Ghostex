@@ -201,21 +201,6 @@ impl GhostexGpuiApp {
         // command is on its way to; the cached copy is dropped so the redraw that follows reads
         // the new value instead of waiting out its second.
         self.gx_store_note_menu_host_write(&command);
-        // A click on a row of a REMOTE machine, and its Split Right: the store builds the same
-        // `openRemoteSessionTerminal` payload the old runtime posts and performs it in this frame.
-        // The command still reaches the old runtime, which keeps the attention acknowledgement and
-        // the remote focus marks until those move too, and it reaches it BEFORE the store's open,
-        // so the runtime computes `keepView` from the group the store read and its copy of the open
-        // equals the store's, which is what lets that copy be dropped
-        // (gx_store/sidebar_remote_focus.rs).
-        let remote_open = self.gx_store_plan_remote_row_focus(&command);
-        let Some(service) = self.sidebar.clone() else {
-            // No old runtime: nothing to send on and no copy to expect.
-            if let Some(plan) = &remote_open {
-                self.gx_store_open_remote_row(plan, cx);
-            }
-            return;
-        };
         if command["type"] == "selectSession" && command["mode"] == "focus" {
             if let Some(session_id) = command["sessionId"].as_str() {
                 crate::app::native_chat::diagnostics::focus_requested(session_id);
@@ -226,6 +211,18 @@ impl GhostexGpuiApp {
                 json!({"sessionId": command["sessionId"], "epochMs": crate::support_logs::temporary_epoch_ms()}),
             );
         }
+        // A click on a row of a REMOTE machine, and its Split Right: the store acknowledges the
+        // attention, performs the same `openRemoteSessionTerminal` the old runtime posted, and the
+        // open's own tab selection moves the remote focus marks, so the command goes no further
+        // (gx_store/sidebar_remote_focus.rs). A click the store does not answer (the old list is
+        // drawn, or the machine has not streamed) is sent on and the old runtime performs it whole.
+        if let Some(plan) = self.gx_store_plan_remote_row_focus(&command) {
+            self.gx_store_focus_remote_row(&command, &plan, cx);
+            return;
+        }
+        let Some(service) = self.sidebar.clone() else {
+            return;
+        };
         self.stage_agent_launch_placeholder(&command, cx);
         // A command that moves the sidebar's own state (collapse, Space, filters, hidden items,
         // selection) moves the Rust state here, before it is sent on: the list is rebuilt from it
@@ -234,15 +231,9 @@ impl GhostexGpuiApp {
         self.gx_store_note_sidebar_command(&command, cx);
         // A sidebar command can change focus in the runtime, so it must not be handled while the runtime still holds an older focus stamp than the store (gx_store/burst.rs).
         self.gx_store_flush_old_runtime_tell(cx);
-        if let Some(plan) = &remote_open {
-            self.gx_store_expect_remote_open_copy(plan);
-        }
         let script = format!("window.ghostexGpui.onNativeSidebarCommand({command}); undefined;");
         service.update(cx, |surface, _| {
             surface.execute_app_owned_script(&script);
         });
-        if let Some(plan) = &remote_open {
-            self.gx_store_open_remote_row(plan, cx);
-        }
     }
 }

@@ -487,9 +487,7 @@ impl GhostexGpuiApp {
                 */
             }
             cef::SidebarBridgeEvent::NativeProjectPathAction(payload) => {
-                // The page's message, so the old runtime's copy of a remote open the store already
-                // performed is dropped here and only here (gx_store/sidebar_remote_focus.rs).
-                self.gx_store_receive_page_native_project_path_action(&payload, cx);
+                self.receive_sidebar_native_project_path_action_payload(&payload, cx);
             }
             cef::SidebarBridgeEvent::NativeAppShotPrompt(payload) => {
                 self.receive_sidebar_native_app_shot_prompt_payload(&payload, cx);

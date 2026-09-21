@@ -24,6 +24,7 @@ import {
   parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
 import {
+  normalizeGpuiWorkspaceRemoteSessionAttentionAcknowledge,
   normalizeGpuiWorkspaceSessionAttentionAcknowledge,
   normalizeGpuiWorkspaceTerminalEscapePressed,
 } from './helpers/terminal-lifecycle';
@@ -135,6 +136,13 @@ export interface GpuiSidebarRuntimeAttentionMethods {
 
 export const gpuiSidebarRuntimeAttentionMethods = {
   handleGpuiWorkspaceSessionAttentionAcknowledge(this: GpuiSidebarRuntime, payload: unknown): void {
+    // A remote row the store opened: the acknowledgement `focusSession`'s remote branch made, with
+    // its reason, so the minimum visible window and the machine's acknowledge call are unchanged.
+    const remoteSessionId = normalizeGpuiWorkspaceRemoteSessionAttentionAcknowledge(payload);
+    if (remoteSessionId) {
+      this.acknowledgeSessionAttention(remoteSessionId, 'sidebar-focus');
+      return;
+    }
     const acknowledgement = normalizeGpuiWorkspaceSessionAttentionAcknowledge(payload);
     if (!acknowledgement) {
       return;

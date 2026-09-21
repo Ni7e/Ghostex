@@ -262,6 +262,47 @@ export function normalizeGpuiWorkspaceSessionAttentionAcknowledge(
   return { projectId, sessionId };
 }
 
+/**
+ * CDXC:RemoteMachines 2026-09-21 WHY:
+ * The same bridge message for a row on ANOTHER machine: the store opens a remote row without
+ * sending the click to this runtime any more, and acknowledges its attention here first, the way
+ * `focusSession`'s remote branch did. The ids are the machine-scoped pair the tab-selected
+ * callback carries, and they must name the same machine and project, so a local payload can
+ * never be read as a remote one or the other way round. Returns the scoped session id.
+ *
+ * SEE-ALSO: packages/gx-core/src/sidebar_actions/remote_focus.rs (`attention_acknowledgement`),
+ * apps/desktop/src/app/gx_store/sidebar_remote_focus.rs.
+ */
+export function normalizeGpuiWorkspaceRemoteSessionAttentionAcknowledge(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => !['projectId', 'sessionId', 'type', 'version'].includes(key))) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  const remoteProject = projectId ? parseGpuiRemotePresentationProjectId(projectId) : undefined;
+  const remoteSession = sessionId ? parseGpuiRemotePresentationSessionId(sessionId) : undefined;
+  if (
+    !sessionId ||
+    !remoteProject ||
+    !remoteSession ||
+    remoteProject.machineId !== remoteSession.machineId ||
+    remoteProject.projectId !== remoteSession.projectId
+  ) {
+    return undefined;
+  }
+  return sessionId;
+}
+
 export function normalizeQueuedGpuiWorkspaceTerminalLifecycleRequest(
   value: unknown
 ): GpuiWorkspaceTerminalLifecycleRequest | undefined {
