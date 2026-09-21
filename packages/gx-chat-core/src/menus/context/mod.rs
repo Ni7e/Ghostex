@@ -5,18 +5,23 @@
 //! e1 file. Document keys: `contextMeter`, `contextEditor`, `contextStatusRows`. Actions:
 //! `context*`, `measureContextStatus`.
 
-use crate::action::UserAction;
-use crate::document::Document;
-use crate::effect::Effect;
-use crate::state::{ChatContext, ChatState};
+pub mod actions;
+pub mod codex;
+pub mod document;
+pub mod editor;
+pub mod meter;
+pub mod preferences;
+pub mod rows;
+pub mod status;
+pub mod time;
+pub mod usage;
+pub mod windows;
 
-/// Writes family e2's context keys into `into`.
-pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
-    let _ = (state, context, into);
-}
-
-/// Handles one context meter, context editor or context details action.
-pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
-    let _ = (state, action, context);
-    Vec::new()
-}
+pub use crate::menus::context::actions::handle;
+pub use crate::menus::context::document::document;
+pub use crate::menus::context::editor::ContextEditorState;
+pub use crate::menus::context::preferences::{ContextDetailItem, ContextDetailsPreferences};
+pub use crate::menus::context::rows::{ContextDetailSession, GroupId, RowDefinition};
+pub use crate::menus::context::status::{
+    AgentAccount, ContextDetailStatus, ContextDetailsAgent, DetectedOptions,
+};

@@ -31,6 +31,8 @@ pub struct ChatState {
     pub composer: ComposerState,
     /// Menus, pickers, options, accounts and context. Family e.
     pub menus: MenusState,
+    /// The model picker, the model menu, model selection and the context surfaces. Family e2.
+    pub pickers: crate::state::PickersState,
     /// The minimap, search, subagents, panels and the terminal tail. Family f.
     pub extras: ExtrasState,
 }

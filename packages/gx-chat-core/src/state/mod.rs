@@ -10,6 +10,7 @@ mod extras;
 mod menus;
 mod messages;
 mod pending;
+mod pickers;
 mod questions;
 mod session;
 mod transcript_view;
@@ -21,6 +22,7 @@ pub use crate::state::extras::{ExtrasState, PanelsState, SaveMarkdownRequest, Sa
 pub use crate::state::menus::MenusState;
 pub use crate::state::messages::{FramePosition, LoadEarlierRequest, MessagesState, ResyncState};
 pub use crate::state::pending::{CommandMarker, PendingSend, PendingState, TerminalStream};
+pub use crate::state::pickers::{ContextPreferencesByAgent, ContextState, ForkBranchesState, PickersState};
 pub use crate::state::questions::{
     AnswerRequest, AsyncQuestionsState, AsyncSubmit, QuestionsState,
 };

@@ -7,18 +7,31 @@
 //! `modelSelection`, `pendingModelSelection`, `forkBranches`. Actions: `toggleModelPicker`,
 //! `modelPicker*`, `modelMenu*`, `selectForkBranch`.
 
-use crate::action::UserAction;
-use crate::document::Document;
-use crate::effect::Effect;
-use crate::state::{ChatContext, ChatState};
+pub mod actions;
+pub mod agents;
+pub mod artwork;
+pub mod catalog;
+pub mod document;
+pub mod favorites;
+pub mod feedback;
+pub mod fork_branches;
+pub mod input;
+pub mod js;
+pub mod model_menu;
+pub mod model_picker;
+pub mod native;
+pub mod projection;
+pub mod request;
+pub mod selection;
+pub mod traits;
 
-/// Writes family e2's picker and menu keys into `into`.
-pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
-    let _ = (state, context, into);
-}
-
-/// Handles one model picker, model menu or fork branch action.
-pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
-    let _ = (state, action, context);
-    Vec::new()
-}
+pub use crate::menus::picker::actions::handle;
+pub use crate::menus::picker::document::document;
+pub use crate::menus::picker::fork_branches::{ForkBranch, ForkBranchRow, ForkBranchTone};
+pub use crate::menus::picker::model_menu::{ModelMenuEntry, ModelMenuRow, ModelMenuTabId, ModelMenuView};
+pub use crate::menus::picker::model_picker::{
+    ModelPickerProvider, ModelPickerRequest, ModelPickerSelection, ModelSelectionScope,
+};
+pub use crate::menus::picker::native::{ModelPickerOutcome, ModelPickerState};
+pub use crate::menus::picker::projection::{ModelMenuContext, ModelMenuPick};
+pub use crate::menus::picker::selection::{ModelSelectionIntent, ModelSelectionState};
