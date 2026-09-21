@@ -41,7 +41,11 @@ import { useSessionChatQuestionDrafts } from './session-chat-question-drafts';
 import { SessionChatAnswerInput } from './session-chat-answer-input';
 import type { SaveSessionChatImage } from './session-chat-image-attachments';
 
-import { sessionChatCardDismissKey, selectQuestionOption, questionAnswerControls } from '@/packages/shared/session-chat-presentation/interactive';
+import {
+  sessionChatCardDismissKey,
+  selectQuestionOption,
+  questionAnswerControls,
+} from '@/packages/shared/session-chat-presentation/interactive';
 export { sessionChatCardDismissKey };
 
 const DELIVERY_FAILED_NOTICE = "Couldn't deliver the answer. Switch to Terminal View to answer there.";
@@ -442,13 +446,15 @@ export function SessionChatInteractiveCard({
       onOpenChange={(open) => setCollapsed(!open)}
       open={!collapsed}
       title={question?.header ?? (questions.length === 1 ? 'Question' : 'Questions')}
+      // CDXC:SessionChat 2026-09-21 DECISION: User: move the "question N of M" counter into the header next to the chevron, only while the card is expanded.
+      trailing={
+        counter && !collapsed ? <span className='ghostex-chat-status-card-annotation'>{counter}</span> : undefined
+      }
       toggleTitle={{ open: 'Hide the question and its options', closed: 'Show the question and its options' }}
     >
       {question ? (
         <>
-          <SessionChatStatusCardRow annotation={counter}>
-            <p className='text-foreground/90'>{question.question}</p>
-          </SessionChatStatusCardRow>
+          <p className='text-foreground/90'>{question.question}</p>
           {question.multiSelect ? <p className='text-xs text-muted-foreground'>Select one or more options.</p> : null}
           <SessionChatChoiceRows
             onSelect={selectOption}

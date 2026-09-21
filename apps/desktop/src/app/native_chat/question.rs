@@ -50,25 +50,10 @@ impl NativeChatView {
             .to_string();
         body.push(
             div()
-                .flex()
-                .items_start()
-                .justify_between()
-                .gap(px(8.0 * s))
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .text_color(p.card_muted)
-                        .line_height(px(19.6 * s))
-                        .child(text(question, "question")),
-                )
-                .when(count > 1, |this| {
-                    this.child(div().flex_shrink_0().text_size(px(12.0 * s)).child(format!(
-                        "question {} of {}",
-                        index + 1,
-                        count
-                    )))
-                })
+                .min_w_0()
+                .text_color(p.card_muted)
+                .line_height(px(19.6 * s))
+                .child(text(question, "question"))
                 .into_any_element(),
         );
         if question["multiSelect"] == true {
@@ -243,6 +228,19 @@ impl NativeChatView {
                         )
                     }),
             )
+            // CDXC:SessionChat 2026-09-21 DECISION: User: move the "question N of M" counter into the header next to the chevron, only while the card is expanded.
+            .when(count > 1 && !collapsed, |header| {
+                header.child(
+                    div()
+                        .flex_shrink_0()
+                        .h(px(22.75 * s))
+                        .flex()
+                        .items_center()
+                        .text_size(px(12.0 * s))
+                        .text_color(p.muted)
+                        .child(format!("question {} of {}", index + 1, count)),
+                )
+            })
             .child(
                 gpui::svg()
                     .path(if collapsed {
