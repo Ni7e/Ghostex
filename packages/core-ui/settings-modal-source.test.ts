@@ -405,8 +405,8 @@ describe('settings modal source', () => {
     /*
      * CDXC:Settings 2026-06-28-07:41:
      * Keep Awake is experimental-only in regular macOS Settings, but the
-     * Experimental section must name the hidden Power settings and titlebar
-     * button so search can lead users to the opt-in gate.
+     * Experimental section must name the hidden Power settings and the
+     * sidebar menu entry so search can lead users to the opt-in gate.
      */
     const betaSearch = sourceBetween(
       settingsModalSearchCatalogSource,
@@ -427,8 +427,8 @@ describe('settings modal source', () => {
     expect(betaSearch).toContain('Keep Awake');
     expect(settingsModalSource).toContain('keepAwakeWhileWorkingSessions');
     expect(settingsModalSource).toContain('Keep awake for working sessions');
-    expect(betaSection).toContain('Title bar and Power settings: Keep Awake');
-    expect(betaSection).toContain('Keep Awake title-bar button');
+    expect(betaSection).toContain('Power settings and the sidebar menu: Keep Awake');
+    expect(betaSection).toContain('the Keep Awake menu.');
     expect(mainVisibility).toContain("sectionId === 'power' && !keepAwakeSettingsVisible");
     expect(settingsModalSource).toContain('system: powerSectionRef');
     expect(mainVisibility).toContain('first-launch lid-close preference');
