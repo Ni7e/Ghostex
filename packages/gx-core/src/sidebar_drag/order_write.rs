@@ -133,7 +133,11 @@ pub fn owns_order_write_message(message: &Value) -> bool {
 /// `reorderNativeSidebar`, which returns for a remote group before it posts anything, so neither
 /// can arrive from the sidebar. `createGroupFromSession` on a remote row CAN arrive (Move to New
 /// Group), and its edit is portable, but it then makes the new group active WITHOUT making its
-/// project active, which is remote focus, and remote focus is still the old runtime's.
+/// project active. That activation is the part still missing: since 2026-09-21 the store opens a
+/// remote row's PANE itself (`sidebar_actions/remote_focus.rs`), but a remote row's focus MARKS are
+/// still carried from the old projection's publish (declared difference 16), so activating a
+/// subgroup on a machine whose focus the store does not own would move the core's active group
+/// somewhere nothing draws from.
 pub fn plan_order_write(
     document: &WorkspaceGroupsDocument,
     message: &Value,

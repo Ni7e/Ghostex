@@ -82,9 +82,10 @@ pub fn owns_split_message(message: &Value) -> bool {
 ///
 /// Refused, with the reason at each refusal:
 ///
-/// - **A remote row**, which opens through the native project-path action bridge with its own
-///   remote focus and its own patch publish, none of which this path can reach. The gate asserts
-///   the TypeScript still acts on one, which is what makes the hand-off a hand-off.
+/// - **A remote row**, which is not a wake and a selection at all but one open through the native
+///   project-path action bridge. Since 2026-09-21 `remote_focus.rs` owns that open, including this
+///   payload's placement, so a remote Split Right is planned there rather than here; the gate
+///   asserts the TypeScript still acts on one, which is what makes the hand-off a hand-off.
 /// - **A browser row and an id that does not parse**, which are the TypeScript's own early return.
 ///
 /// A row the store holds no lifecycle for is NOT refused: see the note at the read below.
