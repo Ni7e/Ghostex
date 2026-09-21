@@ -20,6 +20,20 @@ pub struct LoadedPresentation {
     /// The highest revision applied or seen for this machine: the value to quote as
     /// `lastRevision` on a reconnect.
     pub revision: i64,
+    /// These rows are the LAST SEEN copy of a machine that has not streamed to this run, read back
+    /// from client storage, not anything a daemon said to this client.
+    ///
+    /// CDXC:RemoteMachines 2026-09-21 WHY:
+    /// A last-seen snapshot carries the PREVIOUS run's revision, and the revision rules read that
+    /// number as "what this client has already been told". Three of them would then be wrong at
+    /// once: a delta could ride on yesterday's rows, `presentationSnapshotCurrent` could CONFIRM
+    /// them as live, and the host would quote that revision as `lastRevision` on the subscribe
+    /// that asks for them. A daemon that restarted has reset its counter, so its live first frames
+    /// are LOWER, which is exactly the case where all three go wrong silently and the user keeps
+    /// looking at faded rows from yesterday while the machine is connected. So the copy is held
+    /// with this flag set, every revisioned frame is refused while it is, and only a full stream
+    /// snapshot may replace it, which `apply_snapshot` already does whatever the revision says.
+    pub last_seen: bool,
     pub generated_at: String,
     pub capabilities: Option<PresentationCapabilities>,
     pub auto_settle_after_days: Tri<f64>,
@@ -91,6 +105,7 @@ impl LoadedPresentation {
         let mut loaded = Self {
             server_id,
             revision: snapshot.revision,
+            last_seen: false,
             generated_at: snapshot.generated_at,
             capabilities: snapshot.capabilities,
             auto_settle_after_days: snapshot.auto_settle_after_days,

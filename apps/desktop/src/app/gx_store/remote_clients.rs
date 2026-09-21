@@ -56,6 +56,16 @@ pub(crate) struct RemoteClientCounters {
     pub(crate) reloads: u64,
     /// Times a stored machine tab the sidebar no longer offers was reset to this computer.
     pub(crate) tab_corrections: u64,
+    /// Machines seeded from their last-seen copy, so an offline machine draws its rows faded.
+    /// A run with a disabled or unreachable machine that has connected before and a zero here
+    /// means the copy was not found or not read.
+    pub(crate) last_seen_seeds: u64,
+    /// Machines asked for a last-seen copy that had none stored, which is every machine that has
+    /// never connected on this computer.
+    pub(crate) last_seen_absent: u64,
+    /// Reads that failed or whose payload the protocol could not parse. Not retried: the copy is
+    /// a convenience and the machine connecting replaces it.
+    pub(crate) last_seen_failures: u64,
 }
 
 /// One remote machine's client.
@@ -95,6 +105,11 @@ pub(crate) struct RemoteClients {
     /// them. The sidebar list reads this; nothing else builds it.
     tabs: Vec<MachineTabInput>,
     tabs_read_at: Option<Instant>,
+    /// Machines whose last-seen copy has been asked for in this run, whatever the answer was. A
+    /// second ask would open the database again per reconcile for a machine that has no stored
+    /// copy, which is most of them, and the answer cannot change: only the machine connecting
+    /// changes what is drawn, and then the seed is refused anyway.
+    last_seen_asked: std::collections::BTreeSet<String>,
     pub(super) counters: RemoteClientCounters,
 }
 
@@ -331,6 +346,16 @@ impl GhostexGpuiApp {
                 .handle(Event::MachineUnloaded { machine }, super::host::now_ms());
             self.gx_store.sidebar_list.note_changes(&output.changes);
         }
+        // A machine this run has not streamed to draws its LAST SEEN rows, faded, instead of an
+        // empty tab (the user decision on `seed_last_seen`). Asked once per machine per run, and
+        // only for one the store holds nothing for: a machine whose client is running holds
+        // something newer than any stored copy.
+        for machine_id in enabled.keys() {
+            if connected.contains_key(*machine_id) {
+                continue;
+            }
+            self.gx_store_seed_last_seen_machine(machine_id, cx);
+        }
         for (machine_id, (port, token)) in &connected {
             let running = self
                 .gx_store
@@ -360,6 +385,91 @@ impl GhostexGpuiApp {
         if moved {
             self.gx_store_sidebar_state_changed(cx);
         }
+    }
+
+    /// Draws a machine that has not connected in this run from its last-seen copy.
+    ///
+    /// CDXC:RemoteMachines 2026-09-21 WHY:
+    /// The read is booked on the background executor and never run here, because this function is
+    /// on the reconcile path and opening SQLite on the main thread once per pump is the defect the
+    /// workspace-groups restore had to be fixed for. It is asked once per machine per run; a
+    /// machine the store already holds rows for is refused inside `seed_last_seen`, so a reply that
+    /// lands after the machine connected cannot replace live rows with yesterday's.
+    fn gx_store_seed_last_seen_machine(&mut self, machine_id: &str, cx: &mut gpui::Context<Self>) {
+        if !self
+            .gx_store
+            .remote
+            .last_seen_asked
+            .insert(machine_id.to_string())
+        {
+            return;
+        }
+        let machine = MachineId::Remote(machine_id.to_string());
+        if self.gx_store.core.presentation().loaded(&machine).is_some() {
+            return;
+        }
+        let machine_id = machine_id.to_string();
+        cx.spawn(async move |this, cx| {
+            let stored = cx
+                .background_executor()
+                .spawn({
+                    let machine_id = machine_id.clone();
+                    async move { super::remote_last_seen::read_last_seen_raw(&machine_id) }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.gx_store_apply_last_seen_machine(&machine_id, stored, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// What the booked read came back with.
+    fn gx_store_apply_last_seen_machine(
+        &mut self,
+        machine_id: &str,
+        stored: Result<Option<String>, &'static str>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let raw = match stored {
+            Err(code) => {
+                self.gx_store.remote.counters.last_seen_failures += 1;
+                self.gx_store.diagnostics.remote_last_seen_failed(code);
+                return;
+            }
+            Ok(None) => {
+                self.gx_store.remote.counters.last_seen_absent += 1;
+                return;
+            }
+            Ok(Some(raw)) => raw,
+        };
+        // The stored value is a `GxserverPresentationSnapshot`, the same shape the stream and
+        // `/api/readPresentationSnapshot` deliver, which is why nothing here needs a codec of its
+        // own. A payload this parser refuses is counted, not retried: the machine connecting
+        // replaces it.
+        let Ok(snapshot) =
+            serde_json::from_str::<ghostex_gx_core::protocol::PresentationSnapshot>(&raw)
+        else {
+            self.gx_store.remote.counters.last_seen_failures += 1;
+            self.gx_store.diagnostics.remote_last_seen_failed("parse");
+            return;
+        };
+        let machine = MachineId::Remote(machine_id.to_string());
+        let bytes = raw.len();
+        let output = self
+            .gx_store
+            .core
+            .seed_last_seen_presentation(&machine, snapshot);
+        if output.changes.is_empty() {
+            return;
+        }
+        self.gx_store.remote.counters.last_seen_seeds += 1;
+        self.gx_store.sidebar_list.note_changes(&output.changes);
+        self.gx_store
+            .diagnostics
+            .remote_last_seen_seeded(bytes, self.gx_store.remote.counters);
+        self.gx_store.run_effects(output.effects);
+        self.gx_store_sidebar_state_changed(cx);
     }
 
     /// Falls back to this computer when the selected machine tab is not one the sidebar offers,
@@ -479,12 +589,22 @@ impl GhostexGpuiApp {
         entry.generation = generation;
         // The revision the store holds for this machine, so a restart resumes rather than asking
         // for a whole snapshot it already has.
+        //
+        // CDXC:RemoteMachines 2026-09-21 WHY:
+        // Zero for rows seeded from the LAST SEEN copy, which forces a full snapshot. That
+        // revision came from the previous run, the daemon over there may have restarted and reset
+        // its counter, and a daemon that answers `presentationSnapshotCurrent` to a number it
+        // happens to be at would leave the user looking at yesterday's faded rows while the
+        // machine is connected. The store refuses that confirmation too (`last_seen` in
+        // `presentation_store/apply.rs`), so this is the first of two locks on the same door
+        // rather than the only one.
         let held_revision = entry.held_revision.clone();
         held_revision.store(
             self.gx_store
                 .core
                 .presentation()
                 .loaded(&MachineId::Remote(machine_id.to_string()))
+                .filter(|loaded| !loaded.last_seen)
                 .map_or(0, |loaded| loaded.revision),
             Ordering::Release,
         );

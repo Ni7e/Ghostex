@@ -510,6 +510,29 @@ fn open(flags: OpenFlags) -> Result<Connection, &'static str> {
     Ok(connection)
 }
 
+/// Runs one read against the pooled read-only connection, dropping it when the read failed so the
+/// next caller opens a fresh one.
+///
+/// The `records` door (`remote_last_seen.rs`) borrows this rather than opening the same file a
+/// third time: the pool, the 500 ms busy timeout and the `&'static str` error vocabulary are the
+/// ones every key in this database already uses, and a second pool would mean a second set of
+/// handles to keep in step with a file that can be replaced.
+pub(super) fn with_read_connection<T>(
+    read: impl FnOnce(&Connection) -> Result<T, &'static str>,
+) -> Result<T, &'static str> {
+    let mut held = connections()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if held.read.is_none() {
+        held.read = Some(open(OpenFlags::SQLITE_OPEN_READ_ONLY)?);
+    }
+    let result = read(held.read.as_ref().expect("opened above"));
+    if result.is_err() {
+        held.read = None;
+    }
+    result
+}
+
 /// One preference by key, for a caller that owns a single key rather than the sidebar's set. The
 /// workspace session groups document (K4) is read and written through here so the connection pool,
 /// the busy timeout and the error vocabulary are the ones every other key already uses.

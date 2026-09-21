@@ -214,6 +214,27 @@ impl Core {
         self.focus = focus;
     }
 
+    /// Seeds a remote machine the host has not connected to in this run from its last-seen
+    /// snapshot, so the user sees its sessions faded instead of an empty tab. Not a local intent
+    /// and not a frame: nothing here came from a daemon, which is the whole point.
+    ///
+    /// Returns the changes so the caller can feed them to its list exactly as a frame's are fed.
+    /// See [`PresentationStore::seed_last_seen`] for the user decision and the revision rules.
+    pub fn seed_last_seen_presentation(
+        &mut self,
+        machine: &MachineId,
+        snapshot: PresentationSnapshot,
+    ) -> Output {
+        let mut output = Output {
+            changes: self.presentation.seed_last_seen(machine, snapshot),
+            ..Output::default()
+        };
+        // The same two follow-ups a frame gets, so a seeded machine cannot leave focus or the tab
+        // generation behind, and its effects reach the host rather than being dropped here.
+        self.settle_after_change(&mut output);
+        output
+    }
+
     /// The workspace tabs of the active group. `NotLoaded` until the owning machine's first
     /// snapshot arrived and while no group is active; never `Missing` after an event was handled,
     /// because focus is re-homed when its project goes away.
@@ -313,15 +334,23 @@ impl Core {
             Event::Intent(intent) => self.handle_intent(intent, now_ms, &mut output),
             Event::Tick => output.changes = self.presentation.expire_patches(now_ms),
         }
+        self.settle_after_change(&mut output);
+        output
+    }
+
+    /// What every handled event and the last-seen seed both owe once the store has moved: re-home
+    /// focus if anything changed, and advance the tab generation if a tab list did. One function
+    /// rather than two copies, because a seed that skipped either would leave focus naming a row
+    /// nobody holds and a tab strip drawing a list that moved.
+    fn settle_after_change(&mut self, output: &mut Output) {
         // Focus can only fall out of step with the store when something changed.
         if !output.changes.is_empty() {
             let focus = self.focus.reconcile(&self.presentation);
-            self.note_focus(focus, &mut output);
+            self.note_focus(focus, output);
         }
         if output.changes.tab_lists_changed() {
             self.tabs_generation += 1;
         }
-        output
     }
 
     fn handle_frame(

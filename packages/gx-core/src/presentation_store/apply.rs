@@ -110,6 +110,44 @@ impl PresentationStore {
         summary
     }
 
+    /// Seeds a machine the host has NOT connected to in this run from its last-seen snapshot, so
+    /// its sessions are on screen, faded, until the machine connects.
+    ///
+    /// CDXC:RemoteMachines 2026-09-21 DECISION:
+    /// Asked "today, when a remote machine is offline, the old sidebar still shows its sessions
+    /// from the last time it connected, greyed out; the Rust sidebar cannot do that yet, so an
+    /// offline machine shows nothing until it connects. Do you want that last-seen view kept?",
+    /// the user answered "yes pls". So the copy the old sidebar persisted is read back and held
+    /// here, and this is what makes it "hold these rows, not live": `last_seen` is set, so no
+    /// revisioned frame may be measured against them, the daemon cannot confirm them as current,
+    /// and the host must not quote their revision on a subscribe. `is_stale` in the view model
+    /// already draws a loaded machine whose stream is not live as faded, so nothing about the
+    /// drawing changes.
+    ///
+    /// Refused for a machine that is ALREADY loaded: the seed is a cold start, and a machine the
+    /// host has streamed to in this run holds something newer than any stored copy.
+    pub fn seed_last_seen(
+        &mut self,
+        machine: &MachineId,
+        snapshot: PresentationSnapshot,
+    ) -> ChangeSummary {
+        let entry = self.machine_mut(machine);
+        if matches!(entry.state, PresentationState::Loaded(_)) {
+            return ChangeSummary::ignored(IgnoredReason::StaleRevision {
+                held: 0,
+                received: snapshot.revision,
+            });
+        }
+        let mut summary = self.apply_snapshot(machine, "", snapshot, SnapshotOrigin::Stream);
+        if let PresentationState::Loaded(loaded) = &mut self.machine_mut(machine).state {
+            loaded.last_seen = true;
+        }
+        // A seeded machine has never been subscribed to, so nothing may resume from its revision.
+        summary.machines_reloaded.retain(|held| held != machine);
+        summary.machines_reloaded.push(machine.clone());
+        summary
+    }
+
     /// The daemon confirmed that the quoted `lastRevision` is current: nothing to apply.
     ///
     /// Returns `NotLoaded` when the store holds nothing for the machine, which means the host
@@ -122,6 +160,13 @@ impl PresentationStore {
     ) -> ChangeSummary {
         match &mut self.machine_mut(machine).state {
             PresentationState::NotLoaded => ChangeSummary::ignored(IgnoredReason::NotLoaded),
+            // Rows held from a previous run were never told to this client, so nothing can be
+            // "current" with them. Answered as `NotLoaded` rather than as a stale revision,
+            // because that is the outcome the caller already handles by resubscribing without
+            // `lastRevision`, which is exactly what these rows need.
+            PresentationState::Loaded(loaded) if loaded.last_seen => {
+                ChangeSummary::ignored(IgnoredReason::NotLoaded)
+            }
             PresentationState::Loaded(loaded) => {
                 // "Current" from another daemon says nothing about the rows held from this one.
                 if !server_id.is_empty()
@@ -461,6 +506,15 @@ pub(super) fn frame_rejection(
     server_id: &str,
     revision: i64,
 ) -> Option<IgnoredReason> {
+    // Rows held from a previous run are not a revision this client has been told, so no revisioned
+    // frame may be measured against them or applied on top of them. Only a full stream snapshot
+    // replaces them (`last_seen` on `LoadedPresentation`).
+    if loaded.last_seen {
+        return Some(IgnoredReason::StaleRevision {
+            held: loaded.revision,
+            received: revision,
+        });
+    }
     if !server_id.is_empty() && !loaded.server_id.is_empty() && server_id != loaded.server_id {
         return Some(IgnoredReason::ServerChanged);
     }

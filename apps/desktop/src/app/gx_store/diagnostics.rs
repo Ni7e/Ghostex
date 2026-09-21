@@ -96,6 +96,7 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_action_records: u32,
     pub(super) sidebar_lifecycle_records: u32,
     sidebar_drag_records: u32,
+    pub(super) remote_last_seen_records: u64,
 }
 
 /// A count as a whole percent of a total, which is what tells a skip that fires now and then apart

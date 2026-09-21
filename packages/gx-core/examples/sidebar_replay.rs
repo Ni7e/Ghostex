@@ -52,8 +52,9 @@ fn main() -> ExitCode {
 
     let churned = run_pass("churned inputs", &text, domain_projects.clone(), true);
     let steady = run_pass("steady inputs", &text, domain_projects, false);
+    let last_seen = last_seen_transition(&text);
 
-    if churned.mismatches == 0 && steady.mismatches == 0 {
+    if churned.mismatches == 0 && steady.mismatches == 0 && last_seen {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
@@ -334,6 +335,180 @@ fn run_pass(
     PassResult {
         mismatches: mismatches + ui.persist_failures + ui.reveal_failures,
     }
+}
+
+/// The last-seen transition: a remote machine seeded from a stored snapshot, then the live stream
+/// arriving with a LOWER revision.
+///
+/// This is the case the design is most afraid of and the one no recording holds. A last-seen
+/// snapshot carries the PREVIOUS run's revision; the daemon on the other machine may have
+/// restarted and reset its counter, so its live first frames are LOWER. Every revision rule reads
+/// "lower or equal" as "already contained in what I hold", so without the `last_seen` flag the
+/// live stream would be silently dropped and the user would keep looking at yesterday's faded rows
+/// while the machine is connected.
+///
+/// Four questions, and each of them fails if the flag is removed:
+/// 1. The seed draws rows at all.
+/// 2. A DELTA at a lower revision is refused while the rows are last-seen (it must not ride on
+///    them, because they are not a revision this client was ever told).
+/// 3. A `presentationSnapshotCurrent` at that revision does NOT confirm them as live.
+/// 4. The live SNAPSHOT replaces them whole even though its revision is lower, and the list built
+///    incrementally across the transition equals one built from scratch afterwards, which is the
+///    cache question three bugs of this shape have already been found on.
+fn last_seen_transition(frames: &str) -> bool {
+    let Some(stored) = first_snapshot(frames) else {
+        println!(
+            "\n== last-seen transition ==\nno snapshot frame in the recording, nothing measured"
+        );
+        return false;
+    };
+    let Some(victim) = first_row(&stored) else {
+        println!("\n== last-seen transition ==\nthe recorded snapshot has no session rows");
+        return false;
+    };
+    let machine = MachineId::Remote("remote-ab12".to_string());
+    let mut core = Core::new();
+    let mut model = SidebarViewModel::new();
+    let mut inputs = SidebarInputs::default();
+    inputs.ui.selected_machine_id = "remote-ab12".to_string();
+    let now_ms = START_MS;
+
+    // The stored copy, at a HIGH revision: the previous run got far.
+    let seeded = core.seed_last_seen_presentation(&machine, snapshot_at(&stored, 9_000));
+    model.update(&core, &inputs, &seeded.changes, now_ms);
+    let seeded_rows: usize = model
+        .view()
+        .groups
+        .iter()
+        .map(|group| group.core.sessions.len())
+        .sum();
+    let seeded_faded = model.view().groups.iter().all(|group| group.core.is_stale);
+
+    // A live delta and a "current" reply, both at a revision LOWER than the stored one, which is
+    // what a daemon that restarted sends. Neither may be believed.
+    let delta_changes = core
+        .handle_raw_frame(machine.clone(), &delta_frame(12, &victim), now_ms)
+        .map(|output| output.changes)
+        .unwrap_or_default();
+    // And one ABOVE the stored revision, which is the delta that would really be applied: a
+    // daemon that did NOT restart is simply further along than the copy, and without the flag its
+    // delta would edit yesterday's rows as though this client had been following all along.
+    let ahead_changes = core
+        .handle_raw_frame(machine.clone(), &delta_frame(9_500, &victim), now_ms)
+        .map(|output| output.changes)
+        .unwrap_or_default();
+    let current_changes = core
+        .handle_raw_frame(machine.clone(), &current_frame(12), now_ms)
+        .map(|output| output.changes)
+        .unwrap_or_default();
+    let still_last_seen = core
+        .presentation()
+        .loaded(&machine)
+        .is_some_and(|loaded| loaded.last_seen);
+
+    // The live snapshot, also lower. This one MUST replace the rows.
+    let live = core
+        .handle_raw_frame(machine.clone(), &snapshot_frame(&stored, 12), now_ms)
+        .expect("the live snapshot parses");
+    model.update(&core, &inputs, &live.changes, now_ms);
+    let now_live = core
+        .presentation()
+        .loaded(&machine)
+        .is_some_and(|loaded| !loaded.last_seen && loaded.revision == 12);
+    let fresh = SidebarViewModel::build_from_scratch(&core, &inputs, now_ms);
+    let same = fresh == *model.view();
+
+    let checks = [
+        ("the seed draws rows", seeded_rows > 0),
+        (
+            "every seeded group is faded",
+            seeded_faded && seeded_rows > 0,
+        ),
+        ("a lower delta is refused", delta_changes.is_empty()),
+        ("a HIGHER delta is refused too", ahead_changes.is_empty()),
+        (
+            "a lower current does not confirm",
+            current_changes.is_empty(),
+        ),
+        ("the rows are still last-seen", still_last_seen),
+        ("the live snapshot takes over", now_live),
+        ("incremental equals from scratch", same),
+    ];
+    println!("\n== last-seen transition ==");
+    println!("seeded {seeded_rows} rows at revision 9000, live stream resumed at 12");
+    let mut passed = true;
+    for (label, ok) in checks {
+        println!("{label:<40} {}", if ok { "ok" } else { "FAILED" });
+        passed &= ok;
+    }
+    passed
+}
+
+/// The first `presentationSnapshot` of the recording, as its raw `snapshot` object.
+fn first_snapshot(frames: &str) -> Option<Value> {
+    frames.lines().find_map(|line| {
+        let value: Value = serde_json::from_str(line).ok()?;
+        (value.get("type")?.as_str()? == "presentationSnapshot")
+            .then(|| value.get("snapshot").cloned())
+            .flatten()
+    })
+}
+
+/// The recorded snapshot object, parsed at a chosen revision.
+fn snapshot_at(stored: &Value, revision: i64) -> ghostex_gx_core::protocol::PresentationSnapshot {
+    let mut snapshot = stored.clone();
+    snapshot["revision"] = Value::from(revision);
+    serde_json::from_value(snapshot).expect("the recorded snapshot parses")
+}
+
+fn snapshot_frame(stored: &Value, revision: i64) -> String {
+    let mut snapshot = stored.clone();
+    snapshot["revision"] = Value::from(revision);
+    serde_json::json!({
+        "type": "presentationSnapshot",
+        "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+        "serverId": "live",
+        "revision": revision,
+        "snapshot": snapshot,
+    })
+    .to_string()
+}
+
+/// A delta that removes a row the seeded snapshot really holds.
+///
+/// The first cut named a session that does not exist, which every revision rule would have let
+/// through and which still produced an empty change summary: a probe that cannot fail, the shape
+/// this port has now caught fifteen times. The victim is taken from the recorded snapshot so the
+/// delta has something to remove and "refused" means the rule refused it rather than the delta
+/// having nothing to do.
+fn delta_frame(revision: i64, victim: &(String, String)) -> String {
+    serde_json::json!({
+        "type": "presentationDelta",
+        "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+        "serverId": "live",
+        "revision": revision,
+        "delta": { "type": "sessionRemoved", "projectId": victim.0, "sessionId": victim.1 },
+    })
+    .to_string()
+}
+
+/// The project and session ids of the first row of a recorded snapshot.
+fn first_row(stored: &Value) -> Option<(String, String)> {
+    let session = stored.get("sessions")?.as_array()?.first()?;
+    Some((
+        session.get("projectId")?.as_str()?.to_string(),
+        session.get("sessionId")?.as_str()?.to_string(),
+    ))
+}
+
+fn current_frame(revision: i64) -> String {
+    serde_json::json!({
+        "type": "presentationSnapshotCurrent",
+        "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+        "serverId": "live",
+        "revision": revision,
+    })
+    .to_string()
 }
 
 /// Takes one row of the list, asks what has to change for it to be drawn, does exactly that, and

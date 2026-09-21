@@ -3,7 +3,9 @@
 //! for; `local_focus.rs` makes selections local and admits the old runtime's focus payloads;
 //! `burst.rs` tells the old runtime once and releases deferred work when the selection settles;
 //! `session_walk.rs` walks the rendered sidebar rows for the previous and next session hotkeys;
-//! `remote_clients.rs` runs one client per connected remote machine and owns the machine tabs;
+//! `remote_clients.rs` runs one client per connected remote machine and owns the machine tabs,
+//! and `remote_last_seen.rs` reads back the last-seen rows of one that has not connected in this
+//! run, from the `records` table rather than the `preferences` one every other door here uses;
 //! `layout_persist.rs` writes the shell layout on a timer; `shadow_diff.rs` mirrors the old
 //! runtime's focus into the core and compares its tab list; `sidebar_shadow.rs` builds the
 //! sidebar list from the store beside the old projection's and compares them (`_inputs` mirrors
@@ -32,12 +34,14 @@ mod burst;
 mod client_document;
 mod diagnostics;
 mod diagnostics_open;
+mod diagnostics_remote_last_seen;
 mod effects;
 mod host;
 mod layout_persist;
 mod local_focus;
 mod project_docs;
 mod remote_clients;
+mod remote_last_seen;
 mod session_walk;
 mod shadow_diff;
 mod sidebar_actions;
