@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use gpui::{
     App, Bounds, DispatchPhase, Entity, Hitbox, HitboxBehavior, MouseMoveEvent, Pixels, Window,
@@ -6,6 +8,20 @@ use gpui::{
 
 use super::model::NativeSidebarSession;
 use crate::GhostexGpuiApp;
+
+/// How long after the last wheel tick the list counts as still scrolling.
+const SCROLL_SETTLE: Duration = Duration::from_millis(120);
+
+thread_local! {
+    static LAST_WHEEL: Cell<Option<Instant>> = const { Cell::new(None) };
+    static SETTLE_PENDING: Cell<bool> = const { Cell::new(false) };
+}
+
+fn scroll_in_flight() -> bool {
+    LAST_WHEEL
+        .get()
+        .is_some_and(|at| at.elapsed() < SCROLL_SETTLE)
+}
 
 /// The hovered row one session list asks for: take the row under the pointer, or let go of one of its own rows.
 enum SessionHoverChange {
@@ -42,7 +58,9 @@ impl SessionHoverProbes {
 
     /// Called during paint, once this frame's hit test is known.
     pub(super) fn track(self, view: Entity<GhostexGpuiApp>, window: &mut Window, cx: &mut App) {
-        if let Some(change) = self.change(view.read(cx), window, cx) {
+        if !scroll_in_flight()
+            && let Some(change) = self.change(view.read(cx), window, cx)
+        {
             let view = view.clone();
             window.defer(cx, move |_, cx| {
                 view.update(cx, |app, cx| app.apply_native_session_hover(change, cx))
@@ -91,6 +109,24 @@ impl SessionHoverProbes {
 }
 
 impl GhostexGpuiApp {
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// A mouse wheel tick moves the list by a row or more, so the post-paint hover resolve found a new card under the still pointer after every tick and notified the root again: two full-window frames per tick, which made wheel scrolling stall while a trackpad, which crosses a row every ten frames or so, stayed smooth.
+    /// While ticks keep arriving the post-paint resolve is skipped, and one redraw after the last tick resolves the card under the pointer, which keeps the 2026-09-19 decision for a pointer that has stopped. Real pointer movement still resolves at once.
+    pub(super) fn native_sidebar_scroll_wheel_moved(&mut self, cx: &mut gpui::Context<Self>) {
+        LAST_WHEEL.set(Some(Instant::now()));
+        if SETTLE_PENDING.replace(true) {
+            return;
+        }
+        cx.spawn(async move |app, cx| {
+            while scroll_in_flight() {
+                cx.background_executor().timer(SCROLL_SETTLE).await;
+            }
+            SETTLE_PENDING.set(false);
+            let _ = app.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
+    }
+
     fn apply_native_session_hover(
         &mut self,
         change: SessionHoverChange,
