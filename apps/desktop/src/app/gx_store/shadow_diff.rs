@@ -273,15 +273,7 @@ impl ShadowDiff {
         // resolves the group from the project the old runtime named rather than from focus, which
         // is what lets `skippedRemote` reach zero without handing the store a focus it cannot
         // finish.
-        let observed = if names_remote_focus(old_state) {
-            if observed_stamp < core.focus().local_stamp {
-                ObservedFocus::Stale
-            } else {
-                ObservedFocus::Foreign
-            }
-        } else {
-            self.mirror_focus(core, now_ms)
-        };
+        let observed = self.mirror_focus(core, now_ms);
         // A machine whose rows are not in the store has no list to compare against.
         if self.names_unheld_machine(core) {
             self.counters.remote_skipped += 1;
@@ -349,10 +341,27 @@ impl ShadowDiff {
         }
     }
 
+    /// Mirrors the old focus into the core, unless it is a remote focus, which is judged and never
+    /// mirrored (see `observe`). The one rule for both callers.
+    ///
+    /// CDXC:FocusRouting 2026-09-21 WHY:
+    /// `settle` used to mirror without that check, so a remote publish whose tab list stayed
+    /// different wrote the remote project and group into the core after all, and the core's focus
+    /// then flipped between this computer and a remote machine depending on whether a difference
+    /// had settled.
     fn mirror_focus(&mut self, core: &mut Core, now_ms: u64) -> ObservedFocus {
         let Some(old_focus) = &self.old_focus else {
             return ObservedFocus::Stale;
         };
+        if names_remote_focus(
+            old_focus.active_project_id.as_deref(),
+            old_focus.focused_session_id.as_deref(),
+        ) {
+            return match old_focus.observed_stamp < core.focus().local_stamp {
+                true => ObservedFocus::Stale,
+                false => ObservedFocus::Foreign,
+            };
+        }
         let (update, foreign) = external_focus_update(core, old_focus, self.old_tabs.as_deref());
         let output = core.handle(Event::Intent(Intent::ExternalFocus(update)), now_ms);
         if output.changes.ignored.is_some() {
@@ -478,15 +487,11 @@ impl ShadowDiff {
 /// Mirroring such a focus would set a remote focused session and project while the active group
 /// stays on the last local project (the core cannot derive a group on a machine it does not
 /// hold), and the local tab list would then be compared with a remote one.
-fn names_remote_focus(old_state: &GpuiGxserverPresentationFocusState) -> bool {
-    let remote_project = old_state
-        .active_project_id
-        .as_deref()
+fn names_remote_focus(active_project_id: Option<&str>, focused_session_id: Option<&str>) -> bool {
+    let remote_project = active_project_id
         .and_then(ProjectKey::parse_workspace_project_id)
         .is_some_and(|project| !project.machine.is_local());
-    let remote_focus = old_state
-        .focused_session_id
-        .as_deref()
+    let remote_focus = focused_session_id
         .is_some_and(|session_id| SessionKey::parse_remote_scoped_session_id(session_id).is_some());
     remote_project || remote_focus
 }

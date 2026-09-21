@@ -485,6 +485,9 @@ impl GhostexGpuiApp {
         echo: &GpuiGxserverPresentationFocusEcho,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.gx_store
+            .sidebar_remote_focus
+            .observe_runtime_publish(echo);
         if !self
             .gx_store
             .observe_old_runtime_focus_state(old_state, echo)

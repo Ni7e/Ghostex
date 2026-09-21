@@ -834,6 +834,9 @@ impl GhostexGpuiApp {
             message["localRuntimeMissing"] = serde_json::Value::Bool(true);
         }
         let script = gpui_workspace_tab_session_selected_script(&message);
+        // The runtime's active group moves with this script, which `keepView` for the next remote
+        // click is planned from (gx_store/sidebar_remote_focus.rs).
+        self.gx_store_note_remote_tab_selection_sent(project_id, session_id);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
         true
     }

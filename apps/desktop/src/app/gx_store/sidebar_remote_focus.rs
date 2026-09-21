@@ -25,6 +25,13 @@
 //! is not dropped can only repeat the store's open and never change its view, and no timing can
 //! reorder the two. The open still happens in the click's frame: queueing a script does not wait.
 //!
+//! **`keepView` is planned from the group the RUNTIME will read, not from the core's focus.**
+//! The core's focus stays on this computer while a remote row has focus, so it cannot say whether a
+//! click stays inside the active remote project. The host tracks the runtime's group instead
+//! (`RuntimeActiveGroup` in gx-core): every remote focus it sends the runtime, every tell, and every
+//! focus state the runtime publishes. Planned from that, the store's `keepView` is the one the
+//! runtime computes for its copy, so the copy matches and is dropped.
+//!
 //! **So the runtime's copy is dropped on the Rust side, and only that copy.** The marker is
 //! recorded before the command is sent on and holds the whole payload the store sent (session,
 //! placement, `keepView`, `preferredInterface`), and only a page message equal to it is dropped,
@@ -42,13 +49,18 @@
 
 use std::time::{Duration, Instant};
 
-use ghostex_gx_core::{PreferredInterfaceSettings, RemoteFocusPlan, SessionKey, plan_remote_focus};
+use ghostex_gx_core::{
+    PreferredInterfaceSettings, ProjectKey, RemoteFocusPlan, RuntimeActiveGroup, SessionKey,
+    plan_remote_focus, remote_focus_group,
+};
 use serde_json::{Value, json};
 
 use super::diagnostics::{record, routine_logging_enabled};
+use super::host::now_ms;
 use crate::GhostexGpuiApp;
 use crate::app::helpers::{
-    GpuiSidebarNativeProjectPathAction, gpui_preferred_agent_interface_from_settings,
+    GpuiGxserverPresentationFocusEcho, GpuiSidebarNativeProjectPathAction,
+    gpui_preferred_agent_interface_from_settings,
 };
 use crate::app::model::GpuiPreferredAgentInterface;
 use crate::shared_settings;
@@ -83,9 +95,12 @@ pub(crate) struct SidebarRemoteFocusCounters {
     /// A page open of a row the store had just opened that matched no marker: the copy came late
     /// or in another shape, and the machine was asked a second time.
     pub(crate) unmatched_opens: u64,
-    /// A payload the store owns but did not answer because the renderer is not drawing its list.
+    /// A remote row's click the store did not answer because the renderer is not drawing its list.
+    /// Local rows are not counted: they were never this path's.
     pub(crate) declined_source: u64,
-    /// A remote row's click the planner refused, which the old runtime then performs whole.
+    /// A remote row's click the planner refused, which the old runtime then performs whole: in
+    /// practice a machine that is offline or has not streamed yet. Local and browser rows, and ids
+    /// that do not parse as remote, are not counted.
     pub(crate) handed_back: u64,
 }
 
@@ -105,6 +120,9 @@ pub(crate) struct SidebarRemoteFocusHost {
     expected_opens: Vec<ExpectedRemoteOpen>,
     /// Rows whose marker lapsed unused, kept only to attribute a late copy.
     lapsed_opens: Vec<(SessionKey, Instant)>,
+    /// The old runtime's `activeGroupId` as the next forwarded command finds it, which is what
+    /// `keepView` is planned from.
+    runtime_group: RuntimeActiveGroup,
     records: u32,
 }
 
@@ -153,10 +171,12 @@ impl SidebarRemoteFocusHost {
     /// Keyed on the row, the marker ate the next open of that row from any sender, and a Split
     /// Right right after a click replaced the click's marker so the click's copy took the split's
     /// and the split ran twice. `keepView` can be compared because the command reaches the runtime
-    /// before the store's open moves its active group, so both sides read the same one. Where they
-    /// still disagree, which is a second click on a row landing before the runtime's focus publish
-    /// has reached the store, the runtime's answer is the fresher one: its copy goes through and
-    /// repeats the open with it, and `unmatched_opens` counts it. A different open is never eaten.
+    /// before the store's open moves its active group, and the store plans from the group the
+    /// runtime will hold (`RuntimeActiveGroup`), so both sides read the same one. Where they still
+    /// disagree, which takes the runtime moving its group through a path the host does not track
+    /// (a group header click, a lifecycle replacement) in the moment before the click, the
+    /// runtime's answer is the fresher one: its copy goes through and repeats the open with it, and
+    /// `unmatched_opens` counts it. A different open is never eaten.
     fn take_page_open(&mut self, session: &SessionKey, payload: &Value) -> bool {
         self.prune();
         if let Some(index) = self
@@ -190,6 +210,16 @@ impl SidebarRemoteFocusHost {
     }
 }
 
+impl SidebarRemoteFocusHost {
+    /// The old runtime published its focus state. Every parsed publish comes through here.
+    pub(super) fn observe_runtime_publish(&mut self, echo: &GpuiGxserverPresentationFocusEcho) {
+        self.runtime_group.observe_publish(
+            echo.active_group_id.as_deref(),
+            echo.focus_stamp.unwrap_or(0),
+        );
+    }
+}
+
 impl GhostexGpuiApp {
     /// The store's answer to a sidebar command that selects a remote row, or `None` when the old
     /// runtime answers it alone. Performs nothing: the caller marks, sends the command on, and only
@@ -204,24 +234,79 @@ impl GhostexGpuiApp {
         command: &Value,
     ) -> Option<RemoteFocusPlan> {
         let message = remote_focus_message(command)?;
+        // Only a remote row is this path's, so only a remote row is counted when it is not
+        // answered; a local click here is the store's own focus path and says nothing.
+        let remote_row = message
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .and_then(SessionKey::parse_remote_scoped_session_id)
+            .is_some();
         // The store's answer is only the right one while the store's list is the one on screen:
         // with the old projection drawn, its own state is what the row was built from.
         if !self.gx_store_sidebar_draws_store_list() {
-            self.gx_store.sidebar_remote_focus.counters.declined_source += 1;
+            if remote_row {
+                self.gx_store.sidebar_remote_focus.counters.declined_source += 1;
+            }
             return None;
         }
         let settings = self.gx_store_preferred_interface_settings();
-        let plan = plan_remote_focus(&self.gx_store.core, &message, &settings);
-        if plan.is_none() {
+        // Planned BEFORE the pending tell is flushed, so a pending tell is one the command will
+        // find already handled.
+        let told_stamp = self.gx_store_told_stamp();
+        let tell_pending = self.gx_store.local_focus.pending_tell.is_some();
+        let runtime_group = self.gx_store.sidebar_remote_focus.runtime_group.current(
+            told_stamp,
+            tell_pending,
+            now_ms(),
+        );
+        let plan = plan_remote_focus(&self.gx_store.core, &message, &settings, runtime_group);
+        if plan.is_none() && remote_row {
             self.gx_store.sidebar_remote_focus.counters.handed_back += 1;
         }
         plan
     }
 
-    /// Records that the runtime will send its own copy of this open. Called BEFORE the command is
-    /// sent on, so no copy can arrive unexpected, and only when there is a runtime to send it.
+    /// Records that the runtime will send its own copy of this open, and that the command leaves
+    /// the row's group active in it. Called AFTER the pending tell is flushed and BEFORE the command
+    /// is sent on, so no copy can arrive unexpected, and only when there is a runtime to send it.
     pub(crate) fn gx_store_expect_remote_open_copy(&mut self, plan: &RemoteFocusPlan) {
-        self.gx_store.sidebar_remote_focus.expect(plan);
+        let told_stamp = self.gx_store_told_stamp();
+        let host = &mut self.gx_store.sidebar_remote_focus;
+        host.expect(plan);
+        host.runtime_group
+            .sent_remote_focus(plan.focus_group.clone(), told_stamp, now_ms());
+    }
+
+    /// The host is sending the runtime the tab-selected callback for a REMOTE tab, which runs
+    /// `setRemotePresentationSessionFocus` when the session and the project name the same machine
+    /// and project. The store's own open sends one, and so does an attach that completes later, so
+    /// this is what keeps the tracked group right when a slow attach lands after a newer click.
+    pub(crate) fn gx_store_note_remote_tab_selection_sent(
+        &mut self,
+        scoped_project_id: &str,
+        scoped_session_id: &str,
+    ) {
+        let Some(session) = SessionKey::parse_remote_scoped_session_id(scoped_session_id) else {
+            return;
+        };
+        if ProjectKey::parse_workspace_project_id(scoped_project_id) != Some(session.project_key())
+        {
+            return;
+        }
+        let group = remote_focus_group(&self.gx_store.core, &session);
+        let told_stamp = self.gx_store_told_stamp();
+        self.gx_store
+            .sidebar_remote_focus
+            .runtime_group
+            .sent_remote_focus(group, told_stamp, now_ms());
+    }
+
+    fn gx_store_told_stamp(&self) -> u64 {
+        self.gx_store
+            .local_focus
+            .last_tell
+            .as_ref()
+            .map_or(0, |told| told.stamp)
     }
 
     /// The plan's one effect: the open, through the UNGUARDED entry, so the marker recorded for
