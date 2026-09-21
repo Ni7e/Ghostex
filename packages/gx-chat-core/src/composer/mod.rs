@@ -19,6 +19,7 @@ pub mod queue;
 pub mod reference_menu;
 pub mod reference_pills;
 pub mod references;
+pub mod slash_catalogs;
 pub mod slash_commands;
 pub mod storage;
 pub mod submission;
