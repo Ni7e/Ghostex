@@ -119,6 +119,8 @@ pub(crate) struct GxStoreHost {
     pub(super) sidebar_remote_focus: super::sidebar_remote_focus::SidebarRemoteFocusHost,
     /// The project slot hotkeys' jump: its counters and its log budget.
     pub(super) slot_jump: super::sidebar_slot_jump::SlotJumpHost,
+    /// The session slot hotkeys (cmd+1..9): their counters and their log budget.
+    pub(super) session_slot: super::sidebar_session_slot::SessionSlotHost,
     /// The client-owned workspace session groups document, its stored key and its pending-push
     /// guard.
     pub(crate) workspace_groups: super::workspace_groups::WorkspaceGroupsHost,

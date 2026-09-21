@@ -126,12 +126,7 @@ impl GhostexGpuiApp {
             self.gx_store.slot_jump.counters.empty_projects += 1;
             return ("emptyProject", 0);
         };
-        // Exactly what a row click does, in the click's order.
-        self.dispatch_native_sidebar_ui(
-            json!({"type": "selectSession", "sessionId": target, "mode": "focus"}),
-            cx,
-        );
-        let reaction = self.react_to_native_sidebar_session_click(&target, cx);
+        let (reaction, reveal) = self.gx_store_focus_and_reveal_slot_row(&target, plan.reveal, cx);
         let counters = &mut self.gx_store.slot_jump.counters;
         counters.focuses += 1;
         let route = match reaction {
@@ -149,31 +144,63 @@ impl GhostexGpuiApp {
             }
         };
         let mut reveal_us = 0;
-        if plan.reveal {
-            let started = Instant::now();
-            let changes = self.gx_store_apply_sidebar_reveal(&target, cx).unwrap_or(0);
-            reveal_us = started.elapsed().as_micros() as u64;
-            let counters = &mut self.gx_store.slot_jump.counters;
+        if let Some((changes, us)) = reveal {
+            reveal_us = us;
             counters.reveals += 1;
             counters.reveal_changes += changes as u64;
-            self.gx_store_reveal_walk_row(&target);
         }
         (route, reveal_us)
+    }
+
+    /// Focuses a row exactly as a click on it does, in the click's order, and reveals it when asked.
+    /// Shared by both slot hotkeys (this file and `sidebar_session_slot.rs`). Returns the click's
+    /// reaction and, for a reveal, the changes it made to the sidebar's own state and its time.
+    ///
+    /// The focus is the row click's `selectSession` (which also reaches the remote row machinery of
+    /// `gx_store/sidebar_remote_focus.rs` for a row on another machine) and then the click's own
+    /// reaction. The reveal is `gx_store_apply_sidebar_reveal`, the one a published request ends in,
+    /// and the walk's scroll.
+    pub(super) fn gx_store_focus_and_reveal_slot_row(
+        &mut self,
+        target: &str,
+        reveal: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> (NativeSidebarClickReaction, Option<(usize, u64)>) {
+        self.dispatch_native_sidebar_ui(
+            json!({"type": "selectSession", "sessionId": target, "mode": "focus"}),
+            cx,
+        );
+        let reaction = self.react_to_native_sidebar_session_click(target, cx);
+        if !reveal {
+            return (reaction, None);
+        }
+        let started = Instant::now();
+        let changes = self.gx_store_apply_sidebar_reveal(target, cx).unwrap_or(0);
+        let reveal_us = started.elapsed().as_micros() as u64;
+        self.gx_store_reveal_walk_row(target);
+        (reaction, Some((changes, reveal_us)))
     }
 
     /// Hands the old page what the jump and its reveal changed (see the module note), and stops
     /// collecting. Sends nothing when nothing changed.
     fn gx_store_mirror_slot_jump_to_page(&mut self, cx: &mut gpui::Context<Self>) {
-        let changes = self.gx_store.sidebar_ui.mirror.take().unwrap_or_default();
-        if changes.is_empty() {
-            return;
-        }
-        if self.dispatch_gpui_sidebar_host_message(
-            json!({"type": "sidebarUiMirror", "changes": changes}),
-            cx,
-        ) {
+        if self.gx_store_mirror_sidebar_ui_to_page(cx) {
             self.gx_store.slot_jump.counters.page_told += 1;
         }
+    }
+
+    /// Sends the old page the collected mirror changes and stops collecting. Returns whether a
+    /// message went out; nothing is sent when nothing changed.
+    pub(super) fn gx_store_mirror_sidebar_ui_to_page(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let changes = self.gx_store.sidebar_ui.mirror.take().unwrap_or_default();
+        !changes.is_empty()
+            && self.dispatch_gpui_sidebar_host_message(
+                json!({"type": "sidebarUiMirror", "changes": changes}),
+                cx,
+            )
     }
 
     /// One line per answered press, while the budget lasts: the route and the two timings, never

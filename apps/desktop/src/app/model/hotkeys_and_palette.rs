@@ -94,17 +94,27 @@ pub(crate) fn gpui_sidebar_session_walk_hotkey_reverse(action_id: &str) -> Optio
     }
 }
 
-pub(crate) fn gpui_command_palette_sidebar_slot_hotkey_action_id(action_id: &str) -> Option<&str> {
+/// The action id and its slot number, 1 to 9.
+pub(crate) fn gpui_command_palette_sidebar_slot_hotkey_action_id(
+    action_id: &str,
+) -> Option<(&str, u8)> {
     /*
-    CDXC:CommandPalette 2026-09-19 WHY:
-    Numbered `focusSessionSlot1` through `focusSessionSlot9` are rendered-sidebar row commands, not Rust tab-cycle commands. They are single presses, so only those exact action ids are still delegated to SidebarApp, whose rendered row order resolves the slot, while jump-to-project ids cannot loop back through native. Previous/Next Session left this list for `gpui_sidebar_session_walk_hotkey_reverse`.
+    CDXC:CommandPalette 2026-09-21 WHY:
+    Numbered `focusSessionSlot1` through `focusSessionSlot9` are rendered-sidebar row commands, not Rust tab-cycle commands, and single presses. With the store's list drawn the store resolves the Nth drawn row itself (gx_store/sidebar_session_slot.rs); with the switch off only those exact action ids are delegated to SidebarApp as `nativeHotkey`, whose rendered row order resolves the slot, while jump-to-project ids cannot loop back through native. Previous/Next Session left this list for `gpui_sidebar_session_walk_hotkey_reverse`. Supersedes the 2026-09-19 note that SidebarApp always resolved them.
     */
-    match action_id {
-        "focusSessionSlot1" | "focusSessionSlot2" | "focusSessionSlot3" | "focusSessionSlot4"
-        | "focusSessionSlot5" | "focusSessionSlot6" | "focusSessionSlot7" | "focusSessionSlot8"
-        | "focusSessionSlot9" => Some(action_id),
-        _ => None,
-    }
+    let slot = match action_id {
+        "focusSessionSlot1" => 1,
+        "focusSessionSlot2" => 2,
+        "focusSessionSlot3" => 3,
+        "focusSessionSlot4" => 4,
+        "focusSessionSlot5" => 5,
+        "focusSessionSlot6" => 6,
+        "focusSessionSlot7" => 7,
+        "focusSessionSlot8" => 8,
+        "focusSessionSlot9" => 9,
+        _ => return None,
+    };
+    Some((action_id, slot))
 }
 
 pub(crate) fn gpui_command_palette_project_slot_hotkey_number(action_id: &str) -> Option<u8> {

@@ -90,6 +90,7 @@ pub(crate) struct SidebarRemoteHost {
         super::sidebar_state_actions::SidebarStateActionCounters,
         super::sidebar_accounts::SidebarAccountCounters,
         super::sidebar_slot_jump::SlotJumpCounters,
+        super::sidebar_session_slot::SessionSlotCounters,
     )>,
 }
 
@@ -320,9 +321,20 @@ impl GhostexGpuiApp {
         let accounts = self.gx_store.sidebar_accounts.counters;
         // The project slot hotkeys' jump (gx_store/sidebar_slot_jump.rs).
         let slot_jump = self.gx_store.slot_jump.counters;
+        // The session slot hotkeys, cmd+1..9 (gx_store/sidebar_session_slot.rs).
+        let session_slot = self.gx_store.session_slot.counters;
         let host = &mut self.gx_store.sidebar_remote;
         let now = (host.counters, local);
-        if host.summary_written == Some((now.0, now.1, focus, state, accounts, slot_jump))
+        if host.summary_written
+            == Some((
+                now.0,
+                now.1,
+                focus,
+                state,
+                accounts,
+                slot_jump,
+                session_slot,
+            ))
             || host
                 .summary_at
                 .is_some_and(|at| at.elapsed() < REMOTE_SUMMARY_INTERVAL)
@@ -334,7 +346,15 @@ impl GhostexGpuiApp {
             return;
         }
         host.summary_records += 1;
-        host.summary_written = Some((now.0, now.1, focus, state, accounts, slot_jump));
+        host.summary_written = Some((
+            now.0,
+            now.1,
+            focus,
+            state,
+            accounts,
+            slot_jump,
+            session_slot,
+        ));
         let [
             reloads_stopped,
             paced_legs_waited,
@@ -361,6 +381,7 @@ impl GhostexGpuiApp {
                 "state": super::diagnostics_open::state_counters_json(&state),
                 "accounts": super::sidebar_accounts::account_counters_json(&accounts),
                 "slotJump": super::sidebar_slot_jump::slot_jump_counters_json(&slot_jump),
+                "sessionSlot": super::sidebar_session_slot::session_slot_counters_json(&session_slot),
             }),
         );
     }

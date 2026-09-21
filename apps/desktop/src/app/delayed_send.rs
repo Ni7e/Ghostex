@@ -2124,8 +2124,8 @@ impl GhostexGpuiApp {
                 CDXC:Sidebar 2026-06-26-10:04:
                 `toggleSidebarCollapsed` is shell chrome, not a modal command. Route it before app-modal fallback so the command-palette row and Cmd+B hide or restore the GPUI sidebar and divider while preserving the expanded sidebar width.
 
-                CDXC:CommandPalette 2026-09-19 WHY:
-                Numbered session-slot rows are delegated to SidebarApp as nativeHotkey messages because its rendered sidebar row order resolves `focusSessionSlot1..9`. Previous/Next Session walk the native sidebar's rows in Rust (gx_store/session_walk.rs), which supersedes their delegation of 2026-06-26-23:20. Previous/Next Tab in Pane stays on GPUI tab-cycle routing, and jump-to-project ids must not enter this bounce path because SidebarApp forwards those back to native.
+                CDXC:CommandPalette 2026-09-21 WHY:
+                Numbered session-slot rows (`focusSessionSlot1..9`) resolve against the drawn row order: the store resolves and focuses the Nth drawn row when its list is drawn (gx_store/sidebar_session_slot.rs), and with the switch off they are delegated to SidebarApp as nativeHotkey messages. Previous/Next Session walk the native sidebar's rows in Rust (gx_store/session_walk.rs), which supersedes their delegation of 2026-06-26-23:20. Previous/Next Tab in Pane stays on GPUI tab-cycle routing, and jump-to-project ids must not enter this bounce path because SidebarApp forwards those back to native.
 
                 CDXC:Hotkeys 2026-09-21 WHY:
                 Project jump rows resolve against the drawn project order. With the store's list drawn the store resolves and performs the whole jump (gx_store/sidebar_slot_jump.rs); with the switch off they still go to SidebarApp as the dedicated `gpuiProjectSlotHotkey` host message, never `nativeHotkey`, which SidebarApp would forward back to GPUI. Supersedes the 2026-06-26-23:42 note that SidebarApp always resolved them.
@@ -2364,9 +2364,15 @@ impl GhostexGpuiApp {
                     self.walk_native_sidebar_sessions(reverse, cx);
                     return;
                 }
-                if let Some(sidebar_action_id) =
+                if let Some((sidebar_action_id, slot_number)) =
                     gpui_command_palette_sidebar_slot_hotkey_action_id(action_id)
                 {
+                    // The store resolves the Nth drawn row and focuses it as a click would when
+                    // its list is drawn; with the switch off the old page, which draws the list,
+                    // resolves it (gx_store/sidebar_session_slot.rs).
+                    if self.gx_store_run_session_slot_hotkey(slot_number, cx) {
+                        return;
+                    }
                     self.dispatch_gpui_sidebar_host_message(
                         serde_json::json!({
                             "type": "nativeHotkey",

@@ -66,6 +66,7 @@ mod sidebar_reload;
 mod sidebar_remote;
 mod sidebar_remote_focus;
 mod sidebar_scratch_compare;
+mod sidebar_session_slot;
 mod sidebar_shadow;
 mod sidebar_shadow_compare;
 mod sidebar_snapshot;
