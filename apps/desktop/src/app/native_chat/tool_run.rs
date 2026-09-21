@@ -15,7 +15,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, div, px,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 /// The spacing between the rows of a run, kept the same inside an expansion as
 /// it is outside one so opening a group never re-flows the rows it reveals.
@@ -119,20 +119,6 @@ impl NativeChatView {
         let mut rows = self.tool_row_list(&id, &tools, &kept, p, cx);
         rows.push(self.tool_fold_toggle(run_key, label, false, p, cx));
         rows
-    }
-
-    /// Tell the host which tool rows are open, so it sends their arguments and result
-    /// (`toolDetails` in native-host.ts) and nothing for the rows that stay closed.
-    pub(super) fn sync_tool_details(&mut self, cx: &mut Context<Self>) {
-        let open: Vec<Value> = self
-            .expanded
-            .iter()
-            .filter_map(|key| {
-                let (row, index) = key.strip_prefix("tool:")?.rsplit_once(':')?;
-                Some(json!({"key":key,"messageId":row,"index":index.parse::<u64>().ok()?}))
-            })
-            .collect();
-        self.invoke(json!({"type":"toolDetails","open":open}), cx);
     }
 
     fn tool_row_list(
@@ -304,8 +290,9 @@ impl NativeChatView {
                 .into_any_element()
         });
         if expanded && has_detail {
-            let input = text(&self.tool_details[&key], "input");
-            let output = text(&self.tool_details[&key], "output");
+            let detail = self.row_detail(&key, "tool", message_id, index as u64);
+            let input = text(&detail, "input");
+            let output = text(&detail, "output");
             let has_call = tool["hasCall"] == true;
             let command = tool["glyph"] == "terminal";
             let mut detail: Vec<AnyElement> = Vec::new();

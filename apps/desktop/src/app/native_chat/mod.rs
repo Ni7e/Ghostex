@@ -67,6 +67,7 @@ mod markdown_style;
 mod maximized;
 mod message_actions;
 mod rich_markdown;
+mod row_details;
 mod send_control;
 mod toolbar;
 mod transcript_layout;

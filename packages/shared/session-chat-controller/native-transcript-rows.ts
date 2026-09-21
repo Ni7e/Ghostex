@@ -38,10 +38,7 @@ export function nativeChatToolRows(pairs: readonly SessionChatToolPair[], agentP
   return pairs.map((pair) => {
     const { input, output } = nativeChatToolDetail(pair);
     const subagent = sessionChatToolSubagent(pair.call, pair.result, agentPath);
-    /**
-     * CDXC:SessionChat 2026-09-21 DECISION:
-     * User chose to stop sending a collapsed tool's text: a row ships without its arguments and result, and the host sends them only for rows GPUI reports open (`toolDetails` in native-host.ts).
-     */
+    // The arguments and result stay behind: GPUI asks for them only while the row is open (row_details.rs).
     return {
       hasCall: Boolean(pair.call),
       // An answered question is conversation, not work: a standalone run renders the pair as the
@@ -65,15 +62,21 @@ export function nativeChatToolFold(pairs: readonly SessionChatToolPair[]) {
   return sessionChatToolRunFold(pairs.map((pair) => answeredSessionChatQuestionExchange(pair) !== null));
 }
 
-export function nativeChatFileRows(changes: readonly SessionChatFileChange[], workingDirectory?: string) {
-  return changes.map((change) => {
+export function nativeChatFileRows(
+  changes: readonly SessionChatFileChange[],
+  messageId: string,
+  workingDirectory?: string
+) {
+  return changes.map((change, index) => {
     const counts = sessionChatFileChangeCounts(change.lines);
     const failed = change.result?.isError === true;
     // Only the projected card crosses the bridge: the raw result block would ship the whole write output again.
     return {
       path: change.path,
       action: change.action,
-      lines: change.lines,
+      // The diff stays behind: GPUI asks for it by these two only while the card shows it (row_details.rs).
+      messageId,
+      index,
       // The same opt-out React's card takes (session-chat-file-change-card.tsx): both renderers
       // shorten the folder half against the row's real width, so a character budget on top of that
       // only cuts folders that would have fitted, and the two panes disagree about the same path.

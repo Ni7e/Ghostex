@@ -318,6 +318,15 @@ impl NativeChatView {
         if !show_body {
             return card.into_any_element();
         }
+        let detail = self.row_detail(
+            &key,
+            "file",
+            file["messageId"].as_str().unwrap_or_default(),
+            file["index"].as_u64().unwrap_or_default(),
+        );
+        if detail.is_null() {
+            return card.into_any_element();
+        }
         let mut code = div()
             .flex()
             .flex_col()
@@ -329,7 +338,7 @@ impl NativeChatView {
             .rounded(px(11.0 * s))
             .bg(palette.code)
             .overflow_hidden();
-        let lines: Vec<&Value> = file["lines"]
+        let lines: Vec<&Value> = detail["lines"]
             .as_array()
             .into_iter()
             .flatten()

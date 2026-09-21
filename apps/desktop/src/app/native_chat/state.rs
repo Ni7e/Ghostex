@@ -83,6 +83,8 @@ pub(crate) struct NativeChatView {
     /// The transcript scrollbar's measured track: from the top of the transcript region to the
     /// bottom of the pane, so the composer's height never shortens it (scrollbar.rs).
     pub(super) scrollbar_track: std::rc::Rc<std::cell::Cell<gpui::Pixels>>,
+    /// When the reader last scrolled the transcript, the only thing that shows its scrollbar.
+    pub(super) transcript_scrolled_at: Option<std::time::Instant>,
     input_needs_sync: bool,
     input_placeholder: String,
     input_undoable: bool,
@@ -120,8 +122,12 @@ pub(crate) struct NativeChatView {
     pub(crate) expanded: HashSet<String>,
     /// Scroll offsets of the capped boxes inside transcript rows (nested_scroll.rs).
     pub(super) nested_scrolls: super::nested_scroll::NestedScrolls,
-    /// The arguments and result of each open tool row, keyed like the row; the host sends them only for rows the reader opened.
-    pub(super) tool_details: Value,
+    /// The detail of each row drawn open, keyed like the row (row_details.rs).
+    pub(super) row_details: Value,
+    /// The details this frame's rows asked for, and the set last sent to the host.
+    pub(super) detail_demand: std::collections::BTreeMap<String, Value>,
+    pub(super) detail_sent: std::collections::BTreeMap<String, Value>,
+    pub(super) detail_sync_scheduled: bool,
     /// Armed Delayed Send / Close After Done labels drawn on the working row, set by the app (session_chat_armed_actions.rs).
     pub(crate) armed_actions: Value,
     pub(crate) collapsed: HashSet<String>,
@@ -151,6 +157,9 @@ pub(crate) struct NativeChatView {
     pub(crate) last_render: Option<std::time::Instant>,
     last_notified: Option<std::time::Instant>,
     notify_scheduled: bool,
+    /// The transcript starts at the window's top edge under the floating work area header, so its
+    /// first row reserves the header's height (`set_under_workarea_header`).
+    pub(crate) under_workarea_header: bool,
 }
 
 impl EventEmitter<NativeChatEvent> for NativeChatView {}
@@ -188,6 +197,7 @@ impl NativeChatView {
             let at_top = at_top.clone();
             cx.defer(move |cx| {
                 let _ = chat.update(cx, |chat, cx| {
+                    chat.transcript_scrolled_at = Some(std::time::Instant::now());
                     if chat.list.is_following_tail() && chat.snapshot["composerCollapsed"] == true {
                         chat.invoke(json!({"type":"composerExpand"}), cx);
                     }
@@ -247,6 +257,7 @@ impl NativeChatView {
             context_status_measurements: None,
             bounds: Default::default(),
             scrollbar_track: Default::default(),
+            transcript_scrolled_at: None,
             input_needs_sync: false,
             input_placeholder: String::new(),
             input_undoable: false,
@@ -276,7 +287,10 @@ impl NativeChatView {
             composer_ready: false,
             expanded: HashSet::new(),
             nested_scrolls: Default::default(),
-            tool_details: Value::Null,
+            row_details: Value::Null,
+            detail_demand: Default::default(),
+            detail_sent: Default::default(),
+            detail_sync_scheduled: false,
             armed_actions: Value::Array(Vec::new()),
             collapsed: HashSet::new(),
             code_wrap: HashMap::new(),
@@ -294,6 +308,7 @@ impl NativeChatView {
             last_render: None,
             last_notified: None,
             notify_scheduled: false,
+            under_workarea_header: false,
         }
     }
 
@@ -567,9 +582,9 @@ impl NativeChatView {
         }
         if let Some(details) = output
             .as_object_mut()
-            .and_then(|output| output.remove("toolDetails"))
+            .and_then(|output| output.remove("rowDetails"))
         {
-            self.tool_details = details;
+            self.row_details = details;
             self.list.remeasure();
             self.subagent_list.remeasure();
             self.notify_if_shown(cx);

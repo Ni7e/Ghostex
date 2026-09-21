@@ -116,9 +116,9 @@ export class NativeSubagentViewer {
     };
   }
 
-  /** A tool row's arguments and result, when the row belongs to the transcript this viewer shows. */
-  toolDetail(messageId: string, index: number) {
-    return this.presentation.toolDetail(messageId, index);
+  /** An open row's detail, when the row belongs to the transcript this viewer shows. */
+  rowDetail(kind: string, messageId: string, index: number) {
+    return this.presentation.rowDetail(kind, messageId, index);
   }
 
   private projector(): NativeChatPresentation {
