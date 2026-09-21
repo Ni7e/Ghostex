@@ -31,13 +31,22 @@ picked WSL's Linux bash on any machine with WSL installed, because Git for
 Windows keeps bash.exe in Git\bin, which it deliberately leaves off PATH. WSL
 bash cannot open `C:\...` arguments, so packaging died with no diagnostic.
 Resolve bash beside git.exe, the same way build-windows-code-server.ps1 does.
+Walk up from every git.exe on PATH rather than assuming one fixed depth: a
+start launched from a Git Bash shell resolves git.exe to Git\mingw64\bin, two
+levels below the install root, while a PowerShell start resolves it to Git\cmd,
+one level below.
 #>
 function Get-GitBash {
-    $GitPath = (Get-Command git.exe -ErrorAction Stop).Source
-    $GitRoot = Split-Path (Split-Path $GitPath -Parent) -Parent
-    $Bash = Join-Path $GitRoot "bin/bash.exe"
-    if (!(Test-Path $Bash)) { throw "Git for Windows bash.exe was not found beside git.exe." }
-    return $Bash
+    foreach ($GitPath in (Get-Command git.exe -All -ErrorAction Stop | Select-Object -ExpandProperty Source)) {
+        $Candidate = Split-Path $GitPath -Parent
+        for ($Level = 0; $Level -lt 3 -and $Candidate; $Level += 1) {
+            $Candidate = Split-Path $Candidate -Parent
+            if (!$Candidate) { break }
+            $Bash = Join-Path $Candidate "bin/bash.exe"
+            if (Test-Path $Bash) { return $Bash }
+        }
+    }
+    throw "Git for Windows bash.exe was not found beside git.exe."
 }
 $GitBash = Get-GitBash
 $AppName = "Ghostex"
