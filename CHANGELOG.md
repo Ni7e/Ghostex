@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+## 10.0.0 - 2026-09-21
+
+**Ghostex 10.0.0 is out.** A new layout: the titlebar row is gone, views open as tabs beside your sessions instead of over them, and browser pages share the same tab strip. The sidebar now runs fully natively, the chat model picker gains favorites and one-click settings, and the accent color follows your background tint.
+
+### 🪟 Views open beside your sessions
+- **Your sessions stay on screen while you use a view.** Terminals and chats keep the left side, the view takes the right, and each project remembers where you left the divider; drag it to change the balance and double-click it to reset.
+- **Views are tabs, and a project can keep several open.** Open another from the + at the end of the tab strip, close a tab with its x or a middle click, drag tabs to reorder them, and right-click one to Pin tab. Each project brings its own tabs back when you return to it.
+- **Browser pages are tabs in the same strip.** Every open page shows its icon and title beside your views, Browser Tab at the top of the + menu opens a new one, and page icons are remembered across restarts.
+- **Pop a view out or give it the whole window.** Buttons at the end of the strip open the view in its own window, expand it over the sessions column (Cmd+Ctrl+E), or expand it fully and hide the sidebar too (Cmd+Ctrl+Shift+E).
+- **A slimmer header replaces the titlebar row.** It holds the project name, Start, Open and Commit, and a ⋯ menu with Ask Ghostex, Tips & Tricks, Resources, Dev servers, Extensions and Customize; Cmd+Option+B shows or hides the view panel.
+- **An Open a view picker when nothing is open.** It lists every view you can open in the project; press C, B, K, U or D for Code, Browser, Kanban, Automate or Docs.
+
+### 🦀 The sidebar is fully native
+- **Every sidebar action runs in the app itself.** Clicking, renaming, notes, forking, sleep and wake, pinning, snoozing, Spaces, Project Groups, and the Cmd+1 through 9 session hotkeys no longer go through a web page, so the list responds faster and stays in step with what you do.
+- **Remote computers draw in the same list.** A connected remote computer's projects and sessions sit alongside this computer's, and an offline one shows the sessions it had last time.
+- **Tooltips and menus fit better.** Row tooltips stay inside the sidebar and match their card's width, menus size to their labels, and the More menu no longer repeats Settings and Hotkeys.
+- **The collapsed sidebar's edge reveals what you point at.** Hover the window's left edge to float the sidebar back, or the sessions column when a view fills the window, and the revealed pane takes focus.
+- **Quick Access rows get an actions menu with hotkeys.** Open sessions show a blue status dot there.
+
+### 💬 Chat
+- **Star models to keep them at the top everywhere.** The model picker has a Favorites tab shared by every open session; click a model to set it for this session and as the default, or right-click to change only this session.
+- **Pick another agent's model to start a Handoff.** The Handoff dialog opens with that agent and model already chosen.
+- **Reasoning, context window and Fast mode are one-click buttons.** They sit along the bottom of the model picker.
+- **Option-click Send to compact and send.** The gesture is named on the button.
+- **Armed Delayed Send and Close After Done show on the composer.** Click one to open Delayed Actions.
+- **Resuming a Claude session reattaches to its background agent** when one is still running.
+- **Rewind and question answers are more reliable.** Rewind waits for Claude's input box before acting, pasted text shows as you typed it, and a file change card opens with one click anywhere on it.
+
+### 🎨 Look and feel
+- **The accent color follows your background tint.** The separate accent setting is gone; a neutral tint keeps the sky-blue accent.
+- **Clearer status colors.** Every working status uses the same orange, git diff counts read well in light and dark themes, and Spaces get a theme-aware Gray.
+- **The Quick Actions button shows the name of the last Action you ran.**
+- **The terminal scrollbar appears while you scroll,** and the scroll wheel moves the same distance as in Ghostty.
+- **Browser shortcuts.** Reload with F5 or Cmd+R (Ctrl+R on Windows and Linux), and Ctrl+F finds on the page on Windows and Linux.
+- **App dialogs open faster.** Each one loads only when you first open it.
+
+### 🩹 Fixes
+- **Windows fixes.** Account helpers and install commands resolve correctly, the installer checks that the new version really landed, header dropdowns no longer steal focus from the main window, and chat saves its state again.
+- **Restored custom-agent sessions keep their icon** and their chat view.
+- **New sessions start as top-level agent runs,** not as nested children of another session.
+
+### ⚠️ Heads up
+- **The previous web chat view has been removed.** Desktop chat is native only, so the Use GPUI chat setting is gone.
+
 ## 9.9.0 - 2026-09-19
 
 **Ghostex 9.9.0 is out.** The desktop app's sidebar and chat are rebuilt from the ground up in Rust with GPUI instead of the web views they used before, which cuts memory use roughly in half in many setups (from about 1.5 GB to about 800 MB). This release also adds actions under every chat message, per-session model picks, new session hotkeys, and CLI commands that let agents launch and talk to each other.
