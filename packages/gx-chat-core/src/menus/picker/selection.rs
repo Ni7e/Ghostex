@@ -9,6 +9,7 @@
 //! SEE-ALSO: server/src/session_chat_model_selection.rs owns delivery, coalescing and retries
 //! after the client closes.
 
+use ghostex_gx_protocol::Tri;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -84,10 +85,13 @@ pub fn serialize_model_selection_intent(intent: &ModelSelectionIntent) -> String
 pub struct ModelSelectionState {
     /// The durable intent waiting to reach gxserver, or `None`.
     pub outbox: Option<ModelSelectionIntent>,
-    /// The selection gxserver already reports as pending, folded by family a. A `failed` one is
-    /// dropped here, because a failed selection never applied and is not where the session is
-    /// heading.
-    pub pending: Option<ModelSelectionIntent>,
+    /// The selection gxserver already reports as pending, folded by family a.
+    ///
+    /// Three-state, because `desired` is `outbox ?? pending` and `JSON.stringify` leaves the key
+    /// out only when both are `undefined`: absent, `null` and a value are three different
+    /// documents. A `failed` one folds to `null` here, because a failed selection never applied
+    /// and is not where the session is heading.
+    pub pending: Tri<ModelSelectionIntent>,
     /// The reason the last selection was abandoned, for the surface that offered it.
     pub selection_error: Option<String>,
     /// When a failed delivery is retried.
@@ -99,27 +103,48 @@ pub struct ModelSelectionState {
 impl ModelSelectionState {
     /// `desired`: the outbox entry, else the pending selection.
     pub fn desired(&self) -> Option<&ModelSelectionIntent> {
-        self.outbox.as_ref().or(self.pending.as_ref())
+        match (&self.outbox, &self.pending) {
+            (Some(outbox), _) => Some(outbox),
+            (None, Tri::Value(pending)) => Some(pending),
+            _ => None,
+        }
+    }
+
+    /// Whether `desired` is a key at all: `outbox ?? pending` is `undefined` only when the outbox
+    /// is empty and no frame has carried a pending selection.
+    pub fn desired_present(&self) -> bool {
+        self.outbox.is_some() || !self.pending.is_absent()
     }
 
     /// Adopts what family a folded out of `pendingModelSelection`.
     ///
     /// A `failed` selection never applied, so it is not what this session is heading for; its
     /// message becomes [`ModelSelectionState::selection_error`] instead.
-    pub fn adopt_pending(&mut self, pending: Option<&Value>) {
-        let state = pending
+    pub fn adopt_pending(&mut self, pending: &Tri<Value>) {
+        let value = match pending {
+            Tri::Value(value) => Some(value),
+            _ => None,
+        };
+        let state = value
             .and_then(|value| value.get("state"))
             .and_then(Value::as_str);
         if state == Some("failed") {
-            self.pending = None;
-            self.selection_error = pending
+            self.pending = Tri::Null;
+            self.selection_error = value
                 .and_then(|value| value.get("errorMessage"))
                 .and_then(Value::as_str)
                 .map(str::to_string);
             return;
         }
         self.selection_error = None;
-        self.pending = pending.and_then(|value| serde_json::from_value(value.clone()).ok());
+        self.pending = match pending {
+            Tri::Absent => Tri::Absent,
+            Tri::Null => Tri::Null,
+            Tri::Value(value) => match serde_json::from_value(value.clone()) {
+                Ok(intent) => Tri::Value(intent),
+                Err(_) => Tri::Null,
+            },
+        };
     }
 
     /// `persist`: record a new intent. The id comes from the host, because the core has no random
@@ -190,12 +215,26 @@ impl ModelSelectionState {
     }
 
     /// The `modelSelection` document key.
+    ///
+    /// `desired` is left out when it is `undefined`, which is what `JSON.stringify` does to the
+    /// `outbox ?? pending` of a session no frame has carried a pending selection for.
     pub fn to_json(&self) -> Value {
-        serde_json::json!({
-            "desired": self.desired(),
-            "outbox": self.outbox,
-            "selectionError": self.selection_error,
-        })
+        let mut object = Map::new();
+        if self.desired_present() {
+            object.insert(
+                "desired".into(),
+                serde_json::to_value(self.desired()).unwrap_or(Value::Null),
+            );
+        }
+        object.insert(
+            "outbox".into(),
+            serde_json::to_value(&self.outbox).unwrap_or(Value::Null),
+        );
+        object.insert(
+            "selectionError".into(),
+            serde_json::to_value(&self.selection_error).unwrap_or(Value::Null),
+        );
+        Value::Object(object)
     }
 }
 

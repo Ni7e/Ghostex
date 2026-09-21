@@ -36,6 +36,15 @@ pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> 
         next
     }));
     state.extras.next_request_id = next;
+    // Family e2 carries the same kind of state: the open picker's animations run on deadlines,
+    // the fork branch family is read once inside `publish`, and the starred models, the context
+    // preferences and the agent model catalog all arrive from outside.
+    let mut next = state.pickers.next_request_id;
+    effects.extend(crate::menus::picker::settle(state, event, context, || {
+        next += 1;
+        next
+    }));
+    state.pickers.next_request_id = next;
     effects
 }
 

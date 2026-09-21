@@ -43,6 +43,9 @@ pub struct ModelMenuContext {
     pub selection_error: Option<String>,
     /// Picks are refused while an option command is being typed into a working agent.
     pub disabled: bool,
+    /// `sessionOptions.sessionKey`: the picker checks it again when it finishes, because the
+    /// session can change under an open picker.
+    pub session_key: Option<String>,
     /// The value `modelMenuContext` itself is published as.
     ///
     /// Its `descriptors` and `state` are family e1's own shapes, which e2 does not model, so e1

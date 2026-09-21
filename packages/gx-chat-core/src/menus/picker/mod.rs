@@ -23,6 +23,7 @@ pub mod native;
 pub mod projection;
 pub mod request;
 pub mod selection;
+pub mod settle;
 pub mod traits;
 
 pub use crate::menus::picker::actions::handle;
@@ -35,3 +36,4 @@ pub use crate::menus::picker::model_picker::{
 pub use crate::menus::picker::native::{ModelPickerOutcome, ModelPickerState};
 pub use crate::menus::picker::projection::{ModelMenuContext, ModelMenuPick};
 pub use crate::menus::picker::selection::{ModelSelectionIntent, ModelSelectionState};
+pub use crate::menus::picker::settle::settle;

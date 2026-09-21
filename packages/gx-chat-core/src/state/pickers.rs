@@ -54,6 +54,8 @@ pub struct PickersState {
     pub fork_branches: ForkBranchesState,
     /// The context meter, its editor and its status line.
     pub context: ContextState,
+    /// The ids family e2's own reads are allocated from, the way family f keeps its own.
+    pub next_request_id: u64,
 }
 
 impl PickersState {
@@ -96,12 +98,14 @@ impl PickersState {
 pub struct ForkBranchesState {
     /// The read has been issued; it is never issued again.
     pub asked: bool,
+    /// The id of the one read, while it is in flight.
+    pub request_id: Option<u64>,
     /// The daemon's own order (newest activity first). An empty answer is never adopted.
     pub branches: Vec<ForkBranch>,
 }
 
 /// The context meter, the row editor and the measured status line.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ContextState {
     /// The saved row preferences, per agent. Claude and Codex are saved independently.
     pub preferences: ContextPreferencesByAgent,
@@ -116,6 +120,21 @@ pub struct ContextState {
     pub status_rows: Vec<u32>,
     /// When the meter's countdown labels are next re-rendered (`native-context.ts`, 30 s).
     pub next_meter_refresh_ms: Option<f64>,
+}
+
+impl Default for ContextState {
+    fn default() -> Self {
+        Self {
+            preferences: ContextPreferencesByAgent::default(),
+            editor: None,
+            agent_icon: None,
+            account: None,
+            // `let contextStatusRows = [0]`: one row from the first frame, before the renderer
+            // has measured anything, so the status line never starts unwrapped.
+            status_rows: vec![0],
+            next_meter_refresh_ms: None,
+        }
+    }
 }
 
 /// One preferences record per agent.
