@@ -226,6 +226,13 @@ impl GhostexGpuiApp {
             self.gx_store_focus_remote_row(&command, &plan, cx);
             return;
         }
+        // A click on a row of THIS computer: the page's half of it (the multi-selection cleared, an
+        // open app modal closed) is performed here and the runtime's own `focusSession` goes
+        // straight to the runtime, so the five senders that post this command share ONE route with
+        // no page in it (gx_store/sidebar_focus_route.rs).
+        if self.gx_store_focus_local_row(&command, cx) {
+            return;
+        }
         let Some(service) = self.sidebar.clone() else {
             return;
         };

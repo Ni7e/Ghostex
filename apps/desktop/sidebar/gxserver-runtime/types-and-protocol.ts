@@ -186,6 +186,14 @@ export type GhostexGpuiSidebarBridge = {
   onResourcesSnapshotResult?: (payload: unknown) => void;
   onProjectBoardConversationRequest?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot) => void;
+  /**
+   * CDXC:Sidebar 2026-09-21 WHY:
+   * The Rust store's direct route for a sidebar command this runtime still owns (focus, session
+   * groups, worktrees, git, remote machines, transcripts). It replaces the hop through the sidebar
+   * page's `onNativeSidebarCommand`, which is being deleted with that page; anything Rust sends
+   * before this is installed is parked on `pendingSidebarCommands` and drained here.
+   */
+  onSidebarCommand?: (payload: unknown) => void;
   onSidebarHostMessage?: (message: GpuiSidebarHostMessage) => void;
   /**
    * CDXC:SavedPrompts 2026-08-24:
@@ -233,6 +241,7 @@ export type GhostexGpuiSidebarBridge = {
   pendingNativeAppShots?: unknown[];
   pendingOsIntegrationCommands?: unknown[];
   pendingResourcesSnapshotResults?: unknown[];
+  pendingSidebarCommands?: unknown[];
   pendingProjectBoardConversationRequests?: unknown[];
   pendingStashedPromptSessionJumps?: unknown[];
   pendingStatusPetActivations?: unknown[];

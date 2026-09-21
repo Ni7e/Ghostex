@@ -104,6 +104,21 @@ pub(crate) fn gpui_percent_decoded_id_part(value: &str) -> Option<String> {
     .then_some(decoded)
 }
 
+/// The store's direct route into the sidebar runtime for a command it does not perform itself.
+///
+/// CDXC:Sidebar 2026-09-21 WHY:
+/// The old route was `onNativeSidebarCommand`, the sidebar PAGE's entry, which routed the command
+/// and forwarded most of it to the runtime. That page is being deleted, so the store sends the
+/// runtime's own message straight to the runtime. A command that arrives before the runtime
+/// installed its entry is parked on the bridge and drained by the install, the way the attention
+/// acknowledgement and the terminal runtime action already are, so an edit is delivered late
+/// rather than lost.
+pub(crate) fn gpui_sidebar_runtime_command_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onSidebarCommand==='function'){{bridge.onSidebarCommand(payload);}}else{{const pending=Array.isArray(bridge.pendingSidebarCommands)?bridge.pendingSidebarCommands:[];pending.push(payload);bridge.pendingSidebarCommands=pending;}}}})(); undefined;"
+    )
+}
+
 pub(crate) fn gpui_sidebar_host_message_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui;if(bridge&&typeof bridge.onSidebarHostMessage==='function'){{bridge.onSidebarHostMessage({message});}}}})(); undefined;"

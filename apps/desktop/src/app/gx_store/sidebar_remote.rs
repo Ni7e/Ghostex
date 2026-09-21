@@ -92,6 +92,7 @@ pub(crate) struct SidebarRemoteHost {
         super::sidebar_slot_jump::SlotJumpCounters,
         super::sidebar_session_slot::SessionSlotCounters,
         super::sidebar_close_project::CloseProjectCounters,
+        super::sidebar_focus_route::LocalFocusRouteCounters,
     )>,
 }
 
@@ -325,6 +326,8 @@ impl GhostexGpuiApp {
         let session_slot = self.gx_store.session_slot.counters;
         // Close Project's successor (gx_store/sidebar_close_project.rs).
         let close_project = self.gx_store_close_project_counters();
+        // A local row's click, routed straight to the runtime (gx_store/sidebar_focus_route.rs).
+        let local_focus = self.gx_store_local_focus_route_counters();
         let host = &mut self.gx_store.sidebar_remote;
         let now = (host.counters, local);
         if host.summary_written
@@ -337,6 +340,7 @@ impl GhostexGpuiApp {
                 slot_jump,
                 session_slot,
                 close_project,
+                local_focus,
             ))
             || host
                 .summary_at
@@ -358,6 +362,7 @@ impl GhostexGpuiApp {
             slot_jump,
             session_slot,
             close_project,
+            local_focus,
         ));
         let [
             reloads_stopped,
@@ -387,6 +392,7 @@ impl GhostexGpuiApp {
                 "slotJump": super::sidebar_slot_jump::slot_jump_counters_json(&slot_jump),
                 "sessionSlot": super::sidebar_session_slot::session_slot_counters_json(&session_slot),
                 "closeProject": super::sidebar_close_project::close_project_counters_json(&close_project),
+                "localFocus": super::sidebar_focus_route::local_focus_route_counters_json(&local_focus),
             }),
         );
     }

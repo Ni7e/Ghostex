@@ -17,6 +17,7 @@ import type { GpuiSidebarRuntimeAttentionMethods } from './attention-tracking';
 import { gpuiSidebarRuntimeAttentionMethods } from './attention-tracking';
 import type { GpuiSidebarRuntimeAutoSleepMethods } from './auto-sleep';
 import { gpuiSidebarRuntimeAutoSleepMethods } from './auto-sleep';
+import { asGpuiSidebarCommand } from './sidebar-command-entry';
 import { GpuiGxserverClient } from './client';
 import type { GpuiSidebarRuntimeCloseAfterDoneMethods } from './close-after-done';
 import { gpuiSidebarRuntimeCloseAfterDoneMethods } from './close-after-done';
@@ -758,6 +759,19 @@ export class GpuiSidebarRuntime {
     gpuiBridge.onWorkspaceSessionAttentionAcknowledge = (payload) => {
       this.handleGpuiWorkspaceSessionAttentionAcknowledge(payload);
     };
+    /*
+    CDXC:Sidebar 2026-09-21 WHY:
+    The desktop sidebar is the Rust store's, and the page that used to receive its commands and
+    forward them here (`native-sidebar/controller.ts`'s `post`) is being deleted. Everything the
+    store cannot perform itself, because this runtime still owns it (focus, session groups,
+    worktrees, git, remote machines, transcripts), arrives on this one entry instead and goes
+    straight to the same handler the page's forward ended in. One hop fewer, and nothing in the
+    route depends on a page being loaded.
+    */
+    gpuiBridge.onSidebarCommand = (payload) => {
+      const message = asGpuiSidebarCommand(payload);
+      if (message) void this.handleSidebarMessage(message);
+    };
     gpuiBridge.onWorkspaceTerminalBell = (payload) => {
       void this.handleGpuiWorkspaceTerminalBell(payload);
     };
@@ -895,6 +909,13 @@ export class GpuiSidebarRuntime {
       : [];
     for (const payload of pendingWorkspaceSessionAttentionAcknowledgements) {
       this.handleGpuiWorkspaceSessionAttentionAcknowledge(payload);
+    }
+    const pendingSidebarCommands = Array.isArray(gpuiBridge.pendingSidebarCommands)
+      ? gpuiBridge.pendingSidebarCommands.splice(0)
+      : [];
+    for (const payload of pendingSidebarCommands) {
+      const message = asGpuiSidebarCommand(payload);
+      if (message) void this.handleSidebarMessage(message);
     }
     const pendingWorkspaceTerminalBells = Array.isArray(gpuiBridge.pendingWorkspaceTerminalBells)
       ? gpuiBridge.pendingWorkspaceTerminalBells.splice(0)

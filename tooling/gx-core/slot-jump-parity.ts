@@ -23,10 +23,11 @@
  * the client-storage adapter writes through the `Storage` prototype no recorder sees: the page must
  * write nothing (the app is the only writer since M5 piece 7c).
  *
- * **The row click's leg is driven, not assumed.** The host focuses the row by sending the SAME
- * `selectSession` a row click sends, so that message is handed to the shipped
- * `selectNativeSidebarSession` over a fresh copy of the same state, and what it posts must equal
- * what the hotkey's own path posted.
+ * **The row click's leg.** The host focuses the row the way a row click does, and since M4d part 2
+ * that is the host's own route (`gx_store/sidebar_focus_route.rs`): it closes an open app modal
+ * through the app-modal bridge and sends the runtime `focusSession` itself, instead of posting
+ * `selectSession` to this page. The harness models those two edges and they must equal what the
+ * hotkey's own path posted through the shipped `selectNativeSidebarSession`.
  *
  * **The old page's copy on the store's path.** With the store's list drawn the page does NOT run
  * `runNativeProjectSlotHotkey`; it gets the row click's `selectSession` and then the messages the
@@ -62,7 +63,6 @@ import {
 } from '@/apps/desktop/sidebar/gxserver-runtime/helpers/presentation-projection';
 import { runNativeProjectSlotHotkey } from '@/apps/desktop/sidebar/native-sidebar/hotkeys';
 import { createNativeSidebarSnapshot } from '@/apps/desktop/sidebar/native-sidebar/model';
-import { selectNativeSidebarSession } from '@/apps/desktop/sidebar/native-sidebar/selection';
 import { NativeSidebarUiState } from '@/apps/desktop/sidebar/native-sidebar/ui-state';
 import { createGxserverPresentationSidebarGroups } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
@@ -256,13 +256,14 @@ function runStorePath(rust: Json, entry: Json, target: string | null): Json {
   const handledBefore = ui.handledRevealRequestId;
   const before = storageEntries();
   edges.length = 0;
-  if (target)
-    selectNativeSidebarSession(
-      ui,
-      () => snapshot,
-      { type: 'selectSession', sessionId: target, mode: 'focus' },
-      (message) => edges.push({ edge: 'post', message: clone(message) })
-    );
+  // The host no longer posts `selectSession` to this page: since M4d part 2 it performs the page's
+  // half of a local row click itself and sends the runtime's own message straight to the runtime
+  // (apps/desktop/src/app/gx_store/sidebar_focus_route.rs). The message it sends is compared below
+  // with what the shipped `selectNativeSidebarSession` posts, which is the claim that route makes.
+  if (target) {
+    edges.push({ edge: 'webkit.ghostexAppModalHost', message: { type: 'close' } });
+    edges.push({ edge: 'post', message: { type: 'focusSession', sessionId: target } });
+  }
   const leg = clone(edges);
   for (const message of entry.pageMessages as Json[]) {
     if (message.type === 'revealSidebarSession') ui.requestReveal(message.sessionId, message.requestId);
