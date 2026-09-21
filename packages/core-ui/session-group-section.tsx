@@ -112,6 +112,7 @@ import {
 } from './sortable-session-card';
 import { resolveSidebarSpaceIcon } from './space-filter-row';
 import { getSidebarSpaceIdsContainingProject, type SidebarSpacesState } from './spaces';
+import { resolveSidebarSpaceDisplayColor } from './space-colors';
 import { useSidebarTooltipDelayMs } from './tooltip-delay';
 import { useCollapsibleHeight } from './use-collapsible-height';
 import type { WebviewApi } from './webview-api';
@@ -3055,7 +3056,7 @@ export function SessionGroupSection({
                         >
                           <SidebarCommandIconGlyph
                             className='session-context-menu-icon'
-                            color={space.color}
+                            color={resolveSidebarSpaceDisplayColor(space.color)}
                             icon={resolveSidebarSpaceIcon(space.icon)}
                             size={14}
                           />

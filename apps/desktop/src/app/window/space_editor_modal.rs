@@ -137,10 +137,9 @@ pub(crate) const SPACE_EDITOR_ICONS: [SpaceEditorIcon; 59] = [
     icon!("world", "Browser", "world"),
 ];
 
-/// `SIDEBAR_PROJECT_COLLECTION_COLORS` with `SIDEBAR_PROJECT_COLLECTION_COLOR_LABELS`.
-pub(crate) const SPACE_EDITOR_COLORS: [(&str, &str); 13] = [
-    ("#4f5663", "Dark Gray"),
-    ("#808080", "Gray"),
+/// `SIDEBAR_SPACE_COLORS` with `getSidebarSpaceColorLabel` from packages/core-ui/space-colors.ts.
+pub(crate) const SPACE_EDITOR_COLORS: [(&str, &str); 12] = [
+    (SPACE_GRAY_LIGHT_THEME, "Gray"),
     ("#7c6df2", "Violet"),
     ("#3aa675", "Green"),
     ("#d6873f", "Orange"),
@@ -153,6 +152,29 @@ pub(crate) const SPACE_EDITOR_COLORS: [(&str, &str); 13] = [
     ("#2f9b95", "Teal"),
     ("#596fd1", "Indigo"),
 ];
+
+/// CDXC:Spaces 2026-09-21 DECISION: User: merge the two gray Space colors into one, and use one of them for dark mode and one for light mode.
+/// A Space saved with either hex is the single Gray, drawn as #4f5663 on light themes and #808080 on dark themes.
+/// SEE-ALSO: packages/core-ui/space-colors.ts.
+const SPACE_GRAY_LIGHT_THEME: &str = "#4f5663";
+const SPACE_GRAY_DARK_THEME: &str = "#808080";
+
+fn is_space_gray(color: &str) -> bool {
+    let color = color.trim();
+    color.eq_ignore_ascii_case(SPACE_GRAY_LIGHT_THEME)
+        || color.eq_ignore_ascii_case(SPACE_GRAY_DARK_THEME)
+}
+
+/// The hex a Space draws with under the given appearance.
+pub(crate) fn space_display_color(color: &str, light: bool) -> &str {
+    if !is_space_gray(color) {
+        color
+    } else if light {
+        SPACE_GRAY_LIGHT_THEME
+    } else {
+        SPACE_GRAY_DARK_THEME
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SpaceEditorMode {
@@ -820,8 +842,10 @@ impl GpuiSpaceEditorModalWindow {
                     .iter()
                     .enumerate()
                     .map(|(index, (color, _label))| {
-                        let selected = self.color.eq_ignore_ascii_case(color);
-                        let fill = parse_hex_color(color).unwrap_or(p.raised);
+                        let selected = self.color.eq_ignore_ascii_case(color)
+                            || (is_space_gray(color) && is_space_gray(&self.color));
+                        let fill = parse_hex_color(space_display_color(color, p.light))
+                            .unwrap_or(p.raised);
                         div()
                             .id(("space-editor-color-swatch", index))
                             .flex_shrink_0()

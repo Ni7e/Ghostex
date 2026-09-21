@@ -47,6 +47,7 @@ import { openAppModal } from './app-modal-host-bridge';
 import { resolveSidebarSpaceIcon } from './space-filter-row';
 import { createRemoteSidebarSpaceSectionKey, LOCAL_SIDEBAR_SPACE_SECTION_KEY } from './sidebar-app/space-filtering';
 import { getSidebarSpaceIdsContainingCollection, type SidebarSpacesState } from './spaces';
+import { resolveSidebarSpaceDisplayColor } from './space-colors';
 
 type ProjectCollectionSectionProps = {
   autoEdit: boolean;
@@ -516,7 +517,7 @@ export function ProjectCollectionSection({
                       >
                         <SidebarCommandIconGlyph
                           className='session-context-menu-icon'
-                          color={space.color}
+                          color={resolveSidebarSpaceDisplayColor(space.color)}
                           icon={resolveSidebarSpaceIcon(space.icon)}
                           size={14}
                         />

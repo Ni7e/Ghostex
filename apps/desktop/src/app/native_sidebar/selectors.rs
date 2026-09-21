@@ -7,6 +7,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, px, rgb,
 };
 use gpui_component::{h_flex, v_flex};
+use gpui_component::tooltip::ManagedTooltipExt as _;
 use serde_json::json;
 
 use super::{
@@ -50,6 +51,7 @@ impl GhostexGpuiApp {
             }
         }
         let visible_ids: Vec<String> = visible.iter().map(|space| space.id.clone()).collect();
+        let light = appearance.light;
         let hidden: Vec<_> = user_spaces
             .iter()
             .filter(|space| !visible.iter().any(|item| item.id == space.id))
@@ -58,7 +60,7 @@ impl GhostexGpuiApp {
         v_flex().w_full().flex_shrink_0()
             .children(self.render_native_machine_tabs(snapshot, appearance, cx))
             .child(div().h(px(13.0 * scale)).flex_shrink_0())
-            .when(snapshot.spaces_enabled, |column| column.child(h_flex().id("native-sidebar-space-track").sidebar_drop_target("space-row", String::new(), None, cx).w_full().h(px(40.0 * scale)).pb(px(12.0 * scale)).pl(px(3.0 * scale)).pr(px(10.0 * scale)).gap(px(4.0 * scale))
+            .when(snapshot.spaces_enabled, |column| column.child(h_flex().id("native-sidebar-space-track").sidebar_drop_target("space-row", String::new(), None, cx).w_full().h(px(40.0 * scale)).pb(px(12.0 * scale)).px(px(6.5 * scale)).justify_center().gap(px(4.0 * scale))
                 .when(user_spaces.is_empty(), |row| row.child(h_flex().id("native-sidebar-create-space").flex_1().h(px(28.0 * scale)).px(px(10.0 * scale)).gap(px(6.0 * scale)).rounded(px(6.0 * scale)).border_1().border_color(appearance.muted.opacity(0.25)).text_size(px(12.0 * scale))
                     .child(titlebar_svg_icon("titlebar/plus.svg", 14.0 * scale, appearance.muted)).child("Create space")
                     .on_click(cx.listener(|app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_ui(json!({"type": "editSpace"}), cx); }))))
@@ -67,7 +69,7 @@ impl GhostexGpuiApp {
                     .child(titlebar_svg_icon("titlebar/dots.svg", 16.0 * scale, appearance.muted))
                     .on_click(cx.listener(move |_, event: &gpui::ClickEvent, window, cx| {
                         // CDXC:Spaces 2026-09-20 DECISION: User: the More menu lists the overflowing Spaces first and puts New Space last, under a separator.
-                        let mut items: Vec<_> = hidden.iter().map(|space| json!({"label": space.name, "icon": space.icon, "iconColor": space.color, "checked": space.selected, "command": {"type": "selectSpace", "spaceId": space.id}})).collect();
+                        let mut items: Vec<_> = hidden.iter().map(|space| json!({"label": space.name, "icon": space.icon, "iconColor": crate::app::window::space_editor_modal::space_display_color(&space.color, light), "checked": space.selected, "command": {"type": "selectSpace", "spaceId": space.id}})).collect();
                         if !items.is_empty() { items.push(json!({"separator": true})); }
                         items.push(json!({"label": "New Space", "icon": "plus", "command": {"type": "editSpace"}}));
                         Self::show_native_sidebar_menu(&json!(items), event.position(), scale, window, cx);
@@ -87,11 +89,27 @@ impl GhostexGpuiApp {
         let drag_id = id.clone();
         let name = space.name.clone();
         let scale = appearance.scale;
+        let tooltip_span = super::tooltips::SidebarTooltipSpan::sidebar(self.sidebar_width, scale);
         let path = gpui_sidebar_command_icon_asset_path(Some(&space.icon));
-        let color = u32::from_str_radix(space.color.trim_start_matches('#'), 16)
+        let display_color = crate::app::window::space_editor_modal::space_display_color(
+            &space.color,
+            appearance.light,
+        );
+        let color = u32::from_str_radix(display_color.trim_start_matches('#'), 16)
             .map(rgb)
             .map(gpui::Hsla::from)
             .unwrap_or(appearance.foreground);
+        /*
+        CDXC:Spaces 2026-09-21 DECISION:
+        User: the selected Space's grey box looked bad in light mode, make it nicer. In light mode it
+        is a raised white tile (white fill, hairline outline, small shadow); dark mode keeps its
+        translucent fill.
+        */
+        let (selected_background, selected_outline) = if appearance.light {
+            (appearance.selected, appearance.selected_outline.opacity(0.14 / 0.12))
+        } else {
+            (appearance.foreground.opacity(0.12), appearance.foreground.opacity(0.16))
+        };
         let dragged = SidebarDrag {
             kind: "space",
             id: id.clone(),
@@ -102,18 +120,18 @@ impl GhostexGpuiApp {
                 icon: space.icon.clone(),
                 color,
                 background: if space.selected {
-                    appearance.foreground.opacity(0.12)
+                    selected_background
                 } else if space.contains_active_session {
                     appearance.selected
                 } else {
                     appearance.foreground.opacity(0.08)
                 },
                 outline: if space.selected {
-                    appearance.foreground.opacity(0.16)
+                    selected_outline
                 } else if space.contains_active_session {
                     appearance.selected_outline
                 } else {
-                    gpui::transparent_black()
+                    appearance.foreground.opacity(0.08)
                 },
                 pointer_y: px(0.0),
             }),
@@ -125,17 +143,23 @@ impl GhostexGpuiApp {
             .size(px(16.0 * scale))
             .text_color(color)
             .opacity(if has_status { 0.8 } else { 1.0 });
-        v_flex().id(format!("native-sidebar-space-{id}")).relative().size(px(28.0 * scale)).flex_shrink_0().items_center().justify_center().rounded(px(6.0 * scale)).border_1().border_color(gpui::transparent_black()).cursor_pointer()
+        /*
+        CDXC:Spaces 2026-09-21 DECISION:
+        User: the Spaces row's buttons are centred in the sidebar, and every Space's icon has a very
+        light outline. A selected Space, or one holding the active session, keeps its stronger outline.
+        */
+        v_flex().id(format!("native-sidebar-space-{id}")).relative().size(px(28.0 * scale)).flex_shrink_0().items_center().justify_center().rounded(px(6.0 * scale)).border_1().border_color(appearance.foreground.opacity(0.08)).cursor_pointer()
             .when(self.native_sidebar.is_dragging("space", &id), |row| row.opacity(0.3))
             .when(space.contains_active_session && !space.selected, |row| row.bg(appearance.selected).border_color(appearance.selected_outline))
-            .when(space.selected, |row| row.bg(appearance.foreground.opacity(0.12)).border_color(appearance.foreground.opacity(0.16)))
+            .when(space.selected, |row| row.bg(selected_background).border_color(selected_outline).when(appearance.light, |row| row.shadow_sm()))
             .hover(|row| row.bg(appearance.hover))
             .child(icon)
             .children(drop_position.map(|position| super::space_drag::insertion_line(position, scale)))
-            .when(space.working_count > 0 || space.attention_count > 0, |row| row.child(h_flex().absolute().top(px(15.5 * scale)).left_0().w_full().justify_center().h(px(9.0 * scale)).gap(px(2.0 * scale)).font_family("JetBrainsMono Nerd Font").text_size(px(9.0 * scale)).font_weight(FontWeight::BOLD)
-                .when(space.working_count > 0, |row| row.child(div().text_color(rgb(0xf8ad07)).child(space.working_count.to_string())))
-                .when(space.attention_count > 0, |row| row.child(div().text_color(rgb(0x95d7f6)).child(space.attention_count.to_string())))))
-            .when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.tooltip_show_delay(appearance.tooltip_delay).tooltip(move |window, cx| titlebar_tooltip(name.clone(), window, cx)))
+            // CDXC:Spaces 2026-09-21 DECISION: User: the working and attention counts sit in an orange or blue circle (the colour the number itself used to have) with the number in white.
+            .when(space.working_count > 0 || space.attention_count > 0, |row| row.child(h_flex().absolute().top(px(20.5 * scale)).left_0().w_full().justify_center().h(px(11.0 * scale)).font_family("JetBrainsMono Nerd Font").text_size(px(8.0 * scale)).font_weight(FontWeight::BOLD).text_color(rgb(0xffffff))
+                .when(space.working_count > 0, |row| row.child(space_status_badge(space.working_count, rgb(0xf8ad07), scale)))
+                .when(space.attention_count > 0, |row| row.child(space_status_badge(space.attention_count, rgb(0x95d7f6), scale)))))
+            .when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.managed_discrete_tooltip_with_placement(tooltip_span.placement(), appearance.tooltip_delay, move |window, cx| super::tooltips::sidebar_free_width_tooltip(name.to_string(), tooltip_span, scale, window, cx)))
             .when(id != "other", |row| row.sidebar_drag_source(dragged, cx))
             .sidebar_drop_target("space", drag_id, None, cx)
             .on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_ui(json!({"type": "selectSpace", "spaceId": id}), cx); }))
@@ -148,4 +172,17 @@ impl GhostexGpuiApp {
             }))
             .into_any_element()
     }
+}
+
+/// A count in a filled circle; two-digit counts stretch it into a pill.
+fn space_status_badge(count: usize, fill: gpui::Rgba, scale: f32) -> gpui::Div {
+    h_flex()
+        .h(px(11.0 * scale))
+        .min_w(px(11.0 * scale))
+        .px(px(2.5 * scale))
+        .justify_center()
+        .rounded_full()
+        .bg(fill)
+        .line_height(px(11.0 * scale))
+        .child(count.to_string())
 }

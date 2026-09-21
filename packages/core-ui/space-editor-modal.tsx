@@ -11,7 +11,12 @@ import {
   AppModalTitle,
 } from './app-modal-shell';
 import { CommandIconPicker } from './command-icon-picker';
-import { SIDEBAR_PROJECT_COLLECTION_COLORS, SIDEBAR_PROJECT_COLLECTION_COLOR_LABELS } from './project-collections';
+import {
+  SIDEBAR_SPACE_COLORS,
+  getSidebarSpaceColorLabel,
+  resolveSidebarSpaceDisplayColor,
+  sidebarSpaceColorMatchesSwatch,
+} from './space-colors';
 import { DEFAULT_SIDEBAR_SPACE_ICON } from './spaces';
 import { isSidebarCommandIcon, type SidebarCommandIcon } from '../shared/sidebar-command-icons';
 
@@ -55,7 +60,7 @@ export function SpaceEditorModal({
   onDelete,
   onSubmit,
 }: SpaceEditorModalProps) {
-  const resolvedInitialColor = initialColor ?? SIDEBAR_PROJECT_COLLECTION_COLORS[0];
+  const resolvedInitialColor = initialColor ?? SIDEBAR_SPACE_COLORS[0];
   const resolvedInitialIcon = resolveSpaceEditorIcon(initialIcon);
   const [name, setName] = useState(initialName ?? '');
   const [icon, setIcon] = useState<SidebarCommandIcon>(resolvedInitialIcon);
@@ -166,17 +171,17 @@ export function SpaceEditorModal({
         <Field>
           <FieldTitle id={colorLabelId}>Color</FieldTitle>
           <div aria-labelledby={colorLabelId} className='space-editor-color-strip' role='radiogroup'>
-            {SIDEBAR_PROJECT_COLLECTION_COLORS.map((swatchColor) => (
+            {SIDEBAR_SPACE_COLORS.map((swatchColor) => (
               <button
-                aria-checked={swatchColor === color}
-                aria-label={SIDEBAR_PROJECT_COLLECTION_COLOR_LABELS[swatchColor]}
+                aria-checked={sidebarSpaceColorMatchesSwatch(color, swatchColor)}
+                aria-label={getSidebarSpaceColorLabel(swatchColor)}
                 className='space-editor-color-swatch'
-                data-selected={String(swatchColor === color)}
+                data-selected={String(sidebarSpaceColorMatchesSwatch(color, swatchColor))}
                 key={swatchColor}
                 onClick={() => setColor(swatchColor)}
                 role='radio'
-                style={{ background: swatchColor }}
-                title={SIDEBAR_PROJECT_COLLECTION_COLOR_LABELS[swatchColor]}
+                style={{ background: resolveSidebarSpaceDisplayColor(swatchColor) }}
+                title={getSidebarSpaceColorLabel(swatchColor)}
                 type='button'
               />
             ))}

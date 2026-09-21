@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType, CSSProperties } from 'react';
 import {
   IconApi,
   IconArchiveFilled,
@@ -86,6 +86,7 @@ type TablerIconProps = {
   color?: string;
   size?: number;
   stroke?: number;
+  style?: CSSProperties;
 };
 
 const ICON_COMPONENT_BY_ID: Record<SidebarCommandIcon, ComponentType<TablerIconProps>> = {
@@ -178,10 +179,12 @@ export function SidebarCommandIconGlyph({
     <Icon
       aria-hidden='true'
       className={className}
-      color={color}
+      /* The color rides on CSS `color` because an SVG paint attribute cannot hold `light-dark()`, which a Space's Gray resolves to. */
+      color={color ? 'currentColor' : undefined}
       data-session-tag={dataSessionTag}
       size={size}
       stroke={stroke}
+      style={color ? { color } : undefined}
     />
   );
 }

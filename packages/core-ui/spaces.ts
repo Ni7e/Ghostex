@@ -1,5 +1,6 @@
 import type { GxserverSidebarSpacesState } from '@/packages/shared/gxserver-protocol';
 import { SIDEBAR_PROJECT_COLLECTION_COLORS } from './project-collections';
+import { SIDEBAR_SPACE_COLORS } from './space-colors';
 
 /*
 CDXC:Spaces 2026-08-27:
@@ -207,9 +208,7 @@ export function createSidebarSpace(
       spaces: {
         ...state.spaces,
         [spaceId]: {
-          color:
-            space.color ??
-            SIDEBAR_PROJECT_COLLECTION_COLORS[state.order.length % SIDEBAR_PROJECT_COLLECTION_COLORS.length],
+          color: space.color ?? SIDEBAR_SPACE_COLORS[state.order.length % SIDEBAR_SPACE_COLORS.length],
           icon: space.icon ?? DEFAULT_SIDEBAR_SPACE_ICON,
           memberCollectionIds: [],
           memberProjectIds: [],
