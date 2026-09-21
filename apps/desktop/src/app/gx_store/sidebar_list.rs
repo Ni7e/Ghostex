@@ -143,6 +143,9 @@ pub(crate) struct SidebarList {
     installed_carry: Option<(SidebarCarryKey, u64)>,
     /// Whether the once-a-second tick is running (started once, at the store's bootstrap).
     pub(super) clock_started: bool,
+    /// Which of the two legs the list waits for were given up on, and when the wait started
+    /// (gx_store/sidebar_ready.rs).
+    ready_recovery: super::sidebar_ready::SidebarReadyRecovery,
     /// Whether the loading skeleton is what the renderer is drawing, so it is installed once and
     /// not rebuilt on every update of the launch window.
     loading_installed: bool,
@@ -177,6 +180,7 @@ impl Default for SidebarList {
             deadline_kind: "none",
             installed_carry: None,
             clock_started: false,
+            ready_recovery: super::sidebar_ready::SidebarReadyRecovery::default(),
             loading_installed: false,
             snapshot_cache: SnapshotCache::default(),
             inputs_cache: InputsCache::default(),
@@ -189,6 +193,14 @@ impl Default for SidebarList {
 }
 
 impl SidebarList {
+    pub(super) fn ready_recovery(&self) -> &super::sidebar_ready::SidebarReadyRecovery {
+        &self.ready_recovery
+    }
+
+    pub(super) fn ready_recovery_mut(&mut self) -> &mut super::sidebar_ready::SidebarReadyRecovery {
+        &mut self.ready_recovery
+    }
+
     pub(crate) fn view(&self) -> &SidebarView {
         self.model.view()
     }
@@ -344,25 +356,6 @@ impl GhostexGpuiApp {
                 .as_ref()
                 .map(|reveal| reveal.request_id),
         }
-    }
-
-    /// Whether the drawn list is the real one, so a command that names a row has something to name
-    /// and an install is worth making.
-    ///
-    /// CDXC:Sidebar 2026-09-21 WHY:
-    /// False only in the first instants of a launch, and for exactly two reasons: the sidebar's own
-    /// state (collapse, Space, filters, hidden items) has not been read back from client storage
-    /// yet, so the real list would open every project and hide nothing and then snap; and the
-    /// runtime has not posted the HUD yet, so the agent launcher, the Saved Actions and every
-    /// `hud.settings.*` the renderer reads would be empty. Until both land the renderer draws the
-    /// loading skeleton (`gx_store_install_loading_sidebar_list`) and `dispatch_native_sidebar_ui`
-    /// drops what arrives, counted rather than routed to nobody.
-    ///
-    /// A machine tab the host does not feed (no client, no last-seen copy) is NOT one of them any
-    /// more: its list is empty because that machine really has no rows, and an empty list with its
-    /// own empty state is the honest answer. Before step 6 that case kept the old projection's copy.
-    pub(crate) fn gx_store_sidebar_list_ready(&self) -> bool {
-        self.gx_store.sidebar_ui.restored() && self.gx_store.runtime_facts.hud.is_some()
     }
 
     /// The sidebar's own state moved. The list is rebuilt at once, because a click must show in
@@ -662,7 +655,9 @@ impl GhostexGpuiApp {
     /// Replaces the list the renderer draws with the one derived from the store. Needs no publish:
     /// the caller has already asked `gx_store_sidebar_list_ready`, which is the whole precondition.
     pub(crate) fn gx_store_install_sidebar_list(&mut self, cx: &mut gpui::Context<Self>) {
-        let Some(hud) = self.gx_store.runtime_facts.hud.clone() else {
+        // An empty object once the HUD leg was given up on: every reader of it indexes and
+        // defaults (gx_store/sidebar_ready.rs).
+        let Some(hud) = self.gx_store_sidebar_hud() else {
             return;
         };
         self.gx_store.sidebar_list.loading_installed = false;

@@ -83,6 +83,10 @@ impl GhostexGpuiApp {
             )
         };
         let ready = self.gx_store_sidebar_list_ready();
+        let recovered = {
+            let recovery = self.gx_store.sidebar_list.ready_recovery();
+            (recovery.hud, recovery.state)
+        };
         let deadline_kind = self.gx_store.sidebar_list.deadline_kind;
         let phases = self.gx_store.sidebar_list.install_phases();
         let remote = self.gx_store.remote.counters;
@@ -91,6 +95,7 @@ impl GhostexGpuiApp {
             &counters,
             &list,
             ready,
+            recovered,
             deadline_kind,
             groups,
             rows,

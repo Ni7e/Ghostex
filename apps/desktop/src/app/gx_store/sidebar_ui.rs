@@ -163,6 +163,11 @@ impl SidebarUiHost {
         self.generation
     }
 
+    /// The code of the newest failed read, or `None` while the last read succeeded.
+    pub(super) fn last_error(&self) -> Option<&'static str> {
+        self.last_error
+    }
+
     /// Whether this reveal request has already been answered, asked without taking it.
     pub(super) fn reveal_handled(&self, request_id: u64) -> bool {
         self.handled_reveal == Some(request_id)

@@ -59,6 +59,17 @@ pub(crate) struct RuntimeFactsCounters {
     pub(super) reveals_replayed: u64,
 }
 
+impl SidebarRuntimeFacts {
+    /// The HUD the runtime posted, or `None` while it has not posted one.
+    pub(super) fn hud(&self) -> Option<&Value> {
+        self.hud.as_ref()
+    }
+
+    pub(super) fn counters(&self) -> RuntimeFactsCounters {
+        self.counters
+    }
+}
+
 impl GhostexGpuiApp {
     /// A channel payload. Every value the list, its menus and its snapshot take from outside the
     /// store arrives here, so a post brings the list up to date the way a publish used to.

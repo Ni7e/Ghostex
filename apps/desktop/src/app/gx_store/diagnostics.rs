@@ -324,7 +324,7 @@ impl GxStoreDiagnostics {
         );
     }
 
-    fn warning(&mut self, event: &str, details: serde_json::Value) {
+    pub(super) fn warning(&mut self, event: &str, details: serde_json::Value) {
         if self.warning_lines >= MAX_WARNING_LINES {
             return;
         }
@@ -413,6 +413,9 @@ impl GxStoreDiagnostics {
         counters: &SidebarSelfCheckCounters,
         list: &SidebarListCounters,
         ready: bool,
+        // Which of the two legs the list waits for was given up on and drawn without
+        // (gx_store/sidebar_ready.rs). Both false on an ordinary run.
+        recovered: (bool, bool),
         deadline_kind: &'static str,
         groups: usize,
         rows: usize,
@@ -438,6 +441,9 @@ impl GxStoreDiagnostics {
                 // The list is the only one there is; this says whether it is the REAL one or the
                 // loading skeleton the launch window draws.
                 "ready": ready,
+                // Ready only because a leg was declared absent, which the `.error` line names.
+                "recoveredHud": recovered.0,
+                "recoveredState": recovered.1,
                 "storeGroups": groups,
                 "storeRows": rows,
                 "deadlineKind": deadline_kind,

@@ -29,6 +29,9 @@ impl GhostexGpuiApp {
             return;
         }
         self.gx_store.sidebar_list.clock_started = true;
+        // The wait for the two legs the list needs starts here, with the app
+        // (gx_store/sidebar_ready.rs).
+        self.gx_store.sidebar_list.ready_recovery_mut().start();
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(TICK).await;
@@ -46,6 +49,10 @@ impl GhostexGpuiApp {
     }
 
     fn gx_store_sidebar_clock_tick(&mut self, cx: &mut gpui::Context<Self>) {
+        // A leg the list is still waiting for after a few seconds is declared absent, so the
+        // loading skeleton has an end (gx_store/sidebar_ready.rs). First, because everything below
+        // asks whether the list is ready.
+        self.gx_store_check_sidebar_ready_recovery(cx);
         // The machine tabs: the settings say which machines exist and the connect states say how
         // they are doing, so a tab the sidebar no longer offers falls back to this computer here.
         // It rode the publish until M4d part 2 step 6 and reuses its own answer for a second, so

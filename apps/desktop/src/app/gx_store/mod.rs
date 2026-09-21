@@ -88,6 +88,7 @@ mod sidebar_list_inputs;
 mod sidebar_menus;
 mod sidebar_modals;
 mod sidebar_open;
+mod sidebar_ready;
 mod sidebar_reload;
 mod sidebar_remote;
 mod sidebar_remote_focus;
