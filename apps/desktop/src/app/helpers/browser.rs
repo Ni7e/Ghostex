@@ -98,6 +98,46 @@ pub(crate) fn browser_runtime_favicon_from_url(
     (Some(marker), None, Some(source))
 }
 
+/// The favicon's content type and bytes, capped at `BROWSER_FAVICON_IMAGE_MAX_BYTES`. Blocking: call
+/// it off the main thread.
+fn browser_favicon_fetch_bytes(
+    url: &str,
+) -> std::result::Result<(Option<String>, Vec<u8>), BrowserFaviconFetchError> {
+    let tls_config = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(10)))
+        .max_redirects(BROWSER_FAVICON_HTTP_REDIRECT_LIMIT)
+        .http_status_as_error(false)
+        .tls_config(tls_config)
+        .build();
+    let mut response = ureq::Agent::new_with_config(config)
+        .get(url)
+        .call()
+        .map_err(|_| BrowserFaviconFetchError::Network)?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(BrowserFaviconFetchError::BadStatus(status.as_u16()));
+    }
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let mut body = Vec::new();
+    response
+        .body_mut()
+        .as_reader()
+        .take(BROWSER_FAVICON_IMAGE_MAX_BYTES as u64 + 1)
+        .read_to_end(&mut body)
+        .map_err(|_| BrowserFaviconFetchError::BodyRead)?;
+    if body.is_empty() || body.len() > BROWSER_FAVICON_IMAGE_MAX_BYTES {
+        return Err(BrowserFaviconFetchError::TooLarge);
+    }
+    Ok((content_type, body))
+}
+
 #[derive(Clone)]
 pub(crate) enum BrowserFaviconHttpImageAsset {}
 
@@ -109,48 +149,21 @@ impl Asset for BrowserFaviconHttpImageAsset {
         source: Self::Source,
         cx: &mut App,
     ) -> impl std::future::Future<Output = Self::Output> + Send + 'static {
-        let client = cx.http_client();
+        /*
+        CDXC:Browser 2026-09-21 WHY:
+        The app never installs a GPUI HTTP client, so `cx.http_client()` is GPUI's null client and
+        every favicon request failed before it left the process: tabs only ever showed the "F"
+        marker. The fetch runs on the in-process HTTPS client the component store already uses, on
+        a background thread, with the same redirect, byte and decode limits as before.
+        */
+        let executor = cx.background_executor().clone();
         let svg_renderer = cx.svg_renderer();
         async move {
-            use futures::AsyncReadExt as _;
-
-            let request = gpui::http_client::Request::get(source.url.as_str())
-                .follow_redirects(gpui::http_client::RedirectPolicy::FollowLimit(
-                    BROWSER_FAVICON_HTTP_REDIRECT_LIMIT,
-                ))
-                .body(gpui::http_client::AsyncBody::default())
-                .map_err(|_| {
-                    browser_favicon_fetch_error(BrowserFaviconFetchError::InvalidRequest)
-                })?;
-
-            let mut response = client
-                .send(request)
+            let url = source.url.clone();
+            let (content_type, body) = executor
+                .spawn(async move { browser_favicon_fetch_bytes(url.as_str()) })
                 .await
-                .map_err(|_| browser_favicon_fetch_error(BrowserFaviconFetchError::Network))?;
-            let status = response.status();
-            if !status.is_success() {
-                return Err(browser_favicon_fetch_error(
-                    BrowserFaviconFetchError::BadStatus(status.as_u16()),
-                ));
-            }
-
-            let content_type = response
-                .headers()
-                .get(gpui::http_client::http::header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string);
-            let mut body = Vec::new();
-            response
-                .body_mut()
-                .take(BROWSER_FAVICON_IMAGE_MAX_BYTES as u64 + 1)
-                .read_to_end(&mut body)
-                .await
-                .map_err(|_| browser_favicon_fetch_error(BrowserFaviconFetchError::BodyRead))?;
-            if body.is_empty() || body.len() > BROWSER_FAVICON_IMAGE_MAX_BYTES {
-                return Err(browser_favicon_fetch_error(
-                    BrowserFaviconFetchError::TooLarge,
-                ));
-            }
+                .map_err(browser_favicon_fetch_error)?;
 
             let format = browser_favicon_http_image_format(content_type.as_deref(), &body)
                 .map_err(browser_favicon_fetch_error)?;
