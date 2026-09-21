@@ -10,6 +10,7 @@
 //! apps/desktop/sidebar/native-sidebar/reorder.ts (the `moveSpace` arm),
 //! apps/desktop/sidebar/native-sidebar/project-drag.ts (the `moveToSpace` arm).
 
+use crate::sidebar_view::text::js_trim;
 use crate::sidebar_view::SpacesState;
 
 use super::spaces::SpacesDocument;
@@ -33,7 +34,10 @@ pub fn toggle_space_member(
     kind: SpaceMemberKind,
     member_id: &str,
 ) -> SpacesDocument {
-    let trimmed = member_id.trim();
+    // `js_trim`, not `str::trim`: `withToggledMember` trims with JavaScript's rules, which keep
+    // U+0085 and take U+FEFF where Rust's do the opposite. The twin of the same line in
+    // `move_projects_to_collection`, fixed with it rather than after it.
+    let trimmed = js_trim(member_id);
     if trimmed.is_empty() || !document.state.spaces.contains_key(space_id) {
         return document.clone();
     }

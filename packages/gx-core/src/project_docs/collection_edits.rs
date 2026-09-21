@@ -15,6 +15,7 @@
 //! apps/desktop/sidebar/native-sidebar/membership.ts,
 //! apps/desktop/sidebar/native-sidebar/project-drag.ts.
 
+use crate::sidebar_view::text::js_trim;
 use crate::sidebar_view::{Collection, CollectionsState};
 
 use super::collections::CollectionsDocument;
@@ -37,7 +38,10 @@ pub fn move_projects_to_collection(
 ) -> CollectionsDocument {
     let mut unique: Vec<String> = Vec::new();
     for project_id in project_ids {
-        let trimmed = project_id.trim().to_string();
+        // `js_trim`, not `str::trim`: JavaScript's `trim` leaves U+0085 and takes U+FEFF, and Rust's
+        // does the opposite. A project id is not a place either character is expected, which is
+        // exactly why a difference here would be found years later in one user's document.
+        let trimmed = js_trim(project_id).to_string();
         if !unique.contains(&trimmed) {
             unique.push(trimmed);
         }
@@ -127,9 +131,9 @@ pub fn create_collection(
 /// `reorderSidebarProjectCollections`: sort each folder's projects into the order the sidebar now
 /// has them in.
 ///
-/// A project the order does not name sorts BEFORE one it does, which is `leftIndex === undefined`
-/// answering -1. That is a stable sort in JavaScript, so ties keep their order, and this uses a
-/// stable sort for the same reason.
+/// A project the order does not name sorts AFTER one it does, which is the comparator's
+/// `leftIndex === undefined ? (rightIndex === undefined ? 0 : 1) : -1`. That is a stable sort in
+/// JavaScript, so ties keep their order, and this uses a stable sort for the same reason.
 pub fn reorder_collection_projects(
     document: &CollectionsDocument,
     project_ids_in_order: &[String],

@@ -65,6 +65,14 @@ pub(crate) struct GxStoreDiagnostics {
     workspace_groups_records: u32,
     workspace_groups_summary_at: Option<Instant>,
     client_document_records: u32,
+    /// The PERIODIC line's own budget.
+    ///
+    /// CDXC:Projects 2026-09-21 WHY:
+    /// The summary emits three records per interval (both documents and the moves) and used to
+    /// spend `client_document_records`, so a quiet run of an hour exhausted the two hundred and
+    /// then a real push or a real move had no line left to write. The periodic path exists to say
+    /// "nothing has happened"; it must not be what silences the path that says something did.
+    client_document_summary_records: u32,
     client_document_read_warnings: u32,
     client_document_write_warnings: u32,
     client_document_refusal_warnings: u32,
@@ -951,11 +959,26 @@ impl GxStoreDiagnostics {
         ok: Option<bool>,
         counters: super::client_document::ClientDocumentCounters,
     ) {
-        if self.client_document_records >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled()
-        {
+        self.client_document_record_inner(name, ok, counters, false);
+    }
+
+    /// `periodic` picks which budget this line spends. The two are separate because the periodic
+    /// path writes three lines an interval and would otherwise silence the push and move records.
+    fn client_document_record_inner(
+        &mut self,
+        name: &'static str,
+        ok: Option<bool>,
+        counters: super::client_document::ClientDocumentCounters,
+        periodic: bool,
+    ) {
+        let budget = match periodic {
+            true => &mut self.client_document_summary_records,
+            false => &mut self.client_document_records,
+        };
+        if *budget >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled() {
             return;
         }
-        self.client_document_records += 1;
+        *budget += 1;
         record(
             "gxStore.clientDocument",
             json!({
@@ -1008,8 +1031,8 @@ impl GxStoreDiagnostics {
             return;
         }
         self.client_document_summary_written = Some((collections, spaces, moves));
-        self.client_document_record("collections", None, collections);
-        self.client_document_record("spaces", None, spaces);
+        self.client_document_record_inner("collections", None, collections, true);
+        self.client_document_record_inner("spaces", None, spaces, true);
         self.project_move_summary(moves);
     }
 
@@ -1017,10 +1040,10 @@ impl GxStoreDiagnostics {
     /// about the GESTURE, and a run with moves but no document edit is the shape that says the
     /// planner refused every one of them.
     fn project_move_summary(&mut self, counters: super::project_docs::ProjectMoveCounters) {
-        if self.client_document_records >= MAX_SIDEBAR_ACTION_RECORDS {
+        if self.client_document_summary_records >= MAX_SIDEBAR_ACTION_RECORDS {
             return;
         }
-        self.client_document_records += 1;
+        self.client_document_summary_records += 1;
         record(
             "gxStore.projectMove",
             json!({
