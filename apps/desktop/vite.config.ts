@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 import { defineConfig, type Plugin } from 'vite';
-import { writeDocsClassicAssets } from '../../tooling/docs-classic-assets';
+import { writeClassicModuleAssets } from '../../tooling/docs-classic-assets';
 import {
   MERMAID_ASSET_DIR_NAME,
   mermaidClassicScriptEsbuildPlugin,
@@ -98,7 +98,7 @@ function inlineCefHtmlAssets(): Plugin {
             await buildInlineCefEntryScript(
               cefHtmlEntryScripts[htmlEntry],
               stagedImages,
-              htmlEntry === 'manage.html' ? outDir : undefined
+              cefClassicModuleTargets[htmlEntry]
             )
           ),
           styleTags
@@ -106,6 +106,7 @@ function inlineCefHtmlAssets(): Plugin {
 
         fs.writeFileSync(htmlPath, finalHtml);
       }
+      removeUnloadableCefChunks(outDir);
     },
   };
 }
@@ -170,6 +171,23 @@ type CefOutputBundleEntry =
       type: 'chunk';
       viteMetadata?: { importedCss: Set<string> };
     };
+
+/*
+ * CDXC:CefRuntime 2026-09-21 WHY:
+ * Every page's script and styles are inlined (or staged as classic scripts) above, and a file:// page cannot load Vite's module chunks or stylesheets at all, so the emitted assets/*.js and assets/*.css were about 19 MB shipped in every install that nothing could read.
+ * Images and fonts stay: pages reference them from beside the HTML.
+ */
+function removeUnloadableCefChunks(outDir: string): void {
+  const assetsDir = path.join(outDir, 'assets');
+  if (!fs.existsSync(assetsDir)) {
+    return;
+  }
+  for (const fileName of fs.readdirSync(assetsDir)) {
+    if (/\.(js|css)(\.map)?$/.test(fileName)) {
+      fs.rmSync(path.join(assetsDir, fileName));
+    }
+  }
+}
 
 function collectCefEntryCssFileNames(
   bundle: Record<string, CefOutputBundleEntry>,
@@ -301,10 +319,18 @@ function stagedCefImageFileName(stagedImages: CefStagedImages, imagePath: string
   return fileName;
 }
 
+/** Pages whose code loads on demand as classic scripts (see tooling/docs-classic-assets.ts); every other entry stays one inline module. */
+const cefClassicModuleTargets: Partial<
+  Record<(typeof cefHtmlEntries)[number], { label: string; runtimeDirName: string }>
+> = {
+  'manage.html': { label: 'Docs', runtimeDirName: 'docs-runtime' },
+  'modal-host.html': { label: 'Ghostex', runtimeDirName: 'modal-runtime' },
+};
+
 async function buildInlineCefEntryScript(
   entryPoint: string,
   stagedImages: CefStagedImages,
-  docsOutDir?: string
+  classicModuleTarget?: { label: string; runtimeDirName: string }
 ): Promise<string> {
   const options: esbuild.BuildOptions = {
     absWorkingDir: repoRoot,
@@ -339,7 +365,7 @@ async function buildInlineCefEntryScript(
     target: ['chrome120'],
     write: false,
   };
-  if (docsOutDir) return writeDocsClassicAssets(docsOutDir, options);
+  if (classicModuleTarget) return writeClassicModuleAssets(stagedImages.outDir, options, classicModuleTarget);
   const result = await esbuild.build(options);
   const script = result.outputFiles.find((file) => file.path === '<stdout>');
   if (!script) {

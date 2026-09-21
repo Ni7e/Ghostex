@@ -11,7 +11,6 @@ import {
   type RefObject,
 } from 'react';
 import { flushSync } from 'react-dom';
-import ColorPicker from 'react-best-gradient-color-picker';
 import { cn } from '@/packages/components/utils';
 import { Button } from '@/packages/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/packages/components/ui/dialog';
@@ -28,6 +27,34 @@ import {
 import { SegmentedControl, SegmentedControlItem } from '@/packages/components/ui/segmented-control';
 import { Slider } from '@/packages/components/ui/slider';
 import { Switch } from '@/packages/components/ui/switch';
+
+/**
+ * CDXC:Settings 2026-09-21 WHY:
+ * The picker pulls in html2canvas for an eyedropper this field hides, about 260 KB that Settings parsed before its first paint for a dialog most opens never show. Load it when the Pick Color dialog opens.
+ */
+type ColorPickerComponent = typeof import('react-best-gradient-color-picker').default;
+let loadedColorPicker: ColorPickerComponent | undefined;
+
+/** Not React.lazy: React holds content that resolves behind a Suspense fallback for about 300 ms, so the picker would appear late in an already open dialog. */
+function useColorPicker(isNeeded: boolean): ColorPickerComponent | undefined {
+  const [, setLoadRevision] = useState(0);
+  useEffect(() => {
+    if (!isNeeded || loadedColorPicker) {
+      return;
+    }
+    let isCurrent = true;
+    void import('react-best-gradient-color-picker').then((module) => {
+      loadedColorPicker = module.default;
+      if (isCurrent) {
+        setLoadRevision((revision) => revision + 1);
+      }
+    });
+    return () => {
+      isCurrent = false;
+    };
+  }, [isNeeded]);
+  return loadedColorPicker;
+}
 import { Textarea as BaseTextarea } from '@/packages/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/packages/components/ui/tooltip';
 import { AppTooltip } from '../app-tooltip';
@@ -1190,6 +1217,7 @@ export function WebColorPickerField({
   const savedColorValue = normalizeColorInputValue(value, DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR);
   const [colorText, setColorText] = useState(savedColorValue);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const ColorPicker = useColorPicker(pickerOpen);
   const [pickerValue, setPickerValue] = useState(savedColorValue);
   const colorValue = normalizePickerColorValue(colorText, savedColorValue);
 
@@ -1325,24 +1353,26 @@ export function WebColorPickerField({
             <DialogHeader>
               <DialogTitle>Pick Color</DialogTitle>
             </DialogHeader>
-            <div className='mx-auto'>
-              <ColorPicker
-                hideAdvancedSliders
-                hideColorGuide
-                hideColorTypeBtns
-                hideEyeDrop
-                hideGradientAngle
-                hideGradientControls
-                hideGradientStop
-                hideGradientType
-                hideInputType
-                hideOpacity
-                hidePresets
-                idSuffix='sidebar-titlebar-tint'
-                onChange={previewColor}
-                value={pickerValue}
-                width={294}
-              />
+            <div className='mx-auto min-h-[294px] w-[294px]'>
+              {ColorPicker ? (
+                <ColorPicker
+                  hideAdvancedSliders
+                  hideColorGuide
+                  hideColorTypeBtns
+                  hideEyeDrop
+                  hideGradientAngle
+                  hideGradientControls
+                  hideGradientStop
+                  hideGradientType
+                  hideInputType
+                  hideOpacity
+                  hidePresets
+                  idSuffix='sidebar-titlebar-tint'
+                  onChange={previewColor}
+                  value={pickerValue}
+                  width={294}
+                />
+              ) : null}
             </div>
             <DialogFooter>
               <Button

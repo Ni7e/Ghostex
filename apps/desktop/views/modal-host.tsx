@@ -7,7 +7,6 @@ import { createRoot } from 'react-dom/client';
 import { notifyAccountsConnectionsChanged } from '@/packages/core-ui/accounts/transport';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Toaster, toast } from 'sonner';
-import { AddProjectModal } from '@/packages/core-ui/add-project-modal/add-project-modal';
 import type {
   AddProjectAddResult,
   AddProjectBrowseResult,
@@ -19,48 +18,25 @@ import type {
   AddProjectRepositoryInfo,
   AddProjectSourceControlDiscovery,
 } from '@/packages/core-ui/add-project-modal/types';
-import { AgentConfigModal, type AgentConfigDraft } from '@/packages/core-ui/agent-config-modal';
-import { AgentHooksRequiredModal } from '@/packages/core-ui/agent-hooks-required-modal';
-import { AgentsHubModal } from '@/packages/core-ui/agents-hub-modal';
-import { CommandPalette } from '@/packages/core-ui/command-palette';
-import { DelayedSendModal } from '@/packages/core-ui/delayed-send-modal';
-import { DiscoverGhostexModal } from '@/packages/core-ui/discover-ghostex-modal';
-import { FirstUserMessageModal } from '@/packages/core-ui/first-user-message-modal';
-import { StashedPromptsModal, type StashedPromptsScope } from '@/packages/core-ui/stashed-prompts-modal';
-import { PortlessSetupModal, type PortlessSetupModalMode } from '@/packages/core-ui/portless-setup-modal';
-import { BrowserHistoryModal, type BrowserHistoryTarget } from '@/packages/core-ui/browser-history-modal';
-import { PreviousSessionsModal } from '@/packages/core-ui/previous-sessions-modal';
-import { RecentProjectsModal } from '@/packages/core-ui/recent-projects-modal';
-import { RemoteGxserverInstallModal } from '@/packages/core-ui/remote-gxserver-install-modal';
-import { RemoteSetupModal, gpuiBootstrapRemoteSetupRpc } from '@/packages/core-ui/remote-setup-modal';
-import { RemoteProjectPickerModal } from '@/packages/core-ui/remote-project-picker/remote-project-picker-modal';
+import type { AgentConfigDraft } from '@/packages/core-ui/agent-config-modal';
+import type { StashedPromptsScope } from '@/packages/core-ui/stashed-prompts-modal';
+import type { PortlessSetupModalMode } from '@/packages/core-ui/portless-setup-modal';
+import type { BrowserHistoryTarget } from '@/packages/core-ui/browser-history-modal';
+import { gpuiBootstrapRemoteSetupRpc } from '@/packages/core-ui/remote-setup-modal/gxserver-rpc';
 import type { RemoteFilesystemBrowseResult } from '@/packages/core-ui/remote-project-picker/remote-filesystem';
-import {
-  SettingsModal,
-  gpuiBootstrapTailcatRpc,
-  type MainSettingsInitialSectionId,
-  type SettingsModalTab,
-  type SettingsSidebarTagsAction,
+import type {
+  MainSettingsInitialSectionId,
+  SettingsModalTab,
+  SettingsSidebarTagsAction,
 } from '@/packages/core-ui/settings-modal';
-import {
-  ExportTranscriptModal,
-  type ExportTranscriptModalStage,
-} from '@/packages/core-ui/export-transcript-result-modal';
-import { SessionNoteModal } from '@/packages/core-ui/session-note-modal';
-import { SessionRenameModal } from '@/packages/core-ui/session-rename-modal';
-import { SpaceEditorModal } from '@/packages/core-ui/space-editor-modal';
-import { MermaidDiagramModal } from '@/packages/core-ui/mermaid/mermaid-diagram';
-import { SessionChatTableModal } from '@/packages/core-ui/chat/session-chat-markdown';
-import { WatchGhostexVideoModal } from '@/packages/core-ui/watch-ghostex-video-modal';
-import { UpdateAvailableModal, type UpdateAvailableModalState } from '@/packages/core-ui/update-available-modal';
-import { FirstLaunchSetupModal } from '@/packages/core-ui/first-launch-setup-modal';
-import { OnboardingModal } from '@/packages/core-ui/onboarding';
+import type { ExportTranscriptModalStage } from '@/packages/core-ui/export-transcript-result-modal';
+import type { UpdateAvailableModalState } from '@/packages/core-ui/update-available-modal';
+import { areLazyModalsSettled, lazyModal, lazyRenderedModal, useLazyModalsSettled } from './lazy-modal';
 import { buildOnboardingDetectedAgents, deriveOnboardingComputerUseState } from './onboarding-host-adapter';
-import { GitFileDiffModal, type GitFileDiffModalDraft } from '@/packages/core-ui/git-file-diff-modal';
-import { GitCommitModal, type GitCommitModalDraft } from '@/packages/core-ui/git-commit-modal';
-import { WorktreeDeleteModal, type WorktreeDeleteModalDraft } from '@/packages/core-ui/worktree-delete-modal';
-import { WorktreeRenameModal, type WorktreeRenameModalDraft } from '@/packages/core-ui/worktree-rename-modal';
-import { WorktreeCreateModal } from '@/packages/core-ui/worktree-create-modal';
+import type { GitFileDiffModalDraft } from '@/packages/core-ui/git-file-diff-modal';
+import type { GitCommitModalDraft } from '@/packages/core-ui/git-commit-modal';
+import type { WorktreeDeleteModalDraft } from '@/packages/core-ui/worktree-delete-modal';
+import type { WorktreeRenameModalDraft } from '@/packages/core-ui/worktree-rename-modal';
 import { normalizeAppToastDescription, type AppToastRequest } from '@/packages/shared/app-toast-contract';
 import type { BundledGhostexAgentSkillId } from '@/packages/shared/ghostex-agent-skills';
 import {
@@ -92,16 +68,107 @@ import {
   type SettingsAgentsSection,
   type SettingsRemoteSection,
 } from '@/packages/core-ui/app-modal-host-bridge';
-import { MissingProjectFolderModal } from '@/packages/core-ui/missing-project-folder-modal';
 import { useSidebarStore } from '@/packages/core-ui/sidebar-store';
 import {
   DEFAULT_ghostex_SETTINGS,
+  getAccentColorForBackgroundTint,
   isDiagnosticLoggingScenarioEnabled,
   SETTINGS_MODAL_NAVIGATION_TABS,
   type DiagnosticLoggingScenarioId,
 } from '@/packages/shared/ghostex-settings';
 import type { WebviewApi } from '@/packages/core-ui/webview-api';
 import '@/packages/core-ui/styles.css';
+
+const AddProjectModal = lazyModal(
+  async () => (await import('@/packages/core-ui/add-project-modal/add-project-modal')).AddProjectModal
+);
+const AgentConfigModal = lazyModal(
+  async () => (await import('@/packages/core-ui/agent-config-modal')).AgentConfigModal
+);
+const AgentHooksRequiredModal = lazyModal(
+  async () => (await import('@/packages/core-ui/agent-hooks-required-modal')).AgentHooksRequiredModal
+);
+const CommandPalette = lazyModal(async () => (await import('@/packages/core-ui/command-palette')).CommandPalette);
+const DelayedSendModal = lazyModal(
+  async () => (await import('@/packages/core-ui/delayed-send-modal')).DelayedSendModal
+);
+const FirstUserMessageModal = lazyModal(
+  async () => (await import('@/packages/core-ui/first-user-message-modal')).FirstUserMessageModal
+);
+const StashedPromptsModal = lazyModal(
+  async () => (await import('@/packages/core-ui/stashed-prompts-modal')).StashedPromptsModal
+);
+const PortlessSetupModal = lazyModal(
+  async () => (await import('@/packages/core-ui/portless-setup-modal')).PortlessSetupModal
+);
+const BrowserHistoryModal = lazyRenderedModal(
+  async () => (await import('@/packages/core-ui/browser-history-modal')).BrowserHistoryModal
+);
+const PreviousSessionsModal = lazyModal(
+  async () => (await import('@/packages/core-ui/previous-sessions-modal')).PreviousSessionsModal
+);
+const RecentProjectsModal = lazyModal(
+  async () => (await import('@/packages/core-ui/recent-projects-modal')).RecentProjectsModal
+);
+const RemoteGxserverInstallModal = lazyModal(
+  async () => (await import('@/packages/core-ui/remote-gxserver-install-modal')).RemoteGxserverInstallModal
+);
+const RemoteSetupModal = lazyModal(
+  async () => (await import('@/packages/core-ui/remote-setup-modal')).RemoteSetupModal
+);
+const RemoteProjectPickerModal = lazyModal(
+  async () =>
+    (await import('@/packages/core-ui/remote-project-picker/remote-project-picker-modal')).RemoteProjectPickerModal
+);
+const SettingsModal = lazyModal(async () => (await import('@/packages/core-ui/settings-modal')).SettingsModal);
+const ExportTranscriptModal = lazyModal(
+  async () => (await import('@/packages/core-ui/export-transcript-result-modal')).ExportTranscriptModal
+);
+const SessionNoteModal = lazyModal(
+  async () => (await import('@/packages/core-ui/session-note-modal')).SessionNoteModal
+);
+const SessionRenameModal = lazyModal(
+  async () => (await import('@/packages/core-ui/session-rename-modal')).SessionRenameModal
+);
+const SpaceEditorModal = lazyModal(
+  async () => (await import('@/packages/core-ui/space-editor-modal')).SpaceEditorModal
+);
+const MermaidDiagramModal = lazyRenderedModal(
+  async () => (await import('@/packages/core-ui/mermaid/mermaid-diagram')).MermaidDiagramModal
+);
+const SessionChatTableModal = lazyRenderedModal(
+  async () => (await import('@/packages/core-ui/chat/session-chat-markdown')).SessionChatTableModal
+);
+const WatchGhostexVideoModal = lazyModal(
+  async () => (await import('@/packages/core-ui/watch-ghostex-video-modal')).WatchGhostexVideoModal
+);
+const UpdateAvailableModal = lazyModal(
+  async () => (await import('@/packages/core-ui/update-available-modal')).UpdateAvailableModal
+);
+const WorktreeDeleteModal = lazyModal(
+  async () => (await import('@/packages/core-ui/worktree-delete-modal')).WorktreeDeleteModal
+);
+const WorktreeRenameModal = lazyModal(
+  async () => (await import('@/packages/core-ui/worktree-rename-modal')).WorktreeRenameModal
+);
+const WorktreeCreateModal = lazyModal(
+  async () => (await import('@/packages/core-ui/worktree-create-modal')).WorktreeCreateModal
+);
+const MissingProjectFolderModal = lazyModal(
+  async () => (await import('@/packages/core-ui/missing-project-folder-modal')).MissingProjectFolderModal
+);
+const AgentsHubModal = lazyModal(async () => (await import('@/packages/core-ui/agents-hub-modal')).AgentsHubModal);
+const DiscoverGhostexModal = lazyModal(
+  async () => (await import('@/packages/core-ui/discover-ghostex-modal')).DiscoverGhostexModal
+);
+const FirstLaunchSetupModal = lazyModal(
+  async () => (await import('@/packages/core-ui/first-launch-setup-modal')).FirstLaunchSetupModal
+);
+const OnboardingModal = lazyModal(async () => (await import('@/packages/core-ui/onboarding')).OnboardingModal);
+const GitCommitModal = lazyModal(async () => (await import('@/packages/core-ui/git-commit-modal')).GitCommitModal);
+const GitFileDiffModal = lazyModal(
+  async () => (await import('@/packages/core-ui/git-file-diff-modal')).GitFileDiffModal
+);
 
 const clientStorage = storageScope(['commitAgent', 'renameAgent']);
 
@@ -1251,6 +1318,7 @@ function isRemoteFilesystemBrowseResult(value: unknown): value is RemoteFilesyst
 
 function AppModalHost() {
   useAppScrollbars();
+  const lazyModalsSettled = useLazyModalsSettled();
   const {
     activeModal,
     activeModalRequestId,
@@ -1696,7 +1764,7 @@ function AppModalHost() {
    * later height churn while the user interacts with the form.
    */
   useLayoutEffect(() => {
-    if (!activeModal || !isActiveModalRenderable) {
+    if (!activeModal || !isActiveModalRenderable || !areLazyModalsSettled()) {
       return;
     }
     const presentedMessage: { modal: AppModalKind; requestId?: string; type: 'presented' } = {
@@ -1740,7 +1808,7 @@ function AppModalHost() {
       }
     }
     postAppModalHostMessage(presentedMessage, 'AppModals:presented');
-  }, [activeModal, activeModalRequestId, isActiveModalRenderable]);
+  }, [activeModal, activeModalRequestId, isActiveModalRenderable, lazyModalsSettled]);
 
   useEffect(() => {
     if (activeModal !== 'settings') {
@@ -1862,11 +1930,15 @@ function AppModalHost() {
       pageTheme === 'plain-light' || pageTheme.startsWith('light-') ? 'light' : 'dark';
     /**
      * CDXC:Theming 2026-08-24:
-     * Modals read their accent from --ghostex-accent, so publish the setting
-     * onto the modal host body alongside the workspace theme variables. Before
-     * the HUD settings arrive the normalized default is the correct value.
+     * Modals read their accent from --ghostex-accent, so publish the
+     * tint-derived accent onto the modal host body alongside the workspace
+     * theme variables. Before the HUD settings arrive the default tint's accent
+     * is the correct value.
      */
-    document.body.style.setProperty('--ghostex-accent', settings?.accentColor ?? DEFAULT_ghostex_SETTINGS.accentColor);
+    document.body.style.setProperty(
+      '--ghostex-accent',
+      getAccentColorForBackgroundTint(settings?.customSidebarTitlebarBackgroundTintColor)
+    );
     const normalizedThemeColor = normalizeWorkspaceThemeColor(customThemeColor);
     if (normalizedThemeColor) {
       document.body.dataset.sidebarCustomTheme = 'true';
@@ -1888,7 +1960,7 @@ function AppModalHost() {
       document.body.style.removeProperty('--workspace-sidebar-theme-foreground');
       document.body.style.removeProperty('--ghostex-accent');
     };
-  }, [customThemeColor, isOnboardingModal, settings?.accentColor, theme]);
+  }, [customThemeColor, isOnboardingModal, settings?.customSidebarTitlebarBackgroundTintColor, theme]);
 
   return (
     <>
@@ -2617,7 +2689,7 @@ function AppModalHost() {
         projectViewProjects={projectViewProjects}
         projectViewSpaces={projectViewSpaces}
         settings={settings}
-        tailcatRpc={gpuiBootstrapTailcatRpc()}
+        tailcatRpc={gpuiBootstrapRemoteSetupRpc()}
         vscode={vscode}
         ghostexCliStatus={ghostexCliStatus}
         ghostexCliStatusLoading={ghostexCliStatusLoading}
