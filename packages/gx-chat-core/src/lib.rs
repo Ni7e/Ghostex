@@ -17,22 +17,42 @@
 //! - Integers stay integers. A JSON `1` written back as `1.0` is a contract break.
 //! - No callbacks into the core, no generics and no lifetimes at the public boundary, so the same
 //!   API works over UniFFI.
+//!
+//! The port families each own one directory below, listed in
+//! `docs/2026-09-21/rust-chat/FAMILIES.md`. Nobody edits outside their own directory except to add
+//! one line to a barrel here.
 
 mod action;
+pub mod composer;
 mod core;
+mod dispatch;
 mod document;
 mod effect;
 mod event;
+pub mod extras;
+pub mod menus;
+pub mod questions;
+pub mod session;
+pub mod state;
+pub mod transcript;
 mod wire;
 
 pub use crate::action::{ActionKind, UserAction};
 pub use crate::core::ChatCore;
+pub use crate::dispatch::{owner, Family};
 pub use crate::document::{
-    AccountStatus, AsyncQuestions, ComposerActions, ComposerChrome, ComposerOverflow,
-    DeferredWorkRow, Document, Draft, EmptyState, Frame, HostAction, IncomingDraft, Interaction,
-    ItemsSplice, MinimapMarker, NewSessionWelcome, Note, PreviewSettings, ProjectedMessage, Queue,
-    QueueCapabilities, QueuedPrompt, QuestionCard, QuestionControls, QuestionDraft, RowDetails,
-    TerminalTail, TerminalTailNotice, TranscriptItem, ViewState, WorkingStrip,
+    assemble, frame_parts, AccountStatus, AsyncQuestions, ComposerActions, ComposerChrome,
+    ComposerOverflow, DeferredWorkRow, Document, Draft, EmptyState, Frame, FrameParts, HostAction,
+    IncomingDraft, Interaction, ItemsSplice, MinimapMarker, NewSessionWelcome, Note,
+    PreviewSettings, ProjectedMessage, Queue, QueueCapabilities, QueuedPrompt, QuestionCard,
+    QuestionControls, QuestionDraft, RowDetails, TerminalTail, TerminalTailNotice, TranscriptItem,
+    ViewState, WorkingStrip,
+};
+pub use crate::state::{
+    ChatContext, ChatState, CommandMarker, ComposerState, CoreState, ExtrasState, FramePosition,
+    LoadEarlierRequest, MenusState, MessagesState, PendingSend, PendingState, QuestionsState,
+    ResyncState, SessionIdentity, SessionState, StartupDelivery, TerminalStream,
+    TranscriptViewState,
 };
 pub use crate::effect::{Effect, HostRequest, OpenTarget, RequestKind};
 pub use crate::event::{

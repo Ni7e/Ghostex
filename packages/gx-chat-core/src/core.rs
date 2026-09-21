@@ -1,12 +1,15 @@
 //! The state machine: events in, document plus effects out.
 //!
-//! The port fills the bodies family by family (`docs/2026-09-21/rust-chat/PLAN.md` step 3). What
-//! is fixed here is the shape: one owner, no I/O, no clock read, and a document the host can hand
-//! to the renderer unchanged.
+//! One owner, no I/O, no clock read. The core holds a [`ChatState`], routes each event to the
+//! family that owns it (`crate::dispatch`), and reassembles the [`Document`] from the whole state
+//! afterwards (`crate::document::assemble`). The port fills the family handlers one directory at a
+//! time (`docs/2026-09-21/rust-chat/PLAN.md` step 3) without this file changing.
 
-use crate::document::{Document, Frame};
+use crate::dispatch::events;
+use crate::document::{assemble, frame_parts, Document, Frame, FrameParts};
 use crate::effect::Effect;
 use crate::event::Event;
+use crate::state::{ChatContext, ChatState};
 
 /// One chat's brain.
 ///
@@ -15,14 +18,16 @@ use crate::event::Event;
 /// swap rather than a teardown.
 #[derive(Clone, Debug, Default)]
 pub struct ChatCore {
+    state: ChatState,
     document: Document,
+    parts: FrameParts,
     /// Bumped on every publish, so the host can ask for "only what changed since N".
     revision: u64,
     /// The id the next request carries. Monotonic, never reused, so a late answer to a retired
     /// request is dropped rather than misrouted.
     next_request_id: u64,
-    /// The clock the host last passed in. The core never reads a clock itself.
-    now_ms: f64,
+    /// The clock and locale the host last passed in. The core never reads either itself.
+    context: ChatContext,
 }
 
 impl ChatCore {
@@ -36,27 +41,24 @@ impl ChatCore {
 
     /// Applies one event and returns what the host must do.
     ///
-    /// `now_ms` is the host's clock for this turn; every deadline, elapsed label, and retry
-    /// backoff is measured against it, which is what makes a replay reproducible.
-    pub fn handle(&mut self, event: Event, now_ms: f64) -> Vec<Effect> {
-        self.now_ms = now_ms;
-        match event {
-            // Each arm lands with its family's port. Until then an event is accepted and changes
-            // nothing, which keeps a host wired against this build honest rather than panicking.
-            Event::Start(_)
-            | Event::Frame(_)
-            | Event::Connection(_)
-            | Event::RpcSettled { .. }
-            | Event::Action(_)
-            | Event::Tick
-            | Event::StorageLoaded { .. }
-            | Event::StorageWritten { .. }
-            | Event::SettingsChanged(_)
-            | Event::ContextPreferencesChanged { .. }
-            | Event::ModelCatalogChanged { .. }
-            | Event::Measured(_)
-            | Event::DraftChanged { .. } => Vec::new(),
-        }
+    /// `context` carries the host's clock and UTC offset for this turn; every deadline, elapsed
+    /// label, retry backoff and local-midnight boundary is measured against it, which is what
+    /// makes a replay reproducible.
+    pub fn handle(&mut self, event: Event, context: ChatContext) -> Vec<Effect> {
+        self.context = context;
+        let effects = events::dispatch(&mut self.state, &event, &self.context);
+        self.republish();
+        effects
+    }
+
+    /// The state every family reads.
+    pub fn state(&self) -> &ChatState {
+        &self.state
+    }
+
+    /// The state, for the host that seeds a core from what it had cached.
+    pub fn state_mut(&mut self) -> &mut ChatState {
+        &mut self.state
     }
 
     /// What the renderer should draw right now.
@@ -69,9 +71,9 @@ impl ChatCore {
         self.revision
     }
 
-    /// The clock the host last passed in.
-    pub fn now_ms(&self) -> f64 {
-        self.now_ms
+    /// The clock and locale the host last passed in.
+    pub fn context(&self) -> ChatContext {
+        self.context
     }
 
     /// The frame for a host whose last seen revision is `last_revision`.
@@ -96,8 +98,22 @@ impl ChatCore {
         self.next_request_id
     }
 
-    /// Replaces the document and bumps the revision. Every publish goes through here so no path
-    /// can change what is drawn without telling the host.
+    /// Reassembles the document and bumps the revision when it changed.
+    ///
+    /// Only a real change bumps, because the revision is what the host's change gate reads: a bump
+    /// with identical content would ship the whole document once a second for nothing.
+    pub fn republish(&mut self) {
+        let document = assemble(&self.state, &self.context);
+        let parts = frame_parts(&self.state, &self.context);
+        if document == self.document && parts == self.parts {
+            return;
+        }
+        self.document = document;
+        self.parts = parts;
+        self.revision += 1;
+    }
+
+    /// Replaces the document and bumps the revision, for a host seeding a cached frame.
     pub fn publish(&mut self, document: Document) {
         self.document = document;
         self.revision += 1;

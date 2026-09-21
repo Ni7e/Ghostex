@@ -1,5 +1,6 @@
 //! The "what to draw" document and the frame that carries it.
 
+mod assemble;
 mod composer;
 mod frame;
 mod panels;
@@ -9,6 +10,7 @@ mod snapshot;
 mod transcript;
 mod view;
 
+pub use crate::document::assemble::{assemble, frame_parts, FrameParts};
 pub use crate::document::composer::{
     ComposerActions, ComposerChrome, ComposerOverflow, Draft, IncomingDraft, Interaction, Note,
 };
