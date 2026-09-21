@@ -2,8 +2,12 @@
 //!
 //! Port of `packages/shared/session-chat-presentation/option-menu.ts`.
 
-use crate::menus::option_catalog::{OptionCategory, OptionDescriptor, OptionDispatch, SessionOptionCatalog};
-use crate::menus::option_values::{option_choice_sections, option_tracks_value, ChoiceSection, OptionState};
+use crate::menus::option_catalog::{
+    OptionCategory, OptionDescriptor, OptionDispatch, SessionOptionCatalog,
+};
+use crate::menus::option_values::{
+    option_choice_sections, option_tracks_value, ChoiceSection, OptionState,
+};
 
 /// What the menu can do about the current session.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -55,7 +59,10 @@ pub fn option_menu_sections(descriptors: &[OptionDescriptor]) -> Vec<OptionSecti
 }
 
 /// `visibleSessionChatOptions`: the descriptors this session can actually act on.
-pub fn visible_options(descriptors: &[OptionDescriptor], caps: OptionCaps) -> Vec<OptionDescriptor> {
+pub fn visible_options(
+    descriptors: &[OptionDescriptor],
+    caps: OptionCaps,
+) -> Vec<OptionDescriptor> {
     descriptors
         .iter()
         .filter(|descriptor| {

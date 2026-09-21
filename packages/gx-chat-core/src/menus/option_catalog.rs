@@ -258,12 +258,7 @@ pub struct OptionDescriptor {
 }
 
 impl OptionDescriptor {
-    fn new(
-        id: &str,
-        label: &str,
-        category: OptionCategory,
-        dispatch: OptionDispatch,
-    ) -> Self {
+    fn new(id: &str, label: &str, category: OptionCategory, dispatch: OptionDispatch) -> Self {
         Self {
             id: id.to_string(),
             label: label.to_string(),
@@ -330,7 +325,9 @@ impl SessionOptionCatalog {
                 // Until gxserver confirms the model, do not offer effort controls that may not
                 // exist for the actual model (the catalog gives Haiku none).
                 let current = agent.model(model_value);
-                let efforts = current.map(|model| model.efforts.clone()).unwrap_or_default();
+                let efforts = current
+                    .map(|model| model.efforts.clone())
+                    .unwrap_or_default();
                 let mut descriptors = Vec::new();
                 if !efforts.is_empty() {
                     descriptors.push(claude_effort(catalog, &efforts));
@@ -343,10 +340,8 @@ impl SessionOptionCatalog {
             }
             CatalogOptions::Codex { agent, catalog } => {
                 let current = agent.model(model_value);
-                let mut descriptors = vec![codex_effort(
-                    catalog,
-                    &agent.efforts_for_model(model_value),
-                )];
+                let mut descriptors =
+                    vec![codex_effort(catalog, &agent.efforts_for_model(model_value))];
                 if agent.fast_mode.available && current.is_none_or(|model| model.fast_mode) {
                     descriptors.push(fast_mode_descriptor(agent));
                 }

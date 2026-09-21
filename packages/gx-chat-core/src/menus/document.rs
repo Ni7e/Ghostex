@@ -72,10 +72,14 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
         .unwrap_or(Value::Null),
     });
     into.account_status = AccountStatus {
-        visible: status
-            .visible
-            .as_ref()
-            .map(|_| state.session.account_switch.value().cloned().unwrap_or(Value::Null)),
+        visible: status.visible.as_ref().map(|_| {
+            state
+                .session
+                .account_switch
+                .value()
+                .cloned()
+                .unwrap_or(Value::Null)
+        }),
         now: status.now_ms,
         busy: status.busy,
         extra: serde_json::Map::new(),

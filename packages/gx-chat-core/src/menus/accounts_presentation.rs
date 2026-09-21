@@ -57,9 +57,7 @@ pub fn account_figures(account: &Account) -> [AccountFigure; 2] {
             label: account.usage[index].label.clone(),
             value: percent(index),
         },
-        None if account.provider.as_deref() == Some("codex")
-            && account.reset_credits.is_some() =>
-        {
+        None if account.provider.as_deref() == Some("codex") && account.reset_credits.is_some() => {
             AccountFigure {
                 label: Some("Available usage resets".to_string()),
                 value: format!("{}rs", account.reset_credits.clone().unwrap_or_default()),
@@ -363,7 +361,9 @@ fn switch_card_account(
     let mut cards = vec![
         switch_usage_card(
             "5h limit",
-            main.iter().copied().find(|window| is_five_hour_window(window)),
+            main.iter()
+                .copied()
+                .find(|window| is_five_hour_window(window)),
             now_ms,
         ),
         switch_usage_card(

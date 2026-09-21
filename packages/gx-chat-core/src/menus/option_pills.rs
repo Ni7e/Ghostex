@@ -5,7 +5,9 @@
 use serde::Serialize;
 
 use crate::menus::accounts_data::AccountsState;
-use crate::menus::catalog::{truncate_agent_model_label, AgentModelCatalog, AGENT_MODEL_LABEL_MAX_CHARS};
+use crate::menus::catalog::{
+    truncate_agent_model_label, AgentModelCatalog, AGENT_MODEL_LABEL_MAX_CHARS,
+};
 use crate::menus::option_catalog::{OptionDescriptor, SessionOptionCatalog, MODES_SECTION_LABEL};
 use crate::menus::option_menu::{is_shift_tab_mode_cycler, OptionSection};
 use crate::menus::option_values::{option_value_label, options_pill_label, OptionState};
@@ -19,11 +21,13 @@ use crate::menus::option_values::{option_value_label, options_pill_label, Option
 /// packages/core-ui/accounts/indicator.tsx, apps/desktop/src/app/native_chat/option_pills.rs.
 pub fn account_indicator(accounts: Option<&AccountsState>) -> Option<String> {
     let accounts = accounts?;
-    let session_account_id = accounts.session.as_ref().and_then(|session| session.account_id.as_deref());
-    let active = accounts
-        .accounts
-        .iter()
-        .find(|account| account.id.as_deref().is_some() && account.id.as_deref() == session_account_id)?;
+    let session_account_id = accounts
+        .session
+        .as_ref()
+        .and_then(|session| session.account_id.as_deref());
+    let active = accounts.accounts.iter().find(|account| {
+        account.id.as_deref().is_some() && account.id.as_deref() == session_account_id
+    })?;
     // `account.indicator || account.selector`: a blank indicator falls through to the selector.
     let value = match active.indicator.as_deref() {
         Some(indicator) if !indicator.is_empty() => indicator,
@@ -100,8 +104,8 @@ pub fn option_pill_values(
     descriptors: &[OptionDescriptor],
     state: &OptionState,
 ) -> OptionPillValues {
-    let model = catalog
-        .and_then(|catalog| option_value_label(model_catalog, &catalog.model, state));
+    let model =
+        catalog.and_then(|catalog| option_value_label(model_catalog, &catalog.model, state));
     let mode = descriptors
         .iter()
         .find(|descriptor| is_shift_tab_mode_cycler(descriptor));

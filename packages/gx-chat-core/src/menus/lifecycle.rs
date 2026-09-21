@@ -106,7 +106,8 @@ fn apply_detection(state: &mut ChatState) {
     let Some(detected) = DetectedOptions::from_value(&selected) else {
         return;
     };
-    let catalog = session_option_catalog(&state.menus.model_catalog, state.session.agent.as_deref());
+    let catalog =
+        session_option_catalog(&state.menus.model_catalog, state.session.agent.as_deref());
     state
         .menus
         .options

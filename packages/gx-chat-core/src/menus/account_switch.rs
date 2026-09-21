@@ -118,7 +118,11 @@ impl AccountSwitchState {
     }
 
     /// `visible`: the switch to draw, or nothing.
-    fn visible_id<'a>(&self, progress: &'a SwitchProgress, now_ms: i64) -> Option<&'a SwitchProgress> {
+    fn visible_id<'a>(
+        &self,
+        progress: &'a SwitchProgress,
+        now_ms: i64,
+    ) -> Option<&'a SwitchProgress> {
         if progress.phase == "cancelled" {
             return None;
         }

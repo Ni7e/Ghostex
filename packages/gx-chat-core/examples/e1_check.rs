@@ -132,11 +132,15 @@ fn main() {
 
         match (kind, method.as_str()) {
             ("in", "event") => apply_frame(&mut state, args.first()),
+            ("in", "brokerMessage") => apply_broker_message(&mut state, args.first()),
             ("in", "resolve") => {
                 let id = args.first().and_then(Value::as_u64).unwrap_or_default();
                 let value = args.get(1).cloned().unwrap_or(Value::Null);
                 let failed = args.get(2).is_some_and(|error| !error.is_null());
-                match methods.get(&id).map(|(kind, method)| (kind.as_str(), method.as_str())) {
+                match methods
+                    .get(&id)
+                    .map(|(kind, method)| (kind.as_str(), method.as_str()))
+                {
                     Some(("broker", "read")) => apply_boot_read(&mut state, &value),
                     Some(("rpc", "agentAccounts")) => {
                         state.menus.accounts_busy = false;
@@ -250,12 +254,7 @@ fn apply_frame(state: &mut ChatState, frame: Option<&Value>) {
     let Some(frame) = frame.and_then(Value::as_object) else {
         return;
     };
-    let string = |key: &str| {
-        frame
-            .get(key)
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    };
+    let string = |key: &str| frame.get(key).and_then(Value::as_str).map(str::to_string);
     if let Some(agent) = string("agent") {
         state.session.agent = Some(agent);
     }
@@ -263,14 +262,16 @@ fn apply_frame(state: &mut ChatState, frame: Option<&Value>) {
         state.session.session_agent_id = Some(agent_session_id);
     }
     if frame.contains_key("selectedOptions") {
-        state.session.selected_options = frame.get("selectedOptions").cloned().filter(|value| !value.is_null());
-    }
-    if frame.contains_key("availableAgents") {
-        state.session.available_agents = frame
-            .get("availableAgents")
+        state.session.selected_options = frame
+            .get("selectedOptions")
             .cloned()
             .filter(|value| !value.is_null());
     }
+    // Carried by reads alone, and an omission promotes the draft.
+    state.session.available_agents = frame
+        .get("availableAgents")
+        .cloned()
+        .filter(|value| !value.is_null());
     if frame.contains_key("switchableAgents") {
         state.session.switchable_agents = frame
             .get("switchableAgents")
@@ -299,6 +300,34 @@ fn apply_frame(state: &mut ChatState, frame: Option<&Value>) {
     }
 }
 
+/// The two broker pushes family e1 reads: the chat settings and the model catalog.
+fn apply_broker_message(state: &mut ChatState, message: Option<&Value>) {
+    let Some(message) = message.and_then(Value::as_object) else {
+        return;
+    };
+    match message.get("kind").and_then(Value::as_str) {
+        Some("chatSettings") => {
+            if let Some(settings) = message.get("settings").and_then(Value::as_object) {
+                state.core.hide_account_emails =
+                    settings.get("hideAccountEmails").and_then(Value::as_bool) == Some(true);
+                state.core.title = settings
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            }
+        }
+        Some("catalog") => {
+            if let Some(parsed) = message
+                .get("catalog")
+                .and_then(menus::catalog::parse_agent_model_catalog)
+            {
+                state.menus.model_catalog = parsed;
+            }
+        }
+        _ => {}
+    }
+}
+
 /// The composer boot read: the storage key, the stored option values and the model catalog.
 fn apply_boot_read(state: &mut ChatState, value: &Value) {
     let Some(object) = value.as_object() else {
@@ -309,7 +338,10 @@ fn apply_boot_read(state: &mut ChatState, value: &Value) {
     }
     if let Some(states) = object.get("optionStates").and_then(Value::as_object) {
         let key = state.menus.session_key.clone().unwrap_or_default();
-        state.menus.stored_options = states.get(&key).cloned().unwrap_or(Value::Object(Map::new()));
+        state.menus.stored_options = states
+            .get(&key)
+            .cloned()
+            .unwrap_or(Value::Object(Map::new()));
     }
     state.menus.options_seeded = true;
     if let Some(catalog) = object.get("modelCatalog") {

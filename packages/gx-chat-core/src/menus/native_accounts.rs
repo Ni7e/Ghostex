@@ -265,7 +265,9 @@ pub fn native_account_panel(
                         account_usage_label(window),
                         js_number_text(js_round(window.used_percent.unwrap_or(f64::NAN)))
                     ),
-                    percent: js_number_value(window.used_percent.unwrap_or(f64::NAN).clamp(0.0, 100.0)),
+                    percent: js_number_value(
+                        window.used_percent.unwrap_or(f64::NAN).clamp(0.0, 100.0),
+                    ),
                     reset: account_reset_label(window.resets_at.as_deref(), now_ms),
                 })
                 .collect(),

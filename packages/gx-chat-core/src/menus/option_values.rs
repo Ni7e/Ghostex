@@ -257,7 +257,11 @@ pub fn bounded_key_steps(
     });
     if let Some(current) = current {
         let delta = target as i64 - current as i64;
-        let key = if delta > 0 { increase_key } else { decrease_key };
+        let key = if delta > 0 {
+            increase_key
+        } else {
+            decrease_key
+        };
         return vec![key.to_string(); delta.unsigned_abs() as usize];
     }
     let last = choices.len() - 1;
@@ -381,9 +385,13 @@ pub fn reconcile_options_from_command(
         };
         for choice in descriptor.choice_list() {
             if build.build(&choice.value) == normalized {
-                if let Some(updated) =
-                    set_option_value(&next, &descriptor.id, &choice.value, OptionSource::Dispatched, now_ms)
-                {
+                if let Some(updated) = set_option_value(
+                    &next,
+                    &descriptor.id,
+                    &choice.value,
+                    OptionSource::Dispatched,
+                    now_ms,
+                ) {
                     next = updated;
                 }
             }
@@ -495,9 +503,7 @@ fn apply_detected_choice(
     }
     if let Some(current_detected_at) = current.and_then(|entry| entry.detected_at.as_deref()) {
         let current_at_ms = parse_iso_millis(current_detected_at);
-        if current_priority >= incoming_priority
-            && js_less_than(detected_at_ms, current_at_ms)
-        {
+        if current_priority >= incoming_priority && js_less_than(detected_at_ms, current_at_ms) {
             return None;
         }
     }
@@ -678,9 +684,7 @@ pub fn options_pill_label(
 ) -> Option<String> {
     let labels: Vec<String> = descriptors
         .iter()
-        .filter(|descriptor| {
-            !matches!(descriptor.dispatch, OptionDispatch::ToggleCommand { .. })
-        })
+        .filter(|descriptor| !matches!(descriptor.dispatch, OptionDispatch::ToggleCommand { .. }))
         .filter_map(|descriptor| option_value_label(catalog, descriptor, state))
         .collect();
     if labels.is_empty() {
@@ -710,12 +714,7 @@ pub fn option_state_from_value(value: &Value) -> OptionState {
         else {
             continue;
         };
-        let text = |key: &str| {
-            entry
-                .get(key)
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        };
+        let text = |key: &str| entry.get(key).and_then(Value::as_str).map(str::to_string);
         next.insert(
             id.clone(),
             OptionValue {

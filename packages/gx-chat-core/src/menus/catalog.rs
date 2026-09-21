@@ -189,7 +189,8 @@ fn is_js_whitespace(character: char) -> bool {
 /// `parseAgentModelCatalog`: a complete, well-formed document, or `None`.
 pub fn parse_agent_model_catalog(input: &Value) -> Option<AgentModelCatalog> {
     let object = input.as_object()?;
-    if object.get("schemaVersion").and_then(Value::as_i64) != Some(AGENT_MODEL_CATALOG_SCHEMA_VERSION)
+    if object.get("schemaVersion").and_then(Value::as_i64)
+        != Some(AGENT_MODEL_CATALOG_SCHEMA_VERSION)
     {
         return None;
     }
@@ -290,8 +291,7 @@ fn parse_model(input: &Value, agent_efforts: &[String]) -> Option<CatalogModel> 
         None => agent_efforts.to_vec(),
         Some(efforts) => string_list(Some(efforts))?,
     };
-    let picker_label =
-        optional_string(object.get("pickerLabel")).filter(|picker| picker != &label);
+    let picker_label = optional_string(object.get("pickerLabel")).filter(|picker| picker != &label);
     Some(CatalogModel {
         value,
         label,

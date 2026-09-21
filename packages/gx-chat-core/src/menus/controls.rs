@@ -36,7 +36,9 @@ pub fn account_providers(state: &ChatState) -> AccountProviders {
         .and_then(|agents| {
             agents
                 .iter()
-                .find(|row| Some(row.agent_id.as_str()) == state.session.session_agent_id.as_deref())
+                .find(|row| {
+                    Some(row.agent_id.as_str()) == state.session.session_agent_id.as_deref()
+                })
                 .and_then(|row| row.base_agent_id.clone())
         })
         .or_else(|| agent.map(str::to_string));
@@ -61,15 +63,17 @@ pub fn switch_ready(state: &ChatState) -> bool {
     let bound = match switch_progress(state).and_then(|progress| progress.to_account_id) {
         None => true,
         Some(target) if target.is_empty() => true,
-        Some(target) => crate::menus::options::accounts_state(state)
-            .and_then(|accounts| {
-                accounts
-                    .session
-                    .as_ref()
-                    .and_then(|session| session.account_id.clone())
-            })
-            .as_deref()
-            == Some(target.as_str()),
+        Some(target) => {
+            crate::menus::options::accounts_state(state)
+                .and_then(|accounts| {
+                    accounts
+                        .session
+                        .as_ref()
+                        .and_then(|session| session.account_id.clone())
+                })
+                .as_deref()
+                == Some(target.as_str())
+        }
     };
     let pending_state = state
         .session

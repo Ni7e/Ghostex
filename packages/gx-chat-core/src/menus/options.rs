@@ -10,7 +10,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::menus::accounts_data::AccountsState;
-use crate::menus::option_catalog::{session_option_catalog, OptionDescriptor, SessionOptionCatalog};
+use crate::menus::option_catalog::{
+    session_option_catalog, OptionDescriptor, SessionOptionCatalog,
+};
 use crate::menus::option_menu::{
     is_shift_tab_mode_cycler, option_menu_sections, options_may_resolve, visible_options,
     OptionCaps,
@@ -116,10 +118,7 @@ impl NativeChatOptions {
 }
 
 /// `computeNativeChatOptions`.
-pub fn compute_native_chat_options(
-    state: &ChatState,
-    _context: &ChatContext,
-) -> NativeChatOptions {
+pub fn compute_native_chat_options(state: &ChatState, _context: &ChatContext) -> NativeChatOptions {
     let menus = &state.menus;
     let agent = state.session.agent.as_deref();
     let catalog = session_option_catalog(&menus.model_catalog, agent);
@@ -131,11 +130,11 @@ pub fn compute_native_chat_options(
         }
         None => Vec::new(),
     };
-    let provider = model_picker_provider(catalog.as_ref().map(|catalog| catalog.model_icon.as_str()));
+    let provider =
+        model_picker_provider(catalog.as_ref().map(|catalog| catalog.model_icon.as_str()));
     // `chat.pendingModelSelection !== undefined && provider !== undefined`: absent means the
     // daemon never carried the field, which is the "cannot queue a model" state.
-    let can_pick_model =
-        !state.session.pending_model_selection.is_absent() && provider.is_some();
+    let can_pick_model = !state.session.pending_model_selection.is_absent() && provider.is_some();
     let queued_controls = matches!(
         catalog.as_ref().map(|catalog| catalog.model_icon.as_str()),
         Some("codex") | Some("claude")
@@ -154,12 +153,8 @@ pub fn compute_native_chat_options(
         has_provider: provider.is_some(),
         selection_error: selection_error.clone(),
     };
-    let option_menus = native_option_menus(
-        catalog.as_ref(),
-        &values,
-        &option_descriptors,
-        &menu_params,
-    );
+    let option_menus =
+        native_option_menus(catalog.as_ref(), &values, &option_descriptors, &menu_params);
     let pill_values = option_pill_values(
         &menus.model_catalog,
         catalog.as_ref(),
@@ -184,10 +179,7 @@ pub fn compute_native_chat_options(
             .iter()
             .find(|agent| Some(agent.agent_id.as_str()) == draft_agent_id.as_deref())
     });
-    let accounts = menus
-        .accounts
-        .as_ref()
-        .map(AccountsState::from_value);
+    let accounts = menus.accounts.as_ref().map(AccountsState::from_value);
     let mut option_labels = OptionLabels {
         model: pill_values.model.clone(),
         model_display: pill_values.model_display.clone(),
@@ -203,7 +195,11 @@ pub fn compute_native_chat_options(
             &sections,
             pill_values.fast,
             pill_values.plan,
-            if provider.is_some() { " ({shortcut})" } else { "" },
+            if provider.is_some() {
+                " ({shortcut})"
+            } else {
+                ""
+            },
         ),
         model_quick_picker: provider.is_some(),
         show_model: catalog.is_some() || !option_menus.model.is_empty(),
@@ -222,7 +218,9 @@ pub fn compute_native_chat_options(
         }
     }
     let session_options = SessionOptionsDocument {
-        session_key: menus.session_key.clone(),
+        // `computeSessionChatOptions` publishes the STORAGE key, which a draft session suffixes
+        // with its agent id, not the bare session key the host handed over.
+        session_key: menus.options.storage_key.clone(),
         catalog: catalog.as_ref().map(|catalog| PublishedCatalog {
             model: catalog.model.clone(),
             model_icon: catalog.model_icon.clone(),
@@ -234,7 +232,7 @@ pub fn compute_native_chat_options(
         catalog,
         option_descriptors,
         state: values,
-        session_key: menus.session_key.clone(),
+        session_key: menus.options.storage_key.clone(),
         model_provider: provider,
         can_pick_model,
         queued_controls,
@@ -258,10 +256,7 @@ pub fn option_storage_key(
     draft_agent_id: Option<&str>,
 ) -> Option<String> {
     if let Some(draft_agent_id) = draft_agent_id.filter(|id| !id.is_empty()) {
-        *latched = Some((
-            draft_agent_id.to_string(),
-            session_key.map(str::to_string),
-        ));
+        *latched = Some((draft_agent_id.to_string(), session_key.map(str::to_string)));
     }
     let session_key = session_key?;
     let storage_agent_id = latched.as_ref().and_then(|(agent_id, latched_key)| {

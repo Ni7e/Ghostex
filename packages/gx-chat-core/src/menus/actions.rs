@@ -58,11 +58,7 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
 /// `case 'accounts'`: the Switch Account panel's own requests (select, refresh, policy, stop
 /// recovery, retry). The panel hands the request through unchanged.
 fn accounts(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
-    let request = action
-        .params
-        .get("request")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let request = action.params.get("request").cloned().unwrap_or(Value::Null);
     if request.is_null() {
         return Vec::new();
     }
@@ -82,8 +78,9 @@ fn switch_draft_agent(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
     let Some(agent_id) = action.params.get("agentId").and_then(Value::as_str) else {
         return Vec::new();
     };
-    let known = crate::menus::option_menus::DraftAgent::list(state.session.available_agents.as_ref())
-        .is_some_and(|agents| agents.iter().any(|agent| agent.agent_id == agent_id));
+    let known =
+        crate::menus::option_menus::DraftAgent::list(state.session.available_agents.as_ref())
+            .is_some_and(|agents| agents.iter().any(|agent| agent.agent_id == agent_id));
     if !known || state.session.session_agent_id.as_deref() == Some(agent_id) {
         return Vec::new();
     }

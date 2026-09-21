@@ -12,7 +12,10 @@ use crate::menus::option_values::{bounded_key_steps, cyclic_key_steps, OptionSta
 #[derive(Clone, Debug, PartialEq)]
 pub enum QueuedOption {
     /// `picker.selectOptions({ mode })` or `{ fastMode }`.
-    SelectOptions { mode: Option<String>, fast_mode: Option<String> },
+    SelectOptions {
+        mode: Option<String>,
+        fast_mode: Option<String>,
+    },
     /// `picker.select({ model, effort }, undefined, scope)`.
     SelectModel {
         model: String,
@@ -83,11 +86,18 @@ pub fn queue_session_chat_option(
                 .find(|entry| Some(entry.value.as_str()) == preferred.as_deref())
                 .map(|entry| entry.value.clone())
         })
-        .or_else(|| effort_option.as_ref().and_then(|option| option.default_value.clone()))
         .or_else(|| {
             effort_option
                 .as_ref()
-                .and_then(|option| option.choice_list().first().map(|entry| entry.value.clone()))
+                .and_then(|option| option.default_value.clone())
+        })
+        .or_else(|| {
+            effort_option.as_ref().and_then(|option| {
+                option
+                    .choice_list()
+                    .first()
+                    .map(|entry| entry.value.clone())
+            })
         })
         .unwrap_or_default();
     Some(QueuedOption::SelectModel {

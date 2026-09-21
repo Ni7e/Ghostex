@@ -149,8 +149,7 @@ pub fn native_option_menus(
         let presentation = option_rows(descriptor, state, caps);
         let base = command(&descriptor.id);
         let disabled = params.working
-            && !((params.quick_picker
-                && (descriptor.id == "model" || descriptor.id == "effort"))
+            && !((params.quick_picker && (descriptor.id == "model" || descriptor.id == "effort"))
                 || (queued_controls && (descriptor.id == "mode" || descriptor.id == "fastMode")));
         match presentation {
             OptionRows::Action { label } => {
@@ -207,9 +206,7 @@ pub fn native_option_menus(
                             item.detail = section
                                 .choices()
                                 .iter()
-                                .find(|choice| {
-                                    current.as_deref() == Some(choice.value.as_str())
-                                })
+                                .find(|choice| current.as_deref() == Some(choice.value.as_str()))
                                 .map(|choice| choice.label.clone());
                             item.children = Some(choices);
                             vec![item]
@@ -289,7 +286,9 @@ pub fn native_option_menus(
     model.push(heading);
     model.extend(rows(&catalog.model));
     let visible = visible_options(option_descriptors, caps);
-    let mode = visible.iter().find(|descriptor| is_shift_tab_mode_cycler(descriptor));
+    let mode = visible
+        .iter()
+        .find(|descriptor| is_shift_tab_mode_cycler(descriptor));
     let others: Vec<OptionDescriptor> = visible
         .iter()
         .filter(|descriptor| !is_shift_tab_mode_cycler(descriptor))
