@@ -375,44 +375,65 @@ fn launch_cases<D: SyncedDocument>(documents: &[D], wire: fn(&D) -> Value) -> Ve
                 let mut outcomes: Vec<&'static str> = Vec::new();
                 let mut schedules = 0usize;
                 let mut self_echo_avoided = false;
+                // `apply_to_store`, modelled: the host writes the HELD document into the side
+                // state, and the reconcile skips its own write when the echo is already there. The
+                // side state is fed back rather than being a variable nobody reads, because the
+                // bug this half exists for lives exactly there: a restore that wrote first left the
+                // side state holding the app's own document while the guard held the daemon's, so
+                // the list drew one membership and a drop was filed against the other.
                 if stored_first {
-                    // The read lands first: it restores the guard AND seeds the side state, and the
-                    // snapshot is then judged against what the host wrote there.
+                    // The read lands first: it restores the guard, judges nothing (no echo has
+                    // arrived) and writes what it holds.
                     sync.restore(stored.clone());
-                    side = Some(wire(&stored));
+                    side = Some(wire(sync.document()));
+                    // Then the snapshot lands and is judged against what the host wrote there.
                     let changed = side.as_ref() != Some(&server_value);
+                    side = Some(server_value.clone());
                     if document_reconcile_wanted(changed, true) {
                         asked += 1;
                         let (outcome, effects) = sync.adopt(Some(&server_value));
                         outcomes.push(outcome_name(outcome));
                         schedules += effects.len();
+                        // The reconcile's own write: only when the echo is not already what is held.
+                        if Some(wire(sync.document())) != Some(server_value.clone()) {
+                            side = Some(wire(sync.document()));
+                        }
                     }
                 } else {
                     // The snapshot lands first. The host cannot judge it yet, so it CARRIES the
-                    // echo; the read then lands and overwrites the side state with the stored
-                    // document, and the carried echo is what is judged.
+                    // echo; the read then lands, judges the carried echo, and only THEN writes what
+                    // it holds.
                     let changed = side.as_ref() != Some(&server_value);
+                    side = Some(server_value.clone());
                     let deferred =
                         document_reconcile_wanted(changed, true).then(|| server_value.clone());
                     sync.restore(stored.clone());
-                    // The restore seeds the side state with the app's OWN document, which is what
-                    // the settle used to re-read.
-                    side = Some(wire(&stored));
-                    self_echo_avoided = deferred.as_ref() != side.as_ref();
+                    self_echo_avoided = deferred.as_ref() != Some(&wire(&stored));
                     if let Some(echo) = deferred {
                         asked += 1;
                         let (outcome, effects) = sync.adopt(Some(&echo));
                         outcomes.push(outcome_name(outcome));
                         schedules += effects.len();
+                        if Some(wire(sync.document())) != Some(echo.clone()) {
+                            side = Some(wire(sync.document()));
+                        }
                     }
+                    side = Some(wire(sync.document()));
                 }
+                let document_after_first = wire(sync.document());
                 // THE SECOND ECHO, which is the half of the defect a single judgement cannot show:
                 // a gxserver that has never stored this document echoes an EMPTY one, and if the
                 // first echo was this app's own document the empty rule's token is already spent
                 // and the empty echo is adopted, deleting every collection the user has.
                 let empty = wire(&documents[0]);
+                // The daemon's frame writes the side state before the host judges it, which is the
+                // whole reason the reconcile may skip its own write.
+                side = Some(empty.clone());
                 let (second, _) = sync.adopt(Some(&empty));
                 outcomes.push(outcome_name(second));
+                if wire(sync.document()) != empty {
+                    side = Some(wire(sync.document()));
+                }
                 cases.push(json!({
                     "name": format!("{stored_name}/{server_name}/{}", match stored_first {
                         true => "storedFirst",
@@ -425,7 +446,15 @@ fn launch_cases<D: SyncedDocument>(documents: &[D], wire: fn(&D) -> Value) -> Ve
                     "storedFirst": stored_first,
                     "asked": asked,
                     "outcomes": outcomes,
+                    // What the user is looking at after the FIRST echo, which the second, always
+                    // empty one would otherwise erase: a comparison of final states only had two
+                    // collections cases that could tell the self-echo defect from the fix.
+                    "documentAfterFirst": document_after_first,
                     "document": wire(sync.document()),
+                    // The list draws from the side state and a drop is planned from the held
+                    // document, so the two disagreeing is a sidebar that files a project somewhere
+                    // the user cannot see.
+                    "sideStateMatchesHeld": side.as_ref() == Some(&wire(sync.document())),
                     "pending": sync.is_pending(),
                     "schedules": schedules,
                     "selfEchoAvoided": self_echo_avoided,

@@ -54,6 +54,16 @@ type Json = Record<string, any>;
 /** The manual timer queue: a booking is recorded, and the script decides when it fires. */
 type Booking = { delay: number; run: () => void };
 
+/**
+ * The outcome, derived from what the TypeScript half can SEE rather than copied from the Rust rule:
+ * whether the pending flag was up when the echo arrived, whether a push-back was booked, and
+ * whether the held document moved. Without it the step loop compared the document, the pending flag
+ * and the bookings only, so a port that reached the right document by the wrong outcome passed
+ * while every live counter the run is judged on (echoesRefused, echoesAdopted, echoesPushedBack,
+ * echoesAbsent) would have been wrong.
+ */
+type EchoOutcome = 'NoEcho' | 'IgnoredPending' | 'ScheduledPush' | 'Adopted' | 'IgnoredEqual';
+
 /** One document type's half of the harness, so the two are driven by the same runner. */
 type DocumentHarness = {
   /** What the page holds, in the wire shape the Rust dump records. */
@@ -61,7 +71,7 @@ type DocumentHarness = {
   /** A local edit, which is what `saveNativeCollections` / `metadata.updateSpaces` used to do. */
   edit: (wire: Json) => void;
   /** The daemon's echo, as the two real parts of the shipped forward. */
-  echo: (wire: Json) => void;
+  echo: (wire: Json) => EchoOutcome;
   /** The booked push running now. */
   pushStart: () => void;
   pending: () => boolean;
@@ -111,8 +121,13 @@ function collectionsHarness(start: Json): DocumentHarness {
       runtime.queueSidebarProjectCollectionsServerSync(wire);
     },
     echo: (wire: Json) => {
-      if (runtime.sidebarProjectCollectionsServerSyncPending) return;
+      if (runtime.sidebarProjectCollectionsServerSyncPending) return 'IgnoredPending';
+      const before = JSON.stringify(serializeSidebarProjectCollectionsForGxserver(holder.collections.local));
+      const bookedBefore = bookings.length;
       frozenAdoptCollections(holder, 'local', wire, post as Json);
+      if (bookings.length > bookedBefore) return 'ScheduledPush';
+      const after = JSON.stringify(serializeSidebarProjectCollectionsForGxserver(holder.collections.local));
+      return after === before ? 'IgnoredEqual' : 'Adopted';
     },
     // The booked timer FIRING, which is the shipped callback: it clears the timeout id and then
     // pushes. Calling the push directly instead left the runtime believing a push was still booked,
@@ -148,9 +163,11 @@ function spacesHarness(start: Json): DocumentHarness {
       runtime.queueSidebarSpacesServerSync(wire);
     },
     echo: (wire: Json) => {
-      if (runtime.sidebarSpacesServerSyncPending) return;
+      if (runtime.sidebarSpacesServerSyncPending) return 'IgnoredPending';
+      const before = JSON.stringify(serializeSidebarSpacesForGxserver(held));
       const parsed = parseSidebarSpacesFromGxserver(wire);
       if (parsed) held = parsed;
+      return JSON.stringify(serializeSidebarSpacesForGxserver(held)) === before ? 'IgnoredEqual' : 'Adopted';
     },
     pushStart: () => firePush(),
     pending: () => runtime.sidebarSpacesServerSyncPending === true,
@@ -174,11 +191,12 @@ async function runScript(
   harness: DocumentHarness,
   script: string[],
   documents: Json[]
-): Promise<{ document: Json; pending: boolean; schedules: number[] }[]> {
-  const steps: { document: Json; pending: boolean; schedules: number[] }[] = [];
+): Promise<{ document: Json; pending: boolean; schedules: number[]; outcome: EchoOutcome | null }[]> {
+  const steps: { document: Json; pending: boolean; schedules: number[]; outcome: EchoOutcome | null }[] = [];
   outstanding = undefined;
   for (const event of script) {
     bookings = [];
+    let outcome: EchoOutcome | null = null;
     switch (event) {
       // A FRESH object per edit. The shipped `pushSidebar*ToGxserver` clears its pending flag only
       // when `latest === pushed`, which is object identity, and every real edit goes through a
@@ -193,15 +211,16 @@ async function runScript(
         break;
       case 'echoNone':
         // `serverState === undefined`: the shipped code never calls the forward at all.
+        outcome = 'NoEcho';
         break;
       case 'echoEmpty':
-        harness.echo(documents[0]);
+        outcome = harness.echo(documents[0]);
         break;
       case 'echoA':
-        harness.echo(documents[1]);
+        outcome = harness.echo(documents[1]);
         break;
       case 'echoB':
-        harness.echo(documents[2]);
+        outcome = harness.echo(documents[2]);
         break;
       case 'pushStart':
         harness.pushStart();
@@ -224,6 +243,7 @@ async function runScript(
       document: harness.held(),
       pending: harness.pending(),
       schedules: bookings.map((booking) => booking.delay),
+      outcome,
     });
   }
   return steps;
@@ -240,18 +260,16 @@ async function referenceLaunch(
   kind: 'collections' | 'spaces',
   documents: Json[],
   storedIndex: number,
-  serverIndex: number,
   firstEcho: Json
-): Promise<{ document: Json; pushedBack: number }> {
+): Promise<{ afterFirst: Json; afterSecond: Json }> {
   const harness =
     kind === 'collections' ? collectionsHarness(documents[storedIndex]) : spacesHarness(documents[storedIndex]);
-  void serverIndex;
   bookings = [];
-  harness.echo(firstEcho);
-  const afterFirst = bookings.length;
+  const first = harness.echo(firstEcho);
+  const afterFirst = { document: harness.held(), outcome: first };
   bookings = [];
-  harness.echo(documents[0]);
-  return { document: harness.held(), pushedBack: afterFirst + bookings.length };
+  const second = harness.echo(documents[0]);
+  return { afterFirst, afterSecond: { document: harness.held(), outcome: second } };
 }
 
 /**
@@ -481,13 +499,25 @@ function mutate(dump: Json, name: string): void {
       break;
     case 'never-push-back':
       // The same rule in the other direction for the Spaces document, which must adopt an empty
-      // echo because gxserver owns it outright: a port that gave it the collections rule.
+      // echo because gxserver owns it outright: a port that gave it the collections rule. Written
+      // as the WHOLE state a push-back leaves (the document not adopted, the flag up and the push
+      // booked) rather than as the outcome alone, which was a state the real implementation cannot
+      // reach and registered through the flag by accident.
       for (const entry of dump.spaces.cases as Json[])
-        for (const step of entry.steps as Json[])
-          if (step.event === 'echoEmpty' && step.outcome === 'Adopted') {
-            step.outcome = 'ScheduledPush';
-            step.pending = true;
-          }
+        (entry.steps as Json[]).forEach((step, index) => {
+          if (step.event !== 'echoEmpty' || step.outcome !== 'Adopted') return;
+          step.outcome = 'ScheduledPush';
+          step.pending = true;
+          step.schedules = [400];
+          step.document = index > 0 ? (entry.steps as Json[])[index - 1].document : step.document;
+        });
+      break;
+    case 'write-the-store-before-the-settle':
+      // V1 itself: the restore writes the stored document into the side state and the reconcile
+      // then skips its own write, so the list draws the stored document while the guard holds the
+      // daemon's.
+      for (const kind of ['collections', 'spaces'])
+        for (const entry of dump[kind].launch as Json[]) if (!entry.storedFirst) entry.sideStateMatchesHeld = false;
       break;
     case 'let-the-counter-go-backwards':
       // `CollectionsDocument::adopt` without its `Math.max`: the next new folder reuses a name that
@@ -532,7 +562,13 @@ async function main(): Promise<void> {
       (entry.steps as Json[]).forEach((step, index) => {
         counters.steps += 1;
         const mine = ours[index];
-        const theirs = { document: step.document, pending: step.pending, schedules: step.schedules };
+        const theirs = {
+          document: step.document,
+          pending: step.pending,
+          schedules: step.schedules,
+          // `Unparsable` never occurs here: every echo in the enumeration is a real document.
+          outcome: (step.outcome ?? null) as EchoOutcome | null,
+        };
         if (canonical(mine) === canonical(theirs)) return;
         differences += 1;
         if (shown.length < 6)
@@ -548,22 +584,32 @@ async function main(): Promise<void> {
       const firstEcho = entry.selfEcho
         ? documents[entry.storedIndex as number]
         : documents[entry.serverIndex as number];
-      const ours = await referenceLaunch(
-        kind,
-        documents,
-        entry.storedIndex as number,
-        entry.serverIndex as number,
-        firstEcho
-      );
+      const ours = await referenceLaunch(kind, documents, entry.storedIndex as number, firstEcho);
+      // The SECOND echo is always the empty document, so comparing final states only let it erase
+      // the distinction the first one made: five cases of thirty-six could tell the self-echo
+      // defect from the fix, and none of them were Spaces. Both echoes are compared now, each with
+      // the document it left AND the outcome it reached.
+      const outcomes = entry.outcomes as string[];
+      if (outcomes.length !== 2)
+        throw new Error(`launch ${String(entry.name)} recorded ${outcomes.length} outcomes, not two`);
       const rust = {
-        document: entry.document,
-        pushedBack: (entry.outcomes as string[]).filter((outcome) => outcome === 'ScheduledPush').length,
+        afterFirst: { document: entry.documentAfterFirst, outcome: outcomes[0] },
+        afterSecond: { document: entry.document, outcome: outcomes[1] },
       };
+      // The list draws from the SIDE STATE and a drop is planned from the held document, so the two
+      // disagreeing is a sidebar that files a project into a folder the user cannot see. That is
+      // what a restore writing the store before the settle really did, and it is the step no gate
+      // in this port modelled at all until now.
+      if (entry.sideStateMatchesHeld !== true) {
+        differences += 1;
+        if (shown.length < 12)
+          shown.push(`${kind} launch ${entry.name}: the side state does not hold what the guard holds`);
+      }
       if (canonical(rust) === canonical(ours)) continue;
       differences += 1;
-      if (shown.length < 10)
+      if (shown.length < 12)
         shown.push(
-          `${kind} launch ${entry.name}: rust ${canonical(rust).slice(0, 240)} ts ${canonical(ours).slice(0, 240)}`
+          `${kind} launch ${entry.name}: rust ${canonical(rust).slice(0, 260)} ts ${canonical(ours).slice(0, 260)}`
         );
     }
     const roundTrip = await runRoundTrip(dump[kind].bridge as Json, kind);
