@@ -980,7 +980,12 @@ fn match_grok_segment(segment: &str) -> Option<SessionChatDetectedSelection> {
         None => (segment.trim(), None),
         Some((name, rest)) => (name.trim(), Some(rest.strip_suffix(')')?.trim())),
     };
-    if !name
+    // Grok 1.0.40 added "Grok 4.7 Fast", whose id in `models_cache.json` is
+    // `grok-4.7-build-fast` rather than the name lowercased.
+    let (base, fast) = name
+        .strip_suffix(" Fast")
+        .map_or((name, false), |base| (base, true));
+    if !base
         .strip_prefix("Grok")
         .is_some_and(is_model_version_suffix)
     {
@@ -1004,7 +1009,11 @@ fn match_grok_segment(segment: &str) -> Option<SessionChatDetectedSelection> {
         model: Some(SessionChatDetectedChoice {
             // The catalog id for the displayed name (`Grok 4.6` ⇒ `grok-4.6`),
             // which is what grok's own `models_cache.json` keys models by.
-            value: name.to_ascii_lowercase().replace(' ', "-"),
+            value: format!(
+                "{}{}",
+                base.to_ascii_lowercase().replace(' ', "-"),
+                if fast { "-build-fast" } else { "" }
+            ),
             label: name.to_string(),
             source: SessionChatOptionEvidence::Terminal,
         }),
