@@ -137,7 +137,9 @@ const windowsWslCodeServerArchive = targetsWindows
   : undefined;
 const configuration = isDarwin ? resolveLocalStartConfiguration(process.env.CONFIGURATION) : undefined;
 const arch = isDarwin ? resolveLocalMacosArch(process.env.GHOSTEX_MACOS_ARCH) : undefined;
-const localStartCodeSignIdentity = isDarwin ? resolveLocalStartCodeSignIdentity(startEnvironment) : undefined;
+const localStartCodeSignIdentity = isDarwin
+  ? resolveLocalStartCodeSignIdentity(startEnvironment, installedAppPath)
+  : undefined;
 const localStartCodeSignTimestampFlag = isDarwin ? resolveLocalStartCodeSignTimestampFlag(startEnvironment) : undefined;
 const buildEnvironment = {
   ...startEnvironment,

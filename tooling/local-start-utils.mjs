@@ -18,7 +18,7 @@ function shellQuote(value) {
   return `'${text.replaceAll("'", "'\\''")}'`;
 }
 
-export function resolveLocalStartCodeSignIdentity(environment) {
+export function resolveLocalStartCodeSignIdentity(environment, installedAppPath) {
   if (Object.hasOwn(environment, 'GHOSTEX_GPUI_SIGN_IDENTITY')) {
     return environment.GHOSTEX_GPUI_SIGN_IDENTITY ?? '';
   }
@@ -29,12 +29,41 @@ export function resolveLocalStartCodeSignIdentity(environment) {
   if (preferredIdentity) {
     return preferredIdentity.name;
   }
+  /*
+  CDXC:Build 2026-09-21 WHY:
+  macOS keys folder permissions (Documents, removable volumes, and the rest of TCC) to the app's designated requirement. A certificate-signed build keeps one requirement across rebuilds; an ad-hoc build's requirement is its cdhash, so every rebuild is a new app to TCC and the permission prompts come back on each restart and session switch.
+  A start run from a shell that cannot reach the keychain (a sandboxed agent shell lists no usable identity) used to fall through to ad-hoc silently and replace the certificate-signed install, wiping the grants. Stop before the build instead; ad-hoc stays available for machines with no certificate and through an explicit GHOSTEX_GPUI_SIGN_IDENTITY=-.
+  */
+  const installedAuthority = installedAppPath ? readCertificateAuthority(installedAppPath, environment) : undefined;
+  if (installedAuthority) {
+    console.error(
+      [
+        `${installedAppPath} is signed with "${installedAuthority}", but this shell cannot sign with any code-signing identity.`,
+        'Installing an ad-hoc build over it would make macOS forget its folder permissions and ask again on every rebuild.',
+        'Run the start from a shell that can use the login keychain (not a sandboxed agent shell), or set GHOSTEX_GPUI_SIGN_IDENTITY=- to install an ad-hoc build on purpose.',
+      ].join('\n')
+    );
+    process.exit(1);
+  }
   console.warn(
     identities.length > 0
       ? 'Found code-signing identities, but none could sign; falling back to ad-hoc GPUI signing. macOS may ask for permissions again after GPUI rebuilds.'
       : 'No Apple code-signing identity was found; falling back to ad-hoc GPUI signing. macOS may ask for permissions again after GPUI rebuilds.'
   );
   return '-';
+}
+
+function readCertificateAuthority(codePath, environment) {
+  const result = spawnSync('codesign', ['-dv', '--verbose=4', codePath], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: environment,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error || result.status !== 0) {
+    return undefined;
+  }
+  return `${result.stderr}\n${result.stdout}`.match(/^Authority=(.+)$/m)?.[1];
 }
 
 function preferredLocalStartCodeSignIdentities(identities) {
@@ -128,7 +157,10 @@ export function withoutPowerShell7ModulePaths(environment) {
     return environment;
   }
   const isPowerShell7Entry = (entry) => {
-    const normalized = entry.trim().replace(/[\\/]+$/u, '').toLowerCase();
+    const normalized = entry
+      .trim()
+      .replace(/[\\/]+$/u, '')
+      .toLowerCase();
     return (
       /[\\/]powershell[\\/]7[^\\/]*[\\/]modules$/u.test(normalized) ||
       /[\\/]documents[\\/]powershell[\\/]modules$/u.test(normalized) ||
