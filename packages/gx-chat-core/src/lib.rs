@@ -55,10 +55,10 @@ pub use crate::state::{
     LoadEarlierRequest, MenusState, MessagesState, PendingSend, PendingState, QuestionsState,
     ResyncState, SessionIdentity, SessionState, TerminalStream, TranscriptViewState,
 };
-pub use crate::effect::{Effect, HostRequest, OpenTarget, RequestKind};
+pub use crate::effect::{Effect, HostRequest, OpenTarget, RequestKind, StorageWrite};
 pub use crate::event::{
     ChatSettings, ComposerBootRead, ConnectionUpdate, Event, Measurement, OpenRowDetail,
-    StartConfig, StorageKey,
+    StartConfig, StorageKey, StorageRecord,
 };
 pub use crate::wire::{
     ChatAppendedFrame, ChatBlock, ChatFrame, ChatFrameBase, ChatMessage, ChatRole, ChatRpcMethod,

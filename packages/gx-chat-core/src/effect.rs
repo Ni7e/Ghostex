@@ -33,6 +33,19 @@ pub enum Effect {
     Reconnect,
     /// Read a stored record; answered by [`crate::Event::StorageLoaded`].
     ReadStorage { key: StorageKey },
+    /// Read several stored records as ONE host round trip; answered by
+    /// [`crate::Event::StorageBatchLoaded`].
+    ///
+    /// Some of the host's storage operations read more than one record and answer once.
+    /// `composer('asyncQuestionRead')` is the one this exists for: it hands back
+    /// `{drafts, retired}` from two different stores in a single call
+    /// (`apps/desktop/sidebar/session-chat-runtime/native-composer.ts`). Splitting it into two
+    /// [`Effect::ReadStorage`]s would make the core take two round trips where the TypeScript
+    /// takes one, and the number of round trips is part of the contract: the replay pairs the two
+    /// brains' storage answers by order, so one extra read drifts every answer after it.
+    ///
+    /// A host performs the reads in the order given and answers once with the same order.
+    ReadStorageBatch { keys: Vec<StorageKey> },
     /// Read everything the chat needs at boot in one go; answered by
     /// [`crate::Event::ComposerBootRead`].
     ///
@@ -47,6 +60,13 @@ pub enum Effect {
         /// Flush to disk before reporting, for records that must survive a crash.
         durable: bool,
     },
+    /// Write several stored records as ONE host round trip; answered by
+    /// [`crate::Event::StorageBatchWritten`].
+    ///
+    /// The write counterpart of [`Effect::ReadStorageBatch`], for the same reason:
+    /// `composer('asyncQuestionRetire')` writes the remaining drafts and the retired-id list in a
+    /// single call. A host performs the writes in the order given and answers once.
+    WriteStorageBatch { writes: Vec<StorageWrite> },
     /// Push a store's pending writes to disk and say when they are there; answered by
     /// [`crate::Event::StorageWritten`] with the same `store` and an empty suffix.
     ///
@@ -85,6 +105,17 @@ pub enum Effect {
     /// Something only the app shell can do: switch to the terminal, pick attachments, report the
     /// composer ready. Free-form because the list belongs to the app, not to chat.
     HostAction { action: String, params: Box<Value> },
+}
+
+/// One write of a [`Effect::WriteStorageBatch`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageWrite {
+    pub key: StorageKey,
+    /// `None` deletes the record.
+    pub value: Option<String>,
+    /// Flush to disk before reporting.
+    pub durable: bool,
 }
 
 /// What [`Effect::Open`] should open.

@@ -148,6 +148,28 @@ impl CoreState {
                     store: store.clone(),
                     suffix: String::new(),
                 }),
+                // One host round trip, several records: the arm resumes when the LAST of them has
+                // been folded in, which is what one await per key says.
+                Effect::ReadStorageBatch { keys } => {
+                    for key in keys {
+                        awaited = true;
+                        let await_on = PublishAwait::Storage(key.clone());
+                        if !self.publish_awaits.contains(&await_on) {
+                            self.publish_awaits.push(await_on);
+                        }
+                    }
+                    continue;
+                }
+                Effect::WriteStorageBatch { writes } => {
+                    for write in writes {
+                        awaited = true;
+                        let await_on = PublishAwait::Storage(write.key.clone());
+                        if !self.publish_awaits.contains(&await_on) {
+                            self.publish_awaits.push(await_on);
+                        }
+                    }
+                    continue;
+                }
                 _ => continue,
             };
             awaited = true;

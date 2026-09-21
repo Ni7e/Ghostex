@@ -246,6 +246,35 @@ impl World {
                             next.extend(more.into_iter().map(|effect| (self.record, effect)));
                         }
                     }
+                    // One host call, several records: the harness fans it out the way
+                    // `ChatCore::handle` does.
+                    Effect::ReadStorageBatch { keys } => {
+                        for key in keys {
+                            let value = self
+                                .storage
+                                .get(&(key.store.clone(), key.suffix.clone()))
+                                .cloned();
+                            questions::storage_loaded(&mut self.state, &key, value.as_deref());
+                        }
+                    }
+                    Effect::WriteStorageBatch { writes } => {
+                        for write in writes {
+                            let slot = (write.key.store.clone(), write.key.suffix.clone());
+                            match write.value {
+                                Some(value) => {
+                                    self.storage.insert(slot, value);
+                                }
+                                None => {
+                                    self.storage.remove(&slot);
+                                }
+                            }
+                            if let Some(more) =
+                                questions::storage_written(&mut self.state, &write.key, None)
+                            {
+                                next.extend(more.into_iter().map(|effect| (self.record, effect)));
+                            }
+                        }
+                    }
                     Effect::SendRpc { request_id, .. } => {
                         // The refusal the recording carries for this call: raised after the
                         // request went out, and answered by the record after the document that

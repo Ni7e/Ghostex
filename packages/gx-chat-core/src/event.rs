@@ -39,6 +39,16 @@ pub enum Event {
         key: StorageKey,
         error: Option<String>,
     },
+    /// The answer to [`crate::Effect::ReadStorageBatch`], in the order the keys were asked for.
+    StorageBatchLoaded { records: Vec<StorageRecord> },
+    /// The answer to [`crate::Effect::WriteStorageBatch`].
+    ///
+    /// One outcome for the whole batch, because the host operation it stands for is one call: a
+    /// refusal refuses all of it.
+    StorageBatchWritten {
+        keys: Vec<StorageKey>,
+        error: Option<String>,
+    },
     /// The answer to [`crate::Effect::ReadComposerBoot`].
     ///
     /// One read rather than a dozen, because the host already performs it as one:
@@ -158,6 +168,15 @@ pub struct StorageKey {
     pub store: String,
     /// The part of the key after the store's prefix; empty for a singleton record.
     pub suffix: String,
+}
+
+/// One record of a [`crate::Event::StorageBatchLoaded`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageRecord {
+    pub key: StorageKey,
+    /// `None` when nothing was stored.
+    pub value: Option<String>,
 }
 
 /// The two settings the host pushes into the chat.

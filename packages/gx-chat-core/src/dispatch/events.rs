@@ -66,7 +66,11 @@ fn route(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Eff
         | Event::Tick
         | Event::ComposerBootRead(_)
         | Event::SettingsChanged(_) => crate::session::handle_event(state, event, context),
-        Event::StorageLoaded { .. }
+        // The two batch answers never reach here: `ChatCore::handle` expands one into the per-key
+        // answers it stands for, so every family's existing arm serves it unchanged.
+        Event::StorageBatchLoaded { .. }
+        | Event::StorageBatchWritten { .. }
+        | Event::StorageLoaded { .. }
         | Event::StorageWritten { .. }
         | Event::ContextPreferencesChanged { .. }
         | Event::ModelCatalogChanged { .. }

@@ -91,7 +91,15 @@ impl ChatCore {
         self.context = context;
         // `dispatch` routes the event to its owner and then runs the six per-family settle hooks
         // in a fixed order, which is where every `useMemo` and `useEffect` of the TypeScript lives.
-        let mut effects = events::dispatch(&mut self.state, &event, &self.context);
+        //
+        // A batch storage answer is ONE host round trip carrying several records, so it is
+        // expanded into the per-key answers it stands for and dispatched in order. Every family's
+        // existing arm then serves it unchanged, and the whole batch still publishes once: the
+        // republish below runs after the last of them.
+        let mut effects = Vec::new();
+        for expanded in expand(event) {
+            effects.extend(events::dispatch(&mut self.state, &expanded, &self.context));
+        }
         self.republish();
         // One wake for the whole core, not one per timer: the table knows which key is earliest,
         // and the host only has to be asked again when that answer changed.
@@ -274,6 +282,31 @@ impl ChatCore {
         self.document = document;
         self.published_context = self.context.clone();
         self.revision += 1;
+    }
+}
+
+/// One event, or the per-key answers a batch answer stands for.
+///
+/// `composer('asyncQuestionRead')` and `composer('asyncQuestionRetire')` each touch two stores and
+/// answer once, so the core asks for them as one effect and hears back one event. Every family
+/// reads storage per key, so the answer is fanned out here rather than in six settle hooks.
+fn expand(event: Event) -> Vec<Event> {
+    match event {
+        Event::StorageBatchLoaded { records } => records
+            .into_iter()
+            .map(|record| Event::StorageLoaded {
+                key: record.key,
+                value: record.value,
+            })
+            .collect(),
+        Event::StorageBatchWritten { keys, error } => keys
+            .into_iter()
+            .map(|key| Event::StorageWritten {
+                key,
+                error: error.clone(),
+            })
+            .collect(),
+        other => vec![other],
     }
 }
 

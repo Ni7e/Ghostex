@@ -172,6 +172,36 @@ impl BridgeTranslator {
                         value,
                     });
                 }
+                // One host round trip, so ONE queued answer: the TypeScript's own
+                // `composer('asyncQuestionRead')` is a single `resolve` record, and pairing is by
+                // order.
+                Effect::ReadStorageBatch { keys } => {
+                    let records = keys
+                        .iter()
+                        .map(|key| crate::event::StorageRecord {
+                            key: key.clone(),
+                            value: self.storage.get(&slot(key)).cloned(),
+                        })
+                        .collect();
+                    self.storage_answers
+                        .push_back(Event::StorageBatchLoaded { records });
+                }
+                Effect::WriteStorageBatch { writes } => {
+                    for write in writes {
+                        match &write.value {
+                            Some(value) => {
+                                self.storage.insert(slot(&write.key), value.clone());
+                            }
+                            None => {
+                                self.storage.remove(&slot(&write.key));
+                            }
+                        }
+                    }
+                    self.storage_answers.push_back(Event::StorageBatchWritten {
+                        keys: writes.iter().map(|write| write.key.clone()).collect(),
+                        error: None,
+                    });
+                }
                 Effect::WriteStorage { key, value, .. } => {
                     match value {
                         Some(value) => {

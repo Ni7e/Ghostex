@@ -133,6 +133,9 @@ fn async_settled(state: &mut ChatState, outcome: &RpcOutcome) -> Vec<Effect> {
             Vec::new()
         }
     };
+    // `AsyncQuestions.submit` awaits `persistence.retire(...)` after the delivery and only then
+    // leaves `submitting` and calls `changed()`, so the strip's publish is after the WRITE.
+    state.core.publish_after(&effects);
     effects
 }
 

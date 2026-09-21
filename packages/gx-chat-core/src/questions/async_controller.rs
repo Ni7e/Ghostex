@@ -110,14 +110,14 @@ pub fn project(
 }
 
 /// Reads the saved answers and this client's retirements back.
+///
+/// One effect, not two: `composer('asyncQuestionRead')` hands back `{drafts, retired}` from the two
+/// stores in a single host call, and the number of round trips is part of the contract.
 pub fn load(state: &mut AsyncQuestionsState) -> Vec<Effect> {
     state.pending_reads = 2;
-    vec![
-        Effect::ReadStorage {
-            key: async_drafts_key(),
-        },
-        Effect::ReadStorage { key: retired_key() },
-    ]
+    vec![Effect::ReadStorageBatch {
+        keys: vec![async_drafts_key(), retired_key()],
+    }]
 }
 
 /// One of the two reads answered; the strip unlocks once both have.
@@ -241,18 +241,21 @@ pub fn submit_succeeded(
     // remaining drafts are written from what is left rather than from what was sent.
     let remaining = crate::questions::drafts::remaining_drafts(&state.drafts, submitted);
     state.drafts = remaining;
-    vec![
-        Effect::WriteStorage {
-            key: async_drafts_key(),
-            value: encode_drafts(&state.drafts),
-            durable: true,
-        },
-        Effect::WriteStorage {
-            key: retired_key(),
-            value: Some(retired_value),
-            durable: true,
-        },
-    ]
+    // `composer('asyncQuestionRetire')` writes both records in one call.
+    vec![Effect::WriteStorageBatch {
+        writes: vec![
+            crate::effect::StorageWrite {
+                key: async_drafts_key(),
+                value: encode_drafts(&state.drafts),
+                durable: true,
+            },
+            crate::effect::StorageWrite {
+                key: retired_key(),
+                value: Some(retired_value),
+                durable: true,
+            },
+        ],
+    }]
 }
 
 /// The send was refused: the strip shows why and the question stays open.
