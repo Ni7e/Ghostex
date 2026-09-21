@@ -150,6 +150,11 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_reload(&command, cx) {
             return;
         }
+        // A project's Full Reload and a user-made group's are that reload over a set, one row at a
+        // time (gx_store/sidebar_reload.rs).
+        if self.gx_store_run_sidebar_reload_set(&command, cx) {
+            return;
+        }
         if self.gx_store_run_sidebar_split(&command, cx) {
             return;
         }

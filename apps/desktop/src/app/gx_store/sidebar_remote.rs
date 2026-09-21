@@ -13,9 +13,9 @@
 //! back to Rust as a bridge message; the round trip bought nothing, because the store's own client
 //! for that machine already holds the tunnel's port and token.
 //!
-//! **The counters that prove this path fires in the app** are `actions` and `legs` on
-//! `gxStore.sidebarRemote.summary`, which rides the periodic path and writes its first line with
-//! every counter at zero. A run in which the user slept, woke, pinned or closed a row on a remote
+//! **The counters that prove this path fires in the app** are `remote.actions` and `remote.legs`
+//! on `gxStore.sidebarActions.summary`, which rides the periodic path and writes its first line
+//! with every counter at zero. A run in which the user slept, woke, pinned or closed a row on a remote
 //! machine tab and `actions` is still zero means the command never reached here.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_actions/remote.rs,
@@ -83,7 +83,7 @@ pub(crate) struct SidebarRemoteHost {
     records: u32,
     summary_records: u32,
     summary_at: Option<Instant>,
-    summary_written: Option<(SidebarRemoteCounters, u64, u64)>,
+    summary_written: Option<(SidebarRemoteCounters, [u64; 5])>,
 }
 
 impl GhostexGpuiApp {
@@ -123,13 +123,13 @@ impl GhostexGpuiApp {
     }
 
     /// The same action as a task the caller can wait for, which resolves once its last leg came
-    /// back or a failed one stopped it. The paced bulk sleep waits on it; `None` means the old
-    /// runtime answers the payload.
+    /// back or a failed one stopped it, to whether it came home without a stop. The paced bulk
+    /// sleep and the set reload wait on it; `None` means the old runtime answers the payload.
     pub(super) fn gx_store_start_remote(
         &mut self,
         message: &Value,
         cx: &mut gpui::Context<Self>,
-    ) -> Option<gpui::Task<()>> {
+    ) -> Option<gpui::Task<bool>> {
         let Some(plan) =
             plan_remote_session_action(message, self.gx_store_sleep_session_when_parking())
         else {
@@ -186,7 +186,7 @@ impl GhostexGpuiApp {
                     )
                 });
                 let Ok(task) = sent else {
-                    return;
+                    return false;
                 };
                 // A fire-and-forget leg is always its plan's last, so waiting for it here to count
                 // its answer delays nothing and decides nothing: `step_after` does not read it.
@@ -202,7 +202,7 @@ impl GhostexGpuiApp {
                     })
                     .is_err()
                 {
-                    return;
+                    return false;
                 }
                 match plan.step_after(index, ok) {
                     RemoteStep::Next(next) => index = next,
@@ -218,23 +218,25 @@ impl GhostexGpuiApp {
                                 this.dispatch_gpui_app_modal_toast(level, title, description, cx);
                             });
                             if shown.is_err() {
-                                return;
+                                return false;
                             }
                         }
                         break step;
                     }
                 }
             };
+            let stopped = matches!(outcome, RemoteStep::Stopped { .. });
             let _ = this.update(cx, |this, _| {
-                if matches!(outcome, RemoteStep::Stopped { .. }) {
+                if stopped {
                     this.gx_store.sidebar_remote.counters.stopped += 1;
                 }
                 this.gx_store_record_remote_action(
                     &plan,
-                    matches!(outcome, RemoteStep::Stopped { .. }),
+                    stopped,
                     started.elapsed().as_millis() as u64,
                 );
             });
+            !stopped
         }))
     }
 
@@ -264,7 +266,7 @@ impl GhostexGpuiApp {
         );
     }
 
-    /// The same counters on the periodic path, whether or not anything has happened.
+    /// The action counters on the periodic path, whether or not anything has happened.
     ///
     /// A record emitted only when an action finishes is a record that is not there in a run where
     /// the user touched no remote row, and "the path never ran" is exactly the answer a live round
@@ -272,16 +274,23 @@ impl GhostexGpuiApp {
     /// proved to reach the log in a quiet run, and its first line goes out with every counter at
     /// zero.
     ///
-    /// Two LOCAL counters ride along because they became measurable in the same change and have no
-    /// periodic line of their own: `reloadsStopped` (a Full Reload whose sleep call failed, so the
-    /// wake was never asked for) and `pacedLegsWaited` (a paced bulk sleep, local or remote, whose
-    /// next request waited for this one's answer). Both used to be impossible, so a non-zero value
-    /// is the proof the new wait is real.
-    pub(super) fn gx_store_sidebar_remote_summary(&mut self) {
-        let reloads_stopped = self.gx_store.sidebar_lifecycle.reloads_stopped;
-        let paced_legs_waited = self.gx_store.sidebar_bulk.paced_legs_waited;
+    /// `local` carries the counters of the three LOCAL paths this same change made measurable and
+    /// that have no periodic line of their own: `reloadsStopped` (a Full Reload whose sleep call
+    /// failed, so the wake was never asked for), `pacedLegsWaited` (a paced bulk sleep whose next
+    /// request waited for this one's answer), and the set reloads (`reloadSets`, `reloadSetRows`,
+    /// `reloadSetsStopped`). The first two used to be impossible, so a non-zero value is the proof
+    /// the new wait is real.
+    pub(super) fn gx_store_sidebar_actions_summary(&mut self) {
+        let lifecycle = self.gx_store.sidebar_lifecycle;
+        let local = [
+            lifecycle.reloads_stopped,
+            self.gx_store.sidebar_bulk.paced_legs_waited,
+            lifecycle.reload_sets,
+            lifecycle.reload_set_rows,
+            lifecycle.reload_sets_stopped,
+        ];
         let host = &mut self.gx_store.sidebar_remote;
-        let now = (host.counters, reloads_stopped, paced_legs_waited);
+        let now = (host.counters, local);
         if host.summary_written == Some(now)
             || host
                 .summary_at
@@ -295,15 +304,32 @@ impl GhostexGpuiApp {
         }
         host.summary_records += 1;
         host.summary_written = Some(now);
-        let mut details = remote_counters_json(&host.counters);
-        details["reloadsStopped"] = json!(reloads_stopped);
-        details["pacedLegsWaited"] = json!(paced_legs_waited);
-        record("gxStore.sidebarRemote.summary", details);
+        let [
+            reloads_stopped,
+            paced_legs_waited,
+            reload_sets,
+            reload_set_rows,
+            reload_sets_stopped,
+        ] = local;
+        record(
+            "gxStore.sidebarActions.summary",
+            json!({
+                "remote": remote_counters_json(&host.counters),
+                "local": {
+                    "reloadsStopped": reloads_stopped,
+                    "pacedLegsWaited": paced_legs_waited,
+                    "reloadSets": reload_sets,
+                    "reloadSetRows": reload_set_rows,
+                    "reloadSetsStopped": reload_sets_stopped,
+                },
+            }),
+        );
     }
 }
 
-/// The counters as the two records carry them: 20 keys at depth 1 (or 2 inside `totals`), and 22
-/// on the summary with the two local counters, under the sanitizer's 32-entry cap.
+/// The remote counters as both records carry them: 20 keys at depth 2 (inside `totals` on the
+/// per-action line, inside `remote` on the summary), under the sanitizer's 32-entry cap and its
+/// depth of 4.
 fn remote_counters_json(counters: &SidebarRemoteCounters) -> Value {
     json!({
         "actions": counters.actions,

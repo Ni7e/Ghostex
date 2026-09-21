@@ -507,7 +507,7 @@ impl GhostexGpuiApp {
             .client_document_summary(collections, spaces, moves);
         // A remote row's actions ride the same path for the same reason: a run in which the user
         // touched no remote row must still say so (gx_store/sidebar_remote.rs).
-        self.gx_store_sidebar_remote_summary();
+        self.gx_store_sidebar_actions_summary();
         // A difference that no later publish resolves still has to be judged, so it books one
         // judgement of its own. A stable difference is settled by the first of them; a shape that
         // keeps changing would book for ever, so the bookings are bounded and it then waits for

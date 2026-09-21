@@ -76,6 +76,11 @@ pub(crate) struct SidebarLifecycleCounters {
     pub(crate) reload_legs: u64,
     /// Full Reloads whose sleep call failed, so the wake was never asked for.
     pub(crate) reloads_stopped: u64,
+    /// Set reloads (a project's Full Reload, a user-made group's Full Reload), the rows they
+    /// planned, and the ones a failed row stopped before their end.
+    pub(crate) reload_sets: u64,
+    pub(crate) reload_set_rows: u64,
+    pub(crate) reload_sets_stopped: u64,
     /// Wakes that asked the workspace to tear the dead terminal down first, which is the leg that
     /// makes a Full Reload a reload rather than a sleep and a wake.
     pub(crate) remounts: u64,

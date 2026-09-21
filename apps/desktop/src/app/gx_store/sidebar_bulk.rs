@@ -175,7 +175,9 @@ impl GhostexGpuiApp {
                     Ok(Some(PacedLeg::Local(task))) => {
                         task.await;
                     }
-                    Ok(Some(PacedLeg::Remote(task))) => task.await,
+                    Ok(Some(PacedLeg::Remote(task))) => {
+                        task.await;
+                    }
                     Ok(None) => {}
                 }
             }
@@ -214,5 +216,5 @@ impl GhostexGpuiApp {
 /// What a paced leg hands back to wait on.
 enum PacedLeg {
     Local(gpui::Task<ghostex_gx_core::LifecycleAnswer>),
-    Remote(gpui::Task<()>),
+    Remote(gpui::Task<bool>),
 }
