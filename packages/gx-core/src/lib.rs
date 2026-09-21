@@ -132,7 +132,8 @@ pub use crate::sidebar_ui::{
     SIDEBAR_WINDOW_SCOPE_ID,
 };
 pub use crate::sidebar_view::{
-    project_slot_plan, reveal_plan, session_is_snoozed, space_for_focused_row, BrowserTabInput,
+    project_slot_plan, rendered_session_ids, reveal_plan, session_is_snoozed, session_slot_plan,
+    space_for_focused_row, BrowserTabInput,
     CloseAfterDoneInput, Collection, CollectionView, CollectionsState,
     DelayedSendInput, DelayedSendView,
     EmptyState, FocusedRowSpace, GroupCore, GroupSummary, GroupView, LabelDeadline,
@@ -140,7 +141,7 @@ pub use crate::sidebar_view::{
     MachineTabInput, MachineTabView, OrderItem, OrderKind, ProjectContextView, ProjectDiffStats,
     ProjectSlotPlan, RemoteMachineView, SectionCollapse,
     SectionId, SectionView, SessionMenuFacts, SessionRow, SessionSortMode, SessionTiming,
-    SessionView, SidebarCollapseState, SidebarHiddenItems, SidebarHostInputs, SidebarInputs,
+    SessionSlotPlan, SessionView, SidebarCollapseState, SidebarHiddenItems, SidebarHostInputs, SidebarInputs,
     SidebarRevealPlan, SidebarSettings, SidebarUiState, SidebarUpdateWork, SidebarView,
     SidebarViewModel, Space, SpaceView, SpacesState, TagListItem, TagListItemKind,
     TagPresentation, UnavailableState,

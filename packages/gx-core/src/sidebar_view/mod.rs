@@ -21,6 +21,7 @@ pub(crate) mod projects;
 mod reveal;
 mod rows;
 mod sections;
+pub(crate) mod session_slot;
 mod session_text;
 pub(crate) mod spaces;
 pub(crate) mod tags;
@@ -38,6 +39,7 @@ pub use inputs::{
 pub use model::{SidebarUpdateWork, SidebarViewModel};
 pub use ordering::session_is_snoozed;
 pub use reveal::{reveal_plan, space_for_focused_row, FocusedRowSpace, SidebarRevealPlan};
+pub use session_slot::{rendered_session_ids, session_slot_plan, SessionSlotPlan};
 pub use slot_hotkey::{project_slot_plan, ProjectSlotPlan};
 pub use collections::{Collection, CollectionsState};
 pub use spaces::{Space, SpacesState, OTHER_SPACE_ID};
