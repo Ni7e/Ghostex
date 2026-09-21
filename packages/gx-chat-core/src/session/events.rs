@@ -1,0 +1,525 @@
+//! What family a does with each event: the start, the frames, the reads, and the clock.
+//!
+//! Ported from the subscribe effect of `packages/shared/session-chat-controller/controller.ts`
+//! together with the ordering half of `apps/desktop/sidebar/session-chat-runtime/store.ts`, which
+//! the Rust core folds into one place because the broker and the per-view runtime are both gone.
+
+use crate::effect::Effect;
+use crate::event::{ConnectionUpdate, Event, StartConfig};
+use crate::session::apply::{
+    apply_authoritative, apply_draft_agent_carriage, apply_selected_options,
+};
+use crate::session::constants::{
+    INITIAL_LIMIT, INITIAL_STALL_THRESHOLD_MS, MAX_AUTOMATIC_RECONNECTS, MAX_LIMIT,
+    STALL_CHECK_INTERVAL_MS, STALL_THRESHOLD_MS, TIMER_READ_DEADLINE, TIMER_RESYNC_FOLLOW_UP,
+    TIMER_RESYNC_RETRY, TIMER_SEED_RETRY, TIMER_STALL, TIMER_TERMINAL_TOOL_HOLD,
+};
+use crate::session::fold::{fold_append, fold_state, FoldedSnapshot, StateCarrier};
+use crate::session::pagination::{page_has_more, PageBoundary};
+use crate::session::reads::{
+    arm_read_deadline, expire_overdue_reads, fail_read, inside_seed_window, issue_read, parse_read,
+    request_resync, schedule_resync_follow_up, schedule_seed_retry, take_read,
+};
+use crate::session::stream::{accept_authoritative_frame, accept_sequenced_frame, Verdict};
+use crate::session::view_state::select_view_state;
+use crate::session::working::{is_working, publish_status, working_signal};
+use crate::state::{ChatContext, ChatState, ReadKind};
+use crate::wire::{ChatFrame, RpcOutcome};
+
+/// Handles one event family a owns.
+pub fn handle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
+    let mut effects = route(state, event, context);
+    // The boundary fill is a `useEffect` on the transcript, so it re-evaluates after every event
+    // rather than only after a read.
+    effects.extend(crate::session::actions::fill_history_boundary(
+        state, context,
+    ));
+    effects
+}
+
+/// The event's own handler.
+fn route(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
+    match event {
+        Event::Start(config) => start(state, config, context),
+        Event::Frame(frame) => frame_arrived(state, frame, context),
+        Event::Connection(update) => connection(state, *update, context),
+        Event::RpcSettled {
+            request_id,
+            outcome,
+        } => rpc_settled(state, *request_id, outcome, context),
+        Event::Tick => tick(state, context),
+        Event::SettingsChanged(settings) => {
+            state.core.hide_account_emails = settings.hide_account_emails;
+            state.core.title = settings.title.clone();
+            Vec::new()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The host is opening this chat: adopt what it had cached, then subscribe and seed-read.
+fn start(state: &mut ChatState, config: &StartConfig, context: &ChatContext) -> Vec<Effect> {
+    state.identity.client_id = config.client_id.clone();
+    state.identity.project_id = config.project_id.clone();
+    state.identity.session_id = config.session_id.clone();
+    state.messages.generation += 1;
+    state.messages.limit = state.messages.limit.max(INITIAL_LIMIT);
+    state.messages.last_frame_at_ms = context.now_ms;
+    state.messages.seed_started_at_ms = context.now_ms;
+    state.messages.seed_attempt = 0;
+    state.core.preview_settings = config.preview.clone();
+
+    // Retained data is folded before the first paint, so a session switch never shows an empty
+    // transcript between mount and the subscription's first frame.
+    if let Some(cached) = config
+        .initial_snapshot
+        .as_ref()
+        .and_then(|value| serde_json::from_value::<FoldedSnapshot>(value.clone()).ok())
+    {
+        state.messages.position.epoch = Some(cached.result.epoch);
+        state.messages.position.seq = cached.result.seq;
+        state.messages.limit = state
+            .messages
+            .limit
+            .max(cached.result.messages.len() as u32)
+            .min(MAX_LIMIT);
+        apply_draft_agent_carriage(state, &cached.result);
+        apply_authoritative(state, &cached.result, true, context);
+        state.messages.snapshot = Some(cached);
+    }
+
+    // The stall watchdog runs for as long as the chat is open. Nothing below the socket reports a
+    // follower that stopped delivering: without a frame there is no gap, and without a gap the fold
+    // rules never ask for a resync.
+    state
+        .core
+        .timers
+        .arm_interval(TIMER_STALL, context.now_ms, STALL_CHECK_INTERVAL_MS as f64);
+
+    vec![
+        Effect::Subscribe {
+            limit: state.messages.limit,
+            catalog: true,
+        },
+        issue_read(state, context, ReadKind::Seed, None),
+    ]
+}
+
+/// One accepted frame.
+fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext) -> Vec<Effect> {
+    // Liveness is "a frame reached us", not "a frame changed something": a dropped or duplicate
+    // frame still proves the stream is alive.
+    state.messages.last_frame_at_ms = context.now_ms;
+    let position = frame.position();
+    if state.messages.resync.in_flight {
+        // Remember how far the live stream ran while the read was in flight; the read answers from
+        // a position captured before it.
+        let ahead = state
+            .messages
+            .resync
+            .seen_in_flight
+            .as_ref()
+            .is_none_or(|seen| position.is_ahead_of(seen));
+        if ahead {
+            state.messages.resync.seen_in_flight = Some(position.clone());
+        }
+    }
+
+    match frame {
+        ChatFrame::Snapshot(snapshot) | ChatFrame::Replaced(snapshot) => {
+            accept_authoritative_frame(
+                &mut state.messages.position,
+                &snapshot.base.server_id,
+                snapshot.base.epoch,
+                snapshot.base.seq,
+            );
+            let folded = fold_state(
+                state.messages.snapshot.as_ref(),
+                StateCarrier::Snapshot(snapshot),
+            );
+            apply_authoritative(state, &folded.result, true, context);
+            state.messages.snapshot = Some(folded);
+            Vec::new()
+        }
+        ChatFrame::Appended(appended) => {
+            match accept_sequenced_frame(
+                &mut state.messages.position,
+                appended.base.epoch,
+                appended.base.seq,
+            ) {
+                Verdict::Drop => Vec::new(),
+                Verdict::Resync => request_resync(state, context),
+                Verdict::Apply => {
+                    let Some(previous) = state.messages.snapshot.clone() else {
+                        return request_resync(state, context);
+                    };
+                    // Retract first: the rows that replace an abandoned prompt can ride the very
+                    // same frame.
+                    if state.messages.remove_ids(&appended.superseded_message_ids) {
+                        state.messages.snapshot = Some(previous.clone());
+                    }
+                    let folded = fold_append(&previous, appended);
+                    if !appended.messages.is_empty() {
+                        state.messages.apply_append(&appended.messages);
+                        // Keep the read window at least as large as what is on screen, so a later
+                        // resync or pagination read cannot answer with less than the live list
+                        // already holds.
+                        let on_screen = state
+                            .messages
+                            .list
+                            .len()
+                            .saturating_sub(state.messages.history_prefix_count)
+                            as u32;
+                        state.messages.limit = state.messages.limit.max(on_screen).min(MAX_LIMIT);
+                        state.session.server_status = ghostex_gx_protocol::ChatStatus::Ready;
+                    }
+                    if let Some(lifecycle) = appended.lifecycle.clone() {
+                        state.session.lifecycle = Some(lifecycle);
+                    }
+                    state.messages.snapshot = Some(folded);
+                    Vec::new()
+                }
+            }
+        }
+        ChatFrame::State(frame) => {
+            match accept_sequenced_frame(
+                &mut state.messages.position,
+                frame.base.epoch,
+                frame.base.seq,
+            ) {
+                Verdict::Drop => Vec::new(),
+                Verdict::Resync => request_resync(state, context),
+                Verdict::Apply => {
+                    let folded =
+                        fold_state(state.messages.snapshot.as_ref(), StateCarrier::State(frame));
+                    apply_authoritative(state, &folded.result, true, context);
+                    state.messages.snapshot = Some(folded);
+                    Vec::new()
+                }
+            }
+        }
+    }
+}
+
+/// The socket's own state changed.
+fn connection(
+    state: &mut ChatState,
+    update: ConnectionUpdate,
+    context: &ChatContext,
+) -> Vec<Effect> {
+    state.messages.last_frame_at_ms = context.now_ms;
+    match update {
+        ConnectionUpdate::Subscribed => Vec::new(),
+        ConnectionUpdate::Lost => Vec::new(),
+        ConnectionUpdate::Resubscribed => {
+            // A fresh socket restarts the stream position: nothing applies until its snapshot
+            // re-seeds the epoch, and a snapshot replaces the content wholesale.
+            resubscribe(state, context)
+        }
+    }
+}
+
+/// The subscribe effect re-running: a fresh socket, a fresh seed read, and everything a read in
+/// flight across the swap must not be allowed to finish.
+///
+/// The VIEW state is deliberately left alone. A same-session recycle is a reconnect of the same
+/// conversation, and wiping there destroyed a perfectly good view: status fell back to `loading`,
+/// whose early return unmounts the whole pane, composer included, mid-typing. The sequencing reset
+/// here already guarantees no stale frame can fold in.
+pub fn resubscribe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
+    state.messages.position.frame_arrived = false;
+    state.messages.generation += 1;
+    state.messages.reads.clear();
+    state.messages.load_earlier_request = None;
+    state.messages.history_epoch = None;
+    state.messages.history_prefix_count = 0;
+    state.messages.boundary_attempt = None;
+    state.messages.loading_earlier = false;
+    state.messages.resync = Default::default();
+    state.messages.last_frame_at_ms = context.now_ms;
+    state.messages.last_watchdog_resync_at_ms = 0.0;
+    state.messages.seed_started_at_ms = context.now_ms;
+    state.messages.seed_attempt = 0;
+    state.session.working_started_at_ms = None;
+    for key in [
+        TIMER_SEED_RETRY,
+        TIMER_RESYNC_RETRY,
+        TIMER_RESYNC_FOLLOW_UP,
+        TIMER_READ_DEADLINE,
+    ] {
+        state.core.timers.cancel(key);
+    }
+    state
+        .core
+        .timers
+        .arm_interval(TIMER_STALL, context.now_ms, STALL_CHECK_INTERVAL_MS as f64);
+    vec![issue_read(state, context, ReadKind::Seed, None)]
+}
+
+/// A read the core asked for has settled.
+fn rpc_settled(
+    state: &mut ChatState,
+    request_id: u64,
+    outcome: &RpcOutcome,
+    context: &ChatContext,
+) -> Vec<Effect> {
+    match outcome {
+        RpcOutcome::Ok { result } => {
+            let Some(read) = parse_read(result) else {
+                return Vec::new();
+            };
+            let Some(request) = take_read(state, request_id) else {
+                return Vec::new();
+            };
+            arm_read_deadline(state, context);
+            if request.generation != state.messages.generation {
+                // The answer belongs to the previous conversation.
+                return Vec::new();
+            }
+            match request.kind {
+                ReadKind::Seed => seed_read_settled(state, &read, context),
+                ReadKind::Resync => resync_read_settled(state, &read, context),
+                ReadKind::Page => page_read_settled(state, &read, &request, context),
+            }
+        }
+        RpcOutcome::Err { .. } => {
+            let Some(request) = state
+                .messages
+                .reads
+                .iter()
+                .position(|read| read.request_id == request_id)
+                .map(|at| state.messages.reads.remove(at))
+            else {
+                return Vec::new();
+            };
+            let effects = fail_read(state, context, &request);
+            arm_read_deadline(state, context);
+            effects
+        }
+    }
+}
+
+/// The seed read's answer. The seed transcript is outranked by the first snapshot or replacement
+/// frame; its read-only agent metadata still needs to be applied.
+fn seed_read_settled(
+    state: &mut ChatState,
+    read: &ghostex_gx_protocol::ReadSessionChatResult,
+    context: &ChatContext,
+) -> Vec<Effect> {
+    // CDXC:AgentProviders 2026-09-06 WHY:
+    // Older live snapshots omit the agent family and account-menu metadata. Dropping the entire
+    // seed read when a snapshot won the race made Switch Account disappear from otherwise identical
+    // Claude sessions. Keep the newer transcript while accepting the read's identity; a read from
+    // an older stream generation must resync instead of restoring an obsolete agent.
+    if state.messages.position.frame_arrived {
+        if state
+            .messages
+            .position
+            .epoch
+            .is_some_and(|epoch| read.epoch < epoch)
+        {
+            return request_resync(state, context);
+        }
+        apply_draft_agent_carriage(state, read);
+        apply_selected_options(state, read.state.selected_options.as_ref());
+        if read.state.screen_probed == Some(true) {
+            state.session.screen_probed = true;
+        }
+        return Vec::new();
+    }
+    state.messages.last_frame_at_ms = context.now_ms;
+    state.messages.position.epoch = Some(read.epoch);
+    state.messages.position.seq = read.seq;
+    apply_draft_agent_carriage(state, read);
+    apply_authoritative(state, read, true, context);
+    if matches!(read.status, ghostex_gx_protocol::ChatStatus::Starting)
+        && inside_seed_window(state, context)
+    {
+        schedule_seed_retry(state, context);
+    }
+    Vec::new()
+}
+
+/// The resync read's answer.
+fn resync_read_settled(
+    state: &mut ChatState,
+    read: &ghostex_gx_protocol::ReadSessionChatResult,
+    context: &ChatContext,
+) -> Vec<Effect> {
+    state.messages.resync.in_flight = false;
+    // The read landed, so the stream is answering again: drop the failure backoff and count this as
+    // liveness for the watchdog.
+    state.messages.resync.failures = 0;
+    state.messages.last_frame_at_ms = context.now_ms;
+    state.core.timers.cancel(TIMER_RESYNC_RETRY);
+
+    let observed = state.messages.resync.seen_in_flight.take();
+    let read_position = crate::wire::StreamPosition {
+        server_id: state.messages.position.server_id.clone(),
+        epoch: read.epoch,
+        seq: read.seq,
+    };
+    let outrun = observed
+        .as_ref()
+        .is_some_and(|seen| seen.is_ahead_of(&read_position));
+    if outrun
+        && observed
+            .as_ref()
+            .is_some_and(|seen| seen.epoch > read.epoch)
+    {
+        // A newer generation already replaced the tail; this result is from the previous one and
+        // must not clobber it.
+        schedule_resync_follow_up(state, context);
+        return Vec::new();
+    }
+    state.messages.position.epoch = Some(read.epoch);
+    // Frames seen during the flight were already accounted for; keeping the cursor at the read's
+    // older seq would make every following append look like a gap and resync forever.
+    state.messages.position.seq = match observed.as_ref().filter(|_| outrun) {
+        Some(seen) => seen.seq,
+        None => read.seq,
+    };
+    apply_draft_agent_carriage(state, read);
+    apply_authoritative(state, read, true, context);
+    if outrun {
+        schedule_resync_follow_up(state, context);
+    } else {
+        state.messages.resync.follow_ups = 0;
+    }
+    Vec::new()
+}
+
+/// One history page's answer, from `loadEarlier`.
+fn page_read_settled(
+    state: &mut ChatState,
+    read: &ghostex_gx_protocol::ReadSessionChatResult,
+    request: &crate::state::OutstandingRead,
+    context: &ChatContext,
+) -> Vec<Effect> {
+    let Some(pending) = state.messages.load_earlier_request.clone() else {
+        return Vec::new();
+    };
+    if pending.before_offset != request.before_offset.unwrap_or(0)
+        || pending.generation != request.generation
+    {
+        return Vec::new();
+    }
+    state.messages.load_earlier_request = None;
+    state.messages.loading_earlier = false;
+    if matches!(read.status, ghostex_gx_protocol::ChatStatus::Error) {
+        // Same lane as a rejection: the live tail is still valid and `hasMore` stays set.
+        return Vec::new();
+    }
+    if state.messages.position.epoch != pending.epoch {
+        // A replacement rebuilt the tail while this page was in flight.
+        return Vec::new();
+    }
+    let older: Vec<ghostex_gx_protocol::ChatMessage> = read
+        .messages
+        .iter()
+        .filter(
+            |message| match state.messages.index_by_id.get(&message.id) {
+                None => true,
+                // The same id on a different row (a shared response id) is real history, not a
+                // duplicate: the merger re-keys it on the way in.
+                Some(at) => state.messages.list.get(*at).is_some_and(|existing| {
+                    crate::session::assembler::id_collides(existing, message)
+                }),
+            },
+        )
+        .cloned()
+        .collect();
+    let mut rows = older.clone();
+    rows.extend(state.messages.list.iter().cloned());
+    state.messages.replace_list(&rows);
+    // Grow the read window so a later resync answers with at least the history already on screen.
+    state.messages.history_epoch = pending.epoch;
+    state.messages.history_prefix_count += older.len();
+    state.messages.has_more = page_has_more(
+        PageBoundary {
+            message_count: read.messages.len(),
+            has_more: read.has_more,
+            has_more_exact: read.has_more_exact,
+            before_offset: read.before_offset,
+        },
+        Some(pending.before_offset),
+    );
+    state.messages.before_offset = read.before_offset;
+    // Older pages never rewind the live lifecycle or status.
+    let _ = context;
+    Vec::new()
+}
+
+/// The clock: every deadline family a armed, answered in the order the host's own `tick` would.
+fn tick(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
+    let mut effects = Vec::new();
+    if state.core.timer_fired(TIMER_READ_DEADLINE) {
+        effects.extend(expire_overdue_reads(state, context));
+    }
+    if state.core.timer_fired(TIMER_SEED_RETRY) {
+        effects.push(issue_read(state, context, ReadKind::Seed, None));
+    }
+    if state.core.timer_fired(TIMER_RESYNC_RETRY) {
+        effects.extend(request_resync(state, context));
+    }
+    if state.core.timer_fired(TIMER_RESYNC_FOLLOW_UP) {
+        effects.extend(request_resync(state, context));
+    }
+    if state.core.timer_fired(TIMER_TERMINAL_TOOL_HOLD) {
+        state.pending.terminal_tool = None;
+        state.pending.terminal_tool_hold_until_ms = None;
+    }
+    if state.core.timer_fired(TIMER_STALL) {
+        effects.extend(stall_watchdog(state, context));
+    }
+    effects
+}
+
+/// The stall watchdog, from the `setInterval` at the end of the subscribe effect.
+fn stall_watchdog(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
+    let now = context.now_ms;
+    // Initial window: the working gate below cannot protect it, because a session that never
+    // resolved its transcript may never report work. A silent socket here leaves the view in its
+    // blank loading hold forever, and only a new subscription can re-request the snapshot that was
+    // lost. Rebuilding restamps `last_frame_at_ms`, so the next tick starts a fresh window rather
+    // than firing again immediately.
+    if !state.messages.position.frame_arrived
+        && loading_hold(state)
+        && state.messages.auto_reconnects < MAX_AUTOMATIC_RECONNECTS
+        && now - state.messages.last_frame_at_ms > INITIAL_STALL_THRESHOLD_MS
+    {
+        state.messages.auto_reconnects += 1;
+        let mut effects = vec![Effect::Reconnect];
+        effects.extend(resubscribe(state, context));
+        return effects;
+    }
+    if !working_signal(state) || state.session.interrupted {
+        return Vec::new();
+    }
+    if now - state.messages.last_frame_at_ms <= STALL_THRESHOLD_MS
+        || now - state.messages.last_watchdog_resync_at_ms <= STALL_THRESHOLD_MS
+    {
+        return Vec::new();
+    }
+    // Stamped before the call: a read that succeeds but answers with the same stale tail leaves
+    // `last_frame_at_ms` fresh, but one that is dropped by the in-flight guard must not let the
+    // watchdog fire again on the next tick.
+    state.messages.last_watchdog_resync_at_ms = now;
+    request_resync(state, context)
+}
+
+/// Whether the pane is still holding blank, which is the initial watchdog's own gate.
+fn loading_hold(state: &ChatState) -> bool {
+    let working = is_working(state);
+    let status = publish_status(
+        &state.session.server_status,
+        working,
+        state.session.error.is_some(),
+    );
+    let view = select_view_state(
+        &status,
+        state.messages.composed.len(),
+        state.session.error.as_deref(),
+    );
+    view.kind == "loading" || view.kind == "starting"
+}

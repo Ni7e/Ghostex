@@ -171,6 +171,7 @@ impl NativeChatView {
         let (wake, mut wakes) = futures::channel::mpsc::unbounded::<()>();
         let runtime = ChatRuntimeWorker::start(
             json!({"clientId":config.client_id,"projectId":config.project_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
+            super::replay_recording::recording_path(&config.project_id, &config.session_id),
             move || {
                 let _ = wake.unbounded_send(());
             },

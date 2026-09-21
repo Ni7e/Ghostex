@@ -1,4 +1,5 @@
 import { SessionChatMarkdownSaveController } from './save-markdown';
+import { startNativeChatRecording } from './native-host-replay';
 import { listProjectMarkdownDocumentPaths, saveProjectMarkdownDocument } from '../project-docs';
 import { nativeContextTitle } from './native-context';
 import { COLLAPSED_CHOICE_COUNT, collapsedChoiceLabel } from '../session-chat-presentation/notice-choices';
@@ -1737,6 +1738,8 @@ Object.assign(globalThis, {
     referenceMenu: sessionChatReferenceMenuRows,
     transcriptMenu: sessionChatTranscriptMenuRows,
     sendBlockedToast: sessionChatSendBlockedToastRequest,
+    /** Diagnostic only, off unless the host asks for it: see native-host-replay.ts. */
+    replay: startNativeChatRecording,
     event: (event: GxserverSessionChatEvent) => eventListener?.(event),
     resolve(id: number, value: unknown, error?: { code?: GxserverRpcErrorCode; message: string; endpoint: string }) {
       const call = pending.get(id);

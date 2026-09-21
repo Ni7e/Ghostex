@@ -89,6 +89,9 @@ pub enum GpuiDiagnosticScenario {
     SidebarRefresh,
     TerminalFocus,
     SessionChat,
+    /// Writes the chat brain's own recording under /tmp, never a support log
+    /// (apps/desktop/src/app/native_chat/replay_recording.rs).
+    ChatReplay,
     ProjectBoard,
     AppModal,
 }
@@ -103,6 +106,7 @@ impl GpuiDiagnosticScenario {
             Self::SidebarRefresh => "native.sidebar.refresh",
             Self::TerminalFocus => "native.terminal.focus",
             Self::SessionChat => "gpui.sessionChat.viewState",
+            Self::ChatReplay => "native.chat.replay",
             Self::ProjectBoard => "native.project.board",
             Self::AppModal => "gpui.app.modal",
         }

@@ -156,6 +156,23 @@ pub struct ChatMessage {
     pub queued: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deferred_work: Option<DeferredWork>,
+    /// A client's presentation of an accepted send still waiting for the terminal.
+    ///
+    /// Never on the wire: only a client-sourced row carries it, and the renderer draws the row's
+    /// "Queued" or "Failed" label from it. Not the agent CLI's own queue, which is `queued`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_delivery: Option<StartupDelivery>,
+}
+
+/// Where an accepted send stands with the terminal, as the sending client sees it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupDelivery {
+    pub prompt_id: String,
+    /// `queued`, `sending` or `failed`.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
