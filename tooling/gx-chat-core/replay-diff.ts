@@ -15,6 +15,11 @@
  * well as at the top level of the take payload, because that is where the document's own keys
  * live.
  *
+ * `--records` prints one line per differing record: the record number the recording gave it, which
+ * side published a snapshot, and the pointers that differ there. It is how a publish-timing gap is
+ * told apart from a content gap: `expected-only` and `actual-only` are the reactive-versus-
+ * imperative publish difference, `both` is a real disagreement about a value.
+ *
  * `--ignore` drops whole pointer prefixes from the comparison. `tooling/gx-chat-core/run-gates.sh`
  * passes `/requests`, which is the QuickJS bridge's wire form and not part of the Rust core's
  * contract at all: client storage rides on it there (`composer('read')`, `composer('summary')`)
@@ -31,6 +36,8 @@ interface Options {
   /** Pointer prefixes dropped from the comparison, with the reason printed in the report. */
   ignore: string[];
   limit: number;
+  /** Print one line per differing record: its `n`, and which side published a document. */
+  records: boolean;
 }
 
 function parseOptions(argv: readonly string[]): Options {
@@ -40,6 +47,7 @@ function parseOptions(argv: readonly string[]): Options {
   let keys: string[] | null = null;
   const ignore: string[] = [];
   let limit = 40;
+  let records = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     const next = argv[index + 1];
@@ -66,6 +74,8 @@ function parseOptions(argv: readonly string[]): Options {
     } else if (argument === '--limit' && next) {
       limit = Number(next) || limit;
       index += 1;
+    } else if (argument === '--records') {
+      records = true;
     } else if (argument && !argument.startsWith('--')) {
       name = argument;
     }
@@ -76,6 +86,7 @@ function parseOptions(argv: readonly string[]): Options {
     keys,
     ignore,
     limit,
+    records,
   };
 }
 
@@ -157,12 +168,49 @@ function collectPointers(left: unknown, right: unknown, at: string, into: string
   }
 }
 
+/** The recording's own record number for a line, when the line carries one. */
+function recordNumber(line: unknown): number | null {
+  const value = (line as { n?: unknown } | null)?.n;
+  return typeof value === 'number' ? value : null;
+}
+
+/**
+ * Which side published a snapshot on this record.
+ *
+ * A document ships whenever the publishing brain's revision moved, so `snapshot` is present on the
+ * side that decided to publish and absent on the side that did not. That is the whole of the
+ * reactive-versus-imperative gap, and it is worth telling apart from a content difference.
+ */
+function snapshotSide(expected: unknown, actual: unknown): string {
+  const has = (line: unknown): boolean => {
+    const document = (line as { document?: unknown } | null)?.document ?? line;
+    if (typeof document !== 'object' || document === null) {
+      return false;
+    }
+    const snapshot = (document as Record<string, unknown>).snapshot;
+    return snapshot !== undefined && snapshot !== null;
+  };
+  const left = has(expected);
+  const right = has(actual);
+  if (left && right) {
+    return 'both';
+  }
+  if (left) {
+    return 'expected-only';
+  }
+  if (right) {
+    return 'actual-only';
+  }
+  return 'neither';
+}
+
 function main(): void {
   const options = parseOptions(process.argv.slice(2));
   const expected = readLines(options.expected);
   const actual = readLines(options.actual);
   const compared = Math.min(expected.length, actual.length);
   const counts = new Map<string, number>();
+  const differing: { n: number | null; side: string; pointers: string[] }[] = [];
   let matched = 0;
 
   for (let index = 0; index < compared; index += 1) {
@@ -177,6 +225,13 @@ function main(): void {
     }
     for (const pointer of pointers) {
       counts.set(pointer, (counts.get(pointer) ?? 0) + 1);
+    }
+    if (options.records) {
+      differing.push({
+        n: recordNumber(expected[index]) ?? recordNumber(actual[index]),
+        side: snapshotSide(expected[index], actual[index]),
+        pointers,
+      });
     }
   }
 
@@ -200,6 +255,14 @@ function main(): void {
     }
     if (ranked.length > options.limit) {
       console.log(`  ... and ${ranked.length - options.limit} more pointers`);
+    }
+  }
+  if (options.records) {
+    console.log('');
+    console.log(`${'record'.padEnd(8)} ${'snapshot'.padEnd(13)} pointers`);
+    for (const entry of differing) {
+      const label = entry.n === null ? '?' : String(entry.n);
+      console.log(`${label.padEnd(8)} ${entry.side.padEnd(13)} ${entry.pointers.slice(0, 6).join(' ')}`);
     }
   }
   process.exit(counts.size === 0 && expected.length === actual.length ? 0 : 1);

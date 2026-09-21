@@ -63,6 +63,9 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
         return;
     }
     let projection = presentation::build(state, context);
+    // The rail rides in the same result object as the items in `NativeChatPresentation.update`, so
+    // it is produced by this pass and stored on its owner's state.
+    state.extras.minimap = projection.minimap;
     let view = &mut state.transcript_view;
     view.items = projection.items;
     view.final_ids = projection.final_ids;

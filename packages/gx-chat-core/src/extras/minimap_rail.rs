@@ -72,13 +72,43 @@ pub fn minimap_preview_text(message: Option<&Value>) -> String {
     collapse_whitespace(&joined)
 }
 
+/// `sessionChatMinimapPreviewText` over a typed message: the prompt's own words, on one line.
+pub fn message_preview_text(message: Option<&ghostex_gx_protocol::chat::ChatMessage>) -> String {
+    use ghostex_gx_protocol::chat::ChatBlock;
+    let joined = message
+        .map(|message| {
+            message
+                .blocks
+                .iter()
+                .filter_map(|block| match block {
+                    ChatBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    collapse_whitespace(&joined)
+}
+
+/// `sessionChatMinimapPreview` over a typed message.
+pub fn message_preview(
+    message: Option<&ghostex_gx_protocol::chat::ChatMessage>,
+    preview_limit: usize,
+) -> String {
+    cut_preview(&message_preview_text(message), preview_limit)
+}
+
 /// `sessionChatMinimapPreview`: the same one-line preview, cut to what a hover card can show.
 pub fn minimap_preview(message: Option<&Value>, preview_limit: usize) -> String {
-    let text = minimap_preview_text(message);
-    // The TypeScript slices by UTF-16 code units, which is what a JavaScript string index is.
+    cut_preview(&minimap_preview_text(message), preview_limit)
+}
+
+/// The one cut both previews make: UTF-16 code units, which is what a JavaScript string index is.
+fn cut_preview(text: &str, preview_limit: usize) -> String {
     let units: Vec<u16> = text.encode_utf16().collect();
     if units.len() <= preview_limit {
-        return text;
+        return text.to_string();
     }
     let head = String::from_utf16_lossy(&units[..preview_limit]);
     format!("{}\u{2026}", trim_end_js(&head))

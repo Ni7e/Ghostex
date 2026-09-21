@@ -275,6 +275,13 @@ pub struct Projection {
     pub final_ids: Vec<String>,
     /// Ids that shipped as placeholders and want a backfill batch.
     pub backfill: Vec<String>,
+    /// The minimap rail for this pass.
+    ///
+    /// `NativeChatPresentation.update` builds the rail inside the same result object as the items
+    /// (native-presentation.ts:326), off the SUMMARY turns whichever mode the transcript is in,
+    /// pointing at the row index of the list it just built. Family f owns the rail's rules; this
+    /// pass is where the TypeScript calls them, so it is where the core calls them too.
+    pub minimap: Vec<crate::extras::minimap_rail::MinimapMarkerRow>,
 }
 
 struct Builder<'a> {
@@ -476,11 +483,25 @@ pub fn build(state: &ChatState, context: &ChatContext) -> Projection {
             .collect()
     };
 
-    let _ = message_id;
+    // `itemIndex`: the first row that draws a given id, which is what a dash jumps to.
+    let mut item_index: Vec<(String, usize)> = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let id = message_id(item);
+        if !item_index.iter().any(|(known, _)| *known == id) {
+            item_index.push((id, index));
+        }
+    }
+    let turns: Vec<_> = projection
+        .summary_turns
+        .iter()
+        .map(|turn| (&turn.user, turn.final_message.as_ref()))
+        .collect();
+    let minimap = crate::extras::minimap::project_minimap_turns(&turns, &item_index);
     Projection {
         items,
         final_ids: projection.final_ids,
         backfill: builder.backfill,
+        minimap,
     }
 }
 

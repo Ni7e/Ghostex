@@ -13,7 +13,9 @@
 use serde_json::Value;
 
 use crate::document::{MinimapMarker, TranscriptItem};
-use crate::extras::minimap_rail::{geometry, minimap_preview, minimap_visible, MinimapMarkerRow};
+use crate::extras::minimap_rail::{
+    geometry, message_preview, minimap_preview, minimap_visible, MinimapMarkerRow,
+};
 use crate::state::{ChatContext, ChatState};
 
 /// The minimap rail, shipped whole and only when it changed.
@@ -38,6 +40,45 @@ pub fn subagent_rows(state: &ChatState, _context: &ChatContext) -> Vec<Transcrip
         .as_ref()
         .map(|_| Vec::new())
         .unwrap_or_default()
+}
+
+/// `NativeChatMinimap.project` over the typed turns family b projects.
+///
+/// The same rule as [`project_minimap`], reading `ChatMessage` rather than raw JSON so the
+/// transcript pass does not have to serialize every turn to ask for its preview. This is the one
+/// the core calls; the JSON form stays for the parity fixtures.
+pub fn project_minimap_turns(
+    turns: &[(
+        &ghostex_gx_protocol::chat::ChatMessage,
+        Option<&ghostex_gx_protocol::chat::ChatMessage>,
+    )],
+    item_index: &[(String, usize)],
+) -> Vec<MinimapMarkerRow> {
+    let geometry = geometry();
+    if !minimap_visible(turns.len(), geometry.minimum_turns) {
+        return Vec::new();
+    }
+    turns
+        .iter()
+        .map(|(user, reply)| {
+            let id = user.id.clone();
+            let prompt = message_preview(Some(user), geometry.preview_limit);
+            MinimapMarkerRow {
+                item: item_index
+                    .iter()
+                    .find(|(known, _)| *known == id)
+                    .map(|(_, index)| *index)
+                    .unwrap_or(0),
+                prompt: if prompt.is_empty() {
+                    "User message".to_string()
+                } else {
+                    prompt
+                },
+                reply: message_preview(*reply, geometry.preview_limit),
+                id,
+            }
+        })
+        .collect()
 }
 
 /// `NativeChatMinimap.project`: one row per genuine user prompt, pointing at the transcript row

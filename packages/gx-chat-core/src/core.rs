@@ -43,6 +43,14 @@ pub struct ChatCore {
     /// Bumped whenever `republish` rebuilds the frame parts, which stands in for the array
     /// identity `take` compares on.
     parts_revision: u64,
+    /// Whether a publish has happened at all.
+    ///
+    /// `native-host.ts` starts with its OWN empty `minimapMarkers` and `subagentItems` arrays
+    /// (native-host.ts:145, :149) and replaces both inside `publish` with the projection's rail and
+    /// the viewer's list. So a drain before the first publish ships the module's arrays and the
+    /// drain after it ships the replacements, which are different objects however equal they are.
+    /// The core has no identities, so the first publish clears those two pointers by hand.
+    published_once: bool,
 }
 
 /// The parts the host already has, which is what turns a whole list into a splice.
@@ -250,6 +258,11 @@ impl ChatCore {
         self.parts_revision = self.state.transcript_view.projection_revision;
         self.published_context = self.context.clone();
         self.revision += 1;
+        if !self.published_once {
+            self.published_once = true;
+            self.sent.minimap = None;
+            self.sent.subagent_items = None;
+        }
     }
 
     /// Replaces the document and bumps the revision, for a host seeding a cached frame.
