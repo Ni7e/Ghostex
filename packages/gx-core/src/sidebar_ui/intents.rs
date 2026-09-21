@@ -86,7 +86,7 @@ pub enum SidebarUiIntent {
     },
     /// Expand a project row and, when the setting asks for it, put its session list back to the
     /// compact one. A slot hotkey DELETES both keys rather than toggling them, which is why this is
-    /// not two `Toggle` intents: pressing cmd+1 on an already-expanded project must leave it
+    /// not two `Toggle` intents: pressing cmd+ctrl+1 on an already-expanded project must leave it
     /// expanded.
     ExpandProjectForSlotJump {
         group_id: String,

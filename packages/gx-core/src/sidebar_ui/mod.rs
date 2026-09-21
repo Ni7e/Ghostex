@@ -6,11 +6,13 @@
 
 mod diff;
 mod intents;
+mod mirror;
 mod persist;
 mod store;
 
 pub use diff::SidebarCollapseDiff;
 pub use intents::{SidebarUiIntent, SidebarUiOutcome, ToggleAllProjectsInput};
+pub use mirror::sidebar_ui_mirror_changes;
 pub use persist::{
     collapse_into_storage, collapse_state_from_storage, hidden_items_from_storage,
     hidden_items_into_storage, machine_tab_from_storage, sidebar_window_storage_key,

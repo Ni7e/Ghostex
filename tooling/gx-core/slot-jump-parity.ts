@@ -1,5 +1,5 @@
 /**
- * The gate for the project slot hotkeys (cmd+1 to cmd+9): the whole jump the store plans and the
+ * The gate for the project slot hotkeys (cmd+ctrl+1 to cmd+ctrl+9 by default): the whole jump the store plans and the
  * desktop host performs, against the shipped TypeScript it replaces.
  *
  *   cargo run --release --example sidebar_slot_jump_parity -- <out-dir> [--inject <mutation>]
@@ -28,6 +28,20 @@
  * `selectNativeSidebarSession` over a fresh copy of the same state, and what it posts must equal
  * what the hotkey's own path posted.
  *
+ * **The old page's copy on the store's path.** With the store's list drawn the page does NOT run
+ * `runNativeProjectSlotHotkey`; it gets the row click's `selectSession` and then the messages the
+ * host sends (`pageMessages` in the dump, a `sidebarUiMirror` built by the host's own
+ * `sidebar_ui_mirror_changes`), handled by the shipped `NativeSidebarUiState.mirror` the way
+ * `controller.ts` routes them, followed by the page's next build. What that copy then draws must be
+ * what the store draws, its collapse envelope must read back equal to the store's, it must write no
+ * storage, and its reveal request must not have moved: a new one would be published and overwrite
+ * the id the host uses to skip an already handled reveal.
+ *
+ * **The host never writes a handled-reveal id on this path.** The host is not reachable from a
+ * gate, so its source is read: `sidebar_slot_jump.rs` (or `SLOT_JUMP_HOST_SOURCE`) must not name
+ * `handled_reveal`, `take_reveal_request`, `revealSidebarSession` or `requestReveal` outside a
+ * comment. Pointing it at 04b2d0ee8's copy of the file is the mutation that shows it bites.
+ *
  * A mutation (`--inject` on the Rust side) is recorded in the dump; the run must then report a
  * difference or a collapsed coverage counter, and exits 1 when it reports neither.
  *
@@ -36,6 +50,7 @@
 // First, so the client-storage adapter finds a `Storage` before any module reads one.
 import { resetBrowserStorage, writeStorageItem } from './browser-shim';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { createGpuiSidebarHudState } from '@/apps/desktop/sidebar/gxserver-runtime/helpers/command-pane';
 import { createGpuiSidebarSettings } from '@/apps/desktop/sidebar/gxserver-runtime/helpers/bootstrap';
@@ -229,18 +244,56 @@ function runTypeScript(rust: Json, entry: Json): Json {
   };
 }
 
-/** The host's leg: the row click's `selectSession`, through the shipped handler, on a fresh copy. */
-function runRowClick(rust: Json, entry: Json, target: string): Json[] {
+/**
+ * The page on the store's path, on a fresh copy: the row click's `selectSession` through the shipped
+ * handler (when the jump focuses a row), then the host's messages routed the way `controller.ts`
+ * routes them, then the page's next build.
+ */
+function runStorePath(rust: Json, entry: Json, target: string | null): Json {
   const ui = setUp(rust, entry);
   const snapshot = createNativeSidebarSnapshot(ui);
+  const revealBefore = clone(ui.revealRequest);
+  const handledBefore = ui.handledRevealRequestId;
+  const before = storageEntries();
   edges.length = 0;
-  selectNativeSidebarSession(
-    ui,
-    () => snapshot,
-    { type: 'selectSession', sessionId: target, mode: 'focus' },
-    (message) => edges.push({ edge: 'post', message: clone(message) })
+  if (target)
+    selectNativeSidebarSession(
+      ui,
+      () => snapshot,
+      { type: 'selectSession', sessionId: target, mode: 'focus' },
+      (message) => edges.push({ edge: 'post', message: clone(message) })
+    );
+  const leg = clone(edges);
+  for (const message of entry.pageMessages as Json[]) {
+    if (message.type === 'revealSidebarSession') ui.requestReveal(message.sessionId, message.requestId);
+    if (message.type === 'sidebarUiMirror') ui.mirror(message.changes);
+  }
+  const state = stateVector(ui);
+  return {
+    leg,
+    state,
+    collapse: persistedCollapse(clone(ui.collapse) as Json),
+    revealMoved:
+      canonical(ui.revealRequest ?? null) !== canonical(revealBefore ?? null) ||
+      ui.handledRevealRequestId !== handledBefore,
+    storage: storageChanges(before),
+  };
+}
+
+const FORBIDDEN_ON_SLOT_PATH = ['handled_reveal', 'take_reveal_request', 'revealSidebarSession', 'requestReveal'];
+
+/** The names the host's slot path must not use outside a comment. */
+function hostSourceFindings(): string[] {
+  const path =
+    process.env.SLOT_JUMP_HOST_SOURCE ??
+    fileURLToPath(new URL('../../apps/desktop/src/app/gx_store/sidebar_slot_jump.rs', import.meta.url));
+  const code = readFileSync(path, 'utf8')
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/, ''))
+    .join('\n');
+  return FORBIDDEN_ON_SLOT_PATH.filter((name) => code.includes(name)).map(
+    (name) => `the host's slot path names ${name} (${path})`
   );
-  return clone(edges);
 }
 
 /** The envelope the host would store, read back the way the page reads it. */
@@ -298,7 +351,10 @@ function compare(args: string[]): void {
     hiddenShift: 0,
     spacesCases: 0,
     rowClickLegs: 0,
+    pageMirrored: 0,
+    pageMirrorWithoutReveal: 0,
   };
+  differences.push(...hostSourceFindings());
   for (const [index, entry] of (rust.entries as Json[]).entries()) {
     counters.cases += 1;
     const where = `#${index} ${String(entry.scenario)} slot=${String(entry.slot)}`;
@@ -316,13 +372,30 @@ function compare(args: string[]): void {
       differences.push(
         `${where}: stored collapse\n    rust ${canonical(stored)}\n    ts   ${canonical(theirs.collapse)}`
       );
+    const page = runStorePath(rust, entry, typeof mine.focus === 'string' ? mine.focus : null);
     if (typeof mine.focus === 'string') {
-      const leg = runRowClick(rust, entry, mine.focus);
       counters.rowClickLegs += 1;
-      if (canonical(leg) !== canonical(theirs.posted))
-        differences.push(`${where}: row click leg\n    rust ${canonical(leg)}\n    ts   ${canonical(theirs.posted)}`);
+      if (canonical(page.leg) !== canonical(theirs.posted))
+        differences.push(
+          `${where}: row click leg\n    rust ${canonical(page.leg)}\n    ts   ${canonical(theirs.posted)}`
+        );
     } else if (theirs.posted.length) {
       differences.push(`${where}: the page posted ${canonical(theirs.posted)} where the store selects nothing`);
+    }
+    if (canonical(page.state) !== canonical(mine.state))
+      differences.push(
+        `${where}: the page's copy draws\n    rust ${canonical(mine.state)}\n    page ${canonical(page.state)}`
+      );
+    if (canonical(page.collapse) !== canonical(stored))
+      differences.push(
+        `${where}: the page's collapse copy\n    rust ${canonical(stored)}\n    page ${canonical(page.collapse)}`
+      );
+    if (page.revealMoved) differences.push(`${where}: the page's reveal request moved on the store's path`);
+    if (page.storage.length)
+      differences.push(`${where}: the page wrote storage on the store's path ${page.storage.join(', ')}`);
+    if ((entry.pageMessages as Json[]).some((message) => message.type === 'sidebarUiMirror')) {
+      counters.pageMirrored += 1;
+      if (!theirs.reveal) counters.pageMirrorWithoutReveal += 1;
     }
 
     // Coverage, read off the TypeScript's side where it can be, so a scenario that stopped

@@ -113,6 +113,7 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     if (message.type === 'playCompletionSound' && message.sessionId)
       bridge.postNativeSidebarSnapshot!(JSON.stringify({ kind: 'flash', version: 1, sessionId: message.sessionId }));
     if (message.type === 'revealSidebarSession') ui.requestReveal(message.sessionId, message.requestId);
+    if (message.type === 'sidebarUiMirror') ui.mirror(message.changes);
     if (message.type === 'nativeHotkey') runNativeSidebarHotkey(ui, message.actionId, post);
     if (message.type === 'gpuiProjectSlotHotkey') runNativeProjectSlotHotkey(ui, message.slotNumber, post);
     const focused = Object.values(sidebarStore.getState().sessionsById).find((session) => session.isFocused)?.sessionId;

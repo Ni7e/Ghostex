@@ -1,4 +1,4 @@
-//! The Rust half of the project slot hotkey gate (cmd+1 to cmd+9): the whole jump, planned by
+//! The Rust half of the project slot hotkey gate (cmd+ctrl+1 to cmd+ctrl+9 by default): the whole jump, planned by
 //! gx-core and applied the way the desktop host applies it, against the shipped
 //! `runNativeProjectSlotHotkey` followed by the build that performs its reveal.
 //!
@@ -26,15 +26,24 @@
 //! the dump; the comparer then must report a difference or a collapsed coverage counter. Each one
 //! names a claim of the port: `no-reveal`, `reveal-ignores-setting`, `first-row-always`,
 //! `toggle-not-delete`, `keep-selection`, `clear-selection-always`, `reveal-before-expand`,
-//! `count-remote-groups`, `slot-off-by-one`, `ignore-show-less`, `count-chats`.
+//! `count-remote-groups`, `slot-off-by-one`, `ignore-show-less`, `count-chats`, and two about
+//! what the old page's in-memory copy is told: `page-not-told` (no `sidebarUiMirror` at all) and
+//! `page-told-reveal` (the first port's design, a `revealSidebarSession` sent when the reveal or
+//! the jump changed state).
+//!
+//! **The page's copy.** Every intent applied here that changed the state is also turned into the
+//! page's mirror changes by `sidebar_ui_mirror_changes`, the function the host calls, and written
+//! into the dump as the messages the host sends; the comparer hands them to the shipped
+//! `NativeSidebarUiState` and compares what it then holds with this side's state.
 
 use std::process::ExitCode;
 use std::time::Instant;
 
 use ghostex_gx_core::{
-    collapse_into_storage, hidden_items_into_storage, project_slot_plan, reveal_plan, Core, Event,
-    Intent, MachineId, MachineTabInput, ProjectSlotPlan, SessionKey, SessionSortMode,
-    SidebarInputs, SidebarSettings, SidebarUiIntent, SidebarUiStore, SidebarView, SidebarViewModel,
+    collapse_into_storage, hidden_items_into_storage, project_slot_plan, reveal_plan,
+    sidebar_ui_mirror_changes, Core, Event, Intent, MachineId, MachineTabInput, ProjectSlotPlan,
+    SessionKey, SessionSortMode, SidebarInputs, SidebarSettings, SidebarUiIntent, SidebarUiStore,
+    SidebarView, SidebarViewModel,
 };
 use serde_json::{json, Value};
 
@@ -46,7 +55,7 @@ const SPACE_A: &str = "space-a";
 const SPACE_B: &str = "space-b";
 const COLLECTION: &str = "project-collection-1";
 
-const MUTATIONS: [&str; 11] = [
+const MUTATIONS: [&str; 13] = [
     "no-reveal",
     "reveal-ignores-setting",
     "first-row-always",
@@ -58,6 +67,8 @@ const MUTATIONS: [&str; 11] = [
     "slot-off-by-one",
     "ignore-show-less",
     "count-chats",
+    "page-not-told",
+    "page-told-reveal",
 ];
 
 /// One arrangement of the sidebar's own state and settings, before the key is pressed.
@@ -267,10 +278,13 @@ fn main() -> ExitCode {
             let mut reveal_us = 0u128;
             let mut after = view.clone();
             let mut reveal_json = Value::Null;
+            // What the host hands the old page: the mirror of every intent that changed the state.
+            let mut mirror = Vec::new();
+            let mut reveal_changes = 0usize;
             if let Some(plan) = &plan {
                 planned += 1;
                 for intent in mutate_intents(mutation, plan) {
-                    ui.apply(intent);
+                    apply_mirrored(&mut ui, intent, &mut mirror);
                 }
                 let before_expand = (mutation == Some("reveal-before-expand"))
                     .then(|| (inputs.clone(), view.clone()));
@@ -294,20 +308,27 @@ fn main() -> ExitCode {
                             "selectSpace": reveal.select_space,
                         });
                         for intent in reveal.intents(ui.state()) {
-                            ui.apply(intent);
+                            if apply_mirrored(&mut ui, intent, &mut mirror) {
+                                reveal_changes += 1;
+                            }
                         }
                         if let Some(resolved) = reveal.remember_space {
-                            ui.apply(SidebarUiIntent::RememberSpaceSession {
-                                section_key: resolved.section_key,
-                                space_id: resolved.space_id,
-                                sidebar_session_id: target.to_string(),
-                            });
+                            apply_mirrored(
+                                &mut ui,
+                                SidebarUiIntent::RememberSpaceSession {
+                                    section_key: resolved.section_key,
+                                    space_id: resolved.space_id,
+                                    sidebar_session_id: target.to_string(),
+                                },
+                                &mut mirror,
+                            );
                         }
                         inputs.ui = ui.state().clone();
                         after = SidebarViewModel::build_from_scratch(&core, &inputs, NOW_MS);
                     }
                 }
             }
+            let page_messages = page_messages(mutation, plan.as_ref(), mirror, reveal_changes);
             let total = slot_us + reveal_us;
             plans += 1;
             plan_us_total += total;
@@ -339,6 +360,7 @@ fn main() -> ExitCode {
                     "state": state_vector(&after, ui.state()),
                 },
                 "storedCollapseAfter": collapse_into_storage(&ui.state().collapse, Some(&stored_collapse)),
+                "pageMessages": page_messages,
                 "planNs": total,
             }));
         }
@@ -371,6 +393,43 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+/// Applies one intent the way the host's `gx_store_apply_sidebar_ui_intent_unbuilt` does while
+/// the slot jump collects the page's mirror. Returns whether the state moved.
+fn apply_mirrored(
+    ui: &mut SidebarUiStore,
+    intent: SidebarUiIntent,
+    mirror: &mut Vec<Value>,
+) -> bool {
+    let kept = intent.clone();
+    if !ui.apply(intent).changed {
+        return false;
+    }
+    mirror.extend(sidebar_ui_mirror_changes(&kept, ui.state()));
+    true
+}
+
+/// The messages the host sends the old page for this press (`gx_store_mirror_slot_jump_to_page`).
+fn page_messages(
+    mutation: Option<&str>,
+    plan: Option<&ProjectSlotPlan>,
+    mirror: Vec<Value>,
+    reveal_changes: usize,
+) -> Vec<Value> {
+    match mutation {
+        Some("page-not-told") => Vec::new(),
+        // The first port: a reveal request under a fresh id, sent when the reveal ran and it or
+        // the jump changed state.
+        Some("page-told-reveal") => plan
+            .filter(|plan| plan.reveal && (reveal_changes > 0 || plan.expand_group))
+            .and_then(|plan| plan.target_session_id.clone())
+            .map(|target| json!({ "type": "revealSidebarSession", "sessionId": target, "requestId": 1 }))
+            .into_iter()
+            .collect(),
+        _ if mirror.is_empty() => Vec::new(),
+        _ => vec![json!({ "type": "sidebarUiMirror", "changes": mirror })],
+    }
 }
 
 /// A plan as a mistaken port would have made it. `None` passes the real one through.

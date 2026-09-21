@@ -238,7 +238,7 @@ pub struct SidebarSettings {
     pub hide_keep_awake_titlebar_control: bool,
     /// The project header offers New Browser Tab.
     pub browser_view_tab_hidden: bool,
-    /// A project slot hotkey (cmd+1..9) expands the project it jumps to.
+    /// A project slot hotkey (cmd+ctrl+1..9 by default) expands the project it jumps to.
     pub expand_collapsed_projects_on_jump: bool,
     /// That jump also puts the project's session list back to the compact one.
     pub show_less_for_expanded_project_jumps: bool,

@@ -1549,11 +1549,43 @@ export type SidebarGpuiProjectSlotHotkeyMessage = {
   type: 'gpuiProjectSlotHotkey';
 };
 
+/**
+ * CDXC:Sidebar 2026-09-21 WHY:
+ * A change the app made to the sidebar's own state by itself (the project slot hotkey's jump and the
+ * reveal it performs), handed to the old sidebar page's in-memory copy as the resulting value of each
+ * key it touched. The page sets these and does nothing else: no reveal, no scroll, no focus. Built by
+ * gx-core `sidebar_ui_mirror_changes`.
+ */
+export type SidebarUiMirrorChange =
+  | {
+      kind:
+        'collapsedGroup' | 'expandedList' | 'hoverActions' | 'collapsedCollection' | 'hiddenGroup' | 'hiddenCollection';
+      id: string;
+      on: boolean;
+    }
+  | {
+      kind: 'section';
+      id: string;
+      state: Record<'browser' | 'pinned' | 'drafts' | 'sessions' | 'parked' | 'snoozed', boolean>;
+    }
+  | { kind: 'selectedSpace'; sectionKey: string; spaceId: string | null }
+  | { kind: 'recentSessions'; sectionKey: string; spaceId: string; sessionIds: string[] | null }
+  | { kind: 'selectedMachine'; machineId: string }
+  | { kind: 'tagFilters'; tags: SidebarSessionTagFilter[] }
+  | { kind: 'showHidden'; on: boolean }
+  | { kind: 'selectedSessions'; sessionIds: string[] };
+
+export type SidebarUiMirrorMessage = {
+  changes: SidebarUiMirrorChange[];
+  type: 'sidebarUiMirror';
+};
+
 export type ExtensionToSidebarMessage =
   | SidebarHydrateMessage
   | SidebarSessionStateMessage
   | SidebarNativeHotkeyMessage
   | SidebarGpuiProjectSlotHotkeyMessage
+  | SidebarUiMirrorMessage
   | AgentsHubCatalogMessage
   | AgentsHubFileContentMessage
   | AgentSyncReportMessage

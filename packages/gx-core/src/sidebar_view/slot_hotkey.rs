@@ -1,4 +1,4 @@
-//! The project slot hotkeys, cmd+1 to cmd+9: the port of `runNativeProjectSlotHotkey`.
+//! The project slot hotkeys, cmd+ctrl+1 to cmd+ctrl+9 by default: the port of `runNativeProjectSlotHotkey`.
 //!
 //! CDXC:Sidebar 2026-09-21 WHY:
 //! This one is not a sidebar command and never was. It arrives as `gpuiProjectSlotHotkey`, a THIRD
