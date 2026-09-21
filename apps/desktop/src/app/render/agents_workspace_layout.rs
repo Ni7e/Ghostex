@@ -345,6 +345,12 @@ impl GhostexGpuiApp {
         let pane_id = leaf.pane_id;
         let border_state = self.workspace_leaf_border_state(leaf, window, cx);
         let view = cx.entity().clone();
+        // Only the lone GPUI chat of the docked column is handed a header-facing top edge.
+        let header_reach = (rail_edges.top && self.agents_column_meets_gpui_chat()).then(|| {
+            self.workarea_header_column_top_inset(
+                self.agents_column_flows_under_workarea_header(cx),
+            )
+        });
 
         v_flex()
             .on_children_prepainted(move |child_bounds, _window, cx| {
@@ -369,6 +375,7 @@ impl GhostexGpuiApp {
                     rail_edges,
                     workspace_pane_border_color_for_state(border_state),
                     workspace_pane_border_color(),
+                    header_reach,
                 )
             })
             .bg(workspace_terminal_placeholder_color())

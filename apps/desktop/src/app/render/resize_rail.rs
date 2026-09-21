@@ -152,14 +152,46 @@ pub(crate) fn resize_rail_deferred_strip(strip: impl IntoElement) -> AnyElement 
 /// A pane with a focus or attention outline closes it over the rails it touches, because it has no
 /// border of its own on those sides. Each segment is one rail thickness wide, sits just outside the
 /// pane, and spans the pane's full outer length including the borders it does have.
-pub(crate) fn resize_rail_outline_segments(edges: RailFacingEdges, color: Hsla) -> Vec<AnyElement> {
+///
+/// CDXC:Workarea 2026-09-21 DECISION:
+/// User: the attention outline of a lone chat pane with the tab bar hidden must show "from the top". That pane's top edge is the floating header, not a rail, so its top segment would land off the window or under the header's last row. `header_reach` is how far above the pane the header starts (zero when the chat flows under it): the outline then runs up both sides of the header and closes along the window's top edge, so the header and the chat read as the one outlined pane.
+pub(crate) fn resize_rail_outline_segments(
+    edges: RailFacingEdges,
+    color: Hsla,
+    header_reach: Option<f32>,
+) -> Vec<AnyElement> {
     let thickness = WORKSPACE_SPLIT_HANDLE_THICKNESS;
     let inset = |faces_rail: bool| if faces_rail { 0.0 } else { -1.0 };
+    let vertical_top = header_reach.map_or(inset(edges.top), |reach| -reach);
     let mut segments = Vec::new();
+    if let Some(reach) = header_reach.filter(|reach| *reach > 0.0) {
+        // Sides with a border of their own stop at the pane's top, so they get the stretch beside
+        // the header as a segment over the same pixel column.
+        let mut beside_header = |at_left: bool| {
+            let segment = div()
+                .absolute()
+                .top(px(-reach))
+                .h(px(reach))
+                .w(px(thickness))
+                .bg(color);
+            let segment = if at_left {
+                segment.left(px(-1.0))
+            } else {
+                segment.right(px(-1.0))
+            };
+            segments.push(deferred(segment.into_any_element()).into_any_element());
+        };
+        if !edges.left {
+            beside_header(true);
+        }
+        if !edges.right {
+            beside_header(false);
+        }
+    }
     let mut vertical = |at_left: bool| {
         let segment = div()
             .absolute()
-            .top(px(inset(edges.top)))
+            .top(px(vertical_top))
             .bottom(px(inset(edges.bottom)))
             .w(px(thickness))
             .bg(color);
@@ -184,7 +216,7 @@ pub(crate) fn resize_rail_outline_segments(edges: RailFacingEdges, color: Hsla) 
             .h(px(thickness))
             .bg(color);
         let segment = if at_top {
-            segment.top(px(-thickness))
+            segment.top(px(header_reach.map_or(-thickness, |reach| -reach)))
         } else {
             segment.bottom(px(-thickness))
         };
@@ -207,6 +239,7 @@ pub(crate) fn rail_aware_pane_border<E: Styled + ParentElement>(
     edges: RailFacingEdges,
     color: Hsla,
     neutral_color: Hsla,
+    header_reach: Option<f32>,
 ) -> E {
     let mut pane = pane.border_color(color);
     if !edges.left {
@@ -222,7 +255,7 @@ pub(crate) fn rail_aware_pane_border<E: Styled + ParentElement>(
         pane = pane.border_b_1();
     }
     if color != neutral_color {
-        pane = pane.children(resize_rail_outline_segments(edges, color));
+        pane = pane.children(resize_rail_outline_segments(edges, color, header_reach));
     }
     pane
 }

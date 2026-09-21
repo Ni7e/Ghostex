@@ -92,7 +92,7 @@ impl GhostexGpuiApp {
                     .flex_shrink_0()
                     .h_full()
                     .pt(px(WORKAREA_HEADER_HEIGHT))
-                    .child(self.render_workarea_split_divider(cx)),
+                    .child(self.render_workarea_split_divider("body", cx)),
             )
             .child(
                 // CDXC:Workarea 2026-09-14 WHY:
@@ -142,6 +142,7 @@ impl GhostexGpuiApp {
                                     },
                                     workspace_pane_border_color_for_state(surface_border_state),
                                     workspace_pane_border_color(),
+                                    None,
                                 )
                             })
                             .child(match mode {
@@ -203,6 +204,7 @@ impl GhostexGpuiApp {
                             outer_rail_edges,
                             workspace_pane_border_color_for_state(surface_border_state),
                             workspace_pane_border_color(),
+                            None,
                         )
                     })
                     .child(self.render_project_editor_surface(mode, window, cx))
@@ -216,12 +218,19 @@ impl GhostexGpuiApp {
     /// as it was between the companion and the editor. The grab strip stays on the Agents side while
     /// that side is GPUI-painted, which it always is: the Agents column holds only GPUI terminals and
     /// GPUI chat.
-    pub(crate) fn render_workarea_split_divider(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    ///
+    /// CDXC:Workarea 2026-09-21 DECISION:
+    /// User: the drag bar runs the full height of the view panel's left edge, including beside the header, where its top was missing. The rail is drawn in two segments, one in the header band and one under it, because the band floats over the column; both are the same control and share one hover state, so the accent line shows as one bar.
+    pub(crate) fn render_workarea_split_divider(
+        &self,
+        segment: &'static str,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
         let hover_visible = self.workarea_split_divider_hover_visible;
         // The view panel behind the rail is a CEF page, so the grab strip stays on the Agents side.
         let grab_side = ResizeRailGrabSide::Leading;
         div()
-            .id("ghostex-gpui-workarea-split-divider")
+            .id(format!("ghostex-gpui-workarea-split-divider-{segment}"))
             .relative()
             .flex_shrink_0()
             .h_full()
@@ -229,7 +238,7 @@ impl GhostexGpuiApp {
             .bg(project_editor_companion_divider_background_color())
             .child(resize_rail_deferred_strip(
                 resize_rail_grab_strip(
-                    "ghostex-gpui-workarea-split-grab-strip",
+                    format!("ghostex-gpui-workarea-split-grab-strip-{segment}"),
                     WorkspaceSplitAxis::Horizontal,
                     grab_side,
                 )
@@ -249,7 +258,7 @@ impl GhostexGpuiApp {
                 )
                 .when(hover_visible, |this| {
                     this.child(resize_rail_hover_line(
-                        "ghostex-gpui-workarea-split-divider-hover-line",
+                        format!("ghostex-gpui-workarea-split-divider-hover-line-{segment}"),
                         WorkspaceSplitAxis::Horizontal,
                         grab_side,
                     ))
