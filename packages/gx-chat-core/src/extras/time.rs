@@ -29,7 +29,17 @@ pub fn parse_iso_millis(value: &str, utc_offset_minutes: i32) -> Option<f64> {
     }
     let rest = &value[10..];
     if rest.is_empty() {
-        return epoch_millis(year, month, day, 0, 0, 0, 0.0, 0);
+        // A date-only stamp is UTC, which is what the ECMAScript date-time string format says.
+        return epoch_millis(CivilStamp {
+            year,
+            month,
+            day,
+            hour: 0,
+            minute: 0,
+            second: 0,
+            millis: 0.0,
+            offset_minutes: 0,
+        });
     }
     if !rest.starts_with('T') && !rest.starts_with('t') && !rest.starts_with(' ') {
         return None;
@@ -79,7 +89,16 @@ pub fn parse_iso_millis(value: &str, utc_offset_minutes: i32) -> Option<f64> {
         "Z" | "z" => 0,
         _ => parse_offset(tail)?,
     };
-    epoch_millis(year, month, day, hour, minute, second, fraction, offset)
+    epoch_millis(CivilStamp {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        millis: fraction,
+        offset_minutes: offset,
+    })
 }
 
 /// `±HH:MM`, `±HHMM` or `±HH`, the offsets `Date.parse` accepts on an ISO stamp.
@@ -105,8 +124,8 @@ fn parse_offset(text: &str) -> Option<i32> {
     Some(sign * (hours * 60 + minutes))
 }
 
-/// Milliseconds since the epoch, the same arithmetic `Date.UTC` does.
-fn epoch_millis(
+/// One parsed stamp, before it becomes a number.
+struct CivilStamp {
     year: i64,
     month: i64,
     day: i64,
@@ -115,10 +134,13 @@ fn epoch_millis(
     second: i64,
     millis: f64,
     offset_minutes: i32,
-) -> Option<f64> {
-    let days = days_from_civil(year, month, day);
-    let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second;
-    Some((seconds as f64) * 1_000.0 + millis - (offset_minutes as f64) * 60_000.0)
+}
+
+/// Milliseconds since the epoch, the same arithmetic `Date.UTC` does.
+fn epoch_millis(stamp: CivilStamp) -> Option<f64> {
+    let days = days_from_civil(stamp.year, stamp.month, stamp.day);
+    let seconds = days * 86_400 + stamp.hour * 3_600 + stamp.minute * 60 + stamp.second;
+    Some((seconds as f64) * 1_000.0 + stamp.millis - f64::from(stamp.offset_minutes) * 60_000.0)
 }
 
 /// Howard Hinnant's `days_from_civil`: days since 1970-01-01 for a proleptic Gregorian date.

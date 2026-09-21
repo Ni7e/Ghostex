@@ -169,7 +169,7 @@ pub fn settle_rpc(
 /// `list()` answering: the project's Markdown paths, or the refusal to show under the fields.
 fn settle_listing(state: &mut SaveMarkdownState, outcome: Result<&Value, String>) {
     let title = state.title.clone();
-    match outcome.and_then(|result| checked_response(result).map_err(|error| error)) {
+    match outcome.and_then(checked_response) {
         Ok(response) => {
             let paths = markdown_paths(&response);
             let folder = state
@@ -206,7 +206,7 @@ fn settle_save(
     outcome: Result<&Value, String>,
     next_request: u64,
 ) -> Vec<Effect> {
-    let result = match outcome.and_then(|result| checked_response(result)) {
+    let result = match outcome.and_then(checked_response) {
         Ok(response) => response,
         Err(message) => return fail_save(state, message),
     };

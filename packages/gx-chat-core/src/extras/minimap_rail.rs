@@ -19,14 +19,16 @@ const GEOMETRY_JSON: &str = include_str!("../../../shared/session-chat-presentat
 #[serde(rename_all = "camelCase")]
 pub struct MinimapGeometry {
     pub minimum_turns: usize,
+    /// The one fractional field; every other dimension is a whole pixel, and stays an integer so a
+    /// `1` can never be written back as `1.0`.
     pub scale: f64,
-    pub spacing: f64,
-    pub dash_height: f64,
-    pub rail_width: f64,
-    pub line_offset: f64,
-    pub column_width: f64,
-    pub padding_block: f64,
-    pub dash_widths: Vec<f64>,
+    pub spacing: i64,
+    pub dash_height: i64,
+    pub rail_width: i64,
+    pub line_offset: i64,
+    pub column_width: i64,
+    pub padding_block: i64,
+    pub dash_widths: Vec<i64>,
     pub preview_limit: usize,
 }
 
@@ -89,9 +91,9 @@ pub fn minimap_visible(turn_count: usize, minimum_turns: usize) -> bool {
 }
 
 /// `sessionChatMinimapDashWidth`: dashes grow towards the one the pointer is on.
-pub fn minimap_dash_width(distance: i64, widths: &[f64]) -> f64 {
+pub fn minimap_dash_width(distance: i64, widths: &[i64]) -> i64 {
     if widths.is_empty() {
-        return 0.0;
+        return 0;
     }
     let index = distance.clamp(0, widths.len() as i64 - 1) as usize;
     widths[index]
@@ -104,8 +106,8 @@ pub fn minimap_index_at(progress: f64, turn_count: usize) -> i64 {
 }
 
 /// `sessionChatMinimapRailHeight`: one `spacing` step between neighbouring dashes.
-pub fn minimap_rail_height(turn_count: usize, spacing: f64) -> f64 {
-    (turn_count as f64 - 1.0).max(0.0) * spacing
+pub fn minimap_rail_height(turn_count: usize, spacing: i64) -> i64 {
+    (turn_count as i64 - 1).max(0) * spacing
 }
 
 /// `.replace(/\s+/g, ' ').trim()`.

@@ -42,10 +42,7 @@ pub fn tool_subagent(
     agent_path: &str,
 ) -> Option<SubagentTarget> {
     let call_name = call?.get("name").and_then(Value::as_str)?;
-    let tool = call_name
-        .split(|character| character == '.' || character == ':')
-        .next_back()?
-        .to_lowercase();
+    let tool = call_name.split(['.', ':']).next_back()?.to_lowercase();
     if tool.is_empty() || !SUBAGENT_TOOL_NAMES.contains(&tool.as_str()) {
         return None;
     }

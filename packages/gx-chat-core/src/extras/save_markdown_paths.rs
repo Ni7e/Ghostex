@@ -28,7 +28,7 @@ pub fn normalized_markdown_stem(value: &str) -> String {
 pub fn normalized_folder_path(value: &str) -> String {
     js_trim(value)
         .split('/')
-        .map(|segment| js_trim(segment))
+        .map(js_trim)
         .collect::<Vec<_>>()
         .join("/")
 }
