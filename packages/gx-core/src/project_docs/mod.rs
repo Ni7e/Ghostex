@@ -10,8 +10,8 @@
 mod collection_edits;
 mod collection_menu;
 mod collections;
-mod space_edits;
 mod space_editor;
+mod space_edits;
 mod spaces;
 mod worktree_order;
 

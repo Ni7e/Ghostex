@@ -13,7 +13,7 @@ use super::rows::hotkey_keycaps;
 use super::window::GpuiQuickAccessWindow;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, Anchor, ClickEvent, Context, InteractiveElement as _, IntoElement, KeyDownEvent,
+    Anchor, AnyElement, ClickEvent, Context, InteractiveElement as _, IntoElement, KeyDownEvent,
     MouseDownEvent, ParentElement as _, Pixels, Point, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, anchored, deferred, div, point, px,
 };
@@ -163,7 +163,11 @@ impl GpuiQuickAccessWindow {
     }
 
     /// An open menu owns the keyboard: Up/Down/Return/Escape, and the panel's typed filter.
-    pub(super) fn actions_menu_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+    pub(super) fn actions_menu_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(menu) = self.context_menu.as_mut() else {
             return false;
         };
@@ -245,7 +249,11 @@ impl GpuiQuickAccessWindow {
                         .into_any_element();
                 }
                 let id = item.id.clone();
-                let color = if item.danger { p.destructive } else { p.foreground };
+                let color = if item.danger {
+                    p.destructive
+                } else {
+                    p.foreground
+                };
                 let highlighted = panel && index == menu.highlight;
                 h_flex()
                     .id(("quick-access-menu-item", index))

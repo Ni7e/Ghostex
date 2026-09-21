@@ -40,7 +40,8 @@ export function actionItem(
     id,
     label,
     icon: assetIcon(icon),
-    hotkey: options.hotkey ?? (id === ACTIVATE_ACTION_ID ? '↵' : wireHotkey ? formatSidebarHotkeyLabel(wireHotkey) : ''),
+    hotkey:
+      options.hotkey ?? (id === ACTIVATE_ACTION_ID ? '↵' : wireHotkey ? formatSidebarHotkeyLabel(wireHotkey) : ''),
     danger: options.danger === true,
     disabled: options.disabled === true,
     separator: false,

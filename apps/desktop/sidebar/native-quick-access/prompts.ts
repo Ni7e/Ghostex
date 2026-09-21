@@ -525,7 +525,15 @@ export function promptTagMenuItems(state: PromptsTabState, prompt: GxserverStash
       separator: false,
     }));
   if (items.length > 0) {
-    items.push({ id: 'separator', label: '', icon: NO_ICON, hotkey: '', danger: false, disabled: false, separator: true });
+    items.push({
+      id: 'separator',
+      label: '',
+      icon: NO_ICON,
+      hotkey: '',
+      danger: false,
+      disabled: false,
+      separator: true,
+    });
   }
   items.push({
     id: 'tag:new',

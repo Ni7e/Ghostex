@@ -22,8 +22,8 @@ use super::chrome::{
 use super::editor::{quick_access_prompt_editor, quick_access_tag_composer};
 use super::model::{QuickAccessSnapshot, QuickAccessTabId, QuickAccessToolbar};
 use super::palette::{
-    QUICK_ACCESS_GROUP_HEADING_HEIGHT, QUICK_ACCESS_ITEM_FONT_SIZE,
-    QUICK_ACCESS_LIST_PADDING, QUICK_ACCESS_ROW_PADDING_X, QuickAccessPalette, hsla,
+    QUICK_ACCESS_GROUP_HEADING_HEIGHT, QUICK_ACCESS_ITEM_FONT_SIZE, QUICK_ACCESS_LIST_PADDING,
+    QUICK_ACCESS_ROW_PADDING_X, QuickAccessPalette, hsla,
 };
 use super::rows::{RowCallbacks, quick_access_row};
 use crate::app::window::native_modal_kit::MODAL_UI_FONT;
@@ -1009,10 +1009,7 @@ impl GpuiQuickAccessWindow {
                 .into_any_element(),
             div()
                 .flex_shrink_0()
-                .on_children_prepainted(capture_bounds(
-                    self.project_menu.trigger_bounds.clone(),
-                    0,
-                ))
+                .on_children_prepainted(capture_bounds(self.project_menu.trigger_bounds.clone(), 0))
                 .child(quick_access_filter_trigger(
                     p,
                     projects,

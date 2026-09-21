@@ -33,8 +33,7 @@ pub(crate) mod text;
 pub(crate) mod view;
 
 pub use armed_actions::{
-    armed_actions_by_session, ArmedAction, ARMED_ACTION_CLOSE_AFTER_DONE,
-    ARMED_ACTION_DELAYED_SEND,
+    armed_actions_by_session, ArmedAction, ARMED_ACTION_CLOSE_AFTER_DONE, ARMED_ACTION_DELAYED_SEND,
 };
 pub use close_successor::{
     close_project_group_is_active, close_project_successor_candidates,

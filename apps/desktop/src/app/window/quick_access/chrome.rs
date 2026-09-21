@@ -10,8 +10,8 @@ use super::palette::{
 };
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, Context, InteractiveElement as _,
-    IntoElement, MouseDownEvent, ParentElement as _, Pixels, Rgba, ScrollHandle, SharedString,
+    AnyElement, App, Bounds, ClickEvent, Context, InteractiveElement as _, IntoElement,
+    MouseDownEvent, ParentElement as _, Pixels, Rgba, ScrollHandle, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, anchored, deferred, div, img, point, px,
     svg,
 };
@@ -163,7 +163,10 @@ pub(crate) fn quick_access_filter_trigger<V: 'static>(
         .border_color(hsla(if open {
             p.focus_border
         } else if active {
-            Rgba { a: 0.55, ..p.accent }
+            Rgba {
+                a: 0.55,
+                ..p.accent
+            }
         } else {
             p.hairline
         }))
@@ -205,7 +208,10 @@ pub(crate) fn quick_access_filter_trigger<V: 'static>(
 
 /// A single-choice filter (Saved / Recovered / Sent, All / Closed / External)
 /// shaped as the select the search line's other filters already are.
-pub(crate) fn segments_as_select(segments: &[QuickAccessSegment], selected: &str) -> QuickAccessSelect {
+pub(crate) fn segments_as_select(
+    segments: &[QuickAccessSegment],
+    selected: &str,
+) -> QuickAccessSelect {
     QuickAccessSelect {
         label: segments
             .iter()
@@ -278,9 +284,7 @@ pub(crate) fn quick_access_footer<V: 'static>(
                 .cursor_pointer()
                 .when(active, |this| this.bg(hsla(p.footer_active)))
                 .when(!active, |this| {
-                    this.hover(move |this| {
-                        this.bg(hsla(p.raised)).text_color(hsla(p.foreground))
-                    })
+                    this.hover(move |this| this.bg(hsla(p.raised)).text_color(hsla(p.foreground)))
                 })
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                     on_select_tab(this, index, window, cx);

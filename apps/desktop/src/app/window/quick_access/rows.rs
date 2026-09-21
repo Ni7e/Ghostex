@@ -4,7 +4,9 @@
 //! right-aligned accessories (keycaps, counts, chips, time, the lifecycle dot). Rows carry no
 //! buttons of their own; what a row can do lives in its actions menu (right-click, or the footer's
 //! Actions panel), which the runtime builds in apps/desktop/sidebar/native-quick-access/row-actions.ts.
-use super::chrome::{asset_icon_path, quick_access_icon, quick_access_keycap, quick_access_tooltip};
+use super::chrome::{
+    asset_icon_path, quick_access_icon, quick_access_keycap, quick_access_tooltip,
+};
 use super::model::{QuickAccessIcon, QuickAccessPromptChip, QuickAccessRow};
 use super::palette::{
     QUICK_ACCESS_META_FONT_SIZE, QUICK_ACCESS_ROW_FONT_SIZE, QUICK_ACCESS_ROW_HEIGHT,
@@ -157,11 +159,7 @@ fn status_dot(p: &QuickAccessPalette, lit: bool) -> gpui::Div {
         .flex_shrink_0()
         .size(px(6.0))
         .rounded_full()
-        .bg(hsla(if lit {
-            p.status_dot_open
-        } else {
-            p.status_dot
-        }))
+        .bg(hsla(if lit { p.status_dot_open } else { p.status_dot }))
 }
 
 /// A formatted accelerator (`⌘⇧T`, `Ctrl+Shift+T`) as one keycap per key.
@@ -180,7 +178,9 @@ pub(crate) fn hotkey_keycaps(p: &QuickAccessPalette, label: &str) -> AnyElement 
             match keys.last_mut() {
                 Some(last)
                     if character.is_ascii_alphanumeric()
-                        && last.chars().all(|previous| previous.is_ascii_alphanumeric()) =>
+                        && last
+                            .chars()
+                            .all(|previous| previous.is_ascii_alphanumeric()) =>
                 {
                     last.push(character)
                 }
