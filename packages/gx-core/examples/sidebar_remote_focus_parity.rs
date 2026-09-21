@@ -15,6 +15,19 @@
 //! Split Right rides along because it is the same open with a placement and WITHOUT the two
 //! options, which is the difference a single payload comparison would miss.
 //!
+//! **The active group is read the way the live host reads it.** `keepView` is planned from the OLD
+//! RUNTIME's `activeGroupId`, which the host tracks in a `RuntimeActiveGroup` from what it sent the
+//! runtime and what the runtime published; the core's own focus is seeded to a LOCAL project in
+//! every case, because the shadow mirror never follows a remote focus. Each group is reached by one
+//! or more HISTORIES, fed to the same tracker the host uses and replayed on the TypeScript side
+//! through the runtime's own focus methods, so the group the runtime holds is its code's answer:
+//! `published` (the runtime published the group), `sentPublishLagging` (a remote click in that
+//! group was sent and its publish is not back), `tellAfterRemote` (then a local click's tell went
+//! out, and the late publish still names the remote group), and `tellPending` (that tell is still
+//! waiting, flushed before the command). Three alternative plans ride along for the comparer's
+//! mutations: `corePlan` (the group from `core.focus()`, the reviewed bug), `publishedPlan` (the
+//! last publish only) and `ignoresTellPlan` (the sent group even after a tell).
+//!
 //! A third machine is held as the stored LAST-SEEN copy (`seed_last_seen_presentation`), which is
 //! what an offline machine shows. The old runtime does not list such a machine in
 //! `remotePresentations`, so it opens the row without `preferredInterface`; the planner must hand
@@ -28,8 +41,8 @@
 use std::process::ExitCode;
 
 use ghostex_gx_core::{
-    plan_remote_focus, ActiveGroup, Core, FocusState, MachineId, PreferredInterfaceSettings,
-    ProjectKey, RemoteFocusPlan,
+    plan_remote_focus, remote_focus_group, ActiveGroup, Core, FocusState, MachineId,
+    PreferredInterfaceSettings, ProjectKey, RemoteFocusPlan, RuntimeActiveGroup, SessionKey,
 };
 use serde_json::{json, Value};
 
@@ -42,6 +55,8 @@ const OTHER_MACHINE: &str = "remote-ab12";
 const UNLOADED_MACHINE: &str = "remote-offline";
 /// A machine whose rows are the stored last-seen copy, not this run's stream.
 const LAST_SEEN_MACHINE: &str = "remote-lastseen";
+/// The local project the core's focus stays on, and the group a local tell leaves active.
+const LOCAL_GROUP: &str = "combined-project:P1";
 
 fn main() -> ExitCode {
     let out_dir = std::env::args().nth(1).unwrap_or_default();
@@ -54,28 +69,56 @@ fn main() -> ExitCode {
     for session_id in session_ids() {
         for message in messages(&session_id) {
             for active_group in active_groups() {
-                for settings in interface_settings() {
-                    let core = seeded_core(active_group.as_deref(), false);
-                    let plan = plan_remote_focus(&core, &message, &settings);
-                    if plan.is_some() {
-                        owned += 1;
-                    }
-                    let mut entry = json!({
-                        "message": message,
-                        "activeGroupId": active_group,
-                        "settings": settings_json(&settings),
-                        "presentation": presentation_json(),
-                        "liveMachineIds": [MACHINE, OTHER_MACHINE],
-                        "owned": plan.is_some(),
-                        "plan": plan.as_ref().map(RemoteFocusPlan::to_json),
-                    });
-                    if session_id.starts_with(&format!("remote:{LAST_SEEN_MACHINE}:")) {
-                        let live = seeded_core(active_group.as_deref(), true);
-                        entry["lastSeenPlan"] = plan_remote_focus(&live, &message, &settings)
+                for history in histories(active_group.as_deref()) {
+                    for settings in interface_settings() {
+                        let core = seeded_core(false);
+                        let host_group = history.tracker.current(
+                            history.told_stamp,
+                            history.tell_pending,
+                            NOW_MS,
+                        );
+                        let plan = plan_remote_focus(&core, &message, &settings, host_group);
+                        if plan.is_some() {
+                            owned += 1;
+                        }
+                        let alternative = |group: Option<&str>| {
+                            plan_remote_focus(&core, &message, &settings, group)
+                                .as_ref()
+                                .map_or(Value::Null, RemoteFocusPlan::to_json)
+                        };
+                        let core_group = core
+                            .focus()
+                            .active_group
                             .as_ref()
-                            .map_or(Value::Null, RemoteFocusPlan::to_json);
+                            .map(ActiveGroup::to_sidebar_group_id);
+                        let mut entry = json!({
+                            "message": message,
+                            "history": history.kind,
+                            "historySteps": history.steps,
+                            "startGroupId": history.start_group,
+                            "activeGroupId": history.runtime_group,
+                            "hostGroupId": host_group,
+                            "settings": settings_json(&settings),
+                            "presentation": presentation_json(),
+                            "liveMachineIds": [MACHINE, OTHER_MACHINE],
+                            "owned": plan.is_some(),
+                            "plan": plan.as_ref().map(RemoteFocusPlan::to_json),
+                            "focusGroup": plan.as_ref().map(|plan| plan.focus_group.clone()),
+                            "corePlan": alternative(core_group.as_deref()),
+                            "publishedPlan": alternative(history.tracker.published()),
+                            "ignoresTellPlan": alternative(
+                                history.tracker.sent_group().or(history.tracker.published()),
+                            ),
+                        });
+                        if session_id.starts_with(&format!("remote:{LAST_SEEN_MACHINE}:")) {
+                            let live = seeded_core(true);
+                            entry["lastSeenPlan"] =
+                                plan_remote_focus(&live, &message, &settings, host_group)
+                                    .as_ref()
+                                    .map_or(Value::Null, RemoteFocusPlan::to_json);
+                        }
+                        entries.push(entry);
                     }
-                    entries.push(entry);
                 }
             }
         }
@@ -107,6 +150,10 @@ fn session_ids() -> Vec<String> {
         format!("remote:{MACHINE}:session:R1:RS1"),
         format!("remote:{MACHINE}:session:R1:RS2"),
         format!("remote:{MACHINE}:session:R1:missing"),
+        // An agent id that is empty, and one that is only spaces: both are "no agent" to
+        // `normalizeNonEmptyString`, so neither may carry a `preferredInterface`.
+        format!("remote:{MACHINE}:session:R1:RS3"),
+        format!("remote:{MACHINE}:session:R1:RS4"),
         // The machine's chat project, whose group is the Chats collection rather than its own.
         format!("remote:{MACHINE}:session:R-chat:CS1"),
         // The second machine, and a colon inside the session id, which belongs to the session.
@@ -152,6 +199,96 @@ fn active_groups() -> Vec<Option<String>> {
     ]
 }
 
+/// One way the host came to hold its idea of the runtime's group, and what the runtime holds.
+struct History {
+    kind: &'static str,
+    /// Replayed on the TypeScript runtime before the message, through its own focus methods.
+    steps: Vec<Value>,
+    start_group: Option<String>,
+    /// What the runtime's `activeGroupId` is once the steps ran; the comparer checks it.
+    runtime_group: Option<String>,
+    tracker: RuntimeActiveGroup,
+    told_stamp: u64,
+    tell_pending: bool,
+}
+
+/// The row whose click leaves `group` active in the runtime, for the groups a click can produce.
+fn row_producing(group: &str) -> Option<String> {
+    let rows = [
+        format!("remote:{MACHINE}:session:R1:RS1"),
+        format!("remote:{MACHINE}:session:R2:R2S1"),
+        format!("remote:{MACHINE}:session:R-chat:CS1"),
+        format!("remote:{OTHER_MACHINE}:session:R1:RS1"),
+    ];
+    let core = seeded_core(false);
+    rows.into_iter().find(|row| {
+        let session = SessionKey::parse_remote_scoped_session_id(row).expect("a remote row");
+        remote_focus_group(&core, &session) == group
+    })
+}
+
+/// Every history that ends with the runtime on `group` or, for the two tell histories, on the local
+/// group a tell leaves after a click that produced `group`.
+fn histories(group: Option<&str>) -> Vec<History> {
+    let mut published = RuntimeActiveGroup::default();
+    published.observe_publish(group, 0);
+    let mut out = vec![History {
+        kind: "published",
+        steps: Vec::new(),
+        start_group: group.map(str::to_string),
+        runtime_group: group.map(str::to_string),
+        tracker: published,
+        told_stamp: 0,
+        tell_pending: false,
+    }];
+    let Some(row) = group.and_then(row_producing) else {
+        return out;
+    };
+    let group = group.expect("a producible group").to_string();
+    let remote_step = json!({ "step": "remoteFocus", "sessionId": row });
+    let tell_step =
+        json!({ "step": "localTell", "projectId": "P1", "sessionId": "S1", "focusStamp": 1 });
+    // The click was sent; the runtime's publish of it is not back, so the last publish is local.
+    let mut lagging = RuntimeActiveGroup::default();
+    lagging.observe_publish(Some(LOCAL_GROUP), 0);
+    lagging.sent_remote_focus(group.clone(), 0, NOW_MS);
+    out.push(History {
+        kind: "sentPublishLagging",
+        steps: vec![remote_step.clone()],
+        start_group: Some(LOCAL_GROUP.to_string()),
+        runtime_group: Some(group.clone()),
+        tracker: lagging.clone(),
+        told_stamp: 0,
+        tell_pending: false,
+    });
+    // Then a local click's tell went out (stamp 1), and the click's late publish still names the
+    // remote group with the stamp from before the tell.
+    let mut told = lagging.clone();
+    told.observe_publish(Some(&group), 0);
+    out.push(History {
+        kind: "tellAfterRemote",
+        steps: vec![remote_step.clone(), tell_step.clone()],
+        start_group: Some(LOCAL_GROUP.to_string()),
+        runtime_group: Some(LOCAL_GROUP.to_string()),
+        tracker: told,
+        told_stamp: 1,
+        tell_pending: false,
+    });
+    // The local click's tell is still pending; the command flushes it first.
+    let mut pending = lagging;
+    pending.observe_publish(Some(&group), 0);
+    out.push(History {
+        kind: "tellPending",
+        steps: vec![remote_step, tell_step],
+        start_group: Some(LOCAL_GROUP.to_string()),
+        runtime_group: Some(LOCAL_GROUP.to_string()),
+        tracker: pending,
+        told_stamp: 0,
+        tell_pending: true,
+    });
+    out
+}
+
 /// Every combination of a global Default Agent View and an override for the one agent a row has.
 fn interface_settings() -> Vec<PreferredInterfaceSettings> {
     let mut out = Vec::new();
@@ -179,9 +316,10 @@ fn settings_json(settings: &PreferredInterfaceSettings) -> Value {
     })
 }
 
-/// A core holding both loaded machines and the last-seen one, with the active group seeded to the
-/// case's value. `last_seen_live` streams the third machine instead, which is the mutant's store.
-fn seeded_core(active_group_id: Option<&str>, last_seen_live: bool) -> Core {
+/// A core holding both loaded machines and the last-seen one, with its focus on the LOCAL project
+/// P1, which is where the live store's focus stays while a remote row has focus.
+/// `last_seen_live` streams the third machine instead, which is the mutant's store.
+fn seeded_core(last_seen_live: bool) -> Core {
     let mut core = Core::new();
     for (machine, server_id) in [
         (MachineId::Local, "local"),
@@ -205,22 +343,12 @@ fn seeded_core(active_group_id: Option<&str>, last_seen_live: bool) -> Core {
             );
         }
     }
-    let Some(active_group_id) = active_group_id else {
-        return core;
-    };
-    let Some(active_group) = ActiveGroup::parse_sidebar_group_id(active_group_id) else {
-        return core;
-    };
     let mut focus = FocusState::default();
-    focus.active_project = Some(match &active_group {
-        ActiveGroup::Project(project) => project.clone(),
-        ActiveGroup::Subgroup { project, .. } => project.clone(),
-        ActiveGroup::Chats(machine) => ProjectKey {
-            machine: machine.clone(),
-            project_id: "R-chat".to_string(),
-        },
+    focus.active_project = Some(ProjectKey {
+        machine: MachineId::Local,
+        project_id: "P1".to_string(),
     });
-    focus.active_group = Some(active_group);
+    focus.active_group = ActiveGroup::parse_sidebar_group_id(LOCAL_GROUP);
     core.restore_focus(focus);
     core
 }
@@ -238,6 +366,8 @@ fn presentation_json() -> Value {
         "sessions": [
             session("R1", "RS1", Some("claude")),
             session("R1", "RS2", None),
+            session("R1", "RS3", Some("")),
+            session("R1", "RS4", Some("   ")),
             session("R2", "R2S1", Some("codex")),
             session("R-chat", "CS1", Some("claude")),
         ],
@@ -276,7 +406,7 @@ fn project(project_id: &str, path: &str) -> Value {
 
 fn group(project_id: &str) -> Value {
     let sessions: Vec<&str> = match project_id {
-        "R1" => vec!["RS1", "RS2"],
+        "R1" => vec!["RS1", "RS2", "RS3", "RS4"],
         "R2" => vec!["R2S1"],
         _ => vec!["CS1"],
     };

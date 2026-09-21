@@ -23,6 +23,15 @@
 //! answer "this focus changes the project". Reproducing that on the string keeps the two sides
 //! reading one rule instead of two.
 //!
+//! **And the group id is the OLD RUNTIME's, handed in, never the core's focus.**
+//! CDXC:RemoteMachines 2026-09-21 WHY:
+//! The core's focus does not follow a remote focus (the shadow mirror keeps this computer's, see
+//! `CDXC:FocusRouting 2026-09-20` in shadow_diff.rs), so reading `core.focus()` answered "the
+//! project changes" for every remote click, and every second click inside the active remote project
+//! sent a `keepView` the runtime did not: its copy then ran too. The group is what the runtime's
+//! `activeGroupId` holds when the forwarded command runs, which [`RuntimeActiveGroup`] tracks from
+//! what the host SENT the runtime and what the runtime last PUBLISHED; its comment has the proof.
+//!
 //! Refused, each with its reason: a LOCAL row (the store's own focus path owns it), a browser row
 //! (an app tab, not a session), an id that does not parse as a remote session, and a machine whose
 //! rows did not come from THIS run's stream (not loaded yet, or drawn from the stored last-seen
@@ -37,7 +46,9 @@
 use serde_json::{json, Map, Value};
 
 use crate::core::Core;
+use crate::focus::ActiveGroup;
 use crate::keys::{MachineId, ProjectKey, SessionKey};
+use crate::selectors::is_chat_project_path;
 
 use super::resolve::{
     text_field, NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE, NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
@@ -94,6 +105,10 @@ pub struct RemoteFocusPlan {
     pub split_right: bool,
     /// The `openRemoteSessionTerminal` payload, ready for the native project-path entry point.
     pub native_action: Value,
+    /// The group the old runtime's `activeGroupId` holds once it has run the forwarded command:
+    /// [`remote_focus_group`] of the row. Not part of the payload; the host feeds it to
+    /// [`RuntimeActiveGroup::sent_remote_focus`].
+    pub focus_group: String,
 }
 
 impl RemoteFocusPlan {
@@ -117,10 +132,15 @@ impl RemoteFocusPlan {
 
 /// What a click on a remote row does, or `None` when this file does not own the payload and the old
 /// runtime must answer it whole.
+///
+/// `runtime_active_group` is the sidebar group id the old runtime's `activeGroupId` holds when the
+/// forwarded command runs ([`RuntimeActiveGroup::current`]); `None` is "no group", which, like every
+/// local group, answers "the project changes".
 pub fn plan_remote_focus(
     core: &Core,
     message: &Value,
     settings: &PreferredInterfaceSettings,
+    runtime_active_group: Option<&str>,
 ) -> Option<RemoteFocusPlan> {
     let kind = text_field(message, "type")?;
     if !REMOTE_FOCUS_MESSAGE_TYPES.contains(&kind) {
@@ -151,7 +171,7 @@ pub fn plan_remote_focus(
         true => false,
         false => {
             message.get("keepView") == Some(&Value::Bool(true))
-                || focus_changes_active_project(core, &session)
+                || focus_changes_active_project(runtime_active_group, &session)
         }
     };
     let preferred_interface = match split_right {
@@ -166,6 +186,7 @@ pub fn plan_remote_focus(
         preferred_interface.as_deref(),
         split_right,
     );
+    let focus_group = remote_focus_group(core, &session);
     Some(RemoteFocusPlan {
         session,
         acknowledge_attention: true,
@@ -173,6 +194,7 @@ pub fn plan_remote_focus(
         preferred_interface,
         split_right,
         native_action,
+        focus_group,
     })
 }
 
@@ -224,14 +246,130 @@ fn open_remote_session_terminal(
 /// PROJECT group, and the focus stays inside the project only when that parse names this machine
 /// and this project. A subgroup id, the machine's Chats group and every local group all fail that
 /// parse and answer "the project changes", which is the rule the string form encodes.
-fn focus_changes_active_project(core: &Core, session: &SessionKey) -> bool {
-    let Some(active) = core.focus().active_group.as_ref() else {
-        return true;
-    };
-    let Some(project) = ProjectKey::parse_sidebar_group_id(&active.to_sidebar_group_id()) else {
+fn focus_changes_active_project(runtime_active_group: Option<&str>, session: &SessionKey) -> bool {
+    let Some(project) = runtime_active_group.and_then(ProjectKey::parse_sidebar_group_id) else {
         return true;
     };
     project.machine != session.machine || project.project_id != session.project_id
+}
+
+/// The group `setRemotePresentationSessionFocus` makes active for a remote row: the machine's Chats
+/// group when THAT machine's live presentation stores the project under a chats folder, else the
+/// remote project's own group. Never a user-made subgroup, whatever the row's group is: the old
+/// runtime does not look at subgroups here. A machine with no live rows answers the project group,
+/// as `remotePresentations.get(machineId)` finding nothing does.
+pub fn remote_focus_group(core: &Core, session: &SessionKey) -> String {
+    let chat = core
+        .presentation()
+        .loaded_live(&session.machine)
+        .and_then(|loaded| loaded.project(&session.project_id))
+        .and_then(|project| project.path.as_deref())
+        .is_some_and(is_chat_project_path);
+    match chat {
+        true => ActiveGroup::Chats(session.machine.clone()).to_sidebar_group_id(),
+        false => session.project_key().to_sidebar_group_id(),
+    }
+}
+
+/// How long a group the host sent is believed without the runtime publishing it. The runtime
+/// publishes in the same turn it moves the group (`setRemotePresentationSessionFocus` ends in
+/// `postGxserverPresentationFocusState`), so a group it has not published after this long is one it
+/// did not take (its post refused, or a later change of its own), and its publish is the truth.
+pub const RUNTIME_GROUP_SENT_TRUST_MS: u64 = 2_000;
+
+/// The old runtime's `activeGroupId` as a command sent NOW will find it.
+///
+/// CDXC:RemoteMachines 2026-09-21 WHY:
+/// The runtime runs every script the host sends on one FIFO queue, on its own thread, and its
+/// publishes come back later. So its last publish lags: after a remote click, a second click in the
+/// same project is planned before the first click's publish is back, and after a local click the
+/// store's tell is flushed right before the next command while the last publish still names the
+/// remote group. The group the command finds is the one set by the LAST focus-moving script the
+/// host queued before it, so that is tracked, and the publish is used only once it can be shown to
+/// come after that script:
+///
+/// - A remote focus the host sent (a forwarded click or Split Right on a remote row, or the
+///   tab-selected callback for a remote tab, which both run `setRemotePresentationSessionFocus`) is
+///   believed until a publish names that same group, a later script replaces it, or
+///   [`RUNTIME_GROUP_SENT_TRUST_MS`] passes.
+/// - A local selection reaches the runtime as a tell stamped with the store's focus stamp, and
+///   every publish echoes the newest stamp it has heard. The tell is flushed before any forwarded
+///   command, so a tell newer than the sent remote focus, or one still pending, means the command
+///   finds the local group the tell set, until a publish echoes that stamp; from then on the
+///   publish is fresher than both, because the runtime handled the tell after everything sent
+///   before it.
+///
+/// Anything the runtime does to its group on its own, or on a script not tracked here (a group
+/// header's `focusGroup`, a lifecycle replacement), is seen when it publishes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RuntimeActiveGroup {
+    published: Option<String>,
+    published_stamp: u64,
+    sent: Option<SentRemoteFocus>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SentRemoteFocus {
+    group: String,
+    /// The stamp of the newest tell sent before this focus.
+    told_stamp: u64,
+    at_ms: u64,
+}
+
+impl RuntimeActiveGroup {
+    /// The runtime published its focus state: its `activeGroupId` and the `focusStamp` it echoes.
+    pub fn observe_publish(&mut self, active_group_id: Option<&str>, focus_stamp: u64) {
+        self.published = active_group_id.map(str::to_string);
+        self.published_stamp = focus_stamp;
+        if self
+            .sent
+            .as_ref()
+            .is_some_and(|sent| Some(sent.group.as_str()) == active_group_id)
+        {
+            self.sent = None;
+        }
+    }
+
+    /// The host queued a script that runs `setRemotePresentationSessionFocus`, which leaves `group`
+    /// active ([`remote_focus_group`]). `told_stamp` is the stamp of the newest tell sent so far.
+    pub fn sent_remote_focus(&mut self, group: String, told_stamp: u64, now_ms: u64) {
+        self.sent = Some(SentRemoteFocus {
+            group,
+            told_stamp,
+            at_ms: now_ms,
+        });
+    }
+
+    /// The group a command queued now finds. `told_stamp` is the stamp of the newest tell sent,
+    /// `tell_pending` whether a newer one is still waiting (it is flushed before the command).
+    /// `None` is a local selection or no group, which both answer "the project changes".
+    pub fn current(&self, told_stamp: u64, tell_pending: bool, now_ms: u64) -> Option<&str> {
+        if tell_pending {
+            return None;
+        }
+        if let Some(sent) = &self.sent {
+            if sent.told_stamp == told_stamp
+                && now_ms.saturating_sub(sent.at_ms) < RUNTIME_GROUP_SENT_TRUST_MS
+            {
+                return Some(sent.group.as_str());
+            }
+        }
+        match self.published_stamp >= told_stamp {
+            true => self.published.as_deref(),
+            false => None,
+        }
+    }
+
+    /// The runtime's last publish, whatever came after it. For the gate's mutations.
+    pub fn published(&self) -> Option<&str> {
+        self.published.as_deref()
+    }
+
+    /// The last remote focus sent and not yet published, whatever came after it. For the gate's
+    /// mutations.
+    pub fn sent_group(&self) -> Option<&str> {
+        self.sent.as_ref().map(|sent| sent.group.as_str())
+    }
 }
 
 /// The agent id of the row on ITS machine, which is what `sessionPreferredAgentInterface` reads out

@@ -76,7 +76,8 @@ pub use remote::{
     REMOTE_FIRE_AND_FORGET_TIMEOUT_MS, REMOTE_SESSION_MESSAGE_TYPES,
 };
 pub use remote_focus::{
-    plan_remote_focus, PreferredInterfaceSettings, RemoteFocusPlan, REMOTE_FOCUS_MESSAGE_TYPES,
+    plan_remote_focus, remote_focus_group, PreferredInterfaceSettings, RemoteFocusPlan,
+    RuntimeActiveGroup, REMOTE_FOCUS_MESSAGE_TYPES, RUNTIME_GROUP_SENT_TRUST_MS,
 };
 pub use resolve::{
     local_project_group_project_id, NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,

@@ -46,6 +46,9 @@ pub use crate::keys::{
     parse_workspace_subgroup_id, MachineId, ProjectKey, SessionKey, CHATS_GROUP_ID,
 };
 pub use crate::overlay::SessionPatch;
+pub use crate::sidebar_actions::{
+    remote_focus_group, RuntimeActiveGroup, RUNTIME_GROUP_SENT_TRUST_MS,
+};
 pub use crate::project_docs::{
     apply_space_row_reorder, can_drop_project_with_worktrees, collections_hand_back_script,
     collections_request_script, create_collection, move_members_to_space,
