@@ -119,6 +119,7 @@ impl<'a> DomainRepository<'a> {
                 normalized_params.insert("cwd".to_string(), Value::String(project_path));
             }
         }
+        stamp_custom_agent_icon(project, &mut normalized_params);
         let session = normalize_session_input(
             &self.server_id,
             &project_id,
@@ -855,4 +856,31 @@ fn validate_project_path_for_session(project: &Value) -> DomainResult<()> {
         code: "projectPathUnavailable",
         message,
     })
+}
+
+/// CDXC:SessionChat 2026-09-21 WHY: A custom agent's id (`custom-claude-…`) names no transcript family; only `launchSettings.icon` does. A launch sends the icon, but restoring a previous session sends the agent id alone, so the restored row reached chat as "not running a recognized coding agent" until live-process detection rewrote its agent id. Every create that names a project custom agent without an icon takes the icon from that agent's definition, so the row is right from its first read.
+fn stamp_custom_agent_icon(project: &Value, params: &mut Map<String, Value>) {
+    let Some(agent_id) = read_optional_text(params.get("agentId")) else {
+        return;
+    };
+    if read_optional_text(
+        params
+            .get("launchSettings")
+            .and_then(|settings| settings.get("icon")),
+    )
+    .is_some()
+    {
+        return;
+    }
+    let Some(icon) = crate::presentation::util::project_custom_agent_icon(Some(project), &agent_id)
+    else {
+        return;
+    };
+    let mut launch_settings = params
+        .get("launchSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    launch_settings.insert("icon".to_string(), Value::String(icon));
+    params.insert("launchSettings".to_string(), Value::Object(launch_settings));
 }
