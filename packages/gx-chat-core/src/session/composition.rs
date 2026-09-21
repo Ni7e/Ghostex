@@ -7,6 +7,10 @@
 
 use ghostex_gx_protocol::{ChatBlock, ChatMessage, ChatRole, ChatSource};
 
+use crate::session::app_commands::{
+    app_commands_as_messages, reconcile_local_command_output,
+    retire_markers_covered_by_local_commands,
+};
 use crate::session::assembler::{Assembler, Row};
 use crate::session::markers::{
     apply_marker_boundaries, markers_as_messages, retire_interrupt_markers,
@@ -20,15 +24,29 @@ use crate::session::terminal::{
 };
 use crate::session::text::{collapse_whitespace, is_js_space, parse_command_envelope};
 use crate::state::ChatState;
+use crate::transcript::noise::{classify_suppressed_turn, SuppressedTurn};
 
-/// How many compactions the authoritative transcript records.
+/// `countSessionChatCompactionRecords`: how many compactions the authoritative transcript records.
 ///
-/// The rule lives in `packages/core-ui/chat/session-chat-noise.ts`, which family b ports: a
-/// compaction record is a suppressed turn whose status label is "Context compacted" or "Compaction
-/// completed". Until that classifier exists here the count is zero, which keeps every `/compact`
-/// marker on screen rather than retiring one early. Family b replaces this body.
-pub fn compaction_records(_messages: &[ChatMessage]) -> usize {
-    0
+/// A compaction record is a suppressed turn whose status label is one of the two the agent writes.
+/// The optimistic "Ran /compact" marker retires against this count: once the agent has said the
+/// compaction happened, a client-side "we sent it" row would sit BELOW the result it announced.
+///
+/// The classifier is family b's (`crate::transcript::noise`, from
+/// `packages/core-ui/chat/session-chat-noise.ts`); the two labels are compared as literals here
+/// because they are private to that module, and `session_chat.rs` in gxserver holds the same
+/// spellings.
+pub fn compaction_records(messages: &[ChatMessage]) -> usize {
+    messages
+        .iter()
+        .filter(|message| {
+            matches!(
+                classify_suppressed_turn(message),
+                Some(SuppressedTurn::Status { ref label, .. })
+                    if label == "Context compacted" || label == "Compaction completed"
+            )
+        })
+        .count()
 }
 
 fn text_of(message: &ChatMessage, separator: &str) -> String {
@@ -112,6 +130,30 @@ pub fn surface_skill_invocation_user_turns(
     }
 }
 
+/// The list a pending echo is reconciled against.
+///
+/// CDXC:SessionChat 2026-09-15 WHY:
+/// Startup sends hydrate as pending bubbles even for `/usage`. Its command acknowledgment can
+/// arrive before any transcript exists, and it never needs an assistant reply, so pending
+/// reconciliation must include the server's live local-command records.
+pub fn pending_transcript(state: &ChatState, boundaried: &[ChatMessage]) -> Vec<ChatMessage> {
+    let local: Vec<serde_json::Value> = state
+        .session
+        .app_commands
+        .iter()
+        .filter(|entry| {
+            entry
+                .get("localCommand")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+        })
+        .cloned()
+        .collect();
+    let mut rows = boundaried.to_vec();
+    rows.extend(app_commands_as_messages(&local, boundaried));
+    rows
+}
+
 /// The transcript after assembly, skill surfacing and the `/clear` boundary.
 ///
 /// This is `boundaried` in the TypeScript, and it is what every later step measures against.
@@ -141,8 +183,10 @@ pub fn compose(
     let boundaried = boundaried_transcript(state, catalog);
     let queue = state.session.queue_prompts.clone().unwrap_or_default();
     let startup_pending = pending_with_startup_sends(&state.pending.sends, &queue);
+    let against = pending_transcript(state, &boundaried);
     let pending_messages =
-        pending_sends_as_messages(&visible_pending_sends(&startup_pending, &boundaried));
+        pending_sends_as_messages(&visible_pending_sends(&startup_pending, &against));
+    let transcript = reconcile_local_command_output(&boundaried, &state.session.app_commands);
 
     // A marker whose text an authoritative user row already carries is the same fact twice.
     let authoritative_text: Vec<String> = boundaried
@@ -161,12 +205,21 @@ pub fn compose(
             || !authoritative_text.contains(&normalized_text(message))
     })
     .collect();
+    let marker_messages = retire_markers_covered_by_local_commands(
+        &marker_messages,
+        &state.session.app_commands,
+        &transcript,
+        &state.pending.markers,
+    );
 
-    // Order, from `controller.ts`: the transient terminal statuses, then the app-command rows
-    // (family b's `sessionChatAppCommandsAsMessages`, not folded in yet), then the markers, then
-    // the streaming bubble, then the pending tool row, then the pending echoes.
+    // Order, from `controller.ts`: the transient terminal statuses, then the app-command rows, then
+    // the markers, then the streaming bubble, then the pending tool row, then the pending echoes.
     let mut tail: Vec<ChatMessage> =
         unreconciled_terminal_statuses(&state.pending.terminal_status_messages, &boundaried);
+    tail.extend(app_commands_as_messages(
+        &state.session.app_commands,
+        &transcript,
+    ));
     tail.extend(marker_messages);
 
     let visible_tool = visible_terminal_tool(state, working);
@@ -191,7 +244,7 @@ pub fn compose(
     }
     tail.extend(pending_messages);
 
-    let mut composed = boundaried;
+    let mut composed = transcript;
     composed.extend(tail);
     // An async question older than the retirement stamp is no longer offered.
     if let Some(since) = state.session.async_questions_since {

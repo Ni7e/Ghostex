@@ -4,7 +4,7 @@
 //! before `crate::document::assemble`. All of them are from
 //! `packages/shared/session-chat-controller/controller.ts`.
 
-use crate::session::composition::boundaried_transcript;
+use crate::session::composition::{boundaried_transcript, pending_transcript};
 use crate::session::constants::DEFAULT_COMMAND_CATALOG;
 use crate::session::pending::prune_pending_sends;
 use crate::session::startup_sends::{parse_iso_ms, pending_with_startup_sends};
@@ -17,13 +17,9 @@ pub fn settle(state: &mut ChatState, context: &ChatContext) {
         .iter()
         .map(|name| (*name).to_string())
         .collect();
-    let transcript = boundaried_transcript(state, &catalog);
+    let boundaried = boundaried_transcript(state, &catalog);
+    let transcript = pending_transcript(state, &boundaried);
 
-    // CDXC:SessionChat 2026-09-15 WHY:
-    // Startup sends hydrate as pending bubbles even for `/usage`. Its command acknowledgment can
-    // arrive before any transcript exists, and it never needs an assistant reply, so pending
-    // reconciliation must include the server's live local-command records. Those records are family
-    // b's `sessionChatAppCommandsAsMessages`; until it lands the prune sees the transcript alone.
     if !state.pending.sends.is_empty() {
         state.pending.sends = prune_pending_sends(&state.pending.sends, &transcript);
     }

@@ -10,6 +10,7 @@
 //! Every one of them is pure state: no effect is emitted here, so the caller keeps its own
 //! `Effect::SendRpc` and decides what to do when the call fails.
 
+use crate::session::app_commands::local_command_identities;
 use crate::session::composition::compaction_records;
 use crate::session::constants::{
     INTERRUPT_MARKER_COMMAND, INTERRUPT_MARKER_LABEL, PENDING_SEND_LIMIT,
@@ -103,6 +104,11 @@ pub fn drop_queued_send(state: &mut ChatState, queued_prompt_id: &str) {
 pub fn begin_command_marker(state: &mut ChatState, context: &ChatContext, command: &str) -> i64 {
     let sent_at_ms = context.now_millis();
     let compaction_records_before = compaction_records(&state.messages.list);
+    let identities: Vec<String> =
+        local_command_identities(&state.session.app_commands, &state.messages.list)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
     let id = next_pending_send_id(state, sent_at_ms);
     let marker = CommandMarker {
         id,
@@ -112,9 +118,7 @@ pub fn begin_command_marker(state: &mut ChatState, context: &ChatContext, comman
         sent_at_ms,
         label: None,
         compaction_records_before: Some(compaction_records_before),
-        // Family b's `sessionChatLocalCommandIdentities` fills this; an empty list only means the
-        // marker cannot retire early on a server identity, never that it retires wrongly.
-        local_command_ids_before: Vec::new(),
+        local_command_ids_before: identities,
     };
     state.pending.markers = append_marker(&state.pending.markers, marker);
     sent_at_ms

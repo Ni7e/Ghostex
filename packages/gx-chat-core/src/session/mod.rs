@@ -6,6 +6,7 @@
 //! document keys listed for family a in `docs/2026-09-21/rust-chat/FAMILIES.md`.
 
 pub mod actions;
+pub mod app_commands;
 pub mod apply;
 pub mod assembler;
 pub mod composition;
