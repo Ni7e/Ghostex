@@ -80,6 +80,17 @@ pub(crate) fn run_zmx_start_command(
     zmx_executable_path: &str,
     script: String,
 ) -> ZmxEndpointResult<ZmxStartOutcome> {
+    let gate = macos_zmx_start_gate(session_name);
+    let (_start_guard, waited) = match gate.try_lock() {
+        Ok(guard) => (guard, false),
+        Err(_) => (
+            gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+            true,
+        ),
+    };
+    if waited && macos_zmx_session_exists(session_name, zmx_executable_path) {
+        return Ok(zmx_start_observed_success());
+    }
     let job = MacosZmxLaunchdJob::new(session_name)?;
     job.prepare(&script)?;
 
@@ -140,6 +151,20 @@ pub(crate) fn run_zmx_start_command(
     Err(ZmxEndpointError::DependencyUnavailable(format!(
         "zmx session did not become ready: {launch_log}"
     )))
+}
+
+/// CDXC:Zmx 2026-09-21 WHY: One session's launchd job shares a single script, plist, and label, and the script deletes itself on its first line. Two overlapping starts for the same session (a sidebar attach racing a chat wake) let one attempt's `rm` or cleanup remove the script the other's kickstart was about to exec, so launchd logged `/bin/zsh: can't open input file`, the session never registered, and the attach waited out the 5 s deadline and surfaced as HTTP 503 "Session attach unavailable". Starts for one session therefore run one at a time; a caller that had to wait first checks whether the winner already brought the session up.
+#[cfg(target_os = "macos")]
+fn macos_zmx_start_gate(session_name: &str) -> Arc<std::sync::Mutex<()>> {
+    static GATES: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::Mutex<()>>>>,
+    > = std::sync::LazyLock::new(Default::default);
+    GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(session_name.to_string())
+        .or_default()
+        .clone()
 }
 
 /// First readiness re-check delay, and the amount each further wait grows by.
