@@ -5,6 +5,7 @@ import { GHOSTTY_THEME_OPTIONS } from '../ghostty-theme-options';
 import {
   type AppShotsHotkey,
   type AutoSleepIdleMinutes,
+  type ChatBrain,
   type ChatFileOpenView,
   type CommandsPanelSide,
   type DefaultEditorCommand,
@@ -242,6 +243,14 @@ export const GHOSTTY_SCROLLBAR_OPTIONS: ReadonlyArray<{
 }> = [
   { label: 'System', value: 'system' },
   { label: 'Never', value: 'never' },
+];
+
+export const CHAT_BRAIN_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: ChatBrain;
+}> = [
+  { label: 'QuickJS (shipped)', value: 'quickjs' },
+  { label: 'Rust (in development)', value: 'rust' },
 ];
 
 export const PROMPT_EDITOR_BACKEND_OPTIONS: ReadonlyArray<{

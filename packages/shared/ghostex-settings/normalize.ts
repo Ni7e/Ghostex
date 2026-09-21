@@ -59,6 +59,7 @@ import {
   type KeepAwakeDurationMinutes,
   type PortlessProtocol,
   type PreferredAgentInterface,
+  type ChatBrain,
   type PromptEditorBackend,
   type SidebarSpaceSwitchBehavior,
   type SidebarVisibilityMemory,
@@ -371,6 +372,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     analyticsEnabled: readBoolean(source, 'analyticsEnabled', DEFAULT_ghostex_SETTINGS.analyticsEnabled),
     debuggingMode: readBoolean(source, 'debuggingMode', DEFAULT_ghostex_SETTINGS.debuggingMode),
+    chatBrain: normalizeChatBrain(source),
     diagnosticLogging: normalizeDiagnosticLoggingSettings(source.diagnosticLogging),
     renameSessionOnDoubleClick: readBoolean(
       source,
@@ -1204,6 +1206,14 @@ function normalizeCompletionSoundPreference(source: Record<string, unknown>) {
   return clampCompletionSoundPreference(
     readString(source, 'completionSound', DEFAULT_ghostex_SETTINGS.completionSound)
   );
+}
+
+function normalizeChatBrain(source: Record<string, unknown>): ChatBrain {
+  const brain = readString(source, 'chatBrain', '');
+  if (brain === 'quickjs' || brain === 'rust') {
+    return brain;
+  }
+  return DEFAULT_ghostex_SETTINGS.chatBrain;
 }
 
 function normalizePromptEditorBackend(source: Record<string, unknown>): PromptEditorBackend {

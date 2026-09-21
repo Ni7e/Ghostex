@@ -231,6 +231,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   analyticsEnabled: true,
   debuggingMode: false,
+  chatBrain: 'quickjs',
   diagnosticLogging: {
     scenarios: DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS,
     version: 1,

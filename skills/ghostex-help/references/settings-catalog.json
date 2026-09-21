@@ -7341,6 +7341,14 @@
           "value": "/tmp/gx-chat/*.jsonl"
         },
         {
+          "label": "Chat engine shadow comparison",
+          "value": "native.chat.shadow"
+        },
+        {
+          "label": "gpui-session-chat-debug.jsonl",
+          "value": "gpui-session-chat-debug.jsonl"
+        },
+        {
           "label": "Daemon lifecycle",
           "value": "gxserver.lifecycle"
         },
@@ -7390,6 +7398,28 @@
         }
       ],
       "agentWritable": false
+    },
+    {
+      "key": "chatBrain",
+      "title": "Chat brain",
+      "subtitle": "Which engine runs the chat. Leave this on QuickJS; the Rust engine is still in development.",
+      "tab": "debugging",
+      "tabTitle": "Debugging",
+      "section": "controls",
+      "sectionTitle": "Debug controls",
+      "type": "enum",
+      "default": "quickjs",
+      "options": [
+        {
+          "label": "QuickJS (shipped)",
+          "value": "quickjs"
+        },
+        {
+          "label": "Rust (in development)",
+          "value": "rust"
+        }
+      ],
+      "agentWritable": true
     },
     {
       "key": "showSessionCommandCopyActions",

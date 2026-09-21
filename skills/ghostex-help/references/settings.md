@@ -212,6 +212,7 @@ How to use this file:
 
 - **Show debug UI controls** `debuggingMode` (boolean, default false): Show debug-only controls, storage statistics, and enabled routine diagnostic logs.
 - **Diagnostic disk logging scenarios** `diagnosticLogging` (structured value; change it in Settings, not with `ghostex settings set`): Choose routine repro log areas while Show debug UI controls is on. Important warnings, errors, and crashes remain captured when it is off.
+- **Chat brain** `chatBrain` (one of quickjs | rust; default quickjs): Which engine runs the chat. Leave this on QuickJS; the Rust engine is still in development. Option labels: quickjs = QuickJS (shipped), rust = Rust (in development).
 - **Show command copy actions** `showSessionCommandCopyActions` (boolean, default false): Show Copy resume and Copy attach command in session context menus.
 - **Show Copy Details option** `showSessionDetailsCopyAction` (boolean, default false): Show Copy Details in session context menus.
 ### Storage

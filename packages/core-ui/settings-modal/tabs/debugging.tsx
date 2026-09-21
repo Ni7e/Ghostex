@@ -1,12 +1,19 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import {
   areDiagnosticLoggingSettingsEqual,
+  CHAT_BRAIN_OPTIONS,
   DEFAULT_ghostex_SETTINGS,
   type DiagnosticLoggingScenarioId,
   type ghostexSettings,
 } from '@/packages/shared/ghostex-settings';
 import type { SidebarGhostexFolderStatsMessage } from '@/packages/shared/session-grid-contract';
-import { DiagnosticLoggingSettingsField, SettingsNativeScrollArea, SettingsSection, ToggleField } from '../fields';
+import {
+  DiagnosticLoggingSettingsField,
+  SelectField,
+  SettingsNativeScrollArea,
+  SettingsSection,
+  ToggleField,
+} from '../fields';
 import { hasVisibleSettingsSearchResult, shouldShowSetting, type SettingsTabSearch } from '../search';
 import type { DiagnosticLoggingDurationValue, SettingModificationProps } from '../types';
 
@@ -71,6 +78,17 @@ export function DebuggingSettingsTab({
                   onChange={onChangeDiagnosticScenario}
                   onResetToDefault={() => onChange('diagnosticLogging', DEFAULT_ghostex_SETTINGS.diagnosticLogging)}
                   value={settings.diagnosticLogging}
+                />
+              ) : null}
+              {visible('controls', 'chatBrain') ? (
+                <SelectField
+                  dependent
+                  description='Which engine runs the chat. Leave this on QuickJS; the Rust engine is still in development.'
+                  label='Chat brain'
+                  options={CHAT_BRAIN_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
+                  value={settings.chatBrain}
+                  {...getModificationProps('chatBrain')}
+                  onChange={(value) => onChange('chatBrain', value as ghostexSettings['chatBrain'])}
                 />
               ) : null}
               {visible('controls', 'showSessionCommandCopyActions') ? (
