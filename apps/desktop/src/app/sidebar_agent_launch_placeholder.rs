@@ -143,6 +143,7 @@ impl GhostexGpuiApp {
     pub(crate) fn adopt_agent_launch_placeholder(
         &mut self,
         message: &GpuiSidebarWorkspaceTerminalFocusMessage,
+        cx: &mut gpui::Context<Self>,
     ) {
         if self.agent_launch_placeholders.is_empty()
             || !message.keep_view
@@ -178,6 +179,15 @@ impl GhostexGpuiApp {
             .insert(key.clone(), placeholder.shell_session_id);
         self.local_app_shot_session_mappings
             .insert(key.session_id.clone(), placeholder.shell_session_id);
+        // CDXC:AgentLauncher 2026-09-21 WHY:
+        // A placeholder staged in Chat has no chat view yet: the view is built from the session's gxserver key, which exists only from this mapping on, so the reconcile that ran at staging could not create it. The tab already exists, so the focus path arms no chat launch intent and nothing else re-ran the reconcile before the attach plan finished; the pane sat on the skeleton until a click reconciled it.
+        if self
+            .agents_chat_mode_sessions
+            .contains(&placeholder.shell_session_id)
+        {
+            self.reconcile_agents_pane_surfaces(cx);
+            cx.notify();
+        }
         support_logs::append_temporary(
             support_logs::GpuiSupportLog::TerminalFocus,
             "TEMP.gpui.sessionSwitchLatency.agentLaunchPlaceholderAdopted",
