@@ -7,13 +7,14 @@
 //! before assembling.
 
 use crate::effect::Effect;
+use crate::event::Event;
 use crate::questions::async_controller;
 use crate::questions::document::blank_drafts;
 use crate::questions::drafts::drafts_key;
 use crate::questions::gates::{content_key, prompt_key};
 use crate::questions::model::{InteractivePrompt, TerminalNotice};
 use crate::questions::notice_state::{notice_dismiss_key, DismissedNotice};
-use crate::state::ChatState;
+use crate::state::{ChatContext, ChatState};
 
 /// Brings family c's state in line with `state.session`, and asks for what a new card needs.
 ///
@@ -83,4 +84,31 @@ pub fn refresh_gates(state: &mut ChatState) {
 /// Adopts the dismissal read back from client storage.
 pub fn adopt_dismissed_notice(state: &mut ChatState, dismissed: Option<DismissedNotice>) {
     state.questions.dismissed_notice = dismissed;
+}
+
+/// The mutating half of `publish` for family c, run once per event before the document is
+/// assembled.
+///
+/// Three of the four things family c waits for arrive as events rather than as the return value
+/// of the call that asked for them, so the `try`, `catch` and `finally` bodies of the TypeScript
+/// handlers run here (`crate::questions::events`), and the reconciliation [`sync`] does then runs
+/// over the result.
+pub fn settle(state: &mut ChatState, event: &Event, _context: &ChatContext) -> Vec<Effect> {
+    let mut effects = match event {
+        Event::RpcSettled {
+            request_id,
+            outcome,
+        } => crate::questions::events::rpc_settled(state, *request_id, outcome).unwrap_or_default(),
+        Event::StorageLoaded { key, value } => {
+            crate::questions::events::storage_loaded(state, key, value.as_deref());
+            Vec::new()
+        }
+        Event::StorageWritten { key, error } => {
+            crate::questions::events::storage_written(state, key, error.as_deref())
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
+    effects.extend(sync(state));
+    effects
 }

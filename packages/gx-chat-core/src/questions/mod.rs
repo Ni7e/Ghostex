@@ -26,4 +26,4 @@ pub use crate::questions::document::document;
 pub use crate::questions::events::{rpc_settled, storage_loaded, storage_written};
 pub use crate::questions::exchange_answers::{answered_question_exchange, QuestionExchange};
 pub use crate::questions::hoisting::{hoisted_question_exchanges, message_question_exchanges};
-pub use crate::questions::sync::sync;
+pub use crate::questions::sync::{settle, sync};
