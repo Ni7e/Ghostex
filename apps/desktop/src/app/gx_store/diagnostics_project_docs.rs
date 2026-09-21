@@ -20,6 +20,7 @@ use super::diagnostics::{
     GxStoreDiagnostics, MAX_SIDEBAR_ACTION_RECORDS, record, routine_logging_enabled,
 };
 use super::space_editor::SpaceEditorCounters;
+use super::space_switch::SpaceSwitchCounters;
 
 impl GxStoreDiagnostics {
     /// One line per Project Group menu item that reached the document: which action, whether it
@@ -75,6 +76,30 @@ impl GxStoreDiagnostics {
                 "refusals": counters.refusals,
                 "handOffs": counters.hand_offs,
                 "unparsable": counters.unparsable,
+            }),
+        );
+    }
+
+    /// One line per Space switch that changed the selected Space: what it restored, and the run's
+    /// totals. Never the Space's id or the row's, both of which are the user's.
+    pub(super) fn space_switch_ran(
+        &mut self,
+        outcome: &'static str,
+        counters: SpaceSwitchCounters,
+    ) {
+        if !self.project_doc_edit_budget() {
+            return;
+        }
+        record(
+            "gxStore.spaceSwitch",
+            json!({
+                "restored": outcome,
+                "switches": counters.switches,
+                "sessionRestores": counters.session_restores,
+                "groupRestores": counters.group_restores,
+                "empty": counters.empty,
+                "kept": counters.kept,
+                "handOffs": counters.hand_offs,
             }),
         );
     }

@@ -137,8 +137,9 @@ pub use crate::sidebar_ui::{
 pub use crate::sidebar_view::{
     close_project_group_is_active, close_project_successor_candidates,
     close_project_successor_group_order, first_awake_successor_session_id, is_awake_successor_row,
-    project_slot_plan, rendered_session_ids, reveal_plan, session_is_snoozed, session_slot_plan,
-    space_for_focused_row, BrowserTabInput,
+    plan_space_switch_restore, project_slot_plan, rendered_session_ids, reveal_plan,
+    session_is_snoozed, session_slot_plan,
+    space_for_focused_row, SpaceSwitchFocus, BrowserTabInput,
     CloseAfterDoneInput, Collection, CollectionView, CollectionsState,
     DelayedSendInput, DelayedSendView,
     EmptyState, FocusedRowSpace, GroupCore, GroupSummary, GroupView, LabelDeadline,

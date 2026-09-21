@@ -136,6 +136,8 @@ pub(crate) struct GxStoreHost {
     pub(super) collection_menu: super::collection_menu::CollectionMenuCounters,
     /// The New/Edit Space dialog's results, which write the K6 document.
     pub(super) space_editor: super::space_editor::SpaceEditorCounters,
+    /// The focus a Space switch restores.
+    pub(super) space_switch: super::space_switch::SpaceSwitchCounters,
     /// The last-seen copy of every remote machine: which ones owe a write, and what is unwritten.
     pub(crate) last_seen: super::remote_last_seen::RemoteLastSeenWriter,
     /// The collection a project move just created, which the renderer opens its Rename on. Held

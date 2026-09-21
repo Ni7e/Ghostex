@@ -230,6 +230,9 @@ impl GhostexGpuiApp {
             return;
         };
         self.stage_agent_launch_placeholder(&command, cx);
+        // The Space a `selectSpace` is LEAVING, read before the intent below moves it: the restore
+        // that follows only runs when the selection really changed (gx_store/space_switch.rs).
+        let space_switch = self.gx_store_space_switch_before(&command);
         // A command that moves the sidebar's own state (collapse, Space, filters, hidden items,
         // selection) moves the Rust state here, before it is sent on: the list is rebuilt from it
         // in the same frame, and the old projection keeps its own copy for the menus it owns until
@@ -245,5 +248,12 @@ impl GhostexGpuiApp {
         service.update(cx, |surface, _| {
             surface.execute_app_owned_script(&script);
         });
+        // The Space the switch landed on reopens the session it was last left on, from the list the
+        // intent above has just rebuilt. It posts the same `focusSession` the page posted, after
+        // the page has been told, so the order of the two messages is the one the runtime already
+        // sees (gx_store/space_switch.rs).
+        if let Some(before) = space_switch {
+            self.gx_store_restore_space_switch_focus(before, cx);
+        }
     }
 }

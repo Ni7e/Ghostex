@@ -31,10 +31,19 @@ export function describeNativeSidebarMachine(ui: NativeSidebarUiState, machineId
   return { ...visibility, sectionKey, spacesState, selection, isVisible };
 }
 
+/*
+CDXC:Spaces 2026-09-21 WHY:
+THIS COMPUTER's restore is gone: the app reads the Space's remembered row off the list it draws and
+posts the same `focusSession` (apps/desktop/src/app/gx_store/space_switch.rs), so doing it here as
+well would send two focus messages for one click. The selection itself still moves here, because
+this page draws its own projection until that projection is deleted. A REMOTE machine's tab is
+unchanged: the app does not draw its rows.
+*/
 export function switchNativeSidebarSpace(ui: NativeSidebarUiState, spaceId: string, post: SidebarPostMessage): void {
   const previous = describeNativeSidebarMachine(ui).selection?.spaceId;
   ui.apply({ type: 'selectSpace', spaceId });
   const state = sidebarStore.getState();
+  if (ui.selectedMachineId === 'local') return;
   if (previous === spaceId || nativeSidebarSettings().sidebarSpaceSwitchBehavior !== 'restore') return;
   const section = describeNativeSidebarMachine(ui);
   const visible = section.groupIds.filter(section.isVisible);
