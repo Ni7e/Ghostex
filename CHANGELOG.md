@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 10.0.0 - 2026-09-21
+## 10.0.1 - 2026-09-22
 
-**Ghostex 10.0.0 is out.** A new layout: the titlebar row is gone, views open as tabs beside your sessions instead of over them, and browser pages share the same tab strip. The sidebar now runs fully natively, the chat model picker gains favorites and one-click settings, and the accent color follows your background tint.
+**Ghostex 10.0.1 is out.** A new layout: the titlebar row is gone, views open as tabs beside your sessions instead of over them, and browser pages share the same tab strip. The sidebar now runs fully natively, the chat model picker gains favorites and one-click settings, and the accent color follows your background tint.
 
 ### 🪟 Views open beside your sessions
 - **Your sessions stay on screen while you use a view.** Terminals and chats keep the left side, the view takes the right, and each project remembers where you left the divider; drag it to change the balance and double-click it to reset.
@@ -42,6 +42,8 @@
 - **Windows fixes.** Account helpers and install commands resolve correctly, the installer checks that the new version really landed, header dropdowns no longer steal focus from the main window, and chat saves its state again.
 - **Restored custom-agent sessions keep their icon** and their chat view.
 - **New sessions start as top-level agent runs,** not as nested children of another session.
+- **Opening a prompt search result no longer stalls.** Pressing Enter on a result after browsing for a while used to rescan your whole history first; it now opens straight away.
+- **Menu labels no longer cut off early.** Items like Browser Tab show in full instead of "Browser…" in roomy menus.
 
 ### ⚠️ Heads up
 - **The previous web chat view has been removed.** Desktop chat is native only, so the Use GPUI chat setting is gone.
