@@ -13,7 +13,8 @@ mod worktree_order;
 
 pub use collection_edits::{create_collection, move_projects_to_collection, reorder_collection_projects};
 pub use collections::{
-    CollectionsDocument, COLLECTIONS_HAND_OFF_MESSAGE_TYPE, COLLECTIONS_SYNC_DELAY_MS,
+    collections_hand_back_script, collections_request_script, CollectionsDocument,
+    COLLECTIONS_HAND_OFF_MESSAGE_TYPE, COLLECTIONS_SCRIPT_PLACEHOLDER, COLLECTIONS_SYNC_DELAY_MS,
     COLLECTIONS_SYNC_RETRY_DELAY_MS,
 };
 pub use space_edits::{
@@ -21,8 +22,8 @@ pub use space_edits::{
     SpaceMemberKind,
 };
 pub use spaces::{
-    SpacesDocument, SPACES_HAND_OFF_MESSAGE_TYPE, SPACES_SYNC_DELAY_MS,
-    SPACES_SYNC_RETRY_DELAY_MS,
+    spaces_hand_back_script, SpacesDocument, SPACES_HAND_OFF_MESSAGE_TYPE,
+    SPACES_SCRIPT_PLACEHOLDER, SPACES_SYNC_DELAY_MS, SPACES_SYNC_RETRY_DELAY_MS,
 };
 pub use worktree_order::{
     can_drop_project_with_worktrees, move_projects_with_worktrees, order_projects_with_worktrees,

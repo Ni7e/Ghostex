@@ -15,8 +15,19 @@ import type { ExtensionToSidebarMessage, SidebarToExtensionMessage } from '@/pac
 
 export type SidebarPostMessage = (message: SidebarToExtensionMessage) => void;
 
+/*
+CDXC:Projects 2026-09-21 WHY:
+The two documents THIS COMPUTER owns are adopted from the app and from nowhere else. The daemon's
+echo reaches them through the app's pending-push guard
+(apps/desktop/src/app/gx_store/client_document.rs), which is the only thing that knows whether a
+push is outstanding; adopting the same echo here as well put a document the guard had just REFUSED
+into this page's copy, where it became the base of the page's next edit and silently undid the
+user's drag. So every `local` leg below is gone and only a remote machine, whose copies this page
+still owns outright, is adopted here.
+SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/presentation-stream.ts,
+packages/gx-core/src/doc_sync/sync.rs.
+*/
 export class NativeSidebarMetadata {
-  private adoptedCollections = new Set<string>();
   spaces: Record<string, SidebarSpacesState | undefined> = {};
   collections: Record<string, SidebarProjectCollectionsState> = { local: readSidebarProjectCollections() };
   connections: Record<string, { state: string; message?: string }> = {};
@@ -30,19 +41,17 @@ export class NativeSidebarMetadata {
           for (const [id, value] of Object.entries(message.remoteSidebarSpacesByMachineId ?? {}))
             this.adoptSpaces(id, value);
         }
-        this.adoptSpaces('local', message.sidebarSpaces);
         if (message.type === 'hydrate' || message.remoteSidebarProjectCollectionsByMachineId !== undefined) {
           this.collections = { local: this.collections.local };
           for (const [id, value] of Object.entries(message.remoteSidebarProjectCollectionsByMachineId ?? {}))
-            this.adoptCollections(id, value, post);
+            this.adoptCollections(id, value);
         }
-        this.adoptCollections('local', message.sidebarProjectCollections, post);
         break;
       case 'sidebarSpacesChanged':
-        this.adoptSpaces(message.remoteMachineId ?? 'local', message.sidebarSpaces);
+        if (message.remoteMachineId) this.adoptSpaces(message.remoteMachineId, message.sidebarSpaces);
         break;
       case 'sidebarProjectCollectionsChanged':
-        this.adoptCollections(message.remoteMachineId ?? 'local', message.sidebarProjectCollections, post);
+        if (message.remoteMachineId) this.adoptCollections(message.remoteMachineId, message.sidebarProjectCollections);
         break;
       case 'remoteMachineStatus':
         this.connections[message.machineId] = { state: message.state, message: message.message };
@@ -92,8 +101,18 @@ export class NativeSidebarMetadata {
   applyCollectionsFromHost(state: unknown): void {
     const parsed = parseSidebarProjectCollectionsFromGxserver(state);
     if (!parsed) return;
-    this.adoptedCollections.add('local');
     this.collections.local = parsed;
+  }
+
+  /**
+   * Posts this page's copy of the collections document as an ordinary hand-off.
+   *
+   * Called by the app after it had to refuse one, where this copy is the only one carrying that
+   * edit. The same message every other edit sends, so there is no second way for a document to
+   * cross.
+   */
+  requestCollections(): void {
+    postProjectCollectionsHandOff(this.collections.local);
   }
 
   private adoptSpaces(id: string, value: unknown): void {
@@ -101,16 +120,18 @@ export class NativeSidebarMetadata {
     if (parsed) this.spaces[id] = parsed;
   }
 
-  private adoptCollections(id: string, value: unknown, post: SidebarPostMessage): void {
+  /**
+   * A REMOTE machine's copy, which this page still owns: it pushes that document down the machine's
+   * own tunnel, with no local key and no app-side guard.
+   *
+   * The empty push-back of `firstAdoption` went with the `local` leg, because the app makes that
+   * decision now for the only machine it was ever made for (`EmptyEchoRule::PushBackFirstEcho`),
+   * and a second copy of it here pushed a document the app's guard had not been asked about.
+   */
+  private adoptCollections(id: string, value: unknown): void {
     const parsed = parseSidebarProjectCollectionsFromGxserver(value);
     if (!parsed) return;
     const previous = this.collections[id];
-    const firstAdoption = !this.adoptedCollections.has(id);
-    this.adoptedCollections.add(id);
-    if (firstAdoption && id === 'local' && !parsed.collections.length && previous?.collections.length) {
-      post({ type: 'updateSidebarProjectCollections', state: serializeSidebarProjectCollectionsForGxserver(previous) });
-      return;
-    }
     this.collections[id] = {
       ...parsed,
       nextCollectionNumber: Math.max(parsed.nextCollectionNumber, previous?.nextCollectionNumber ?? 1),
@@ -118,4 +139,12 @@ export class NativeSidebarMetadata {
     // NOT written to client storage: since 2026-09-21 the app is the only writer of that key, and
     // this copy exists only to feed the projection and the menus this page still draws.
   }
+}
+
+/** The one post that hands an edited collections document to the app. */
+export function postProjectCollectionsHandOff(state: SidebarProjectCollectionsState): void {
+  window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
+    state: serializeSidebarProjectCollectionsForGxserver(state),
+    type: 'persistProjectCollections',
+  });
 }

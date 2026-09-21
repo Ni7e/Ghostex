@@ -43,6 +43,10 @@ use crate::app::helpers::board_gxserver::gxserver_health_and_daemon::gpui_gxserv
 
 /// The push is a plain write-through, so it gets the same timeout every other sidebar call has.
 const PUSH_TIMEOUT: Duration = Duration::from_secs(10);
+/// The same push on the quit path, where the app is holding the user's quit while it waits. Long
+/// enough for the local daemon to answer, short enough that a daemon that is not there costs a
+/// blink.
+const QUIT_PUSH_TIMEOUT: Duration = Duration::from_millis(1_500);
 /// How long a storage write that lost the lock race waits before it is tried again, and how many
 /// times. Nothing is lost while it fails: the owed write stays owed and the quit path flushes it.
 const STORAGE_RETRY: Duration = Duration::from_millis(400);
@@ -74,6 +78,12 @@ pub(crate) trait ClientDocument: SyncedDocument + 'static {
     /// The script that hands the held document back to the sidebar page, so the page's own copy is
     /// never the stale base of its next edit.
     fn hand_back_script(&self) -> String;
+
+    /// The script that asks the page to post the document it holds, for a document that can refuse
+    /// a hand-off. `None` for one that cannot: a document with no stored key is ready from the
+    /// first frame, so there is no window in which the page is the only holder of an edit, and a
+    /// request path nothing can reach would be a second way for a document to cross.
+    fn request_script() -> Option<String>;
 
     /// Where this document's host lives on the app.
     fn host(app: &mut GhostexGpuiApp) -> &mut ClientDocumentHost<Self>
@@ -134,6 +144,10 @@ pub(crate) struct ClientDocumentCounters {
     /// Reads of the stored key that failed. Until one succeeds nothing is adopted and nothing is
     /// edited, so a non-zero value here beside a zero `edits` is this app refusing to guess.
     pub(crate) read_failures: u64,
+    /// Times the page was asked to hand its document over again after a refusal. Read beside the
+    /// document's own `hand_offs_refused`: a refusal with no request behind it is an edit this app
+    /// refused and never went back for.
+    pub(crate) hand_offs_requested: u64,
     /// Daemon echoes left unjudged because the read had not landed. Read beside
     /// `deferred_recovered`: equal means every deferral was judged when the read landed.
     pub(crate) echoes_deferred: u64,
@@ -152,8 +166,18 @@ pub(crate) struct ClientDocumentHost<D: ClientDocument> {
     restoring: bool,
     read_retries: u32,
     read_retry_scheduled: bool,
-    /// An echo arrived before the read landed and still owes a judgement.
-    deferred_echo: bool,
+    /// An echo that arrived before the read landed and still owes a judgement, held AS IT ARRIVED.
+    ///
+    /// The value is carried rather than re-read from the side state when the read lands, because by
+    /// then the side state no longer holds it: the restore puts the app's OWN stored document there
+    /// (`apply_to_store`), which is the same field `server_state` reads back, so a settle that
+    /// re-read it judged this app's document as if it were the daemon's. For the collections
+    /// document that spent the first-echo push-back token on a self-echo and left the daemon's copy
+    /// unjudged for the whole run.
+    deferred_echo: Option<Option<Value>>,
+    /// The page holds an edit this app refused and has not handed over again yet, so nothing may be
+    /// told to the page until it does: a hand-back would replace that edit.
+    page_holds_newer: bool,
     /// The storage write that has not landed yet: `None` is the REMOVE, `Some(raw)` the value, and
     /// the whole field absent is "nothing owed".
     owed_write: Option<Option<String>>,
@@ -174,7 +198,8 @@ impl<D: ClientDocument> Default for ClientDocumentHost<D> {
             restoring: false,
             read_retries: 0,
             read_retry_scheduled: false,
-            deferred_echo: false,
+            deferred_echo: None,
+            page_holds_newer: false,
             owed_write: None,
             write_retries: 0,
             handed_back: None,
@@ -304,7 +329,9 @@ impl GhostexGpuiApp {
         if !self.gx_document_restored::<D>(cx) {
             let host = D::host(self);
             host.counters.echoes_deferred += 1;
-            host.deferred_echo = true;
+            // The echo is kept as it arrived. A later one replaces it, because the reconcile runs
+            // again for every frame that moves the document.
+            host.deferred_echo = Some(server_state);
             return;
         }
         let (outcome, effects) = D::host(self).sync.adopt(server_state.as_ref());
@@ -327,9 +354,15 @@ impl GhostexGpuiApp {
         self.gx_document_run_effects::<D>(effects, cx);
         // Whatever the guard decided, the store must end up holding the document the guard holds:
         // the daemon's value is already in the side state by the time this runs, so a refusal is
-        // only a refusal if it is put back.
+        // only a refusal if it is put back. Written only when the two really differ: an
+        // unconditional write puts this app's round trip of the daemon's own document back into the
+        // side state, and any byte the sanitizer moves makes the next frame report a change and
+        // book another reconcile and another list rebuild, for ever.
         let held = D::host(self).sync.document().clone();
-        D::apply_to_store(self, &held, cx);
+        let echoed = server_state.as_ref().and_then(D::parse_echo);
+        if echoed.as_ref() != Some(&held) {
+            D::apply_to_store(self, &held, cx);
+        }
         self.gx_document_hand_back::<D>(cx);
         let counters = D::host(self).counters;
         self.gx_store
@@ -337,18 +370,48 @@ impl GhostexGpuiApp {
             .client_document_record(D::NAME, None, counters);
     }
 
-    /// Runs whatever a deferred echo owes, once the read has landed.
+    /// Runs whatever a deferred echo owes, once the read has landed, and then settles with the page.
+    ///
+    /// This is the deferral's only other chance: `side_state` reports a change on the frame that
+    /// moved the document and on no later one, and on a normal launch that frame is the initial
+    /// snapshot.
     fn gx_document_settle<D: ClientDocument>(&mut self, cx: &mut gpui::Context<Self>) {
-        if !D::host(self).deferred_echo {
-            self.gx_document_hand_back::<D>(cx);
+        if let Some(server_state) = D::host(self).deferred_echo.take() {
+            D::host(self).counters.deferred_recovered += 1;
+            // The echo the reconcile was handed, not whatever the side state holds now: the restore
+            // that got us here put this app's own document there a moment ago.
+            self.gx_document_reconcile::<D>(server_state, cx);
+        }
+        // An edit the page made while the read was on its way is only in the page's copy, and
+        // handing the stored document back would replace it: the user would watch the rename they
+        // just made revert. So the page is asked to hand its own document over again instead, which
+        // is one ordinary hand-off and therefore the same path every other edit takes.
+        if D::host(self).page_holds_newer {
+            self.gx_document_ask_page::<D>(cx);
             return;
         }
-        D::host(self).deferred_echo = false;
-        D::host(self).counters.deferred_recovered += 1;
-        // The caller re-reads the daemon's copy out of the side state, which is where the deferred
-        // echo still is: nothing consumed it.
-        let server_state = D::server_state(self);
-        self.gx_document_reconcile::<D>(server_state, cx);
+        self.gx_document_hand_back::<D>(cx);
+    }
+
+    /// Asks the page to post the document it holds. Dropped rather than retried when the page is
+    /// not there: it has not edited anything in that state either.
+    fn gx_document_ask_page<D: ClientDocument>(&mut self, cx: &mut gpui::Context<Self>) {
+        let Some(script) = D::request_script() else {
+            return;
+        };
+        let Some(service) = self.sidebar.clone() else {
+            return;
+        };
+        if service.update(cx, |surface, _| surface.execute_app_owned_script(&script)) {
+            D::host(self).counters.hand_offs_requested += 1;
+        }
+    }
+
+    /// Whether the page is holding an edit this app could not take. Set when a hand-off is refused
+    /// and cleared when the page's document finally arrives, so a hand-back in between cannot
+    /// replace it.
+    pub(crate) fn gx_document_page_holds_newer<D: ClientDocument>(&mut self, holds: bool) {
+        D::host(self).page_holds_newer = holds;
     }
 
     /// Hands the held document to the sidebar page, which no longer reads the daemon's copy itself.
@@ -360,6 +423,12 @@ impl GhostexGpuiApp {
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) {
+        // While the page is the only holder of an edit this app had to refuse, telling it anything
+        // would replace that edit. It is asked for its document instead, and told again once it
+        // arrives.
+        if D::host(self).page_holds_newer {
+            return;
+        }
         let held = D::host(self).sync.document().clone();
         if D::host(self).handed_back.as_ref() == Some(&held) {
             return;
@@ -539,6 +608,32 @@ impl GhostexGpuiApp {
                     .client_document_write_failed(D::NAME, code);
             }
         }
+    }
+
+    /// Sends what the daemon has not got yet, synchronously and bounded, on the quit path.
+    ///
+    /// CDXC:Spaces 2026-09-21 WHY:
+    /// The Spaces document has no stored key at all, so between the gesture and the daemon's
+    /// acknowledgement a 400 ms debounce and one RPC are the only things carrying it, and a quit in
+    /// that window took the edit with it: there was nothing on disk behind it and nothing to flush.
+    /// The collections document has the key but the same hole one step further on, because a launch
+    /// adopts a daemon copy that is older than the stored one. So the PUSH is flushed here, with its
+    /// own short timeout rather than the ten seconds a background push gets: a quit may wait for the
+    /// local daemon, not for a network that is down. A failure is counted and dropped, and the retry
+    /// the guard asks for is not booked, because the timer would never fire.
+    pub(crate) fn gx_document_flush_push<D: ClientDocument>(&mut self) {
+        if !D::host(self).sync.is_pending() {
+            return;
+        }
+        let (document, revision) = D::host(self).sync.push_started();
+        D::host(self).counters.pushes += 1;
+        let params = serde_json::json!({ "state": document });
+        let ok = gpui_gxserver_rpc_result(D::RPC_PATH, &params, QUIT_PUSH_TIMEOUT).is_ok();
+        let host = D::host(self);
+        if !ok {
+            host.counters.push_failures += 1;
+        }
+        let _ = host.sync.push_finished(revision, ok);
     }
 
     /// Books the push, replacing whatever booking was outstanding. A drag that moves a row five

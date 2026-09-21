@@ -19,7 +19,7 @@ import { openAppModal } from '@/packages/core-ui/app-modal-host-bridge';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import type { NativeSidebarCommand, NativeSidebarMenuItem } from '@/packages/shared/native-sidebar';
 import type { NativeSidebarUiState } from './ui-state';
-import type { SidebarPostMessage } from './metadata';
+import { postProjectCollectionsHandOff, type SidebarPostMessage } from './metadata';
 import { describeNativeSidebarMachine } from './space-navigation';
 
 /*
@@ -53,10 +53,7 @@ export function saveNativeCollections(
     });
     return;
   }
-  window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
-    state: serializeSidebarProjectCollectionsForGxserver(next),
-    type: 'persistProjectCollections',
-  });
+  postProjectCollectionsHandOff(next);
 }
 
 export function nativeCollectionGroups(ui: NativeSidebarUiState, collectionId: string): string[] {

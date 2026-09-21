@@ -74,11 +74,11 @@ impl ClientDocument for CollectionsDocument {
     }
 
     fn hand_back_script(&self) -> String {
-        hand_back_script(
-            "applyProjectCollections",
-            "pendingProjectCollections",
-            &self.to_wire_json(),
-        )
+        ghostex_gx_core::collections_hand_back_script(&self.to_wire_json())
+    }
+
+    fn request_script() -> Option<String> {
+        Some(ghostex_gx_core::collections_request_script())
     }
 
     fn host(app: &mut GhostexGpuiApp) -> &mut ClientDocumentHost<Self> {
@@ -117,11 +117,13 @@ impl ClientDocument for SpacesDocument {
     }
 
     fn hand_back_script(&self) -> String {
-        hand_back_script(
-            "applySidebarSpaces",
-            "pendingSidebarSpaces",
-            &self.to_wire_json(),
-        )
+        ghostex_gx_core::spaces_hand_back_script(&self.to_wire_json())
+    }
+
+    /// None: with no stored key this host is ready from the first frame, so it never refuses a
+    /// hand-off and there is nothing for a request to recover.
+    fn request_script() -> Option<String> {
+        None
     }
 
     fn host(app: &mut GhostexGpuiApp) -> &mut ClientDocumentHost<Self> {
@@ -145,19 +147,6 @@ impl ClientDocument for SpacesDocument {
             .and_then(|machine| machine.side_state().spaces.as_ref())
             .and_then(|state| serde_json::to_value(state).ok())
     }
-}
-
-/// The hand-back script, which is the same shape the workspace groups document uses and for the
-/// same reason: a NAMED bridge function rather than a sidebar command, because a command arrives in
-/// one of two envelopes and picking the wrong one is how piece 3d shipped dead with a clean gate.
-///
-/// The parking branch is not a fallback that hides a failure: the controller drains the pending
-/// field when it installs its hook, so a document that arrives before the page has connected its
-/// sidebar is delivered late rather than lost.
-fn hand_back_script(apply: &str, pending: &str, state: &Value) -> String {
-    format!(
-        "(function(bridge, state) {{ if (!bridge) return; if (bridge.{apply}) bridge.{apply}(state); else bridge.{pending} = state; }})(window.ghostexGpui, {state}); undefined;"
-    )
 }
 
 impl GhostexGpuiApp {
@@ -311,10 +300,14 @@ impl GhostexGpuiApp {
         if collections {
             // The stored key has to be in hand before an edit lands on top of it, for the same
             // reason the echo path reads it first: a cold start must not write a document built on
-            // nothing. A read that has not landed refuses the edit; the page keeps the document in
-            // memory and its next edit carries it.
+            // nothing. A read that has not landed refuses the edit and REMEMBERS that the page is
+            // the only holder of it, so nothing is handed back in the meantime and the page is
+            // asked to post it again when the read lands. Relying on "its next edit carries it" is
+            // what K4's review round proved false: the restore hands the stored document over and
+            // the page's copy, with the user's rename in it, is replaced.
             if !self.gx_document_restored::<CollectionsDocument>(cx) {
                 self.gx_store.project_moves.hand_offs_refused += 1;
+                self.gx_document_page_holds_newer::<CollectionsDocument>(true);
                 return;
             }
             let Some(document) = CollectionsDocument::from_echo_json(state) else {
@@ -322,6 +315,8 @@ impl GhostexGpuiApp {
                 return;
             };
             self.gx_store.project_moves.collection_hand_offs += 1;
+            // The page's document is here; this app is the holder again.
+            self.gx_document_page_holds_newer::<CollectionsDocument>(false);
             self.gx_document_edit::<CollectionsDocument>(document, cx);
             return;
         }
@@ -367,10 +362,29 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// Both documents' owed writes, on the quit path. The Spaces document has no stored key and
-    /// answers at once.
+    /// Books the read of the collections key, whatever else is happening.
+    ///
+    /// CDXC:Projects 2026-09-21 WHY:
+    /// Asked on every pump, the way the prune books the workspace groups key, because nothing else
+    /// books it before the daemon's first snapshot: the first call used to come from the reconcile
+    /// that snapshot triggers, so the FIRST echo of every run was deferred, and a deferral judged
+    /// against a side state the restore had just overwritten spent the collections document's
+    /// first-echo push-back on this app's own document. It is one boolean after the read lands.
+    pub(crate) fn gx_store_book_project_docs_read(&mut self, cx: &mut gpui::Context<Self>) {
+        self.gx_document_restored::<CollectionsDocument>(cx);
+    }
+
+    /// Both documents on the quit path: the owed storage write, and then the push the daemon has
+    /// not got yet.
+    ///
+    /// The push matters most for the Spaces document, which has no stored key at all, so a 400 ms
+    /// debounce is the only thing between the gesture and the daemon; for the collections document
+    /// it is the difference between the next launch reading the user's own key and adopting the
+    /// daemon's older copy over it.
     pub(crate) fn gx_store_flush_project_docs(&mut self) {
         self.gx_document_flush_write::<CollectionsDocument>();
         self.gx_document_flush_write::<SpacesDocument>();
+        self.gx_document_flush_push::<CollectionsDocument>();
+        self.gx_document_flush_push::<SpacesDocument>();
     }
 }

@@ -145,6 +145,11 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     ui.metadata.applySpacesFromHost(state);
     publish();
   };
+  // The app refused a hand-off because it had not read the stored key yet, so this page's copy is
+  // the only one carrying that edit. It posts it again as an ordinary hand-off.
+  bridge.requestProjectCollections = () => {
+    ui.metadata.requestCollections();
+  };
   if (bridge.pendingProjectCollections !== undefined) {
     const parked = bridge.pendingProjectCollections;
     delete bridge.pendingProjectCollections;
@@ -219,5 +224,6 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     delete bridge.requestWorkspaceGroups;
     delete bridge.applyProjectCollections;
     delete bridge.applySidebarSpaces;
+    delete bridge.requestProjectCollections;
   };
 }

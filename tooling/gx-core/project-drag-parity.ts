@@ -294,12 +294,18 @@ async function runCases(dump: Json): Promise<Json[]> {
 }
 
 /**
- * The launch and counter halves, against the SHIPPED `NativeSidebarMetadata.adoptCollections`,
- * which is the real twin of K5's guard: its `firstAdoption` flag is the first-echo-only empty rule
- * and its `Math.max(parsed, previous)` is the monotonic counter.
+ * The launch and counter halves, against the page's `local` adopt as it was on 2026-09-21, which is
+ * the real twin of K5's guard: its `firstAdoption` flag is the first-echo-only empty rule and its
+ * `Math.max(parsed, previous)` is the monotonic counter.
+ *
+ * FROZEN rather than shipped since the day the page stopped adopting this computer's echoes, and
+ * `project-collections-typescript.ts` says what that costs. The pending half is still live: the
+ * runtime's `queueSidebarProjectCollectionsServerSync` suppresses the forward while a push is
+ * outstanding, and driving the page alone is the harness bug this gate found on its first run.
  */
 async function runTypeScriptLaunchCases(dump: Json): Promise<{ launch: Json[]; monotonic: Json[] }> {
-  const { NativeSidebarMetadata } = await import('@/apps/desktop/sidebar/native-sidebar/metadata');
+  const { createFrozenCollectionsHolder, frozenAdoptCollections } = await import('./project-collections-typescript');
+  const { readSidebarProjectCollections } = await import('@/packages/core-ui/project-collections');
   const launch: Json[] = [];
   // `queueSidebarProjectCollectionsServerSync` books a real timer. The push must NEVER fire here:
   // "a push is outstanding" is exactly the state these cases are about, and a timer that resolved
@@ -310,19 +316,19 @@ async function runTypeScriptLaunchCases(dump: Json): Promise<{ launch: Json[]; m
   for (const entry of dump.launch as Json[]) {
     resetBrowserStorage();
     seedStoredCollections(entry.stored as Json);
-    const metadata = new NativeSidebarMetadata() as Json;
-    // **The TypeScript twin of K5's guard is NOT `adoptCollections` alone.** The pending flag lives
-    // in the gxserver runtime, which suppresses a forward while a push is outstanding, and the page
-    // adopts whatever reaches it. Driving only the page made the SECOND empty echo look adopted
-    // where the real app never delivers it, which is the harness bug this gate found on its first
-    // run: the first cut would have reported a port bug that was not there.
+    const holder = createFrozenCollectionsHolder(readSidebarProjectCollections());
+    // **The TypeScript twin of K5's guard is NOT the adopt alone.** The pending flag lives in the
+    // gxserver runtime, which suppresses a forward while a push is outstanding, and the page adopted
+    // whatever reached it. Driving only the page made the SECOND empty echo look adopted where the
+    // real app never delivers it, which is the harness bug this gate found on its first run: the
+    // first cut would have reported a port bug that was not there.
     const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
     const pushed: Json[] = [];
     runtime.sidebarProjectCollectionsServerSyncPending = false;
     runtime.sidebarProjectCollectionsServerSyncTimeoutId = undefined;
     runtime.lastForwardedSidebarProjectCollectionsJson = undefined;
     runtime.messageSource = {
-      postMessage: (message: Json) => metadata.receive(message, post),
+      postMessage: (message: Json) => frozenAdoptCollections(holder, 'local', message.sidebarProjectCollections, post),
     };
     const post = (message: Json) => {
       if (message.type !== 'updateSidebarProjectCollections') return;
@@ -334,7 +340,7 @@ async function runTypeScriptLaunchCases(dump: Json): Promise<{ launch: Json[]; m
       const before = pushed.length;
       runtime.forwardSidebarProjectCollectionsFromGxserver(step.echo);
       steps.push({
-        held: storageShape(metadata.collections.local),
+        held: storageShape(holder.collections.local),
         pushedBack: pushed.length - before,
       });
     }
@@ -344,14 +350,14 @@ async function runTypeScriptLaunchCases(dump: Json): Promise<{ launch: Json[]; m
   for (const entry of dump.monotonic as Json[]) {
     resetBrowserStorage();
     seedStoredCollections(entry.held as Json);
-    const metadata = new NativeSidebarMetadata() as Json;
-    metadata.receive({ type: 'sidebarProjectCollectionsChanged', sidebarProjectCollections: entry.echo }, () => {});
-    const merged = storageShape(metadata.collections.local);
+    const holder = createFrozenCollectionsHolder(readSidebarProjectCollections());
+    frozenAdoptCollections(holder, 'local', entry.echo, () => {});
+    const merged = storageShape(holder.collections.local);
     const { createSidebarProjectCollection, moveProjectsToSidebarCollection } =
       await import('@/packages/core-ui/project-collections');
     const now = Date.now;
     Date.now = () => dump.createMs as number;
-    const created = createSidebarProjectCollection(metadata.collections.local, 'P15');
+    const created = createSidebarProjectCollection(holder.collections.local, 'P15');
     const createdState = moveProjectsToSidebarCollection(created.state, ['P15'], created.collectionId);
     Date.now = now;
     monotonic.push({ label: entry.label, merged, created: storageShape(createdState) });

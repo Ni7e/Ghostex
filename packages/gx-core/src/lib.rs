@@ -34,7 +34,8 @@ pub use crate::change::{ChangeSummary, IgnoredReason, SideStateChanges};
 pub use crate::connection::{ConnectionPhase, ConnectionState, ConnectionUpdate};
 pub use crate::core::{Core, Effect, Event, Intent, Output, ResubscribeReason};
 pub use crate::doc_sync::{
-    document_reconcile_wanted, DocumentSync, EmptyEchoRule, SyncEffect, SyncPolicy, SyncedDocument,
+    document_hand_back_script, document_reconcile_wanted, document_request_script, DocumentSync,
+    EmptyEchoRule, SyncEffect, SyncPolicy, SyncedDocument,
 };
 pub use crate::focus::{
     default_group_for_project, next_visible_sessions_for_local_focus, ActiveGroup,
@@ -46,13 +47,14 @@ pub use crate::keys::{
 };
 pub use crate::overlay::SessionPatch;
 pub use crate::project_docs::{
-    apply_space_row_reorder, can_drop_project_with_worktrees, create_collection,
-    move_members_to_space, move_projects_to_collection, move_projects_with_worktrees,
-    order_projects_with_worktrees, reorder_collection_projects, reorder_spaces,
-    toggle_space_member, CollectionsDocument, DropPosition, ProjectOrderItem, SpaceMemberKind,
-    SpacesDocument, COLLECTIONS_HAND_OFF_MESSAGE_TYPE, COLLECTIONS_SYNC_DELAY_MS,
-    COLLECTIONS_SYNC_RETRY_DELAY_MS, SPACES_HAND_OFF_MESSAGE_TYPE, SPACES_SYNC_DELAY_MS,
-    SPACES_SYNC_RETRY_DELAY_MS,
+    apply_space_row_reorder, can_drop_project_with_worktrees, collections_hand_back_script,
+    collections_request_script, create_collection, move_members_to_space,
+    move_projects_to_collection, move_projects_with_worktrees, order_projects_with_worktrees,
+    reorder_collection_projects, reorder_spaces, spaces_hand_back_script, toggle_space_member,
+    CollectionsDocument, DropPosition, ProjectOrderItem, SpaceMemberKind, SpacesDocument,
+    COLLECTIONS_HAND_OFF_MESSAGE_TYPE, COLLECTIONS_SCRIPT_PLACEHOLDER, COLLECTIONS_SYNC_DELAY_MS,
+    COLLECTIONS_SYNC_RETRY_DELAY_MS, SPACES_HAND_OFF_MESSAGE_TYPE, SPACES_SCRIPT_PLACEHOLDER,
+    SPACES_SYNC_DELAY_MS, SPACES_SYNC_RETRY_DELAY_MS,
 };
 pub use crate::presentation_store::{
     LoadedPresentation, MachinePresentation, PresentationState, PresentationStore, SideState,

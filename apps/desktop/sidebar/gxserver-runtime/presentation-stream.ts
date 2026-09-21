@@ -18,12 +18,7 @@ import {
   validateGpuiGxserverBootstrap,
 } from './helpers/bootstrap';
 import { sameStringSet } from './helpers/records';
-import {
-  isCustomSessionTagsState,
-  isSidebarProjectCollectionsState,
-  isSidebarSpacesState,
-  parseGpuiRemotePresentationProjectId,
-} from './helpers/remote-presentation';
+import { isCustomSessionTagsState, parseGpuiRemotePresentationProjectId } from './helpers/remote-presentation';
 import type {
   GpuiGxserverBootstrap,
   GpuiSidebarRuntimeSnapshotKind,
@@ -232,12 +227,19 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
         void this.refreshNotificationFeed();
       },
       onRendererCommand: (command) => this.handleGxserverRendererCommand(command),
-      onSidebarProjectCollections: (state) => {
-        this.forwardSidebarProjectCollectionsFromGxserver(state);
-      },
-      onSidebarSpaces: (state) => {
-        this.forwardSidebarSpacesFromGxserver(state);
-      },
+      /*
+      CDXC:Projects 2026-09-21 WHY:
+      This computer's project collections and Spaces documents are NOT taken off this socket any
+      more, exactly as the workspace session groups document stopped being in M5 piece 7c. The app
+      owns both, and its pending-push guard is the only thing that knows whether a local edit is
+      still on its way to the daemon; forwarding the daemon's echo straight into the page put a
+      document the guard had refused back into the page's copy, which is the base its next edit is
+      computed from. The app hands the held document back instead
+      (`applyProjectCollections`, `applySidebarSpaces`). A REMOTE machine's copies still arrive
+      through `forwardRemoteSidebar*FromGxserver`, because this page still owns those.
+      SEE-ALSO: apps/desktop/src/app/gx_store/project_docs.rs,
+      apps/desktop/sidebar/native-sidebar/metadata.ts.
+      */
       onCustomSessionTags: (state) => {
         this.forwardCustomSessionTagsFromGxserver(state);
       },
@@ -345,12 +347,8 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     const projectedSnapshot = this.projectLocalPresentationAttentionAcknowledgementGuards(snapshot);
     this.presentation = projectedSnapshot;
     this.syncLocalPresentationAttentionTracking(previousSessions, projectedSnapshot.sessions);
-    if (isSidebarProjectCollectionsState(snapshot.sidebarProjectCollections)) {
-      this.forwardSidebarProjectCollectionsFromGxserver(snapshot.sidebarProjectCollections);
-    }
-    if (isSidebarSpacesState(snapshot.sidebarSpaces)) {
-      this.forwardSidebarSpacesFromGxserver(snapshot.sidebarSpaces);
-    }
+    // The snapshot's own copies of the two project documents go the same way as the socket's, and
+    // for the same reason: the app judges them behind the guard and hands the result back.
     if (isCustomSessionTagsState(snapshot.customSessionTags)) {
       this.forwardCustomSessionTagsFromGxserver(snapshot.customSessionTags);
     }

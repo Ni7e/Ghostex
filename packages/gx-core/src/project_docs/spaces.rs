@@ -19,11 +19,23 @@
 use ghostex_gx_protocol::SidebarSpacesState as WireSpacesState;
 use serde_json::{json, Map, Value};
 
-use crate::doc_sync::{EmptyEchoRule, SyncPolicy, SyncedDocument};
+use crate::doc_sync::{document_hand_back_script, EmptyEchoRule, SyncPolicy, SyncedDocument};
 use crate::sidebar_view::SpacesState;
 
 /// The `type` of the message the sidebar page posts when it hands an edited document over.
 pub const SPACES_HAND_OFF_MESSAGE_TYPE: &str = "persistSidebarSpaces";
+
+/// The placeholder a harness substitutes a document into, so it can assert that the text it drives
+/// is the text the app sends.
+pub const SPACES_SCRIPT_PLACEHOLDER: &str = "__GX_SIDEBAR_SPACES_STATE__";
+
+/// The script the host runs in the sidebar page to hand the held document back.
+///
+/// There is no request script beside it: this document has no stored key, so its host is ready from
+/// the first frame and can never refuse a hand-off, which is the only thing a request recovers.
+pub fn spaces_hand_back_script(state: &Value) -> String {
+    document_hand_back_script("applySidebarSpaces", "pendingSidebarSpaces", state)
+}
 
 /// `GPUI_SIDEBAR_SPACES_SERVER_SYNC_DELAY_MS`.
 pub const SPACES_SYNC_DELAY_MS: u64 = 400;

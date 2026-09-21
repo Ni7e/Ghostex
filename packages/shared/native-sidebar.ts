@@ -213,6 +213,13 @@ export type NativeSidebarBridge = {
   applyProjectCollections?: (state: unknown) => void;
   /** A document handed over before `applyProjectCollections` was installed; drained when it is. */
   pendingProjectCollections?: unknown;
+  /**
+   * Post the collections document this page holds. Called once by the app after a hand-off it had
+   * to refuse because the stored key had not been read yet, where this page's copy is the only one
+   * carrying that edit. The Spaces document needs no counterpart: it has no stored key, so its host
+   * is ready from the first frame and never refuses.
+   */
+  requestProjectCollections?: () => void;
   /** The Spaces document the app holds. gxserver owns it outright, so there is no stored key. */
   applySidebarSpaces?: (state: unknown) => void;
   /** A document handed over before `applySidebarSpaces` was installed; drained when it is. */

@@ -440,6 +440,10 @@ impl GhostexGpuiApp {
             // The daemon's copy is already in the store by now; the guard says whether it may stay.
             self.gx_store_reconcile_workspace_groups(cx);
         }
+        // The collections key is read here rather than by whatever asks for it first, so the read
+        // is already in hand when the daemon's first snapshot arrives and the first echo of a run
+        // is judged rather than deferred (gx_store/project_docs.rs).
+        self.gx_store_book_project_docs_read(cx);
         // The same funnel for K5 and K6: the daemon's copy is already in the store by now, and the
         // guard says whether it may stay. One place, off the change summary, rather than an
         // interception on the frame path.

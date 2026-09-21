@@ -980,6 +980,7 @@ impl GxStoreDiagnostics {
                 "handBacks": counters.hand_backs,
                 "handBacksDropped": counters.hand_backs_dropped,
                 "readFailures": counters.read_failures,
+                "handOffsRequested": counters.hand_offs_requested,
             }),
         );
     }
