@@ -20,7 +20,9 @@ pub use crate::document::panels::{
     WorkingStrip,
 };
 pub use crate::document::queue::{Queue, QueueCapabilities, QueuedPrompt};
-pub use crate::document::question::{AsyncQuestions, QuestionCard, QuestionControls, QuestionDraft};
+pub use crate::document::question::{
+    AsyncQuestions, PendingAsyncQuestion, QuestionCard, QuestionControls, QuestionDraft,
+};
 pub use crate::document::snapshot::Document;
 pub use crate::document::transcript::{ProjectedMessage, TranscriptItem};
 pub use crate::document::view::{EmptyState, NewSessionWelcome, ViewState};

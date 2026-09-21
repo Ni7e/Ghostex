@@ -41,6 +41,9 @@ pub struct QuestionDraft {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AsyncQuestions {
+    /// The question the strip is showing, absent when nothing is pending.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<PendingAsyncQuestion>,
     pub draft: QuestionDraft,
     pub index: u32,
     pub count: u32,
@@ -56,4 +59,24 @@ pub struct AsyncQuestions {
     pub previous_disabled: bool,
     pub next_disabled: bool,
     pub selected: Vec<u32>,
+    /// The key the Previous button moves to, absent on the first question.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_key: Option<String>,
+    /// The key the Next button moves to, absent on the last question.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_key: Option<String>,
+}
+
+/// One question the async strip is waiting on, as the renderer draws it.
+///
+/// `options` keeps its absent-versus-empty distinction, because a question with no options is a
+/// free-text answer while an empty list would draw an empty picker.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingAsyncQuestion {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<String>>,
+    /// `<message id>:<index within that message>`.
+    pub key: String,
 }
