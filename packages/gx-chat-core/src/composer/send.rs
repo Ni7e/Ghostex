@@ -180,10 +180,16 @@ fn run_head(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
                 })),
             }]
         }
-        SendPhase::SendCompact => send_to_agent(state, context, "/compact", None, &[]),
+        SendPhase::SendCompact => {
+            let (sent, effects) = send_to_agent(state, context, "/compact", None, &[]);
+            adopt_send(state, sent);
+            effects
+        }
         SendPhase::SendText => {
             let images = submission.image_paths.clone();
-            send_to_agent(state, context, &text, version, &images)
+            let (sent, effects) = send_to_agent(state, context, &text, version, &images);
+            adopt_send(state, sent);
+            effects
         }
         SendPhase::QueueText => {
             let request_id = state.core.allocate_request_id();
@@ -218,18 +224,30 @@ fn run_head(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
     }
 }
 
+/// What one call to [`send_to_agent`] left behind, so the caller can undo it if the call fails.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AgentSend {
+    pub request_id: u64,
+    /// Family a's optimistic echo, for a chat send.
+    pub pending_id: Option<String>,
+    /// The "Ran /x" marker's command and stamp, for a catalog slash command.
+    pub marker: Option<(String, i64)>,
+}
+
 /// `sendSessionChatOptionAware` plus `chat.send`: the pills move, the echo or the marker is
 /// recorded, and the call goes out.
 ///
 /// The echo and the marker are recorded BEFORE the call and undone when it fails, which is what
-/// makes a send read as a new row the instant the user presses Enter.
-fn send_to_agent(
+/// makes a send read as a new row the instant the user presses Enter. Public because family e's
+/// option dispatch types a command into the agent through the same seam
+/// (`onDispatchCommand` in `native-host.ts`, which is `option-command.ts`).
+pub fn send_to_agent(
     state: &mut ChatState,
     context: &ChatContext,
     text: &str,
     version: Option<crate::composer::queue::DraftVersion>,
     image_paths: &[String],
-) -> Vec<Effect> {
+) -> (AgentSend, Vec<Effect>) {
     let catalog = crate::menus::option_catalog::session_option_catalog(
         &state.menus.model_catalog,
         state.session.agent.as_deref(),
@@ -258,21 +276,42 @@ fn send_to_agent(
         _ => {}
     }
     let request_id = state.core.allocate_request_id();
+    (
+        AgentSend {
+            request_id,
+            pending_id,
+            marker,
+        },
+        vec![Effect::SendRpc {
+            request_id,
+            method: ChatRpcMethod::SendSessionChatMessage,
+            params: Box::new(json!({
+                "text": text,
+                "imagePaths": if image_paths.is_empty() { Value::Null } else { json!(image_paths) },
+                "draftVersion": version,
+            })),
+        }],
+    )
+}
+
+/// The submission is the one waiting for this call.
+fn adopt_send(state: &mut ChatState, sent: AgentSend) {
     if let Some(submission) = state.composer.submitting.as_mut() {
-        submission.request = Some(request_id);
+        submission.request = Some(sent.request_id);
         submission.storage = None;
-        submission.pending_id = pending_id;
-        submission.marker = marker;
+        submission.pending_id = sent.pending_id;
+        submission.marker = sent.marker;
     }
-    vec![Effect::SendRpc {
-        request_id,
-        method: ChatRpcMethod::SendSessionChatMessage,
-        params: Box::new(json!({
-            "text": text,
-            "imagePaths": if image_paths.is_empty() { Value::Null } else { json!(image_paths) },
-            "draftVersion": version,
-        })),
-    }]
+}
+
+/// Undoes one [`AgentSend`] whose call never reached the agent.
+pub fn undo_agent_send(state: &mut ChatState, sent: &AgentSend) {
+    if let Some(pending_id) = sent.pending_id.as_deref() {
+        sends::drop_send(state, pending_id);
+    }
+    if let Some((command, sent_at)) = sent.marker.as_ref() {
+        sends::drop_command_marker(state, command, *sent_at);
+    }
 }
 
 /// The answer to the head phase arrived.
@@ -664,17 +703,22 @@ fn cancellable_dialog(state: &ChatState) -> Option<String> {
 }
 
 /// `sendKey`: a raw keystroke, with its marker recorded only after the write is accepted.
-pub fn send_key(state: &mut ChatState, key: &str, marker: &str) -> Vec<Effect> {
+pub fn send_key(state: &mut ChatState, key: &str, marker: &str) -> (Option<u64>, Vec<Effect>) {
+    // `transport.sendKey` is optional and `chat.sendKey` is only offered when the host has it, so
+    // a host without the endpoint drops the keystroke rather than calling something that 404s.
     if !state.menus.can_send_key {
-        return Vec::new();
+        return (None, Vec::new());
     }
     let request_id = state.core.allocate_request_id();
     state.composer.key_send = Some((request_id, key.to_string(), marker.to_string()));
-    vec![Effect::SendRpc {
-        request_id,
-        method: ChatRpcMethod::SendSessionChatMessage,
-        params: Box::new(json!({ "key": key })),
-    }]
+    (
+        Some(request_id),
+        vec![Effect::SendRpc {
+            request_id,
+            method: ChatRpcMethod::SendSessionChatMessage,
+            params: Box::new(json!({ "key": key })),
+        }],
+    )
 }
 
 /// The keystroke was accepted: a non-empty marker becomes a chat row.

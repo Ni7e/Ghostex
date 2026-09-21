@@ -10,7 +10,7 @@ use crate::action::{ActionKind, UserAction};
 use crate::effect::Effect;
 use crate::menus::option_dispatch::{
     descriptor_for, exit_plan_delivery, model_pick_scope, plan_dispatch, queue_session_chat_option,
-    DispatchStep, QueuedOption,
+    QueuedOption,
 };
 use crate::menus::options::{compute_native_chat_options, picker_supports_session_scope};
 use crate::state::{ChatContext, ChatState};
@@ -96,10 +96,9 @@ fn switch_draft_agent(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
 
 /// `case 'selectOption'`: one row of a pill's menu.
 ///
-/// The whole decision tree is ported (`option-dispatch.ts`); what is not wired yet is the typed
-/// half of a delivery, because `chat.send` and `chat.sendKey` are family d's seams and do not
-/// exist in the core yet. A plan whose steps are all daemon-side or app-shell side runs; one that
-/// needs text typed into the agent records the dispatch and leaves its steps for that seam.
+/// The decision tree is `option-dispatch.ts`'s `plan_dispatch`; the plan's steps are then walked
+/// one answer at a time by `crate::menus::dispatch_run`, because the TypeScript awaits them in
+/// order (a `command-confirm-picker` types the command and only then presses Enter).
 fn select_option(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
     let Some(descriptor_id) = action.params.get("descriptorId").and_then(Value::as_str) else {
         return Vec::new();
@@ -181,41 +180,22 @@ fn select_option(state: &mut ChatState, action: &UserAction, context: &ChatConte
         state.core.fail(error, None);
         return Vec::new();
     }
+    // `beginDispatch` answers the receipt the run completes or rolls back; a model picker's real
+    // values are only known once the pick resolves, so it takes the later of the two.
+    let mut receipt = None;
     if !plan.optimistic.is_empty() {
-        state.menus.options.begin_dispatch(plan.optimistic, now_ms);
+        receipt = Some(state.menus.options.begin_dispatch(plan.optimistic, now_ms));
     }
     if !plan.picker_optimistic.is_empty() {
-        state
-            .menus
-            .options
-            .begin_dispatch(plan.picker_optimistic, now_ms);
+        receipt = Some(
+            state
+                .menus
+                .options
+                .begin_dispatch(plan.picker_optimistic, now_ms),
+        );
     }
     state.menus.option_dispatch_id = Some(descriptor.id.clone());
-    let mut effects = Vec::new();
-    for step in plan.steps {
-        match step {
-            DispatchStep::PickModel { model, effort } => {
-                let request_id = state.core.allocate_request_id();
-                effects.push(Effect::SendRpc {
-                    request_id,
-                    method: ChatRpcMethod::SelectSessionChatModel,
-                    params: Box::new(serde_json::json!({ "model": model, "effort": effort })),
-                });
-            }
-            DispatchStep::SwitchToTerminal => effects.push(Effect::HostAction {
-                action: "switchToTerminal".to_string(),
-                params: Box::new(serde_json::json!({})),
-            }),
-            DispatchStep::Switching(switching) => state.menus.option_switching = switching,
-            // `chat.send` and `chat.sendKey` are family d's seams; until they exist the dispatch
-            // is recorded and the typed half is left undone rather than half sent.
-            DispatchStep::Command { .. } | DispatchStep::Key { .. } => {}
-        }
-    }
-    if effects.is_empty() {
-        state.menus.option_dispatch_id = None;
-    }
-    effects
+    crate::menus::dispatch_run::begin(state, context, plan.steps, receipt)
 }
 
 /// A choice the daemon queues rather than the TUI accepting: family e2 owns the queue itself, so

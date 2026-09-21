@@ -23,7 +23,15 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
         Event::RpcSettled {
             request_id,
             outcome,
-        } => settle_accounts(state, *request_id, outcome.as_ref()),
+        } => {
+            settle_accounts(state, *request_id, outcome.as_ref());
+            // The option dispatch walks its steps on the same answers; it claims only the id it
+            // issued, so family d's keystroke marker still sees the very same call.
+            effects.extend(
+                crate::menus::dispatch_run::settle(state, context, *request_id, outcome)
+                    .unwrap_or_default(),
+            );
+        }
         _ => {}
     }
     effects.extend(crate::menus::lifecycle::observe(state, context));

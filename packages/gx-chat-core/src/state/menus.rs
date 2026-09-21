@@ -71,6 +71,8 @@ pub struct MenusState {
     pub option_switching: bool,
     /// Whether the transport can type a raw key into the agent (`chat.sendKey`).
     pub can_send_key: bool,
+    /// The option dispatch walking its steps, or `None`.
+    pub dispatch_run: Option<crate::menus::dispatch_run::OptionDispatchRun>,
 }
 
 /// The state a chat opens with.
@@ -100,6 +102,7 @@ impl Default for MenusState {
             account_switch: AccountSwitchState::default(),
             option_dispatch_id: None,
             option_switching: false,
+            dispatch_run: None,
             can_send_key: true,
         }
     }

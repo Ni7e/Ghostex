@@ -18,6 +18,7 @@ pub mod catalog;
 pub mod context;
 pub mod context_usage;
 pub mod controls;
+pub mod dispatch_run;
 pub mod document;
 pub mod lifecycle;
 pub mod native_accounts;

@@ -148,14 +148,17 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             save_note(state)
         }
         ActionKind::SaveNote => save_note(state),
-        ActionKind::SendKey => crate::composer::send::send_key(
-            state,
-            string_param(action, "key"),
-            action
-                .param("marker")
-                .and_then(Value::as_str)
-                .unwrap_or_default(),
-        ),
+        ActionKind::SendKey => {
+            crate::composer::send::send_key(
+                state,
+                string_param(action, "key"),
+                action
+                    .param("marker")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            )
+            .1
+        }
         ActionKind::Interrupt => crate::composer::send::interrupt(state, context),
         ActionKind::Send | ActionKind::Queue | ActionKind::Compact => crate::composer::send::begin(
             state,
