@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 /** Live height of the composer overlay, for chrome that hugs the box (scroll-to-end button, minimap, welcome state). */
 export const SESSION_CHAT_COMPOSER_OVERLAY_VAR = '--ghostex-chat-composer-overlay';
@@ -12,8 +12,10 @@ export const SESSION_CHAT_COMPOSER_INSET_VAR = '--ghostex-chat-composer-inset';
  * The transcript keeps its end clear with a bottom inset that tracks the overlay while expanded and holds the expanded height while collapsed, so the resting box never uncovers rows its expansion will cover again.
  * SEE-ALSO: use-session-chat-composer-transition.ts pins the overlay at its destination height for the tween, so the resize observer here sees one change per transition, not one per frame.
  * The observer is the only reader: measuring the overlay in a layout effect read a stale pin during quick reversals and let the inset drop mid-transition.
+ * CDXC:SessionChat 2026-09-17 WHY:
+ * The scroll-linked collapse (use-session-chat-composer-collapse.ts) also holds the inset at the expanded height for as long as its holdRef is set, because a shrinking inset would cancel the scroll distance that phase measures its progress from.
  */
-export function useSessionChatComposerInset(collapsed: boolean) {
+export function useSessionChatComposerInset(collapsed: boolean, holdRef?: RefObject<boolean>) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [overlay, setOverlay] = useState<HTMLDivElement | null>(null);
   const collapsedRef = useRef(collapsed);
@@ -30,13 +32,13 @@ export function useSessionChatComposerInset(collapsed: boolean) {
         overlayHeightRef.current = next;
         host.style.setProperty(SESSION_CHAT_COMPOSER_OVERLAY_VAR, `${next}px`);
       }
-      const inset = collapsedRef.current ? Math.max(insetRef.current, next) : next;
+      const inset = collapsedRef.current || holdRef?.current === true ? Math.max(insetRef.current, next) : next;
       if (insetRef.current !== inset) {
         insetRef.current = inset;
         host.style.setProperty(SESSION_CHAT_COMPOSER_INSET_VAR, `${inset}px`);
       }
     },
-    [host]
+    [host, holdRef]
   );
 
   useLayoutEffect(() => {

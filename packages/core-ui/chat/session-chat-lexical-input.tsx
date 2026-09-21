@@ -76,7 +76,6 @@ export function SessionChatLexicalInput({
   onPasteData,
   placeholder,
   fillHeight,
-  collapsed = false,
   registerApi,
   theme,
   ariaLabel = 'Message',
@@ -91,7 +90,6 @@ export function SessionChatLexicalInput({
   onPasteData: (data: DataTransfer) => boolean;
   placeholder: string;
   fillHeight: boolean;
-  collapsed?: boolean;
   registerApi: (api: ComposerEditorControls | null) => void;
   theme: SessionChatTheme;
   ariaLabel?: string;
@@ -624,7 +622,7 @@ export function SessionChatLexicalInput({
 
   useLayoutEffect(() => {
     updateVisualsRef.current?.();
-  }, [collapsed, fillHeight, wrap, panel]);
+  }, [fillHeight, wrap, panel]);
   const closePanel = (): void => {
     panelRef.current = null;
     setPanel(null);
@@ -634,9 +632,8 @@ export function SessionChatLexicalInput({
     <div
       ref={containerRef}
       className='ghostex-chat-composer-lexical w-full min-w-0 flex-1'
-      data-collapsed={collapsed}
       data-fill-height={fillHeight}
-      data-word-wrap={wrap && !collapsed}
+      data-word-wrap={wrap}
       data-editor-theme={theme}
       data-editor-panel-open={panel !== null}
       data-session-chat-typing-redirect-ignore='true'

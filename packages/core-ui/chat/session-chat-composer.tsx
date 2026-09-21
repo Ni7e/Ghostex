@@ -269,6 +269,8 @@ export interface SessionChatComposerProps {
   transcriptRef?: RefObject<HTMLDivElement | null>;
   scrollCollapseEnabled?: boolean;
   onScrollCollapsedChange?: (collapsed: boolean) => void;
+  /** Hold flag the scroll-linked clip flips so the transcript inset stays at the expanded height. */
+  scrollCollapseInsetHoldRef?: RefObject<boolean>;
   /**
    * CDXC:SessionChat 2026-09-03:
    * Why a message cannot be sent right now, or null when it can. Typing,
@@ -594,6 +596,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       queue,
       scrollCollapseEnabled = false,
       onScrollCollapsedChange,
+      scrollCollapseInsetHoldRef,
       sendBlockedReason = null,
       sendOnEnter = true,
       sessionKey,
@@ -822,12 +825,12 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const fileOpen = filePickerActive && (fileMatches.length > 0 || (filesLoading && !files));
     const highlightedFileIndex = Math.min(fileIndex, Math.max(fileMatches.length - 1, 0));
     const {
-      collapsed,
       composerRef: composerContainerRef,
       expand: expandComposer,
     } = useSessionChatComposerCollapse({
       onCollapsedChange: onScrollCollapsedChange,
       enabled: scrollCollapseEnabled,
+      insetHoldRef: scrollCollapseInsetHoldRef,
       collapseEligible:
         !maximized &&
         !sessionNoteActive &&
@@ -2440,19 +2443,23 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const showStopButton = (isWorking || stopButtonCoolingDown) && !hasSendableDraft;
     const inputPlaceholder =
       placeholder ?? (sendOnEnter ? DESKTOP_SESSION_CHAT_PLACEHOLDER : MOBILE_SESSION_CHAT_PLACEHOLDER);
-    /** CDXC:SessionChat 2026-09-14 DECISION: User: an empty, collapsed composer shows only the first line of its placeholder. */
-    const visiblePlaceholder = collapsed ? inputPlaceholder.split(/\r?\n/, 1)[0] : inputPlaceholder;
+    /**
+     * CDXC:SessionChat 2026-09-14 DECISION:
+     * User: an empty, collapsed composer shows only the first line of its placeholder.
+     * Implemented by the scroll clip occluding everything below the first line. Truncating the
+     * placeholder string instead made the collapsed flip swap the text — the full placeholder must
+     * always render so the clip is the only thing that changes.
+     */
     const composerInput = useLexical ? (
       <SessionChatLexicalInput
         sessionKey={sessionKey}
-        collapsed={collapsed}
         fillHeight={maximized}
         initialValue={draft}
         onCaretChange={handleCaretChange}
         onChange={updateDraft}
         onKeyDown={handleKeyDown}
         onPasteData={processClipboardData}
-        placeholder={visiblePlaceholder}
+        placeholder={inputPlaceholder}
         registerApi={(api) => {
           lexicalApiRef.current = api;
           if (api && pendingInsertTextRef.current) {
@@ -2489,7 +2496,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           handleKeyDown(adapted);
         }}
         onPasteData={processClipboardData}
-        placeholder={visiblePlaceholder}
+        placeholder={inputPlaceholder}
         registerApi={(api) => {
           plainApiRef.current = api;
           if (api && pendingInsertTextRef.current) {
@@ -2736,7 +2743,6 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
               'ghostex-chat-composer min-w-0 rounded-3xl border border-input bg-card px-4 py-2.5 transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20',
               paneFocused && 'border-ring ring-[3px] ring-ring/20'
             )}
-            data-scroll-collapsed={collapsed ? 'true' : undefined}
             data-pane-focused={paneFocused ? 'true' : undefined}
             ref={composerContainerRef}
             onPointerDownCapture={() => {

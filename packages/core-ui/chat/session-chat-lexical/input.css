@@ -59,13 +59,6 @@
   min-height: 0;
   max-height: none;
 }
-.ghostex-chat-composer-lexical[data-collapsed='true'],
-.ghostex-chat-composer-lexical[data-collapsed='true'] > .ghostex-chat-composer-lexical-content {
-  height: 32px;
-  min-height: 32px;
-  max-height: 32px;
-  line-height: 32px;
-}
 .ghostex-chat-composer-lexical[data-word-wrap='false'] > .ghostex-chat-composer-lexical-content {
   white-space: pre;
   overflow-wrap: normal;

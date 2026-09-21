@@ -594,7 +594,8 @@ export function SessionChatView({
     hostComposerBridge?.providesPaneFocus === true
   );
   const [composerCollapsed, setComposerCollapsed] = useState(false);
-  const composerInset = useSessionChatComposerInset(composerCollapsed);
+  const composerScrollInsetHoldRef = useRef(false);
+  const composerInset = useSessionChatComposerInset(composerCollapsed, composerScrollInsetHoldRef);
   /*
   CDXC:SessionChat 2026-09-04: a prompt Claude handed back to its composer
   comes back into this one, once per id (see session-chat-returned-prompt.ts).
@@ -1947,6 +1948,7 @@ export function SessionChatView({
                               !accountSwitch.visible
                             }
                             onScrollCollapsedChange={setComposerCollapsed}
+                            scrollCollapseInsetHoldRef={composerScrollInsetHoldRef}
                             transcriptRef={transcriptRef}
                             sessionKey={sessionKey}
                             theme={theme}
