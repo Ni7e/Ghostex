@@ -477,12 +477,14 @@ fn publish(world: &mut World, key: &str, requests: Vec<HostRequest>) {
     }
 }
 
-/// The clock, the timezone and the two random draws, once per turn.
+/// The clock, the timezone, the two random draws and the two random ids, once per turn.
 ///
 /// The core reads none of them: `packages/gx-chat-core` builds for wasm and must cross UniFFI, so
 /// every one of them is an input. The draws are taken from the OS random source a v4 UUID uses
 /// rather than a seeded generator, because the one rule that reads them is the working strip's
-/// stint word and a repeated seed would freeze it on one word.
+/// stint word and a repeated seed would freeze it on one word. The ids are raw entropy:
+/// `ChatContext::random_id(slot)` forces the version and variant bits when it prints one back as a
+/// canonical UUID, so the host must not pre-format them.
 fn context() -> ChatContext {
     let bytes = uuid::Uuid::new_v4().into_bytes();
     let draw = |at: usize| -> f64 {
@@ -496,6 +498,10 @@ fn context() -> ChatContext {
         now_ms: now_millis() as f64,
         utc_offset_minutes: chrono::Local::now().offset().local_minus_utc() / 60,
         random_units: [draw(0), draw(8)],
+        random_ids: [
+            u128::from_be_bytes(bytes),
+            u128::from_be_bytes(uuid::Uuid::new_v4().into_bytes()),
+        ],
     }
 }
 
