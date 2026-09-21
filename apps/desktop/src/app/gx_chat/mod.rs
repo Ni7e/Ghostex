@@ -21,18 +21,25 @@
 //! - `storage.rs` is the chat half of `packages/client-storage/catalog.ts` and the two doors into
 //!   the one client-storage database; `host_records.rs` owns the four records the core left to the
 //!   host; `boot.rs` answers `Effect::ReadComposerBoot`.
+//! - `draft_ops.rs` performs the three draft operations the core names as stores, `outbox.rs` is
+//!   the durable save outbox and its retry ladder, `locale.rs` the two formatted stamps the host
+//!   owes the core.
 //! - `diagnostics.rs` writes the periodic counters, behind the usual two gates.
 
 mod boot;
 mod diagnostics;
+mod draft_ops;
 mod effects;
 mod events;
 mod frame;
 mod host_records;
 mod identity;
+mod locale;
+mod outbox;
 mod queries;
 mod storage;
 mod store;
 mod worker;
 
+pub(crate) use identity::LOCAL_MACHINE_ID;
 pub(crate) use worker::{ChatHostHandle, ChatHostOutput};

@@ -36,6 +36,9 @@ pub(super) struct HostCounters {
     pub(super) storage_refused: u64,
     /// Renderer calls this build could not turn into an event.
     pub(super) actions_unrouted: u64,
+    /// Effects this build has no arm for, which is only possible when the core grows a variant:
+    /// `Effect` is `#[non_exhaustive]` and `effects::route` spells out every one it knows.
+    pub(super) effects_unrouted: u64,
 }
 
 /// Throttles the summary and remembers what it last wrote.
@@ -88,6 +91,7 @@ impl HostDiagnostics {
                 "rpcRefusals": refusals,
                 "storageRefused": counters.storage_refused,
                 "actionsUnrouted": counters.actions_unrouted,
+                "effectsUnrouted": counters.effects_unrouted,
             }),
         );
     }

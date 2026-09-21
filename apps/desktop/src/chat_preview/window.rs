@@ -78,6 +78,7 @@ impl PreviewWindow {
             cx,
         );
         let native = NativeChatConfig {
+            machine_id: crate::app::gx_chat::LOCAL_MACHINE_ID.into(),
             project_id: "preview".into(),
             session_id: "preview".into(),
             sidebar_session_id: "preview".into(),

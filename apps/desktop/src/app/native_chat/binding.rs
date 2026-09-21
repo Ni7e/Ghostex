@@ -23,11 +23,17 @@ impl GhostexGpuiApp {
                 &key.session_id,
             ),
         };
-        let (project_id, server_session_id, remote) = match &key {
-            GpuiWorkspaceTerminalSessionKey::Local(key) => {
-                (key.project_id.clone(), key.session_id.clone(), None)
-            }
+        // The machine id is the same one `build_session_chat_runtime_request` puts on the broker's
+        // `identity`, because the Rust brain's per-session storage keys are built from it.
+        let (machine_id, project_id, server_session_id, remote) = match &key {
+            GpuiWorkspaceTerminalSessionKey::Local(key) => (
+                crate::app::gx_chat::LOCAL_MACHINE_ID.to_string(),
+                key.project_id.clone(),
+                key.session_id.clone(),
+                None,
+            ),
             GpuiWorkspaceTerminalSessionKey::Remote(key) => (
+                key.remote_machine_id.clone(),
                 key.project_id.clone(),
                 key.session_id.clone(),
                 Some(self.gpui_remote_gxserver_request_target(&key.remote_machine_id)?),
@@ -37,6 +43,7 @@ impl GhostexGpuiApp {
         state.account_key = Some(key.clone());
         let generation = state.generation;
         let config = NativeChatConfig {
+            machine_id,
             project_id,
             session_id: server_session_id,
             sidebar_session_id,

@@ -19,7 +19,9 @@
 
 use ghostex_gx_chat_core::StorageKey;
 
-use crate::app::gx_store::{RecordRead, RecordStore, read_record_raw, write_record};
+use crate::app::gx_store::{
+    RecordRead, RecordStore, read_record_raw, scan_record_raw, write_record,
+};
 
 const KIB: i64 = 1024;
 const MIB: i64 = 1024 * 1024;
@@ -258,6 +260,35 @@ pub(super) fn read(key: &StorageKey, now_ms: i64) -> Result<Option<String>, &'st
             RecordRead::Missing | RecordRead::Expired => Ok(None),
         },
     }
+}
+
+/// Every live record of a collection store whose SUFFIX starts with `prefix`, as
+/// `(suffix, raw)` pairs.
+///
+/// The suffix is what the TypeScript calls the record's key once the store's own prefix is off
+/// (`key.slice(STORAGE_PREFIX.length)` in `storedSessionChatOptionKeys`), so a caller compares and
+/// stores exactly the strings the other brain wrote. A singleton store has no suffix to scan and
+/// answers with nothing.
+pub(super) fn scan(
+    store_id: &str,
+    prefix: &str,
+    now_ms: i64,
+) -> Result<Vec<(String, String)>, &'static str> {
+    let store = store(store_id).ok_or("unregistered")?;
+    if !store.collection {
+        return Ok(Vec::new());
+    }
+    let Backend::Records(definition) = store.backend else {
+        // Only the `records` table is scannable. No chat store on `local` is a collection, so this
+        // is unreachable rather than a gap; it answers empty rather than inventing a second scan.
+        return Ok(Vec::new());
+    };
+    let full = format!("{}{}", store.prefix, prefix);
+    let offset = store.prefix.len();
+    Ok(scan_record_raw(definition, &full, now_ms)?
+        .into_iter()
+        .filter_map(|(key, raw)| Some((key.get(offset..)?.to_string(), raw)))
+        .collect())
 }
 
 /// Writes one record, or removes it when `value` is `None`.

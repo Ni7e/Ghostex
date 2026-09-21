@@ -19,49 +19,50 @@ use super::storage;
 /// Every read that fails is treated as "nothing stored", which is what the TypeScript's `catch`
 /// around each accessor does; the caller counts the refusals.
 pub(super) fn read(session_key: &str, now_ms: i64, errors: &mut usize) -> ComposerBootRead {
-    let mut load = |store: &str, suffix: &str| -> Option<String> {
-        match storage::read(
-            &StorageKey {
-                store: store.to_string(),
-                suffix: suffix.to_string(),
-            },
-            now_ms,
-        ) {
-            Ok(value) => value.filter(|raw| !raw.is_empty()),
-            Err(_) => {
-                *errors += 1;
-                None
-            }
-        }
-    };
-
-    let client_id = load("chatClient", "").unwrap_or_default();
-    let stored = load("drafts", session_key).map(|raw| decode_stored_draft(&raw));
+    let client_id = load("chatClient", "", now_ms, errors).unwrap_or_default();
+    let stored = load("drafts", session_key, now_ms, errors).map(|raw| decode_stored_draft(&raw));
     let entry = entry_with_version(stored.as_ref());
+    let model_catalog = parse(load("modelCatalog", "", now_ms, errors));
+    let claude_context = parse(load("claudeContext", "", now_ms, errors));
+    let codex_context = parse(load("codexContext", "", now_ms, errors));
+    let dismissed_notice = parse(load("notices", session_key, now_ms, errors));
+    let summary_mode = decode_summary(load("summary", session_key, now_ms, errors).as_deref());
+    let verbose_override = decode_verbose(load("verbose", session_key, now_ms, errors).as_deref());
     ComposerBootRead {
         session_key: session_key.to_string(),
         client_id,
         entry,
         next_version: next_draft_version(),
-        // The scoped option and model-outbox keys (`<sessionKey>#<scope>`) need a prefix scan of the
-        // `records` table, which the Rust door does not have. The unscoped key is the one every
-        // session has, so it is read and the scoped ones are left to the first write.
-        option_states: single(session_key, load("sessionOptions", session_key)),
-        model_outboxes: single(session_key, load("modelOutbox", session_key)),
-        model_catalog: parse(load("modelCatalog", "")),
+        option_states: scoped("sessionOptions", session_key, now_ms, errors),
+        model_outboxes: scoped("modelOutbox", session_key, now_ms, errors),
+        model_catalog,
         // The two settings arrive as a push (`Event::SettingsChanged`) as well, and the push is the
         // authority; this is only what the first frame draws with.
         chat_settings: json!({"hideAccountEmails": false, "title": Value::Null}),
-        context_preferences: json!({
-            "claude": parse(load("claudeContext", "")),
-            "codex": parse(load("codexContext", "")),
-        }),
-        dismissed_notice: parse(load("notices", session_key)),
-        summary_mode: decode_summary(load("summary", session_key).as_deref()),
-        verbose_override: match decode_verbose(load("verbose", session_key).as_deref()) {
+        context_preferences: json!({ "claude": claude_context, "codex": codex_context }),
+        dismissed_notice,
+        summary_mode,
+        verbose_override: match verbose_override {
             Some(verbose) => Value::Bool(verbose),
             None => Value::Null,
         },
+    }
+}
+
+/// One stored record, or `None` when it is absent, empty or unreadable.
+fn load(store: &str, suffix: &str, now_ms: i64, errors: &mut usize) -> Option<String> {
+    match storage::read(
+        &StorageKey {
+            store: store.to_string(),
+            suffix: suffix.to_string(),
+        },
+        now_ms,
+    ) {
+        Ok(value) => value.filter(|raw| !raw.is_empty()),
+        Err(_) => {
+            *errors += 1;
+            None
+        }
     }
 }
 
@@ -109,12 +110,32 @@ pub(super) fn next_draft_version() -> Value {
     json!({"draftId": uuid::Uuid::new_v4().to_string(), "revision": 1})
 }
 
-/// `{ "<key>": <value> }`, or an empty object when nothing is stored.
-fn single(key: &str, raw: Option<String>) -> Value {
-    match raw.and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) {
-        Some(value) => json!({ key: value }),
-        None => Value::Object(Map::new()),
+/// `{ "<sessionKey>[#<scope>]": <value> }` for every stored record of this session.
+///
+/// `storedSessionChatOptionKeys` and `storedModelSelectionKeys` take exactly the keys that are the
+/// session key itself or start with `<sessionKey>#`, and hand back the part after the store's own
+/// prefix. The `#` scope is how one session's pills are remembered per worktree or per draft agent,
+/// so a session with scopes whose unscoped row alone was read opened on another scope's options.
+fn scoped(store: &str, session_key: &str, now_ms: i64, errors: &mut usize) -> Value {
+    let rows = match storage::scan(store, session_key, now_ms) {
+        Ok(rows) => rows,
+        Err(_) => {
+            *errors += 1;
+            return Value::Object(Map::new());
+        }
+    };
+    let mut states = Map::new();
+    for (suffix, raw) in rows {
+        // The scan is a prefix scan, so a sibling session whose key merely starts with this one's
+        // (`p:s` against `p:s2`) would come back too. Only the key itself and its `#` scopes count.
+        if suffix != session_key && !suffix.starts_with(&format!("{session_key}#")) {
+            continue;
+        }
+        if let Ok(value) = serde_json::from_str::<Value>(&raw) {
+            states.insert(suffix, value);
+        }
     }
+    Value::Object(states)
 }
 
 /// A stored JSON record, or `null` when it is missing or unreadable.

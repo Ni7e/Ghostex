@@ -12,6 +12,11 @@ use std::{
 
 #[derive(Clone)]
 pub(crate) struct NativeChatConfig {
+    /// `"local"` for a chat on this computer, the saved machine's settings id otherwise. It is the
+    /// spelling `session_chat_runtime.rs` puts on the broker's `identity`, and the Rust host builds
+    /// its `remote-<machineId>:` storage prefix from the same test, so a remote chat reads back the
+    /// drafts, notices and option pills the TypeScript brain wrote rather than a local session's.
+    pub(crate) machine_id: String,
     pub(crate) project_id: String,
     pub(crate) session_id: String,
     pub(crate) sidebar_session_id: String,
@@ -171,7 +176,7 @@ impl NativeChatView {
         super::keyboard::register(cx);
         let (wake, mut wakes) = futures::channel::mpsc::unbounded::<()>();
         let runtime = ChatRuntimeWorker::start(
-            json!({"clientId":config.client_id,"projectId":config.project_id,"sessionId":config.session_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
+            json!({"clientId":config.client_id,"machineId":config.machine_id,"projectId":config.project_id,"sessionId":config.session_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
             super::replay_recording::recording_path(&config.project_id, &config.session_id),
             move || {
                 let _ = wake.unbounded_send(());
@@ -680,6 +685,28 @@ impl NativeChatView {
                 }
                 Some("host") => self.host(request["method"].as_str().unwrap_or_default(), request["params"].clone(), cx),
                 Some("chatImage") => self.receive_chat_image(request, cx),
+                // The two arms the Rust brain's `Effect::Copy` and `Effect::Toast` ride in. The
+                // QuickJS brain pushed neither (a clipboard write only ever reached the view inside
+                // `markdownSaved`), so nothing here changes under `chatBrain: quickjs`.
+                Some("copy") => {
+                    if let Some(text) = request["params"]["text"].as_str() {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
+                        crate::app::helpers::gpui_play_copy_sound();
+                    }
+                }
+                Some("toast") => {
+                    let message = request["params"]["message"].as_str().unwrap_or_default().to_string();
+                    let error = request["params"]["level"] == "error";
+                    if let Some(main) = self.main_window && !message.is_empty() {
+                        cx.defer(move |cx| {
+                            let _ = main.update(cx, |_, window, cx| {
+                                use gpui_component::WindowExt as _;
+                                use gpui_component::notification::Notification;
+                                window.push_notification(if error { Notification::error(message) } else { Notification::success(message) }, cx);
+                            });
+                        });
+                    }
+                }
                 Some("actionError") => { cx.notify(); }
                 Some("composer") => {
                     self.replace_draft(request["params"]["content"].as_str().unwrap_or_default(), request["method"] == "history", cx);

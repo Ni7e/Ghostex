@@ -18,11 +18,14 @@ use web_time::Instant;
 
 use super::boot;
 use super::diagnostics::{HostCounters, HostDiagnostics};
+use super::draft_ops;
 use super::effects::{self, Routed};
 use super::events;
 use super::frame;
 use super::host_records::{self, DraftVersion, PendingDraft, RecoveryCheckpoint};
 use super::identity::ChatIdentity;
+use super::locale;
+use super::outbox::{self, DraftWorker, Workers};
 use super::queries;
 use super::storage;
 use super::store::ChatStore;
@@ -223,6 +226,15 @@ struct World {
     diagnostics: HostDiagnostics,
     /// The draft saves in flight, by request id, so the outbox row is cleared when gxserver has it.
     draft_saves: std::collections::BTreeMap<u64, PendingDraft>,
+    /// One retry worker per chat, which drains what a refused save left in the outbox.
+    draft_workers: Workers,
+    /// When each chat's retry ladder is next due. Its own map, because `wakes` is the core's timer
+    /// and `Effect::SetTimer` owns that one exclusively.
+    retry_wakes: std::collections::BTreeMap<String, Instant>,
+    /// The `composer('park')` answer a handoff owes its `draftSubmitted` request.
+    parked: std::collections::BTreeMap<String, draft_ops::ParkResult>,
+    /// Delivery receipts already written, so a re-read of the same synced draft writes nothing.
+    delivered: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
 }
 
 fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
@@ -232,6 +244,7 @@ fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
         let wait = world
             .wakes
             .values()
+            .chain(world.retry_wakes.values())
             .min()
             .map(|at| at.saturating_duration_since(Instant::now()));
         let command = match wait {
@@ -258,6 +271,10 @@ fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
                 // how the app resolves a chat to one view already (`native_chat_for_generation`);
                 // the replaced handle simply stops being drained.
                 world.sinks.insert(key.clone(), sink);
+                // `replayDraftSaves`: a save a previous run could not deliver is still in the
+                // outbox, and opening its chat is what registers the writer that drains it.
+                world.draft_workers.entry(key.clone()).or_default();
+                world.retry_wakes.insert(key.clone(), Instant::now());
                 drive(&mut world, &key, Vec::new());
             }
             Some(HostCommand::Detach { key, sink }) => {
@@ -275,9 +292,14 @@ fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
                 arguments,
             }) => {
                 // A `resolve` is the answer to a request the core made, and the view echoes the
-                // core's own id back, so there is no order matching to do.
+                // core's own id back, so there is no order matching to do. A retry write is the
+                // one exception: it is the HOST's own request, numbered above every id the core
+                // can allocate, and the core must never see its answer.
+                if method == "resolve" && settle_retry_write(&mut world, &key, &arguments) {
+                    continue;
+                }
                 let events = if method == "resolve" {
-                    settle_draft_save(&mut world, &arguments);
+                    settle_draft_save(&mut world, &key, &arguments);
                     events::resolved(&arguments).into_iter().collect()
                 } else {
                     events::events_for(method, &arguments)
@@ -304,13 +326,24 @@ fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
                 reply,
             }) => {
                 let answer = world.store.get(&key).and_then(|retained| {
-                    queries::answer(retained.core.state(), context(), method, &arguments)
+                    let context = context(retained.core.state());
+                    queries::answer(retained.core.state(), context, method, &arguments)
                 });
                 let _ = reply.send(answer);
                 // A query changes nothing, so it does not drain; the view uses the answer at once.
                 continue;
             }
             None => {
+                let due: Vec<String> = world
+                    .retry_wakes
+                    .iter()
+                    .filter(|(_, at)| **at <= Instant::now())
+                    .map(|(key, _)| key.clone())
+                    .collect();
+                for key in due {
+                    world.retry_wakes.remove(&key);
+                    drain_outbox(&mut world, &key);
+                }
                 let due: Vec<String> = world
                     .wakes
                     .iter()
@@ -344,10 +377,8 @@ fn drive(world: &mut World, key: &str, events: Vec<Event>) {
         .store
         .get(key)
         .is_some_and(|retained| !retained.booted);
-    if needs_boot {
-        if let Some(retained) = world.store.get_mut(key) {
-            retained.booted = true;
-        }
+    if needs_boot && let Some(retained) = world.store.get_mut(key) {
+        retained.booted = true;
     }
     while !pending.is_empty() && rounds < MAX_SETTLE_ROUNDS {
         rounds += 1;
@@ -361,7 +392,8 @@ fn drive(world: &mut World, key: &str, events: Vec<Event>) {
                 };
                 retained.touched_at = Instant::now();
                 let session_key = retained.session_key.clone();
-                (retained.core.handle(event, context()), session_key)
+                let context = context(retained.core.state());
+                (retained.core.handle(event, context), session_key)
             };
             for effect in effects {
                 *world
@@ -371,18 +403,126 @@ fn drive(world: &mut World, key: &str, events: Vec<Event>) {
                     .or_insert(0) += 1;
                 match effects::route(effect) {
                     Routed::Renderer(request) => {
+                        if request.kind
+                            == ghostex_gx_chat_core::RequestKind::Other(
+                                effects::UNROUTED.to_string(),
+                            )
+                        {
+                            world.counters.effects_unrouted += 1;
+                        }
                         note_draft_save(world, &session_key, &request);
-                        requests.push(*request);
+                        requests.push(adopt_park_answer(world, key, *request));
                     }
                     Routed::Host(effect) => {
-                        perform(world, key, &session_key, effect, &mut answers);
+                        perform(
+                            world,
+                            key,
+                            &session_key,
+                            effect,
+                            &mut answers,
+                            &mut requests,
+                        );
                     }
                 }
             }
         }
         pending.append(&mut answers);
     }
+    record_deliveries(world, key);
     publish(world, key, requests);
+}
+
+/// A handoff's `draftSubmitted` carries what `composer('park')` minted, which is the host's.
+///
+/// `native-host.ts` spreads the park answer into the request (`{...handoff, text, version}`), and
+/// the view reads `nextVersion` out of it to start the composer's next draft. The core has no
+/// random source and no view state, so both the handoff id and the next revision are made here and
+/// merged on the way past.
+fn adopt_park_answer(world: &mut World, key: &str, mut request: HostRequest) -> HostRequest {
+    if request.kind != ghostex_gx_chat_core::RequestKind::DraftSubmitted {
+        return request;
+    }
+    // Every send adopts a fresh revision, which is what `composer('submitted')` answers with.
+    request
+        .params
+        .insert("nextVersion".into(), boot::next_draft_version());
+    if request.method != "handoff" {
+        return request;
+    }
+    if let Some(park) = world.parked.remove(key) {
+        request
+            .params
+            .insert("handoffId".into(), Value::String(park.handoff_id));
+        request
+            .params
+            .insert("content".into(), Value::String(park.content));
+        request
+            .params
+            .insert("draftVersion".into(), park.draft_version);
+    }
+    request
+}
+
+/// Writes the sent history for every draft gxserver reports it delivered, once each.
+///
+/// `onDeliveredDrafts` in `native-host.ts` hands the receipts to `composer('deliveries')`, which is
+/// `recordDeliveredSessionChatDrafts`. The core folds them onto `session.synced_draft`
+/// (`merge_draft_state`), so the host reads them there rather than needing a callback into the
+/// core. The stored receipt set is the real de-duplication; the in-memory set only keeps a chat
+/// that re-reads the same snapshot from touching disk again.
+fn record_deliveries(world: &mut World, key: &str) {
+    let Some(retained) = world.store.get(key) else {
+        return;
+    };
+    let Some(deliveries) = retained
+        .core
+        .state()
+        .session
+        .synced_draft
+        .as_ref()
+        .and_then(|draft| draft.get("deliveredDrafts"))
+        .and_then(Value::as_array)
+        .filter(|deliveries| !deliveries.is_empty())
+        .cloned()
+    else {
+        return;
+    };
+    let now_ms = now_millis();
+    let seen = world.delivered.entry(key.to_string()).or_default();
+    let mut refusals = 0u64;
+    for delivery in deliveries {
+        let (Some(id), Some(project_id), Some(session_id)) = (
+            delivery.get("id").and_then(Value::as_str),
+            delivery.get("projectId").and_then(Value::as_str),
+            delivery.get("sessionId").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        if !seen.insert(id.to_string()) {
+            continue;
+        }
+        if host_records::record_delivered_draft(
+            id,
+            project_id,
+            session_id,
+            delivery
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            delivery
+                .get("deliveredAt")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            now_ms,
+        )
+        .is_err()
+        {
+            // A refused write must be retried rather than remembered as done.
+            seen.remove(id);
+            refusals += 1;
+        }
+    }
+    world.counters.storage_refused += refusals;
 }
 
 /// Performs one host-side effect and queues the event that answers it.
@@ -392,6 +532,7 @@ fn perform(
     session_key: &str,
     effect: Effect,
     answers: &mut Vec<Event>,
+    requests: &mut Vec<HostRequest>,
 ) {
     let now_ms = now_millis();
     match effect {
@@ -415,7 +556,7 @@ fn perform(
         } => {
             // `durable` asks for a flush before the answer. Every write here lands in one immediate
             // SQLite transaction with `synchronous=FULL`, so it is already durable when it returns.
-            let error = match storage::write(&storage_key, value.as_deref(), now_ms) {
+            let error = match write_storage(world, key, session_key, &storage_key, &value, now_ms) {
                 Ok(()) => None,
                 Err(reason) => {
                     world.counters.storage_refused += 1;
@@ -427,10 +568,42 @@ fn perform(
                 error,
             });
         }
+        // `composer('flush')` is `flushDraftSaves(sessionKey)`: every stored write this door makes
+        // is already on disk when it returns, so what is left to wait for is the outbox, and the
+        // send must not deliver while a revision gxserver has not acknowledged is still queued.
+        Effect::FlushStorage { store } => {
+            let drained = outbox::pending(session_key, now_ms).is_empty();
+            if !drained && let Some(request) = next_retry_write(world, key, session_key, now_ms) {
+                requests.push(request);
+            }
+            answers.push(Event::StorageWritten {
+                key: ghostex_gx_chat_core::StorageKey {
+                    store,
+                    suffix: String::new(),
+                },
+                // A queued revision is a delivery the daemon has not taken yet, not a storage
+                // failure: the ladder keeps trying and the send goes on, which is what the
+                // TypeScript's already-resolved `flushDraftSaves` did for an empty queue.
+                error: None,
+            });
+        }
         Effect::ReadComposerBoot { .. } => {
             let mut errors = 0usize;
             let read = boot::read(session_key, now_ms, &mut errors);
             world.counters.storage_refused += errors as u64;
+            // `start` in `native-host.ts` pushes `{kind: 'composerInit', method: 'restore', params:
+            // result}` from the same answer. It is the ONLY path that gives the view its client id,
+            // its draft id and its draft revision, so without it every save is refused with "Two
+            // editors changed the same draft revision" and the composer never reports itself ready.
+            requests.push(HostRequest {
+                id: None,
+                kind: ghostex_gx_chat_core::RequestKind::ComposerInit,
+                method: "restore".to_string(),
+                params: match serde_json::to_value(&read) {
+                    Ok(Value::Object(params)) => params,
+                    _ => serde_json::Map::new(),
+                },
+            });
             answers.push(Event::ComposerBootRead(Box::new(read)));
         }
         Effect::SetTimer { delay_ms } => match delay_ms {
@@ -448,6 +621,44 @@ fn perform(
     }
 }
 
+/// One stored write, or one of the three draft operations the core names as a store.
+///
+/// `composer('submitted')`, `composer('park')` and `composer('receive')` are conditional on what is
+/// already on disk and touch records the core does not own, so they are performed here rather than
+/// written through (`draft_ops.rs`). Anything else is an ordinary catalogued row.
+fn write_storage(
+    world: &mut World,
+    key: &str,
+    session_key: &str,
+    storage_key: &ghostex_gx_chat_core::StorageKey,
+    value: &Option<String>,
+    now_ms: i64,
+) -> Result<(), &'static str> {
+    use ghostex_gx_chat_core::composer::storage::{
+        DRAFT_PARK_STORE, DRAFT_RECEIVE_STORE, DRAFT_SUBMITTED_STORE,
+    };
+    let operation = matches!(
+        storage_key.store.as_str(),
+        DRAFT_SUBMITTED_STORE | DRAFT_PARK_STORE | DRAFT_RECEIVE_STORE
+    );
+    if !operation {
+        return storage::write(storage_key, value.as_deref(), now_ms);
+    }
+    let payload: Value = value
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or(Value::Null);
+    match storage_key.store.as_str() {
+        DRAFT_SUBMITTED_STORE => draft_ops::submitted(session_key, &payload, now_ms),
+        DRAFT_PARK_STORE => {
+            let park = draft_ops::park(session_key, &payload, now_ms)?;
+            world.parked.insert(key.to_string(), park);
+            Ok(())
+        }
+        _ => draft_ops::receive(session_key, &payload, now_ms),
+    }
+}
+
 /// Drains a frame and posts it, when it carries anything.
 fn publish(world: &mut World, key: &str, requests: Vec<HostRequest>) {
     let Some(last_revision) = world.sinks.get(key).map(|sink| sink.last_revision) else {
@@ -456,12 +667,15 @@ fn publish(world: &mut World, key: &str, requests: Vec<HostRequest>) {
     let Some(retained) = world.store.get_mut(key) else {
         return;
     };
-    let drained = retained.core.frame(last_revision);
+    // `frame_at`, not `frame`: `take` in `native-host.ts` reads `Date.now()` itself, and measuring
+    // `nextWakeMs` against the clock of the last event handled is one turn stale, so the host would
+    // arm its timer that much late (`docs/2026-09-21/rust-chat/PROGRESS.md`, Integration 2 item 8).
+    let drained = retained.core.frame_at(last_revision, now_millis() as f64);
     let revision = drained.revision;
     let envelope = frame::envelope(drained, requests);
     let carries = envelope
         .as_object()
-        .is_some_and(|frame| frame::envelope_carries_change(frame));
+        .is_some_and(frame::envelope_carries_change);
     let Some(sink) = world.sinks.get_mut(key) else {
         return;
     };
@@ -477,7 +691,7 @@ fn publish(world: &mut World, key: &str, requests: Vec<HostRequest>) {
     }
 }
 
-/// The clock, the timezone, the two random draws and the two random ids, once per turn.
+/// The clock, the timezone, the random draws and the formatted stamps, once per turn.
 ///
 /// The core reads none of them: `packages/gx-chat-core` builds for wasm and must cross UniFFI, so
 /// every one of them is an input. The draws are taken from the OS random source a v4 UUID uses
@@ -485,7 +699,10 @@ fn publish(world: &mut World, key: &str, requests: Vec<HostRequest>) {
 /// stint word and a repeated seed would freeze it on one word. The ids are raw entropy:
 /// `ChatContext::random_id(slot)` forces the version and variant bits when it prints one back as a
 /// canonical UUID, so the host must not pre-format them.
-fn context() -> ChatContext {
+///
+/// It is built with the `with_*` setters rather than an exhaustive struct literal, because an
+/// input the core adds then costs this host nothing and falls back to what it did before.
+fn context(state: &ghostex_gx_chat_core::ChatState) -> ChatContext {
     let bytes = uuid::Uuid::new_v4().into_bytes();
     let draw = |at: usize| -> f64 {
         let mut value = 0u64;
@@ -494,15 +711,15 @@ fn context() -> ChatContext {
         }
         value as f64 / (1u64 << 56) as f64
     };
-    ChatContext {
-        now_ms: now_millis() as f64,
-        utc_offset_minutes: chrono::Local::now().offset().local_minus_utc() / 60,
-        random_units: [draw(0), draw(8)],
-        random_ids: [
+    let utc_offset_minutes = chrono::Local::now().offset().local_minus_utc() / 60;
+    ChatContext::at(now_millis() as f64)
+        .with_utc_offset_minutes(utc_offset_minutes)
+        .with_random_units([draw(0), draw(8)])
+        .with_random_ids([
             u128::from_be_bytes(bytes),
             u128::from_be_bytes(uuid::Uuid::new_v4().into_bytes()),
-        ],
-    }
+        ])
+        .with_formatted_times(locale::formatted_times(state, utc_offset_minutes))
 }
 
 fn now_millis() -> i64 {
@@ -522,6 +739,7 @@ fn effect_name(effect: &Effect) -> &'static str {
         Effect::ReadStorage { .. } => "readStorage",
         Effect::ReadComposerBoot { .. } => "readComposerBoot",
         Effect::WriteStorage { .. } => "writeStorage",
+        Effect::FlushStorage { .. } => "flushStorage",
         Effect::SetTimer { .. } => "setTimer",
         Effect::SetComposerText { .. } => "setComposerText",
         Effect::ClearComposerIfUnchanged { .. } => "clearComposerIfUnchanged",
@@ -602,11 +820,11 @@ fn note_draft_save(world: &mut World, session_key: &str, request: &HostRequest) 
     world.draft_saves.insert(request_id, draft);
 }
 
-/// Clears the outbox row once gxserver acknowledged the save.
+/// Clears the outbox row once gxserver acknowledged the save, and arms the ladder when it did not.
 ///
-/// A refusal leaves the row where it is, which is what makes the save retry: the pending record IS
-/// the retry queue, and the ladder that drains it is `host_records::draft_retry_delay_ms`.
-fn settle_draft_save(world: &mut World, arguments: &[Value]) {
+/// A refusal leaves the row where it is, which is what makes the save retry at all: the stored
+/// record IS the queue, so a save is not lost when the app quits between two attempts.
+fn settle_draft_save(world: &mut World, key: &str, arguments: &[Value]) {
     let Some(request_id) = arguments.first().and_then(Value::as_u64) else {
         return;
     };
@@ -614,10 +832,86 @@ fn settle_draft_save(world: &mut World, arguments: &[Value]) {
         return;
     };
     if arguments.get(2).is_some_and(|error| !error.is_null()) {
-        world.draft_saves.insert(request_id, draft);
+        // The row it queued is still in the outbox, and that row is the queue, so the in-flight
+        // entry is dropped rather than kept: keeping it would grow a map nothing ever reads again.
+        arm_retry(world, key, true);
         return;
     }
-    if host_records::acknowledge_draft_save(&draft, now_millis()).is_err() {
+    if outbox::acknowledge(&draft.session_key, &draft.version, now_millis()).is_err() {
         world.counters.storage_refused += 1;
     }
+    let worker = world.draft_workers.entry(key.to_string()).or_default();
+    worker.failures = 0;
+}
+
+/// The answer to a retry write of this host's own, which the core must never see.
+///
+/// A retry is numbered from [`outbox::HOST_REQUEST_ID_BASE`], above every id
+/// `ChatCore::allocate_request_id` can reach, so one glance at the id says whose answer this is.
+fn settle_retry_write(world: &mut World, key: &str, arguments: &[Value]) -> bool {
+    let Some(request_id) = arguments.first().and_then(Value::as_u64) else {
+        return false;
+    };
+    if request_id < outbox::HOST_REQUEST_ID_BASE {
+        return false;
+    }
+    let failed = arguments.get(2).is_some_and(|error| !error.is_null());
+    let now_ms = now_millis();
+    let Some(worker) = world.draft_workers.get_mut(key) else {
+        return true;
+    };
+    let Some(cleared) = outbox::settle(worker, request_id, failed, now_ms) else {
+        return true;
+    };
+    if cleared {
+        // The queue is drained one row at a time, in the order the revisions were typed.
+        drain_outbox(world, key);
+    } else {
+        arm_retry(world, key, false);
+    }
+    true
+}
+
+/// Sends the next pending save of one chat, if the view is there to perform it.
+fn drain_outbox(world: &mut World, key: &str) {
+    let Some(session_key) = world
+        .store
+        .get(key)
+        .map(|retained| retained.session_key.clone())
+    else {
+        return;
+    };
+    let now_ms = now_millis();
+    let Some(request) = next_retry_write(world, key, &session_key, now_ms) else {
+        return;
+    };
+    publish(world, key, vec![request]);
+}
+
+/// The next retry write, or `None` when one is in flight or nothing is pending.
+fn next_retry_write(
+    world: &mut World,
+    key: &str,
+    session_key: &str,
+    now_ms: i64,
+) -> Option<HostRequest> {
+    let worker = world.draft_workers.entry(key.to_string()).or_default();
+    outbox::next_write(worker, session_key, now_ms)
+}
+
+/// Arms the retry ladder after a refused save.
+///
+/// `count` is whether this refusal is the worker's own to count: a save the CORE issued is not one
+/// of the worker's attempts, but it is the event that starts the ladder, which is exactly what
+/// `queueDraftSave`'s `void flushDraftSaves(...)` did on the TypeScript side.
+fn arm_retry(world: &mut World, key: &str, count: bool) {
+    let worker: &mut DraftWorker = world.draft_workers.entry(key.to_string()).or_default();
+    if count {
+        worker.failures = worker.failures.saturating_add(1);
+    }
+    let delay = outbox::retry_delay_ms(worker.failures);
+    world.retry_wakes.insert(
+        key.to_string(),
+        Instant::now() + Duration::from_millis(delay),
+    );
 }

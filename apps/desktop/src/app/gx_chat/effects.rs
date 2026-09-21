@@ -35,6 +35,7 @@ pub(super) fn route(effect: Effect) -> Routed {
         Effect::ReadStorage { .. }
         | Effect::WriteStorage { .. }
         | Effect::ReadComposerBoot { .. }
+        | Effect::FlushStorage { .. }
         | Effect::SetTimer { .. } => Routed::Host(effect),
         Effect::SendRpc {
             request_id,
@@ -89,7 +90,7 @@ pub(super) fn route(effect: Effect) -> Routed {
         Effect::Open(OpenTarget::Url { url }) => {
             let mut params = Map::new();
             params.insert("url".into(), Value::String(url));
-            Routed::Renderer(Box::new(host_action("openLink", params)))
+            Routed::Renderer(Box::new(dispatched("openLink", params)))
         }
         Effect::Open(OpenTarget::File { path, line, column }) => {
             let mut params = Map::new();
@@ -100,23 +101,33 @@ pub(super) fn route(effect: Effect) -> Routed {
             if let Some(column) = column {
                 params.insert("column".into(), Value::from(column));
             }
-            Routed::Renderer(Box::new(host_action("openFile", params)))
+            Routed::Renderer(Box::new(dispatched("openFile", params)))
         }
-        // Neither `Copy` nor `Toast` has an emitter in the core today, and neither has an arm in
-        // `apply_output`: a toast is a raw `{type: "toast"}` app message rather than a
-        // `sessionChatHostAction`, which is why `send_control.rs` emits it outside the frame. They
-        // are routed here so a family that starts emitting one gets a visible missing-arm bug
-        // rather than silence, and the arm is written then.
+        // The QuickJS brain never pushed either kind: a clipboard write only ever reached the view
+        // inside `markdownSaved`, and a toast is a raw `{type: "toast"}` app message rather than a
+        // `sessionChatHostAction`. Both go out as their own dispatch arm rather than as a `host`
+        // method the app shell would silently drop, so the first family to emit one is drawn
+        // instead of counted.
         Effect::Copy { text } => {
             let mut params = Map::new();
             params.insert("text".into(), Value::String(text));
-            Routed::Renderer(Box::new(host_action("copyText", params)))
+            Routed::Renderer(Box::new(HostRequest {
+                id: None,
+                kind: RequestKind::Other("copy".to_string()),
+                method: String::new(),
+                params,
+            }))
         }
         Effect::Toast { level, message } => {
             let mut params = Map::new();
             params.insert("level".into(), Value::String(level));
             params.insert("message".into(), Value::String(message));
-            Routed::Renderer(Box::new(host_action("toast", params)))
+            Routed::Renderer(Box::new(HostRequest {
+                id: None,
+                kind: RequestKind::Other("toast".to_string()),
+                method: String::new(),
+                params,
+            }))
         }
         Effect::MarkdownSaved { path } => {
             let mut params = Map::new();
@@ -129,35 +140,24 @@ pub(super) fn route(effect: Effect) -> Routed {
             }))
         }
         Effect::HostAction { action, params } => {
-            let params = object(*params);
-            // Two app-shell actions have their own dispatch arm in the view rather than going
-            // through `sessionChatHostAction`, because the view has to read its own composer
-            // selection or its own image cache before it can perform them.
-            let kind = match action.as_str() {
-                "attachmentReferences" => Some(RequestKind::AttachmentReferences),
-                "chatImage" => Some(RequestKind::ChatImage),
-                _ => None,
-            };
-            match kind {
-                Some(kind) => Routed::Renderer(Box::new(HostRequest {
-                    id: None,
-                    kind,
-                    method: String::new(),
-                    params,
-                })),
-                None => Routed::Renderer(Box::new(host_action(&action, params))),
-            }
+            Routed::Renderer(Box::new(dispatched(&action, object(*params))))
         }
         // `Effect` is `#[non_exhaustive]`: a core newer than this host is a missing arm, not a
-        // crash, and the counter says so.
+        // crash. Every variant this build knows is spelled out above, so an arm can only be missing
+        // when the crate grows one, and `gxChat.host.summary` counts it as `effectsUnrouted`.
         _ => Routed::Renderer(Box::new(HostRequest {
             id: None,
-            kind: RequestKind::Other("unrouted".to_string()),
+            kind: RequestKind::Other(UNROUTED.to_string()),
             method: String::new(),
             params: Map::new(),
         })),
     }
 }
+
+/// The dispatch kind an effect this build does not know rides under.
+///
+/// The view has no arm for it, so it draws nothing; the counter is how it is noticed.
+pub(super) const UNROUTED: &str = "unrouted";
 
 /// `{kind: "broker", method, params}`: what the view forwards to the app runtime's transport.
 fn broker(method: &str, params: Map<String, Value>) -> HostRequest {
@@ -169,14 +169,78 @@ fn broker(method: &str, params: Map<String, Value>) -> HostRequest {
     }
 }
 
-/// `{kind: "host", method: <action>, params}`: the view turns it into
-/// `{type: "sessionChatHostAction", action, ...params}`.
-fn host_action(action: &str, params: Map<String, Value>) -> HostRequest {
-    HostRequest {
-        id: None,
-        kind: RequestKind::Host,
-        method: action.to_string(),
-        params,
+/// The request one [`Effect::HostAction`] rides in.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// Five of the core's host actions are NOT `sessionChatHostAction`s. The QuickJS brain pushed each
+/// under a dispatch kind of its own, because the view has to read its own composer field, its own
+/// selection, its own draft revision or its own image cache before it can perform them
+/// (`native-host.ts` lines 1130, 1216, 1247, 1296, 1498). Routed through `host` they would reach
+/// `receive_session_chat_host_action`, which has no arm for any of them and drops them: a send
+/// would clear no field, a failed send would restore no text, and a draft arriving from another
+/// client would reach no composer. The method and the parameter shape are the view's, not the
+/// core's, so both are built here.
+fn dispatched(action: &str, mut params: Map<String, Value>) -> HostRequest {
+    let method = |params: &Map<String, Value>, fallback: &str| {
+        params
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or(fallback)
+            .to_string()
+    };
+    match action {
+        // `insertAttachments` reads `paths` and the view supplies the selection.
+        "attachmentReferences" => HostRequest {
+            id: None,
+            kind: RequestKind::AttachmentReferences,
+            method: "insert".to_string(),
+            params,
+        },
+        // `receive_chat_image` reads `method == "loaded"` and then `base64Data` and `mediaType`
+        // from `params` itself, where the core nests the whole read answer under `image`.
+        "chatImage" => {
+            let loaded = params.remove("image").filter(Value::is_object);
+            let found = loaded.is_some();
+            if let Some(Value::Object(image)) = loaded {
+                for (key, value) in image {
+                    params.entry(key).or_insert(value);
+                }
+            }
+            HostRequest {
+                id: None,
+                kind: RequestKind::ChatImage,
+                method: if found { "loaded" } else { "failed" }.to_string(),
+                params,
+            }
+        }
+        // The view dispatches these three on the request's `method`, which is the gesture that
+        // produced them: `send`, `queue`, `compact` or `handoff`.
+        "draftSubmitted" => HostRequest {
+            id: None,
+            kind: RequestKind::DraftSubmitted,
+            method: method(&params, "send"),
+            params,
+        },
+        "submissionFailed" => HostRequest {
+            id: None,
+            kind: RequestKind::SubmissionFailed,
+            method: method(&params, "send"),
+            params,
+        },
+        "draftReceived" => HostRequest {
+            id: None,
+            kind: RequestKind::DraftReceived,
+            method: "handoff".to_string(),
+            params,
+        },
+        // Everything else is `{kind: "host", method: <action>, params}`, which the view turns into
+        // `{type: "sessionChatHostAction", action, ...params}`.
+        _ => HostRequest {
+            id: None,
+            kind: RequestKind::Host,
+            method: action.to_string(),
+            params,
+        },
     }
 }
 

@@ -43,6 +43,83 @@ pub(crate) fn read_record_raw(
     })
 }
 
+/// Every live record of one store whose key starts with `prefix`, as `(key, raw)` pairs.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// `Storage::call` has `recordScan` on the JavaScript side and this door had no equivalent, so the
+/// Rust chat host could only read a record whose whole key it already knew. Two of the chat's own
+/// records are keyed by a SCOPE it cannot know in advance (`<sessionKey>#<scope>` for the option
+/// pills and the model-selection outbox, `storedSessionChatOptionKeys` in
+/// `packages/core-ui/chat/session-chat-session-options.ts`), and the draft save outbox is keyed by
+/// a revision, so a prefix scan is the only way to find them.
+///
+/// The scan is a RANGE over the primary key rather than a pattern, so it reads the rows it returns
+/// and not the table: `key >= prefix AND key < <prefix with its last byte raised>`. A prefix whose
+/// successor is not valid UTF-8 (nothing the catalog produces) falls back to the store's own rows.
+/// An expired row is skipped, exactly as [`read_record_raw`] skips it.
+pub(crate) fn scan_record_raw(
+    store: RecordStore,
+    prefix: &str,
+    now_ms: i64,
+) -> Result<Vec<(String, String)>, &'static str> {
+    let upper = prefix_successor(prefix);
+    with_read_connection(|connection| {
+        let mut statement = match &upper {
+            Some(_) => connection
+                .prepare("SELECT key, value FROM records WHERE store=?1 AND key>=?2 AND key<?3"),
+            None => connection.prepare("SELECT key, value FROM records WHERE store=?1"),
+        }
+        .map_err(|_| "read")?;
+        let bind: Vec<&dyn rusqlite::ToSql> = match &upper {
+            Some(upper) => vec![&store.id, &prefix, upper],
+            None => vec![&store.id],
+        };
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(bind), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|_| "read")?;
+        let mut found = Vec::new();
+        for row in rows {
+            let (key, value) = row.map_err(|_| "read")?;
+            if !key.starts_with(prefix) {
+                continue;
+            }
+            let Ok(row) = serde_json::from_str::<serde_json::Value>(&value) else {
+                continue;
+            };
+            let Some(raw) = row.get("raw").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let updated_at = row
+                .get("updatedAt")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or_default();
+            if store
+                .max_age_ms
+                .is_some_and(|limit| now_ms - updated_at > limit)
+            {
+                continue;
+            }
+            found.push((key, raw.to_string()));
+        }
+        Ok(found)
+    })
+}
+
+/// The first key that sorts after every key starting with `prefix`, under SQLite's BINARY
+/// collation, or `None` when there is none this scan can express.
+fn prefix_successor(prefix: &str) -> Option<String> {
+    let mut bytes = prefix.as_bytes().to_vec();
+    while let Some(last) = bytes.pop() {
+        if last < 0xff {
+            bytes.push(last + 1);
+            return String::from_utf8(bytes).ok();
+        }
+    }
+    None
+}
+
 /// Stores one record in one immediate transaction.
 pub(crate) fn write_record(
     store: RecordStore,

@@ -10,6 +10,10 @@
 
 use serde_json::Value;
 
+/// What `session_chat_runtime.rs` writes for a chat on this computer, and what `broker.ts` tests
+/// for before it builds a `remote-<machineId>:` prefix.
+pub(crate) const LOCAL_MACHINE_ID: &str = "local";
+
 /// One retained chat.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct ChatIdentity {
@@ -21,12 +25,18 @@ pub(super) struct ChatIdentity {
 
 impl ChatIdentity {
     /// Reads the identity out of the config the view hands its runtime.
+    ///
+    /// `machineId` is the spelling `session_chat_runtime.rs` puts on the wire: the literal
+    /// `"local"` for this computer and the saved machine's settings id otherwise. Both it and an
+    /// absent field mean "local", because `broker.ts` takes its prefix from exactly that test
+    /// (`machineId === 'local' ? '' : ...`) and a chat that read `remote-local:` here would open on
+    /// a different draft than the one the TypeScript brain wrote.
     pub(super) fn from_config(config: &Value) -> Self {
         Self {
             machine_id: config
                 .get("machineId")
                 .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
+                .filter(|id| !id.is_empty() && *id != LOCAL_MACHINE_ID)
                 .map(str::to_string),
             project_id: config
                 .get("projectId")
@@ -43,15 +53,12 @@ impl ChatIdentity {
 
     /// `JSON.stringify([machineId, projectId, sessionId])`, the retention key.
     ///
-    /// The local machine writes `null` for its id, which is what the TypeScript store does with an
-    /// absent `identity.machineId`.
+    /// `SessionChatRuntimeIdentity.machineId` is a plain string on the TypeScript side, never
+    /// absent, so this computer spells itself `"local"` here too rather than `null`.
     pub(super) fn retention_key(&self) -> String {
-        let machine = match &self.machine_id {
-            Some(id) => Value::String(id.clone()),
-            None => Value::Null,
-        };
+        let machine = self.machine_id.as_deref().unwrap_or(LOCAL_MACHINE_ID);
         Value::Array(vec![
-            machine,
+            Value::String(machine.to_string()),
             Value::String(self.project_id.clone()),
             Value::String(self.session_id.clone()),
         ])

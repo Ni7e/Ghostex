@@ -11,13 +11,9 @@
 //! `packages/core-ui/chat/session-chat-draft-recovery.ts`, `session-chat-draft-outbox.ts` and
 //! `session-chat-sent-history.ts`, so a record written by one brain is read back by the other.
 
-// CDXC:Drafts 2026-09-22 WHY:
-// The sent history, the delivery receipts and the retry ladder are written and not yet called: the
-// core's send path is still landing, so nothing emits the delivery list or the send that would
-// record a prompt. They are here rather than later because the RECORD FORMATS are the part that
-// must not drift, and they are the TypeScript's byte for byte; wiring them is one call each from
-// `worker.rs` once `Effect::SendRpc { SendSessionChatMessage }` and the daemon's startup deliveries
-// reach it.
+// One item here has no caller: `DRAFT_SAVE_FAILURE`, the composer's save-failure line, which no
+// family has ported into the document yet. It is kept because the sentence is the user's and must
+// not be reworded when it is finally drawn.
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
@@ -180,34 +176,11 @@ pub(super) fn queue_draft_save(draft: &PendingDraft, now_ms: i64) -> Result<(), 
     )
 }
 
-/// Clears one pending save once gxserver has it.
-///
-/// `acknowledgeDraftSave` removes every pending entry of that draft at or below the acknowledged
-/// revision, which is what makes an append-only run of keystrokes collapse to one write.
-pub(super) fn acknowledge_draft_save(
-    draft: &PendingDraft,
-    now_ms: i64,
-) -> Result<(), &'static str> {
-    storage::write(
-        &StorageKey {
-            store: "draftOutbox".to_string(),
-            suffix: draft.suffix(),
-        },
-        None,
-        now_ms,
-    )
-}
-
-/// The retry ladder a failed save waits out, in milliseconds.
-///
-/// `Math.min(30_000, 1_000 * 2 ** Math.min(failures, 5))` with `failures` incremented BEFORE the
-/// computation, so the first retry is 2 s: 2, 4, 8, 16, 30, 30, …
-pub(super) fn draft_retry_delay_ms(failures: u32) -> u64 {
-    let failures = failures.min(5);
-    30_000u64.min(1_000u64 << failures)
-}
-
 /// What a failed save tells the user. One sentence, the TypeScript's, word for word.
+///
+/// It has no caller yet: `draftSaveStatus` is a composer line no family has ported, so nothing in
+/// the document carries it. The clearing of a pending save and the ladder that retries it are
+/// `outbox.rs`, which owns the whole queue rather than one row.
 pub(super) const DRAFT_SAVE_FAILURE: &str =
     "Draft could not be saved on this computer. Keep this view open until saving succeeds.";
 
