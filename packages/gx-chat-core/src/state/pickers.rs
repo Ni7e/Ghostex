@@ -114,11 +114,6 @@ pub struct ContextState {
     pub preferences: ContextPreferencesByAgent,
     /// The row editor's draft, or `None` when the dialog is closed.
     pub editor: Option<ContextEditorState>,
-    /// The session's agent icon, which chooses the catalog. Family e1's session option catalog
-    /// answers it (`sessionOptions.catalog?.modelIcon`).
-    pub agent_icon: Option<String>,
-    /// The saved account assigned to this session, which family e1's accounts read answers.
-    pub account: Option<crate::menus::context::AgentAccount>,
     /// Where the status line wraps, as the renderer measured it. `[0]` until it reports.
     pub status_rows: Vec<u32>,
     /// When the meter's countdown labels are next re-rendered (`native-context.ts`, 30 s).
@@ -130,8 +125,6 @@ impl Default for ContextState {
         Self {
             preferences: ContextPreferencesByAgent::default(),
             editor: None,
-            agent_icon: None,
-            account: None,
             // `let contextStatusRows = [0]`: one row from the first frame, before the renderer
             // has measured anything, so the status line never starts unwrapped.
             status_rows: vec![0],

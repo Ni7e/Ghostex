@@ -11,6 +11,7 @@ use crate::menus::context::editor::context_editor_projection;
 use crate::menus::context::meter::{compute_context_meter, ContextMeterInput};
 use crate::menus::context::status::DetectedOptions;
 use crate::menus::context::usage::mask_account_text;
+use crate::menus::picker::inputs::menu_inputs;
 use crate::state::{ChatContext, ChatState};
 
 /// Writes family e2's context keys into `into`.
@@ -21,15 +22,23 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
         .selected_options
         .as_ref()
         .and_then(|value| serde_json::from_value(value.clone()).ok());
+    let agent_icon = menu_inputs(state, context).agent_icon;
+    // `accounts?.accounts.find((account) => account.id === accounts.session?.accountId)`. Family
+    // e1 folds the raw answer; the context rows read more of an account than e1's menu view keeps
+    // (the session count, the usage snapshot's age, every window's own reset), so the row is read
+    // from the answer itself rather than from that view.
+    let account = session_account(state.menus.accounts.as_ref());
     let input = ContextMeterInput {
-        icon: pickers.context.agent_icon.as_deref(),
+        icon: agent_icon.as_deref(),
         selected_options: detected.as_ref(),
-        account: pickers.context.account.as_ref(),
+        account: account.as_ref(),
         agent_session_id: state.session.agent_session_id.clone(),
         // `chat.availableAgents !== null`: nothing has reached the agent yet.
         draft: state.session.available_agents.is_some(),
         title: state.core.title.clone(),
-        working: agent_working(state),
+        // Family a writes `working` first (`document::assemble` runs a, b, c, d, e, f), so this is
+        // the same derived flag the Compact button reads in the TypeScript.
+        working: into.working,
         hide_account_emails: state.core.hide_account_emails,
     };
     let agent = crate::menus::context::ContextDetailsAgent::from_icon(input.icon);
@@ -66,10 +75,17 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
     into.context_status_rows = pickers.context.status_rows.clone();
 }
 
-/// `chat.working`, which family a derives.
-///
-/// To fold into family a: the derived live-turn flag is not on `ChatState` yet, so this is the
-/// smallest stand-in the Compact button needs. Replace it with family a's own accessor.
-fn agent_working(state: &ChatState) -> bool {
-    !state.session.interrupted && (state.session.server_working || state.session.external_working)
+/// The session's saved account, read out of the answer family e1 folded.
+fn session_account(accounts: Option<&Value>) -> Option<crate::menus::context::AgentAccount> {
+    let accounts = accounts?;
+    let account_id = accounts
+        .get("session")
+        .and_then(|session| session.get("accountId"))
+        .and_then(Value::as_str)?;
+    let entry = accounts
+        .get("accounts")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|account| account.get("id").and_then(Value::as_str) == Some(account_id))?;
+    serde_json::from_value(entry.clone()).ok()
 }

@@ -15,6 +15,7 @@ pub mod favorites;
 pub mod feedback;
 pub mod fork_branches;
 pub mod input;
+pub mod inputs;
 pub mod js;
 pub mod model_menu;
 pub mod model_picker;

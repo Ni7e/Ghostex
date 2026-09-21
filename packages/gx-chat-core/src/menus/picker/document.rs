@@ -11,27 +11,30 @@ use serde_json::Value;
 
 use crate::document::Document;
 use crate::menus::picker::fork_branches::fork_branches_projection;
+use crate::menus::picker::inputs::menu_inputs;
+use crate::menus::picker::projection::model_menu_projection;
 use crate::state::{ChatContext, ChatState};
 
 /// Writes family e2's picker and menu keys into `into`.
 pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
     let pickers = &state.pickers;
 
-    into.model_provider = match pickers
-        .model_menu_context
-        .as_ref()
-        .and_then(|menu| menu.provider)
-    {
-        Some(provider) => Tri::Value(provider.as_str().to_string()),
-        // `modelProvider: undefined` is a key `JSON.stringify` leaves out.
-        None => Tri::Absent,
-    };
-    into.model_menu_context = match pickers.model_menu_context.as_ref() {
+    // `modelMenuContext` is `computeNativeChatOptions`'s output, which is family e1's compute. It
+    // is read here rather than carried on `ChatState`, so a frame can never draw a menu against a
+    // stale catalog. `modelProvider` rides in from the same compute and family e1 publishes it.
+    let inputs = menu_inputs(state, context);
+    into.model_menu_context = match inputs.menu.as_ref() {
         Some(menu) => Tri::Value(menu.to_json()),
         None => Tri::Null,
     };
-    into.model_menu = match pickers.model_menu_context.as_ref() {
-        Some(menu) => Tri::Value(pickers.model_menu_projection(menu, &state.menus.model_catalog)),
+    into.model_menu = match inputs.menu.as_ref() {
+        Some(menu) => Tri::Value(model_menu_projection(
+            menu,
+            &pickers.model_menu_view,
+            &inputs.catalogs,
+            &pickers.model_favorites,
+            &state.menus.model_catalog,
+        )),
         None => Tri::Null,
     };
     into.model_picker = match pickers.model_picker.as_ref() {

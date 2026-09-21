@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use crate::effect::Effect;
 use crate::event::Event;
+use crate::menus::catalog::parse_agent_model_catalog;
 use crate::menus::context::preferences::{context_preferences_key, parse_preferences};
 use crate::menus::context::status::ContextDetailsAgent;
 use crate::menus::picker::favorites::{parse_model_favorites, MODEL_FAVORITES_STORE};
@@ -37,7 +38,28 @@ pub fn settle(
     mut next_request_id: impl FnMut() -> u64,
 ) -> Vec<Effect> {
     let mut effects = Vec::new();
+    // To fold into family e1: `currentAgentModelCatalog()` starts from the snapshot bundled with
+    // the build (`agent-model-catalog-state.ts:37`), so every pill, menu and context row already
+    // has a full lineup before any push arrives. `MenusState::model_catalog` starts empty
+    // instead, which draws every agent as "outside the catalog". Seeding it here is the smallest
+    // fix that makes the port comparable; it belongs in family e1's own boot, beside the
+    // `newer()` rule that lets a pushed catalog replace it.
+    if state.menus.model_catalog.agents.is_empty() {
+        if let Some(bundled) = bundled_agent_model_catalog() {
+            state.menus.model_catalog = bundled;
+        }
+    }
     match event {
+        // To fold into family e1: `menus.model_catalog` is e1's field and this adoption belongs
+        // in an e1 settle. Nothing routed `ModelCatalogChanged` anywhere, so the option catalog
+        // stayed empty and every menu, pill and context row drew as "no catalog"; adopting it
+        // here is what makes the replay comparable at all.
+        Event::ModelCatalogChanged { catalog } => {
+            if let Some(parsed) = parse_agent_model_catalog(catalog) {
+                let current = std::mem::take(&mut state.menus.model_catalog);
+                state.menus.model_catalog = current.newer(parsed);
+            }
+        }
         Event::ContextPreferencesChanged {
             provider,
             preferences,
@@ -217,4 +239,13 @@ pub fn outbox_retry_selection(state: &ChatState) -> Option<ModelPickerSelection>
         .outbox
         .as_ref()
         .map(|intent| intent.selection())
+}
+
+/// The `agent-model-catalog.json` snapshot bundled with the build.
+///
+/// SEAM.md section 4: the JSON tables are already platform neutral and must not be ported; the
+/// crate includes the same file the TypeScript imports.
+fn bundled_agent_model_catalog() -> Option<crate::menus::catalog::AgentModelCatalog> {
+    const BUNDLED: &str = include_str!("../../../../../agent-model-catalog.json");
+    parse_agent_model_catalog(&serde_json::from_str::<Value>(BUNDLED).ok()?)
 }

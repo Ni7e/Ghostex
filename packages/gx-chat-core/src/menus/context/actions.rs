@@ -43,7 +43,7 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             Vec::new()
         }
         ActionKind::ContextEdit => {
-            let agent = editor_agent(state);
+            let agent = editor_agent(state, context);
             state.pickers.context.editor = Some(ContextEditorState {
                 agent,
                 draft: normalize_preferences(
@@ -133,8 +133,12 @@ fn editor_command(
 }
 
 /// `chat.sessionOptions.catalog?.modelIcon === 'codex' ? 'codex' : 'claude'`.
-fn editor_agent(state: &ChatState) -> ContextDetailsAgent {
-    ContextDetailsAgent::from_icon(state.pickers.context.agent_icon.as_deref())
+fn editor_agent(state: &ChatState, context: &ChatContext) -> ContextDetailsAgent {
+    ContextDetailsAgent::from_icon(
+        crate::menus::picker::inputs::menu_inputs(state, context)
+            .agent_icon
+            .as_deref(),
+    )
 }
 
 fn number(value: Option<&Value>) -> Option<f64> {
