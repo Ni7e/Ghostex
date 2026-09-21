@@ -23,7 +23,7 @@ use gpui::http_client::HttpRequestExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, Asset, FontWeight, Hsla, Image, ImageCacheError, ImageFormat,
     IntoElement, ParentElement as _, RenderImage, Styled as _, StyledImage as _, Window, div, img,
-    prelude::FluentBuilder as _, px, rgb,
+    prelude::FluentBuilder as _, px, svg,
 };
 
 use crate::app::helpers::*;
@@ -170,11 +170,15 @@ impl Asset for BrowserFaviconHttpImageAsset {
             browser_favicon_validate_encoded_dimensions(format, &body)
                 .map_err(browser_favicon_fetch_error)?;
 
+            let cached_body = body.clone();
             let render_image = Image::from_bytes(format, body)
                 .to_image_data(svg_renderer)
                 .map_err(|_| browser_favicon_fetch_error(BrowserFaviconFetchError::Decode))?;
             browser_favicon_validate_render_image(&render_image)
                 .map_err(browser_favicon_fetch_error)?;
+            if let Some(cache_key) = source.cache_key.as_deref() {
+                browser_favicon_cache_store(cache_key, format, &cached_body);
+            }
             Ok(render_image)
         }
     }
@@ -596,6 +600,7 @@ pub(crate) fn browser_safe_http_favicon_parts(
         marker,
         BrowserFaviconFetchSource {
             url: url.to_string(),
+            cache_key: None,
         },
     ))
 }
@@ -730,22 +735,12 @@ pub(crate) fn browser_hex_value(byte: u8) -> Option<u8> {
 pub(crate) fn browser_tab_icon_element(
     profile_id: BrowserProfileId,
     chrome_status: BrowserTabChromeStatus,
-    runtime_favicon_url: Option<&str>,
     runtime_favicon_image: Option<&BrowserFaviconImage>,
     runtime_favicon_fetch: Option<&BrowserFaviconFetchSource>,
 ) -> AnyElement {
     /*
-    CDXC:Browser 2026-06-22-09:11:
-    GPUI Browser tabs must visibly distinguish address-only placeholders, generic loaded pages, and loaded pages that reported favicon metadata. Use a deterministic native shell glyph/color derived from the runtime-only safe favicon marker whenever an actual favicon image is unavailable.
-
-    CDXC:Browser 2026-06-22-10:41:
-    Render decoded runtime favicon images when CEF provides a safe capped data:image URL, but keep tab chrome as normal in-layout GPUI elements and fall back to the deterministic URL marker or generic dot when decoding is unavailable.
-
-    CDXC:Browser 2026-06-22-11:05:
-    HTTP(S) favicon images must render through a favicon-only non-AssetLogger asset loader inside the existing tab icon slot. Loading, failed status, unsupported MIME/format, oversized bodies, oversized decode dimensions, and decode failures all show the safe marker or generic icon without logging raw URLs, response bodies, headers, cookies, tokens, paths, titles, command text, stdout/stderr, or user content.
-
-    CDXC:Browser 2026-06-22-16:48:
-    Restored loaded Browser placeholders have loaded shell state but no materialized CEF surface, so their tab chrome uses a restored teal status dot and suppresses runtime favicon image/fetch rendering until a live surface exists. Address-only tabs keep the neutral placeholder dot and cannot borrow stale page or favicon state.
+    CDXC:Browser 2026-09-21 DECISION:
+    User: "please stop putting a bg behind the favicon. I want the default icon if we don't have a favicon to be the default browser icon and then we replace it with the actual site's favicon". The slot is a bare image with no tile, border or tint. Supersedes the 2026-06-22 status dots and coloured "F" marker: loading, failed, unsupported or oversized favicons, restored tabs and address-only tabs all show the globe (or the icon cached for the site) instead. HTTP(S) favicons still load through the favicon-only asset loader with its byte, redirect, format and dimension caps, and nothing about a failed fetch is logged.
 
     Non-default profiles replace the favicon slot with their stable generated profile number in a circular badge. The badge is tab-owned chrome, so mixed-profile tabs remain visible without adding overlays or another interactive hit region.
     */
@@ -767,207 +762,60 @@ pub(crate) fn browser_tab_icon_element(
             .into_any_element();
     }
 
-    let runtime_favicon_url =
-        runtime_favicon_url.filter(|_| chrome_status.allows_runtime_favicon());
     let runtime_favicon_image =
         runtime_favicon_image.filter(|_| chrome_status.allows_runtime_favicon());
     let runtime_favicon_fetch =
         runtime_favicon_fetch.filter(|_| chrome_status.allows_runtime_favicon());
     let base = div()
-        .relative()
         .flex()
         .flex_shrink_0()
         .size(px(BROWSER_TAB_ICON_SIZE))
         .items_center()
-        .justify_center()
-        .rounded(px(3.0))
-        .border_1();
-
-    if let Some(favicon_image) = runtime_favicon_image {
-        let fallback_favicon_url = runtime_favicon_url.map(str::to_string);
-        return base
-            .overflow_hidden()
-            .border_color(browser_tab_favicon_bitmap_border_color(runtime_favicon_url))
-            .bg(browser_tab_favicon_bitmap_background_color(
-                runtime_favicon_url,
-            ))
-            .child(
-                img(favicon_image.image.clone())
-                    .size(px(BROWSER_TAB_ICON_SIZE - 2.0))
-                    .rounded(px(2.0))
-                    .with_fallback(move || {
-                        browser_tab_favicon_fallback_inner_element(
-                            BrowserTabChromeStatus::LoadedSurface,
-                            fallback_favicon_url.as_deref(),
-                        )
-                    }),
-            )
-            .into_any_element();
-    }
+        .justify_center();
 
     if let Some(favicon_fetch_source) = runtime_favicon_fetch {
         let favicon_fetch_source = favicon_fetch_source.clone();
-        let fallback_favicon_url = runtime_favicon_url.map(str::to_string);
-        let loading_fallback_favicon_url = fallback_favicon_url.clone();
+        let loading_favicon_image = runtime_favicon_image.cloned();
+        let fallback_favicon_image = loading_favicon_image.clone();
         return base
-            .overflow_hidden()
-            .border_color(browser_tab_favicon_bitmap_border_color(runtime_favicon_url))
-            .bg(browser_tab_favicon_bitmap_background_color(
-                runtime_favicon_url,
-            ))
             .child(
                 img(move |window: &mut Window, cx: &mut App| {
                     window.use_asset::<BrowserFaviconHttpImageAsset>(&favicon_fetch_source, cx)
                 })
-                .size(px(BROWSER_TAB_ICON_SIZE - 2.0))
-                .rounded(px(2.0))
+                .size(px(BROWSER_TAB_ICON_SIZE))
                 .with_loading(move || {
-                    browser_tab_favicon_fallback_inner_element(
-                        BrowserTabChromeStatus::LoadedSurface,
-                        loading_fallback_favicon_url.as_deref(),
-                    )
+                    browser_tab_favicon_pending_element(loading_favicon_image.as_ref())
                 })
                 .with_fallback(move || {
-                    browser_tab_favicon_fallback_inner_element(
-                        BrowserTabChromeStatus::LoadedSurface,
-                        fallback_favicon_url.as_deref(),
-                    )
+                    browser_tab_favicon_pending_element(fallback_favicon_image.as_ref())
                 }),
             )
             .into_any_element();
     }
 
-    if let Some(favicon_url) = runtime_favicon_url {
-        return base
-            .border_color(browser_tab_favicon_icon_border_color(favicon_url))
-            .bg(browser_tab_favicon_icon_background_color(favicon_url))
-            .child(browser_tab_favicon_marker_inner_element(favicon_url))
-            .into_any_element();
-    }
-
-    base.border_color(browser_tab_icon_border_color(chrome_status))
-        .bg(browser_tab_icon_background_color(chrome_status))
-        .child(browser_tab_generic_icon_inner_element(chrome_status))
+    base.child(browser_tab_favicon_pending_element(runtime_favicon_image))
         .into_any_element()
 }
 
-pub(crate) fn browser_tab_favicon_fallback_inner_element(
-    chrome_status: BrowserTabChromeStatus,
-    runtime_favicon_url: Option<&str>,
+/// What the icon slot shows while the page's own favicon is not drawable: the icon cached for the site, else the default browser icon.
+pub(crate) fn browser_tab_favicon_pending_element(
+    cached_favicon_image: Option<&BrowserFaviconImage>,
 ) -> AnyElement {
-    if let Some(favicon_url) = runtime_favicon_url {
-        return browser_tab_favicon_marker_inner_element(favicon_url);
-    }
-    browser_tab_generic_icon_inner_element(chrome_status)
-}
-
-pub(crate) fn browser_tab_favicon_marker_inner_element(favicon_url: &str) -> AnyElement {
-    div()
-        .flex()
-        .size(px(9.0))
-        .items_center()
-        .justify_center()
-        .rounded(px(2.0))
-        .bg(browser_tab_favicon_icon_color(favicon_url))
-        .text_size(px(7.0))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(browser_tab_favicon_glyph_color())
-        .child("F")
+    let Some(favicon_image) = cached_favicon_image else {
+        return browser_tab_default_icon_element();
+    };
+    img(favicon_image.image.clone())
+        .size(px(BROWSER_TAB_ICON_SIZE))
+        .with_fallback(browser_tab_default_icon_element)
         .into_any_element()
 }
 
-pub(crate) fn browser_tab_generic_icon_inner_element(
-    chrome_status: BrowserTabChromeStatus,
-) -> AnyElement {
-    let is_placeholder = chrome_status == BrowserTabChromeStatus::AddressOnly;
-    div()
-        .size(px(if is_placeholder { 5.0 } else { 6.0 }))
-        .rounded_full()
-        .bg(browser_tab_icon_dot_color(chrome_status))
+pub(crate) fn browser_tab_default_icon_element() -> AnyElement {
+    svg()
+        .path(BROWSER_ICON_WORLD)
+        .size(px(BROWSER_TAB_ICON_SIZE))
+        .text_color(chrome_color(0xc7c7c7, 0x525252))
         .into_any_element()
-}
-
-pub(crate) fn browser_tab_favicon_bitmap_border_color(runtime_favicon_url: Option<&str>) -> Hsla {
-    runtime_favicon_url
-        .map(browser_tab_favicon_icon_border_color)
-        .unwrap_or_else(|| chrome_ink().opacity(0.24).into())
-}
-
-pub(crate) fn browser_tab_favicon_bitmap_background_color(
-    runtime_favicon_url: Option<&str>,
-) -> Hsla {
-    runtime_favicon_url
-        .map(browser_tab_favicon_icon_background_color)
-        .unwrap_or_else(|| chrome_ink().opacity(0.08).into())
-}
-
-pub(crate) fn browser_tab_icon_border_color(chrome_status: BrowserTabChromeStatus) -> Hsla {
-    match chrome_status {
-        BrowserTabChromeStatus::LoadedSurface | BrowserTabChromeStatus::RestoredPlaceholder => {
-            rgb(browser_tab_chrome_status_color(chrome_status))
-                .opacity(0.48)
-                .into()
-        }
-        BrowserTabChromeStatus::AddressOnly => chrome_ink().opacity(0.18).into(),
-    }
-}
-
-pub(crate) fn browser_tab_icon_background_color(chrome_status: BrowserTabChromeStatus) -> Hsla {
-    match chrome_status {
-        BrowserTabChromeStatus::LoadedSurface | BrowserTabChromeStatus::RestoredPlaceholder => {
-            rgb(browser_tab_chrome_status_color(chrome_status))
-                .opacity(0.14)
-                .into()
-        }
-        BrowserTabChromeStatus::AddressOnly => chrome_ink().opacity(0.055).into(),
-    }
-}
-
-pub(crate) fn browser_tab_icon_dot_color(chrome_status: BrowserTabChromeStatus) -> Hsla {
-    rgb(browser_tab_chrome_status_color(chrome_status))
-        .opacity(match chrome_status {
-            BrowserTabChromeStatus::LoadedSurface => 0.82,
-            BrowserTabChromeStatus::RestoredPlaceholder => 0.82,
-            BrowserTabChromeStatus::AddressOnly => 0.36,
-        })
-        .into()
-}
-
-pub(crate) fn browser_tab_chrome_status_color(chrome_status: BrowserTabChromeStatus) -> u32 {
-    match chrome_status {
-        BrowserTabChromeStatus::LoadedSurface => 0x58b7ff,
-        BrowserTabChromeStatus::RestoredPlaceholder => 0x41d7b5,
-        BrowserTabChromeStatus::AddressOnly => 0xffffff,
-    }
-}
-
-pub(crate) fn browser_tab_favicon_icon_color(url: &str) -> Hsla {
-    rgb(browser_tab_favicon_palette_color(url))
-        .opacity(0.92)
-        .into()
-}
-
-pub(crate) fn browser_tab_favicon_icon_border_color(url: &str) -> Hsla {
-    rgb(browser_tab_favicon_palette_color(url))
-        .opacity(0.62)
-        .into()
-}
-
-pub(crate) fn browser_tab_favicon_icon_background_color(url: &str) -> Hsla {
-    rgb(browser_tab_favicon_palette_color(url))
-        .opacity(0.16)
-        .into()
-}
-
-pub(crate) fn browser_tab_favicon_glyph_color() -> Hsla {
-    rgb(0x061014).opacity(0.86).into()
-}
-
-pub(crate) fn browser_tab_favicon_palette_color(url: &str) -> u32 {
-    let hash = url.bytes().fold(0_u64, |hash, byte| {
-        hash.wrapping_mul(31).wrapping_add(u64::from(byte))
-    });
-    BROWSER_TAB_FAVICON_COLORS[hash as usize % BROWSER_TAB_FAVICON_COLORS.len()]
 }
 
 pub(crate) fn browser_tab_close_color() -> Hsla {

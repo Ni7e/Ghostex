@@ -389,7 +389,6 @@ impl GhostexGpuiApp {
             .child(self.render_browser_tab_icon(
                 profile_id,
                 chrome_status,
-                runtime_favicon_url,
                 runtime_favicon_image.as_ref(),
                 runtime_favicon_fetch.as_ref(),
             ))
@@ -498,14 +497,12 @@ impl GhostexGpuiApp {
         &self,
         profile_id: BrowserProfileId,
         chrome_status: BrowserTabChromeStatus,
-        runtime_favicon_url: Option<&str>,
         runtime_favicon_image: Option<&BrowserFaviconImage>,
         runtime_favicon_fetch: Option<&BrowserFaviconFetchSource>,
     ) -> AnyElement {
         browser_tab_icon_element(
             profile_id,
             chrome_status,
-            runtime_favicon_url,
             runtime_favicon_image,
             runtime_favicon_fetch,
         )

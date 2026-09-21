@@ -385,10 +385,14 @@ pub(crate) fn browser_tab_from_shell_state(
     } else {
         None
     };
+    let remote_machine_id = json_string_field(object, "remoteMachineId")
+        .and_then(crate::app::helpers::gpui_normalize_remote_machine_id);
+    let cached_favicon_image = (state == BrowserTabState::Loaded)
+        .then(|| browser_favicon_cache_lookup(&url, remote_machine_id.as_deref()))
+        .flatten();
     Some(BrowserTab {
         id,
-        remote_machine_id: json_string_field(object, "remoteMachineId")
-            .and_then(crate::app::helpers::gpui_normalize_remote_machine_id),
+        remote_machine_id,
         profile_id: json_u64_field(object, "profileId")
             .map(BrowserProfileId)
             .filter(|profile_id| browser_profiles.contains_profile(*profile_id))
@@ -400,7 +404,7 @@ pub(crate) fn browser_tab_from_shell_state(
         },
         runtime_page_title: cached_title,
         runtime_favicon_url: None,
-        runtime_favicon_image: None,
+        runtime_favicon_image: cached_favicon_image,
         runtime_favicon_fetch: None,
         runtime_is_loading: false,
         runtime_can_go_back: false,

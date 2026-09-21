@@ -191,6 +191,11 @@ impl GhostexGpuiApp {
                     .iter_mut()
                     .find(|tab| tab.id == tab_id && tab.url == page_url)
                 {
+                    if let Some(cache_key) =
+                        browser_favicon_cache_key(&tab.url, tab.remote_machine_id.as_deref())
+                    {
+                        browser_favicon_cache_store_image(&cache_key, &image);
+                    }
                     tab.runtime_favicon_image = Some(image);
                     app.record_browser_history_page(runtime_key, tab_id, "", false);
                     cx.notify();

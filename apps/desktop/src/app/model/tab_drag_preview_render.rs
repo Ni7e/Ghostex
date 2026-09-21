@@ -123,7 +123,6 @@ impl Render for BrowserTabDragPreview {
             .child(browser_tab_icon_element(
                 self.profile_id,
                 self.chrome_status,
-                self.runtime_favicon_url.as_deref(),
                 self.runtime_favicon_image.as_ref(),
                 self.runtime_favicon_fetch.as_ref(),
             ))

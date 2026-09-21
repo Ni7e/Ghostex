@@ -126,8 +126,9 @@ impl BrowserTabChromeStatus {
         }
     }
 
+    /// A restored tab shows its cached favicon before its surface exists; an address-only tab has no page to take one from.
     pub(crate) fn allows_runtime_favicon(self) -> bool {
-        self == Self::LoadedSurface
+        self != Self::AddressOnly
     }
 }
 
@@ -286,6 +287,8 @@ pub(crate) struct BrowserFaviconImage {
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct BrowserFaviconFetchSource {
     pub(crate) url: String,
+    /// Where the fetched icon is kept for the next start; see `browser_favicon_cache_key`.
+    pub(crate) cache_key: Option<String>,
 }
 
 #[derive(Clone)]
@@ -320,14 +323,8 @@ pub(crate) struct BrowserTab {
     CDXC:Browser 2026-07-12:
     The last displayed title is persisted into shell state as a bounded `cachedTitle` and restored into `runtime_page_title`, so the sidebar and tab strip keep the pre-restart label until the page reports a fresh document title.
 
-    CDXC:Browser 2026-06-22-09:11:
-    Browser favicon metadata is runtime-only like page titles, but even stricter for persistence: keep only a safe HTTP(S) origin marker or capped decoded data:image bytes for visible tab chrome, clear favicon state on navigation/address-only transitions, and never serialize raw favicon URLs or image cache data into shell state.
-
-    CDXC:Browser 2026-06-22-10:41:
-    Browser tab icons can render capped runtime favicon image bytes from safe data:image URLs without persisting favicon bytes or raw URLs. Clear decoded images and HTTP(S) fetch sources wherever favicon URL metadata clears, and use the URL-only shell marker as fallback.
-
-    CDXC:Browser 2026-06-22-11:05:
-    Browser tab icons may fetch safe HTTP(S) favicons only through a favicon-specific runtime asset source. Keep raw CEF favicon URLs out of shell state and logging, store only a scheme+authority marker on BrowserTab, cap URL length, redirects, body bytes, formats, and decode dimensions, and fall back to the marker or generic icon on every failure.
+    CDXC:Browser 2026-09-21 WHY:
+    Shell state carries no favicon data: raw CEF favicon URLs stay out of it and out of logs, and the tab keeps only a scheme+authority marker, capped decoded data:image bytes, or a capped HTTP(S) fetch source. The icon survives a restart through the per-origin favicon cache instead (`browser_favicon_cache.rs`), which also fills the slot on navigation until the page reports its own icon. Supersedes the 2026-06-22 runtime-only favicon notes.
 
     CDXC:Browser 2026-06-22-10:09:
     The per-tab navigation list restores back/forward state. The history popup reads the independent persistent visit store across projects; both remain separate from CEF internals.
@@ -793,7 +790,8 @@ impl BrowserTabModel {
         tab.title = browser_tab_title_for_url(&url);
         tab.runtime_page_title = None;
         tab.runtime_favicon_url = None;
-        tab.runtime_favicon_image = None;
+        tab.runtime_favicon_image =
+            browser_favicon_cache_lookup(&url, tab.remote_machine_id.as_deref());
         tab.runtime_favicon_fetch = None;
         tab.runtime_is_loading = true;
         tab.runtime_can_go_back = false;
@@ -838,7 +836,8 @@ impl BrowserTabModel {
         tab.title = browser_tab_title_for_url(&url);
         tab.runtime_page_title = None;
         tab.runtime_favicon_url = None;
-        tab.runtime_favicon_image = None;
+        tab.runtime_favicon_image =
+            browser_favicon_cache_lookup(&url, tab.remote_machine_id.as_deref());
         tab.runtime_favicon_fetch = None;
         tab.runtime_is_loading = true;
         tab.runtime_can_go_back = false;
@@ -855,18 +854,20 @@ impl BrowserTabModel {
         let url = url.trim().to_string();
         let title = browser_tab_title_for_url(&url);
         let history_changed = tab.navigation_history.record_address_change(&url);
+        let cached_favicon_image =
+            browser_favicon_cache_lookup(&url, tab.remote_machine_id.as_deref());
         let changed = tab.url != url
             || tab.title != title
             || tab.runtime_page_title.is_some()
             || tab.runtime_favicon_url.is_some()
-            || tab.runtime_favicon_image.is_some()
+            || tab.runtime_favicon_image != cached_favicon_image
             || tab.runtime_favicon_fetch.is_some()
             || tab.state != BrowserTabState::Loaded
             || history_changed;
         tab.title = title;
         tab.runtime_page_title = None;
         tab.runtime_favicon_url = None;
-        tab.runtime_favicon_image = None;
+        tab.runtime_favicon_image = cached_favicon_image;
         tab.runtime_favicon_fetch = None;
         tab.url = url;
         tab.state = BrowserTabState::Loaded;
@@ -908,8 +909,24 @@ impl BrowserTabModel {
         };
         let (favicon_url, favicon_image, favicon_fetch) =
             browser_runtime_favicon_from_url(favicon_url.as_deref());
+        let cache_key = browser_favicon_cache_key(&tab.url, tab.remote_machine_id.as_deref());
+        if let (Some(cache_key), Some(favicon_image)) = (cache_key.as_deref(), &favicon_image) {
+            browser_favicon_cache_store_image(cache_key, favicon_image);
+        }
         // Remote HTTP favicons are fetched through the tab's SSH route, never GPUI's local HTTP client.
-        let favicon_fetch = favicon_fetch.filter(|_| tab.remote_machine_id.is_none());
+        let favicon_fetch = favicon_fetch
+            .filter(|_| tab.remote_machine_id.is_none())
+            .map(|source| BrowserFaviconFetchSource {
+                cache_key: cache_key.clone(),
+                ..source
+            });
+        // An HTTP(S) favicon has no bytes yet: the cached icon stays up while it loads.
+        let favicon_image = favicon_image.or_else(|| {
+            favicon_url
+                .is_some()
+                .then(|| tab.runtime_favicon_image.clone())
+                .flatten()
+        });
         if tab.runtime_favicon_url == favicon_url
             && tab.runtime_favicon_image == favicon_image
             && tab.runtime_favicon_fetch == favicon_fetch

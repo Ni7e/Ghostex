@@ -7,6 +7,7 @@
 pub(crate) mod agents_hub;
 pub(crate) mod board_gxserver;
 pub(crate) mod browser;
+pub(crate) mod browser_favicon_cache;
 pub(crate) mod chrome_palette;
 pub(crate) mod dev_servers;
 pub(crate) mod indicator_animation;
@@ -25,6 +26,7 @@ pub(crate) mod titlebar;
 pub(crate) use agents_hub::*;
 pub(crate) use board_gxserver::*;
 pub(crate) use browser::*;
+pub(crate) use browser_favicon_cache::*;
 pub(crate) use chrome_palette::*;
 pub(crate) use dev_servers::*;
 pub(crate) use indicator_animation::*;

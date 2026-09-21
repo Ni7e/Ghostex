@@ -797,10 +797,6 @@ pub(crate) const BROWSER_FAVICON_IMAGE_MAX_PIXELS: u64 = 512 * 512;
 
 pub(crate) const BROWSER_FAVICON_IMAGE_MAX_FRAMES: usize = 16;
 
-pub(crate) const BROWSER_TAB_FAVICON_COLORS: [u32; 8] = [
-    0x3ed2a4, 0xffc857, 0xff7a7a, 0x8ba7ff, 0xb877ff, 0x52d6ff, 0xf28cc6, 0x9bd45a,
-];
-
 pub(crate) const BROWSER_TAB_CLOSE_SIZE: f32 = 20.0;
 
 pub(crate) const BROWSER_TAB_ACTION_BUTTON_SIZE: f32 = 42.0;
