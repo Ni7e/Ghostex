@@ -675,6 +675,10 @@ impl GhostexGpuiApp {
         // drained it) has nothing for the list to read.
         if applied {
             self.gx_store_update_sidebar_list(cx);
+            // The rows this machine's tab draws are also the copy the NEXT run seeds from while it
+            // is offline, so every frame that moves them owes the stored key an update
+            // (`remote_last_seen.rs`, which debounces and skips a payload that is already stored).
+            self.gx_store_note_last_seen_change(machine_id, cx);
         }
         thread_ended
     }

@@ -57,8 +57,8 @@ pub use crate::project_docs::{
     SPACES_SYNC_DELAY_MS, SPACES_SYNC_RETRY_DELAY_MS,
 };
 pub use crate::presentation_store::{
-    LoadedPresentation, MachinePresentation, PresentationState, PresentationStore, SideState,
-    SideStateUpdate, SnapshotOrigin,
+    snapshot_storage_json, sorted_json, LoadedPresentation, MachinePresentation, PresentationState,
+    PresentationStore, SideState, SideStateUpdate, SnapshotOrigin,
 };
 pub use crate::selectors::{
     is_chat_project_path, Loadable, TabDirection, TabSession, DEFAULT_TERMINAL_SESSION_TITLE,

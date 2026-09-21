@@ -28,6 +28,10 @@ impl GhostexGpuiApp {
         // reason; the Spaces document has no stored key at all and answers at once
         // (gx_store/project_docs.rs).
         self.gx_store_flush_project_docs();
+        // The last-seen copy of every remote machine is written on a two-second debounce, so the
+        // rows of the last seconds of a session are still only in memory, and this app must be the
+        // later writer of a key the sidebar page still writes too (gx_store/remote_last_seen.rs).
+        self.gx_store_flush_last_seen_writes();
     }
 
     pub(crate) fn project_scoped_workarea_availability(&self) -> ProjectScopedWorkareaAvailability {

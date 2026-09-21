@@ -374,7 +374,7 @@ export const storageCatalog = Object.freeze({
   remotePresentations: define(
     'remotePresentations',
     'Remote presentation cache',
-    desktop + 'sidebar/gxserver-runtime/helpers/remote-last-seen.ts',
+    desktop + 'src/app/gx_store/remote_last_seen.rs',
     'ghostex-gpui-remote-last-seen-presentations',
     objectCodec,
     { ...cache, maxEntryBytes: 8 * MiB, maxBytes: 24 * MiB, maxEntries: 32 }

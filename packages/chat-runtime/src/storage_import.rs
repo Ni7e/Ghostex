@@ -112,33 +112,11 @@ pub(crate) fn import(storage: &mut Storage, profile: &Path) -> Result<()> {
             params![database, table, value.to_string()],
         )?;
     }
-    let mut usage: HashMap<String, (u64, u64)> = HashMap::new();
-    let mut revision = 0;
-    let mut total = 0;
-    {
-        let mut query = transaction.prepare("SELECT value FROM records")?;
-        for row in query.query_map([], |row| row.get::<_, String>(0))? {
-            let row: Value = serde_json::from_str(&row?)?;
-            let bytes = row["bytes"].as_u64().unwrap_or(0);
-            let counter = usage
-                .entry(row["store"].as_str().unwrap_or_default().to_owned())
-                .or_default();
-            counter.0 += bytes;
-            counter.1 += 1;
-            total += bytes;
-            revision = revision.max(row["revision"].as_u64().unwrap_or(0));
-        }
-    }
-    for (store, (bytes, entries)) in usage {
-        transaction.execute("INSERT INTO metadata VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![store,json!({"bytes":bytes,"entries":entries}).to_string()])?;
-    }
-    for (key, value) in [
-        ("revision", json!(revision)),
-        ("total", json!(total)),
-        ("browserImportV1", json!(true)),
-    ] {
-        transaction.execute("INSERT INTO metadata VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key,value.to_string()])?;
-    }
+    super::storage_metadata::recompute_record_metadata(&transaction)?;
+    transaction.execute(
+        "INSERT INTO metadata VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params!["browserImportV1", json!(true).to_string()],
+    )?;
     transaction.commit()?;
     Ok(())
 }

@@ -123,6 +123,8 @@ pub(crate) struct GxStoreHost {
     /// K6, the Spaces document. Same host, no stored key.
     pub(crate) spaces: super::client_document::ClientDocumentHost<ghostex_gx_core::SpacesDocument>,
     pub(super) project_moves: super::project_docs::ProjectMoveCounters,
+    /// The last-seen copy of every remote machine: which ones owe a write, and what is unwritten.
+    pub(crate) last_seen: super::remote_last_seen::RemoteLastSeenWriter,
     /// The collection a project move just created, which the renderer opens its Rename on. Held
     /// here rather than carried from the old projection's publish, because the create is the
     /// store's now and the publish would not know about it.

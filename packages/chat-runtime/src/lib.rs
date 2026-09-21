@@ -9,7 +9,9 @@ mod service;
 mod service_worker;
 mod storage;
 mod storage_import;
+mod storage_metadata;
 pub use service::ServiceRuntime;
+pub use storage_metadata::recompute_record_metadata;
 pub use service_worker::ServiceWorker;
 
 pub struct ChatRuntime {

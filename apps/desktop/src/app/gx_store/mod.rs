@@ -4,8 +4,10 @@
 //! `burst.rs` tells the old runtime once and releases deferred work when the selection settles;
 //! `session_walk.rs` walks the rendered sidebar rows for the previous and next session hotkeys;
 //! `remote_clients.rs` runs one client per connected remote machine and owns the machine tabs,
-//! and `remote_last_seen.rs` reads back the last-seen rows of one that has not connected in this
-//! run, from the `records` table rather than the `preferences` one every other door here uses;
+//! and `remote_last_seen.rs` keeps the last-seen copy of every remote machine, reading one back to
+//! seed a machine that has not connected in this run and writing it as the machine's rows move,
+//! through `records_storage.rs`, the door to the `records` table an indexeddb-catalogued store
+//! lives in rather than the `preferences` one every other door here uses;
 //! `layout_persist.rs` writes the shell layout on a timer; `shadow_diff.rs` mirrors the old
 //! runtime's focus into the core and compares its tab list; `sidebar_shadow.rs` builds the
 //! sidebar list from the store beside the old projection's and compares them (`_inputs` mirrors
@@ -40,6 +42,7 @@ mod host;
 mod layout_persist;
 mod local_focus;
 mod project_docs;
+mod records_storage;
 mod remote_clients;
 mod remote_last_seen;
 mod session_walk;

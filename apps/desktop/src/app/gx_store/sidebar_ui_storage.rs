@@ -67,7 +67,7 @@ const MAX_BACKEND_BYTES: usize = 2 * 1024 * 1024;
 /// `storageBytes(key, raw)`: two per UTF-16 code unit of the key and the value together. Not the
 /// length of the value in bytes, which is what the bound is most easily mistaken for and admits
 /// about twice as much.
-fn storage_bytes(key: &str, raw: &str) -> usize {
+pub(super) fn storage_bytes(key: &str, raw: &str) -> usize {
     2 * (utf16_len(key) + utf16_len(raw))
 }
 
@@ -529,6 +529,32 @@ pub(super) fn with_read_connection<T>(
     let result = read(held.read.as_ref().expect("opened above"));
     if result.is_err() {
         held.read = None;
+    }
+    result
+}
+
+/// Runs one write against the pooled read-write connection. The `records` door
+/// (`records_storage.rs`) borrows it for the same reason it borrows the read side: one pool, one
+/// busy timeout and one error vocabulary for a file two tables of which this app now writes.
+///
+/// A failed call drops the connection AND the cached preference totals, because a connection whose
+/// statement failed may have left the transaction open and the totals were measured against a
+/// database this process can no longer vouch for.
+pub(super) fn with_write_connection<T>(
+    write: impl FnOnce(&Connection) -> Result<T, &'static str>,
+) -> Result<T, &'static str> {
+    let mut held = connections()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if held.write.is_none() {
+        held.write = Some(open(
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
+        )?);
+    }
+    let result = write(held.write.as_ref().expect("opened above"));
+    if result.is_err() {
+        held.write = None;
+        held.totals = None;
     }
     result
 }

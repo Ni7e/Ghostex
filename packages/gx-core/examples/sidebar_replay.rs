@@ -383,6 +383,11 @@ fn last_seen_transition(frames: &str) -> bool {
         .map(|group| group.core.sessions.len())
         .sum();
     let seeded_faded = model.view().groups.iter().all(|group| group.core.is_stale);
+    // The WRITE half's only gate that runs on real rows: the copy this app would store for a
+    // machine has to be the copy it read, byte for byte, or the two writers of this key flip the
+    // row between them on every publish and a field the wire type drops is stripped from the copy
+    // the old sidebar still reads.
+    let seeded_round_trip = stored_round_trip(&core, &machine, &stored, 9_000);
 
     // A live delta and a "current" reply, both at a revision LOWER than the stored one, which is
     // what a daemon that restarted sends. Neither may be believed.
@@ -415,11 +420,14 @@ fn last_seen_transition(frames: &str) -> bool {
         .presentation()
         .loaded(&machine)
         .is_some_and(|loaded| !loaded.last_seen && loaded.revision == 12);
+    let live_round_trip = stored_round_trip(&core, &machine, &stored, 12);
     let fresh = SidebarViewModel::build_from_scratch(&core, &inputs, now_ms);
     let same = fresh == *model.view();
 
     let checks = [
         ("the seed draws rows", seeded_rows > 0),
+        ("the seeded copy writes back unchanged", seeded_round_trip),
+        ("the live copy writes back unchanged", live_round_trip),
         (
             "every seeded group is faded",
             seeded_faded && seeded_rows > 0,
@@ -442,6 +450,73 @@ fn last_seen_transition(frames: &str) -> bool {
         passed &= ok;
     }
     passed
+}
+
+/// Whether what the store would STORE for this machine is what it was given, byte for byte.
+///
+/// Both sides are put through `sorted_json` because the comparison is about the payload and not
+/// about whichever map `serde_json` was built with; the writer sorts for the same reason. A field
+/// the wire type does not carry, a `null` normalized to a default, a row left out of `Rows` and a
+/// differently ordered array all fail this.
+fn stored_round_trip(core: &Core, machine: &MachineId, stored: &Value, revision: i64) -> bool {
+    let Some(written) = core.presentation().machine(machine).and_then(|entry| {
+        entry
+            .to_snapshot()
+            .map(|snapshot| ghostex_gx_core::snapshot_storage_json(&snapshot))
+    }) else {
+        return false;
+    };
+    let mut expected = stored.clone();
+    expected["revision"] = Value::from(revision);
+    // The recording holds a snapshot in the order gxserver BUILDS it (project by project, each
+    // project's rows by `sortKey`), and what the old sidebar stores is its own cache, which
+    // `orderPresentationSessions` re-sorts whole after every delta and therefore within seconds of
+    // any snapshot. So the copy to match is that order, and the harness derives it here rather
+    // than borrowing the writer's own comparator: a writer that dropped one of the four keys still
+    // fails this.
+    if let Some(sessions) = expected.get_mut("sessions").and_then(Value::as_array_mut) {
+        sessions.sort_by_key(|session| {
+            let field = |name: &str| {
+                session
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            (
+                field("projectId"),
+                field("groupId"),
+                field("sortKey"),
+                field("sessionId"),
+            )
+        });
+    }
+    let expected = ghostex_gx_core::sorted_json(&expected).to_string();
+    if expected == written {
+        return true;
+    }
+    // Says WHERE, because "not byte identical" over a 400 KB payload is not a finding anyone can
+    // act on. The first byte that differs plus its surroundings names the field.
+    let at = expected
+        .bytes()
+        .zip(written.bytes())
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| expected.len().min(written.len()));
+    let window = |text: &str| {
+        let mut start = at.saturating_sub(70);
+        let mut end = (at + 70).min(text.len());
+        while start > 0 && !text.is_char_boundary(start) {
+            start -= 1;
+        }
+        while end < text.len() && !text.is_char_boundary(end) {
+            end += 1;
+        }
+        text[start..end].to_string()
+    };
+    println!("  stored copy differs at byte {at}");
+    println!("    read  …{}…", window(&expected));
+    println!("    write …{}…", window(&written));
+    false
 }
 
 /// The first `presentationSnapshot` of the recording, as its raw `snapshot` object.
