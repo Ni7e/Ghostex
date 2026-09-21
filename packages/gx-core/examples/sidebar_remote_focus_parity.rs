@@ -1,5 +1,7 @@
-//! The gate for a click on a row of another machine: the one native action it posts, and the two
-//! options that decide what the user sees.
+//! The gate for a click on a row of another machine: the one native action it posts, the two
+//! options that decide what the user sees, and the attention acknowledgement and tab selection the
+//! store sends the old runtime in place of the command (each plan's `attentionAcknowledgement` and
+//! `tabSelection`, which the comparer replays against the shipped `focusSession`).
 //!
 //! **No recording holds one**, for the same reason the remote action gate builds its payloads: no
 //! remote machine was enabled until 2026-09-21. So the cases are BUILT, and the two that actually

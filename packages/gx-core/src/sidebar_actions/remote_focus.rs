@@ -1,14 +1,19 @@
-//! Clicking a row that lives on ANOTHER machine: which session, which pane, and the one native
-//! action that opens it.
+//! Clicking a row that lives on ANOTHER machine: which session, which pane, the one native action
+//! that opens it, and the attention acknowledgement that goes with it.
 //!
 //! CDXC:RemoteMachines 2026-09-21 WHY:
 //! The old runtime's remote branch of `focusSession` is four steps and the ORDER of them is the
 //! whole contract: acknowledge the attention, work out `keepView` from the group that is active
 //! right now, read the agent's Default Agent View off THAT machine's presentation, and post
-//! `openRemoteSessionTerminal` through the fixed native project-path bridge. Only if that post is
-//! accepted does the focus move. The post is the one thing this crate cannot do, so the plan ends
-//! at the payload and the host performs it; the marks it then applies are the core's own focus
-//! intent rather than a second copy of the runtime's bookkeeping.
+//! `openRemoteSessionTerminal` through the fixed native project-path bridge; then it moves its
+//! remote focus marks (`setRemotePresentationSessionFocus`) and publishes them. The post and the
+//! acknowledgement's timers are the two things this crate cannot do, so the plan ends at two
+//! payloads the host performs in that order: the acknowledgement for the old runtime's attention
+//! subsystem (which keeps the minimum visible window and its one timer implementation), and the
+//! open. The marks are not a third payload: the open ends in the tab-selected callback, whose
+//! remote branch is exactly `setRemotePresentationSessionFocus` plus the publish
+//! ([`RemoteFocusPlan::tab_selection`] is what it carries), so the command no longer goes to the
+//! old runtime at all.
 //!
 //! **What the payload actually reaches.** The bridge arm for this action is
 //! `handle_gpui_remote_session_native_action`, which resolves the machine's SSH configuration and
@@ -28,9 +33,11 @@
 //! The core's focus does not follow a remote focus (the shadow mirror keeps this computer's, see
 //! `CDXC:FocusRouting 2026-09-20` in shadow_diff.rs), so reading `core.focus()` answered "the
 //! project changes" for every remote click, and every second click inside the active remote project
-//! sent a `keepView` the runtime did not: its copy then ran too. The group is what the runtime's
-//! `activeGroupId` holds when the forwarded command runs, which [`RuntimeActiveGroup`] tracks from
-//! what the host SENT the runtime and what the runtime last PUBLISHED; its comment has the proof.
+//! sent a `keepView` the runtime did not. The old runtime's `activeGroupId` is still the one
+//! definition of "the active project" (a group header's attach, a lifecycle replacement and its
+//! own restores move it, and none of those are the store's yet), so the group is what it holds at
+//! the moment of the click, which [`RuntimeActiveGroup`] tracks from what the host SENT the runtime
+//! and what the runtime last PUBLISHED; its comment has the proof.
 //!
 //! Refused, each with its reason: a LOCAL row (the store's own focus path owns it), a browser row
 //! (an app tab, not a session), an id that does not parse as a remote session, and a machine whose
@@ -53,6 +60,14 @@ use crate::selectors::is_chat_project_path;
 use super::resolve::{
     text_field, NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE, NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
 };
+
+/// `ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge`, the bridge the store already uses to
+/// acknowledge a local row (`GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE` in
+/// the desktop's consts.rs). A remote row rides it with machine-scoped ids, which the old runtime's
+/// `normalizeGpuiWorkspaceRemoteSessionAttentionAcknowledge` accepts only as a matching pair.
+pub const SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge";
+pub const SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION: i64 = 1;
 
 /// The two messages whose remote branch is this file's. `focusSession` is what
 /// `selectNativeSidebarSession` posts for a row click, and what a Space restore posts with
@@ -94,9 +109,11 @@ impl PreferredInterfaceSettings {
 pub struct RemoteFocusPlan {
     /// The row, as a key that carries its machine.
     pub session: SessionKey,
-    /// Queued for the old runtime, which owns the attention timers and their minimum visible
-    /// window; a click acknowledges before anything else happens, exactly as Split Right does.
-    pub acknowledge_attention: bool,
+    /// The acknowledgement the host sends the old runtime BEFORE the open, as `focusSession` and
+    /// `splitSessionRight` both acknowledge first. Always sent: whether the row is in attention,
+    /// and whether the minimum visible window defers the clear, is the runtime's to decide, so the
+    /// timer stays one implementation.
+    pub attention_acknowledgement: Value,
     /// Whether the destination keeps its own remembered view instead of switching to Agents.
     pub keep_view: bool,
     /// The agent's Default Agent View, absent for a row with no agent.
@@ -105,9 +122,9 @@ pub struct RemoteFocusPlan {
     pub split_right: bool,
     /// The `openRemoteSessionTerminal` payload, ready for the native project-path entry point.
     pub native_action: Value,
-    /// The group the old runtime's `activeGroupId` holds once it has run the forwarded command:
-    /// [`remote_focus_group`] of the row. Not part of the payload; the host feeds it to
-    /// [`RuntimeActiveGroup::sent_remote_focus`].
+    /// The group the old runtime's `activeGroupId` holds once the open's tab-selected callback has
+    /// run: [`remote_focus_group`] of the row. Not part of either payload; the host's callback feeds
+    /// it to [`RuntimeActiveGroup::sent_remote_focus`], and the gate checks the two agree.
     pub focus_group: String,
 }
 
@@ -116,12 +133,25 @@ impl RemoteFocusPlan {
         self.session.machine.remote_id().unwrap_or_default()
     }
 
+    /// The ids the open's tab-selected callback carries (`set_sidebar_gxserver_remote_attach_focus_state`
+    /// builds them from the attach key with `gpui_remote_scoped_project_id` and
+    /// `gpui_remote_scoped_session_id`). Not sent by the host: the open sends it. The gate replays it
+    /// through `handleGpuiWorkspaceTabSessionSelected` to prove it moves the marks the forwarded
+    /// command used to move.
+    pub fn tab_selection(&self) -> Value {
+        json!({
+            "projectId": self.session.project_key().to_workspace_project_id(),
+            "sessionId": self.session.to_focus_state_session_id(),
+        })
+    }
+
     /// The plan in the shape the parity gate compares: the payload that opens the pane and the
     /// marks that follow it.
     pub fn to_json(&self) -> Value {
         json!({
             "session": self.session.to_sidebar_session_id(),
-            "acknowledgeAttention": self.acknowledge_attention,
+            "attentionAcknowledgement": self.attention_acknowledgement,
+            "tabSelection": self.tab_selection(),
             "keepView": self.keep_view,
             "preferredInterface": self.preferred_interface,
             "splitRight": self.split_right,
@@ -133,8 +163,8 @@ impl RemoteFocusPlan {
 /// What a click on a remote row does, or `None` when this file does not own the payload and the old
 /// runtime must answer it whole.
 ///
-/// `runtime_active_group` is the sidebar group id the old runtime's `activeGroupId` holds when the
-/// forwarded command runs ([`RuntimeActiveGroup::current`]); `None` is "no group", which, like every
+/// `runtime_active_group` is the sidebar group id the old runtime's `activeGroupId` holds at the
+/// moment of the click ([`RuntimeActiveGroup::current`]); `None` is "no group", which, like every
 /// local group, answers "the project changes".
 pub fn plan_remote_focus(
     core: &Core,
@@ -187,9 +217,15 @@ pub fn plan_remote_focus(
         split_right,
     );
     let focus_group = remote_focus_group(core, &session);
+    let attention_acknowledgement = json!({
+        "projectId": session.project_key().to_workspace_project_id(),
+        "sessionId": session.to_focus_state_session_id(),
+        "type": SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE,
+        "version": SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION,
+    });
     Some(RemoteFocusPlan {
         session,
-        acknowledge_attention: true,
+        attention_acknowledgement,
         keep_view,
         preferred_interface,
         split_right,
@@ -288,13 +324,13 @@ pub const RUNTIME_GROUP_SENT_TRUST_MS: u64 = 2_000;
 /// host queued before it, so that is tracked, and the publish is used only once it can be shown to
 /// come after that script:
 ///
-/// - A remote focus the host sent (a forwarded click or Split Right on a remote row, or the
-///   tab-selected callback for a remote tab, which both run `setRemotePresentationSessionFocus`) is
+/// - A remote focus the host sent (the tab-selected callback for a remote tab, which the store's
+///   own open of a remote row sends and which runs `setRemotePresentationSessionFocus`) is
 ///   believed until a publish names that same group, a later script replaces it, or
 ///   [`RUNTIME_GROUP_SENT_TRUST_MS`] passes.
 /// - A local selection reaches the runtime as a tell stamped with the store's focus stamp, and
-///   every publish echoes the newest stamp it has heard. The tell is flushed before any forwarded
-///   command, so a tell newer than the sent remote focus, or one still pending, means the command
+///   every publish echoes the newest stamp it has heard. The tell is flushed before any remote
+///   focus is sent, so a tell newer than the sent remote focus, or one still pending, means the command
 ///   finds the local group the tell set, until a publish echoes that stamp; from then on the
 ///   publish is fresher than both, because the runtime handled the tell after everything sent
 ///   before it.
