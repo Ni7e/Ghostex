@@ -169,13 +169,17 @@ pub fn more_menu(input: &MoreMenuInput<'_>) -> Vec<MenuItem> {
             children,
         ));
     }
+    /*
+    CDXC:Sidebar 2026-09-21 DECISION:
+    User: the sidebar menu has no Settings or Hotkeys entries; it ends at Join Discord. Settings is
+    the gear beside the Commands row, and Hotkeys is a page inside Settings. This supersedes the
+    2026-09-20 rule that kept both entries here as a deliberate duplicate of the gear.
+    SEE-ALSO: apps/desktop/sidebar/native-sidebar/navigation.ts builds the same menu for React and must match.
+    */
     more.push(MenuItem::row(
         "Join Discord",
         "users-group",
         MenuCommand::command(message::open_external_url(DISCORD_URL)),
     ));
-    more.push(MenuItem::separator());
-    more.push(intent("Hotkeys", "keyboard", "hotkeys"));
-    more.push(intent("Settings", "settings", "settings"));
     more
 }

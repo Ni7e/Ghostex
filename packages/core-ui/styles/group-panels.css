@@ -1636,6 +1636,19 @@ body[data-sidebar-tooltips-suppressed='true'] [data-slot='tooltip-content'] {
 }
 
 /*
+ * CDXC:ContextMenus 2026-09-21 WHY:
+ * Compact session menus are 178px, but Configure Machines wraps onto a second line there. Size this menu to its labels and keep each row on one line.
+ */
+.reference-sidebar-machine-tab-menu {
+  width: min(200px, calc(100vw - 24px));
+}
+
+.reference-sidebar-machine-tab-menu.ghostex-menu-panel :is([role^='menuitem'], .session-context-menu-item) {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+/*
  * CDXC:RemoteMachines 2026-09-02:
  * The strip is edge-to-edge. It lives in the unclipped top chrome and bleeds
  * by the layout root's full horizontal padding (not the 5px-gutter row

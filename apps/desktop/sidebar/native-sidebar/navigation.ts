@@ -112,12 +112,12 @@ export function createNativeNavigation(ui: NativeSidebarUiState) {
     children.push({ separator: true }, intent('Power Settings', 'settings', 'powerSettings'));
     more.push({ label: 'Keep Awake', icon: active ? 'coffee' : 'moon', children });
   }
-  more.push(
-    runtime('Join Discord', 'users-group', { type: 'openExternalUrl', url: GHOSTEX_DISCORD_URL }),
-    { separator: true },
-    intent('Hotkeys', 'keyboard', 'hotkeys'),
-    intent('Settings', 'settings', 'settings')
-  );
+  /**
+   * CDXC:Sidebar 2026-09-21 DECISION:
+   * User: the sidebar menu has no Settings or Hotkeys entries; it ends at Join Discord. Settings is the gear beside the Commands row, and Hotkeys is a page inside Settings.
+   * SEE-ALSO: packages/gx-core/src/sidebar_menu/navigation.rs builds the same menu for the GPUI sidebar and must match.
+   */
+  more.push(runtime('Join Discord', 'users-group', { type: 'openExternalUrl', url: GHOSTEX_DISCORD_URL }));
   return {
     moreMenu: more,
     searchShortcut: hotkeys.openSessionSearchPalette

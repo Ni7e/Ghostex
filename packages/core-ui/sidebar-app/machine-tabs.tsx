@@ -181,7 +181,7 @@ export function SidebarMachineTabs({
       {contextMenu ? (
         <SidebarContextMenuPortal
           menuClassName='session-context-menu reference-sidebar-machine-tab-menu'
-          menuStyle={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px`, width: '200px' }}
+          menuStyle={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
           onDismiss={dismissContextMenu}
           vscode={vscode}
         >

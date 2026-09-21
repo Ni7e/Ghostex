@@ -1,11 +1,24 @@
 use gpui::{Bounds, FocusHandle, Pixels, Point};
 use serde_json::Value;
 
+/// Where a panel sits relative to its anchor point.
+#[derive(Clone, Copy, Default, PartialEq)]
+pub(crate) enum SidebarMenuPlacement {
+    /// Centred across the sidebar at the anchor's height: context menus and the menus that open
+    /// where the pointer is.
+    #[default]
+    Pointer,
+    /// The anchor is a point just below a trigger's bottom-right corner: the panel's right edge
+    /// lines up with the trigger's right edge and its top sits on the anchor.
+    BelowTrigger,
+}
+
 #[derive(Clone)]
 pub(crate) struct SidebarMenuPanel {
     pub(crate) items: Vec<Value>,
     pub(crate) scroll: gpui::ScrollHandle,
     pub(crate) anchor: Point<Pixels>,
+    pub(crate) placement: SidebarMenuPlacement,
     pub(crate) selected: Option<usize>,
     pub(crate) pages: Vec<Vec<Value>>,
     /// Border-box height of the rendered rows, measured after layout.
@@ -29,6 +42,7 @@ impl SidebarMenuPanel {
             items,
             scroll: Default::default(),
             anchor,
+            placement: SidebarMenuPlacement::Pointer,
             selected: None,
             pages: vec![],
             measured_height: None,
@@ -50,6 +64,47 @@ impl SidebarMenuPanel {
             .is_some_and(|item| item["menuStyle"] == "agentLauncher")
     }
 
+    /// CDXC:ContextMenus 2026-09-21 WHY:
+    /// Compact session menus stay at 178px (nested 204px) to match React, but Configure Machines wraps onto a second line there. Grow to the longest label so every row stays on one line without widening short menus.
+    fn fitted_width(&self, nested: bool) -> f32 {
+        if self.is_agent_launcher() {
+            return super::agent_launcher_menu::AGENT_LAUNCHER_MENU_WIDTH;
+        }
+        let min = if nested { 204.0 } else { 178.0 };
+        // Panel padding 6+6, border 1+1, row inset 10+10, icon 16, gap 8.
+        const CHROME: f32 = 58.0;
+        // 13px UI font; slightly wide so a label cannot wrap after rounding.
+        const PX_PER_CHAR: f32 = 8.0;
+        self.items
+            .iter()
+            .filter(|item| item["separator"] != true)
+            .map(|item| {
+                let label = item["label"].as_str().unwrap_or("");
+                let suffix = item["suffix"].as_str().unwrap_or("");
+                let mut extra = 0.0;
+                if item.get("children").is_some()
+                    || item["command"]["type"] == "sessionAccounts"
+                        && item["command"]["action"] == "load"
+                {
+                    extra += 18.0;
+                }
+                if item.get("secondary").is_some() {
+                    extra += 36.0;
+                }
+                if item["checked"] == true {
+                    extra += 22.0;
+                }
+                if item["supportsChat"] == true {
+                    extra += 18.0;
+                }
+                CHROME
+                    + extra
+                    + (label.chars().count() + suffix.chars().count()) as f32 * PX_PER_CHAR
+            })
+            .fold(min, f32::max)
+            .ceil()
+    }
+
     /// CDXC:AgentLauncher 2026-09-19 DECISION:
     /// User: the GPUI Select Agent menu and its account page must fit every account without cutting off the last row, like the React sidebar.
     /// The panel takes the measured height of its rows; the per-row estimate only places the first frame, because two-line account rows and wrapped hints outgrow any fixed row height.
@@ -61,16 +116,8 @@ impl SidebarMenuPanel {
     ) -> Bounds<Pixels> {
         let margin = gpui::px(12.0 * scale);
         let launcher = self.is_agent_launcher();
-        let width = gpui::px(
-            if launcher {
-                super::agent_launcher_menu::AGENT_LAUNCHER_MENU_WIDTH
-            } else if nested {
-                204.0
-            } else {
-                178.0
-            } * scale,
-        )
-        .min((sidebar.size.width - margin * 2.0).max(gpui::px(0.0)));
+        let width = gpui::px(self.fitted_width(nested) * scale)
+            .min((sidebar.size.width - margin * 2.0).max(gpui::px(0.0)));
         let estimate = if launcher {
             super::agent_launcher_menu::estimated_height(&self.items, width, scale)
         } else {
@@ -100,6 +147,12 @@ impl SidebarMenuPanel {
         let left = if launcher {
             (self.anchor.x - width)
                 .min(sidebar.right() - width - margin)
+                .max(sidebar.left() + margin)
+        } else if self.placement == SidebarMenuPlacement::BelowTrigger {
+            // No margin on the right: the trigger itself sits inside the sidebar's edge, and the
+            // panel's right edge has to meet it exactly.
+            (self.anchor.x - width)
+                .min(sidebar.right() - width)
                 .max(sidebar.left() + margin)
         } else {
             sidebar.left() + (sidebar.size.width - width) / 2.0
@@ -148,6 +201,12 @@ impl SidebarMenuPanel {
 }
 
 impl SidebarMenuState {
+    pub(crate) fn dropped_from_trigger(&self) -> bool {
+        self.panels
+            .first()
+            .is_some_and(|panel| panel.placement == SidebarMenuPlacement::BelowTrigger)
+    }
+
     pub(crate) fn refresh(&mut self, snapshot: &super::model::NativeSidebarSnapshot) {
         fn collect(value: &Value, items: &mut std::collections::HashMap<String, Value>) {
             match value {

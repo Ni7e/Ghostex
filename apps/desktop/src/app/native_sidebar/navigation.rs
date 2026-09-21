@@ -1,16 +1,19 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled,
-    WindowControlArea, div, px,
+    AnyElement, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    StatefulInteractiveElement, Styled, div, px,
 };
+use gpui_component::ElementExt as _;
 use gpui_component::h_flex;
 use gpui_component::tooltip::ManagedTooltipExt as _;
 use gpui_component::tooltip::ManagedTooltipPlacement;
 use serde_json::json;
 
 use super::appearance::SidebarAppearance;
+use super::menu_state::SidebarMenuState;
 use crate::app::consts::*;
 use crate::app::helpers::*;
+use crate::app::render::window_drag_region::window_drag_region;
 use crate::*;
 
 impl GhostexGpuiApp {
@@ -52,29 +55,51 @@ impl GhostexGpuiApp {
         let reserves_window_controls =
             cfg!(target_os = "macos") && !footer && !self.sidebar_collapsed;
         /*
-        CDXC:Sidebar 2026-09-20 DECISION:
-        User: once the sidebar is narrower than `SIDEBAR_COMPACT_ROWS_WIDTH`, the Search and the
-        Commands rows drop their label and their shortcut hint and become icon-only buttons with the
+        CDXC:Sidebar 2026-09-21 DECISION:
+        User: once the sidebar is narrower than its row's threshold (`SIDEBAR_COMPACT_SEARCH_WIDTH`,
+        `SIDEBAR_COMPACT_COMMANDS_WIDTH`), the Search and the Commands rows drop their label and their shortcut hint and become icon-only buttons with the
         same icon they already show, the label and shortcut move into the tooltip ("Search (⌘P)",
-        "Commands (⌘⇧P)"), and every button in both rows aligns left instead of the trailing controls
-        hugging the right edge.
+        "Commands (⌘⇧P)"), and every button in both rows aligns right, against the sidebar's
+        trailing edge. This supersedes the 2026-09-20 rule that aligned them left.
         */
-        let compact = self.sidebar_width < SIDEBAR_COMPACT_ROWS_WIDTH * scale;
+        let compact_below = if footer {
+            SIDEBAR_COMPACT_COMMANDS_WIDTH
+        } else {
+            SIDEBAR_COMPACT_SEARCH_WIDTH
+        };
+        let compact = self.sidebar_width < compact_below * scale;
         /*
         CDXC:Sidebar 2026-09-20 WHY:
-        At `SIDEBAR_MIN_WIDTH` the macOS traffic-light reserve leaves the Search row about seventy
+        At `SIDEBAR_MIN_WIDTH` the macOS traffic-light reserve leaves the Search row about 110
         points for three buttons, so a compact row that kept all of them would have painted its last
         one over the divider and the work area. The row is clipped, and it drops what cannot fit
         instead: the search button always stays, the notification bell goes first because its badge
         also shows up in the menu, and the sidebar menu button is the last to go.
         */
         let compact_button_slot = 38.0 * scale;
+        /*
+        CDXC:Sidebar 2026-09-21 DECISION:
+        User: the Toggle sidebar button sits left of Search, so it stays in exactly the same spot
+        always. While the sidebar is docked this row owns the window's top-left corner, so it draws
+        the button right after the traffic lights, at the unscaled x the collapsed workarea header
+        draws it (`WINDOW_CONTROLS_LEADING_RESERVE`); the header only draws it while collapsed.
+        */
+        let sidebar_toggle_width = if reserves_window_controls {
+            7.0 * scale
+                + TITLEBAR_BUTTON_HORIZONTAL_PADDING * 2.0
+                + TITLEBAR_SIDEBAR_COLLAPSE_ICON_LEFT_OFFSET
+                + TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE
+                + 4.0 * scale
+        } else {
+            0.0
+        };
         let compact_room = self.sidebar_width
             - if reserves_window_controls {
                 WINDOW_CONTROLS_LEADING_RESERVE - 7.0 * scale
             } else {
                 5.0 * scale
             }
+            - sidebar_toggle_width
             - 5.0 * scale;
         let compact_fits = |buttons: f32| !compact || compact_room >= buttons * compact_button_slot;
         let icon_path = if footer {
@@ -95,9 +120,9 @@ impl GhostexGpuiApp {
             .when(!footer || compact, |row| {
                 row.px(px(5.0 * scale)).gap(px(4.0 * scale))
             })
+            .when(compact, |row| row.justify_end())
             .when(reserves_window_controls, |row| {
-                row.pl(px(WINDOW_CONTROLS_LEADING_RESERVE - 7.0 * scale))
-                    .window_control_area(WindowControlArea::Drag)
+                window_drag_region(row.pl(px(WINDOW_CONTROLS_LEADING_RESERVE - 7.0 * scale)))
             })
             .overflow_hidden()
             /*
@@ -110,6 +135,18 @@ impl GhostexGpuiApp {
             */
             .flex_shrink_0()
             .text_color(titlebar_active_text_color().opacity(0.52))
+            .when(reserves_window_controls, |row| {
+                // The row's leading padding is scaled with the sidebar; the margin puts the button
+                // back on the header's unscaled x. The spacer keeps it left of a compact row, whose
+                // other buttons align right.
+                row.child(
+                    div()
+                        .flex_shrink_0()
+                        .ml(px(7.0 * scale))
+                        .child(self.render_sidebar_collapse_button(cx)),
+                )
+                .when(compact, |row| row.child(div().flex_1()))
+            })
             /*
             CDXC:Sidebar 2026-09-20 WHY:
             The sidebar can be dragged down to `SIDEBAR_MIN_WIDTH`, and this row now carries more
@@ -203,6 +240,11 @@ impl GhostexGpuiApp {
                 |row| row.child(self.render_sidebar_notification_bell(appearance, cx)),
             )
             .when(!footer && compact_fits(2.0), |row| {
+                let more_open = self
+                    .native_sidebar
+                    .menu
+                    .as_ref()
+                    .is_some_and(SidebarMenuState::dropped_from_trigger);
                 row.child(
                     div()
                         .id("native-sidebar-more")
@@ -214,29 +256,42 @@ impl GhostexGpuiApp {
                         .items_center()
                         .justify_center()
                         .cursor_default()
+                        .when(more_open, |row| row.bg(appearance.hover))
                         .hover(|row| row.bg(appearance.hover))
                         .child(titlebar_svg_icon(
                             "titlebar/menu-2.svg",
                             15.0 * scale,
                             appearance.muted,
                         ))
-                        .on_click(cx.listener(move |_, event: &gpui::ClickEvent, window, cx| {
-                            Self::show_native_sidebar_menu(
-                                &more_menu,
-                                event.position(),
-                                scale,
-                                window,
-                                cx,
-                            );
-                        })),
+                        .on_prepaint({
+                            let bounds = self.native_sidebar.more_button_bounds.clone();
+                            move |painted, _, _| bounds.set(Some(painted))
+                        })
+                        .on_mouse_down(MouseButton::Left, {
+                            let bounds = self.native_sidebar.more_button_bounds.clone();
+                            cx.listener(move |app, event: &gpui::MouseDownEvent, window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                let trigger = bounds.get().unwrap_or_else(|| gpui::Bounds {
+                                    origin: event.position,
+                                    size: gpui::size(gpui::px(1.0), gpui::px(1.0)),
+                                });
+                                app.toggle_native_sidebar_more_menu(
+                                    &more_menu, trigger, scale, window, cx,
+                                );
+                            })
+                        }),
                 )
             })
             /*
-            CDXC:Sidebar 2026-09-20 DECISION:
+            CDXC:Sidebar 2026-09-21 DECISION:
             User: Settings gets a one-click gear immediately to the right of the Commands
             row, and the Commands row keeps its full-width shape and its shortcut hint
-            rather than shrinking to an icon. The sidebar menu keeps its own Settings and
-            Hotkeys entries; that duplication is deliberate.
+            rather than shrinking to an icon while the sidebar is wide enough. The gear is
+            now the sidebar's only Settings entry: the sidebar menu no longer carries
+            Settings or Hotkeys (packages/gx-core/src/sidebar_menu/navigation.rs). This
+            supersedes the 2026-09-20 rule that kept both entries in the menu as a
+            deliberate duplicate.
             */
             .when(footer, |row| {
                 row.children(self.render_native_sidebar_usage_toggle(appearance, cx))
@@ -247,7 +302,8 @@ impl GhostexGpuiApp {
                         .id("native-sidebar-settings")
                         .h(px(28.0 * scale))
                         .w(px(34.0 * scale))
-                        .mr(px(6.0 * scale))
+                        // The compact row already insets its trailing edge like the Search row.
+                        .mr(px((if compact { 0.0 } else { 6.0 }) * scale))
                         .rounded(px(5.0 * scale))
                         .flex()
                         .flex_shrink_0()
