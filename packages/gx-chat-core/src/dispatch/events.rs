@@ -16,6 +16,15 @@ use crate::state::{ChatContext, ChatState};
 /// family that asked owns the answer, and the request id is what says which family that is. Family
 /// a keeps that table in [`crate::ChatCore`], so those arms land there rather than here.
 pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
+    // The core owns no threads, so a due timer is a key on the state rather than a callback. The
+    // table is drained once here, before any family runs, and the keys stay readable for the whole
+    // dispatch: a family answers its own timer inside its ordinary handler
+    // (`state.core.timer_fired(KEY)`), which is why the drain cannot live in one family's arm.
+    state.core.fired_timers = if matches!(event, Event::Tick) {
+        state.core.timers.due(context.now_ms)
+    } else {
+        Vec::new()
+    };
     let mut effects = route(state, event, context);
     // Family f carries state a pure `document` cannot derive (the stint word, the loading stage,
     // the task fold, the search cursor, the tail sheet), so the mutating half of the TypeScript's

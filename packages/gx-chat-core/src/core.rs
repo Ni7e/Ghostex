@@ -28,6 +28,9 @@ pub struct ChatCore {
     next_request_id: u64,
     /// The clock and locale the host last passed in. The core never reads either itself.
     context: ChatContext,
+    /// The wake the host was last told to arm, so a [`Effect::SetTimer`] is emitted only when the
+    /// earliest deadline actually moved.
+    armed_wake_ms: Option<u64>,
 }
 
 impl ChatCore {
@@ -46,9 +49,21 @@ impl ChatCore {
     /// makes a replay reproducible.
     pub fn handle(&mut self, event: Event, context: ChatContext) -> Vec<Effect> {
         self.context = context;
-        let effects = events::dispatch(&mut self.state, &event, &self.context);
+        let mut effects = events::dispatch(&mut self.state, &event, &self.context);
         self.republish();
+        // One wake for the whole core, not one per timer: the table knows which key is earliest,
+        // and the host only has to be asked again when that answer changed.
+        let wake = self.next_wake_ms();
+        if wake != self.armed_wake_ms {
+            self.armed_wake_ms = wake;
+            effects.push(Effect::SetTimer { delay_ms: wake });
+        }
         effects
+    }
+
+    /// Milliseconds until the core's earliest armed deadline, or `None` when nothing is armed.
+    pub fn next_wake_ms(&self) -> Option<u64> {
+        self.state.core.timers.next_wake_ms(self.context.now_ms)
     }
 
     /// The state every family reads.
@@ -88,6 +103,7 @@ impl ChatCore {
             } else {
                 Some(Box::new(self.document.clone()))
             },
+            next_wake_ms: self.next_wake_ms(),
             ..Frame::default()
         }
     }

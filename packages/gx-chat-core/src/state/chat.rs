@@ -55,9 +55,20 @@ pub struct CoreState {
     pub title: Option<String>,
     /// The Chat Lab's display settings, present only under a preview backend.
     pub preview_settings: Option<serde_json::Value>,
+    /// Every deadline the core is waiting on. Any family may arm one by key; the host only ever
+    /// sees the earliest, as the frame's `nextWakeMs`.
+    pub timers: crate::session::timers::TimerTable,
+    /// The timer keys that came due during the dispatch running right now, cleared before the next
+    /// one. A family reads its own keys out of this rather than being called back.
+    pub fired_timers: Vec<String>,
 }
 
 impl CoreState {
+    /// Whether one of this dispatch's due timers is `key`.
+    pub fn timer_fired(&self, key: &str) -> bool {
+        self.fired_timers.iter().any(|fired| fired == key)
+    }
+
     /// Records a refusal, replacing whatever was shown before.
     pub fn fail(&mut self, message: impl Into<String>, code: Option<String>) {
         self.operation_error = Some(message.into());

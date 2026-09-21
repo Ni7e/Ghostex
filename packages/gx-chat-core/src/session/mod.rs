@@ -22,6 +22,7 @@ pub mod startup_sends;
 pub mod stream;
 pub mod streaming;
 pub mod text;
+pub mod timers;
 pub mod view_state;
 pub mod working;
 
