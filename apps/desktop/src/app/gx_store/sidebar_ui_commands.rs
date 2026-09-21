@@ -318,27 +318,51 @@ impl GhostexGpuiApp {
     /// the full list is shown when the compact one would still leave it out. The old projection
     /// does the same to its own copy, from the same request, so the two stay in step.
     ///
-    /// Runs whichever list is drawn. It used to be gated on the store's list being the drawn one,
-    /// because working the plan out reads the list and may build it again and nothing on screen
-    /// would have used the answer; since M5 piece 7c this state is the only writer of the collapse
-    /// key in either position of the switch, so a reveal that did not run here would simply not be
-    /// stored.
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// A reveal that arrives before the list is ready is HELD, not answered. The whole plan is read
+    /// off `inputs.ui`, and until the client-storage read lands that is the empty default: every
+    /// group open, nothing hidden, no tag filter, so the plan has nothing to lift and makes no
+    /// intent, and with no presentation snapshot yet even the scratch build cannot locate the row.
+    /// Answering it then took the request id all the same, so the user's real collapsed project
+    /// came back from storage a moment later with the row still folded inside it, and the session a
+    /// notification or a project activation asked for was scrolled to but never opened.
+    /// `gx_store_replay_held_sidebar_reveal` answers it once the list is ready, which is the one
+    /// place the sidebar's own state and the HUD are both known to have landed. This supersedes the
+    /// 2026-09-20 note that the id had to be taken before any gate, which guarded against the
+    /// deleted page's publish re-carrying a minutes-old request on every frame: `newest_reveal` is
+    /// now set only by a reveal that really happened, and the ready gate opens once per launch.
     pub(crate) fn gx_store_note_sidebar_reveal(
         &mut self,
         sidebar_session_id: &str,
         request_id: u64,
         cx: &mut gpui::Context<Self>,
     ) {
-        // The request id is taken first, whatever the switch says. `reveal.ts` never clears
-        // `ui.revealRequest`, so the newest one is on every publish for the rest of the run, and a
-        // gate that returned before this would replay the session's last reveal the moment the
-        // switch moved: a group expanding, Show Hidden lifting and the filters clearing out of
-        // nowhere, for something the user asked for minutes ago.
+        if !self.gx_store_sidebar_list_ready() {
+            self.gx_store.runtime_facts.counters.reveals_held += 1;
+            return;
+        }
         let fresh = self.gx_store.sidebar_ui.take_reveal_request(request_id);
         if !fresh {
             return;
         }
         self.gx_store_apply_sidebar_reveal(sidebar_session_id, cx);
+    }
+
+    /// The newest reveal the launch window held, answered the first time the list is ready. Costs
+    /// one `Option<u64>` comparison on every other update.
+    pub(super) fn gx_store_replay_held_sidebar_reveal(&mut self, cx: &mut gpui::Context<Self>) {
+        let held = self
+            .gx_store
+            .runtime_facts
+            .newest_reveal
+            .as_ref()
+            .filter(|reveal| !self.gx_store.sidebar_ui.reveal_handled(reveal.request_id))
+            .cloned();
+        let Some(held) = held else {
+            return;
+        };
+        self.gx_store.runtime_facts.counters.reveals_replayed += 1;
+        self.gx_store_note_sidebar_reveal(&held.session_id, held.request_id, cx);
     }
 
     /// The reveal itself, for a request a publish carried and for the slot hotkey's jump, which

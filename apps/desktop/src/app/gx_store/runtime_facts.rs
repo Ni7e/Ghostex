@@ -52,6 +52,11 @@ pub(crate) struct RuntimeFactsCounters {
     pub(super) row_posts: u64,
     pub(super) reveal_posts: u64,
     pub(super) unparsable: u64,
+    /// Reveals that arrived before the list was ready and were held for the replay. Above zero
+    /// only in the first instants of a launch, and each one is answered once
+    /// (`revealsReplayed` moves with it).
+    pub(super) reveals_held: u64,
+    pub(super) reveals_replayed: u64,
 }
 
 impl GhostexGpuiApp {
@@ -129,7 +134,9 @@ impl GhostexGpuiApp {
         }
         // The sidebar's own state answers a reveal, and it used to learn of one only on the publish
         // that carried it. Taking the request id here and again in the receiver is harmless: the
-        // second call finds it already taken and returns (`take_reveal_request`).
+        // second call finds it already taken and returns (`take_reveal_request`). A reveal that
+        // arrives before the list is ready is HELD rather than answered, and
+        // `gx_store_update_sidebar_list` replays it (`gx_store_replay_held_sidebar_reveal`).
         if let Some(reveal) = reveal {
             self.gx_store_note_sidebar_reveal(&reveal.session_id, reveal.request_id, cx);
         }

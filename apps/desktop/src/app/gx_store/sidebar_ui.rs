@@ -163,6 +163,11 @@ impl SidebarUiHost {
         self.generation
     }
 
+    /// Whether this reveal request has already been answered, asked without taking it.
+    pub(super) fn reveal_handled(&self, request_id: u64) -> bool {
+        self.handled_reveal == Some(request_id)
+    }
+
     /// Whether this reveal request is a new one. Answered once, like the renderer's own.
     pub(super) fn take_reveal_request(&mut self, request_id: u64) -> bool {
         if self.handled_reveal == Some(request_id) {

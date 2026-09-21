@@ -547,6 +547,10 @@ impl GhostexGpuiApp {
             self.gx_store_install_loading_sidebar_list(cx);
             return;
         }
+        // A reveal the launch window held, now that the state it has to read is known. It re-enters
+        // here once through `gx_store_sidebar_state_changed` when it changes something, and that
+        // pass finds the request already taken and does nothing.
+        self.gx_store_replay_held_sidebar_reveal(cx);
         let carry_moved = self
             .gx_store
             .sidebar_list
