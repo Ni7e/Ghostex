@@ -84,7 +84,8 @@ pub(crate) struct NativeChatView {
     /// bottom of the pane, so the composer's height never shortens it (scrollbar.rs).
     pub(super) scrollbar_track: std::rc::Rc<std::cell::Cell<gpui::Pixels>>,
     /// When the reader last scrolled the transcript, the only thing that shows its scrollbar.
-    pub(super) transcript_scrolled_at: Option<std::time::Instant>,
+    /// `instant::Instant` because gpui-component's scrollbar takes that type; it is std's on native and a browser clock on wasm32.
+    pub(super) transcript_scrolled_at: Option<instant::Instant>,
     input_needs_sync: bool,
     input_placeholder: String,
     input_undoable: bool,
@@ -154,8 +155,8 @@ pub(crate) struct NativeChatView {
     pub(crate) focus_requested: bool,
     pub(crate) subscriptions: Vec<Subscription>,
     /// When this view last rendered; a parked chat keeps applying frames without redrawing the window.
-    pub(crate) last_render: Option<std::time::Instant>,
-    last_notified: Option<std::time::Instant>,
+    pub(crate) last_render: Option<web_time::Instant>,
+    last_notified: Option<web_time::Instant>,
     notify_scheduled: bool,
     /// The transcript starts at the window's top edge under the floating work area header, so its
     /// first row reserves the header's height (`set_under_workarea_header`).
@@ -170,7 +171,7 @@ impl NativeChatView {
         super::keyboard::register(cx);
         let (wake, mut wakes) = futures::channel::mpsc::unbounded::<()>();
         let runtime = ChatRuntimeWorker::start(
-            json!({"clientId":config.client_id,"projectId":config.project_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
+            json!({"clientId":config.client_id,"projectId":config.project_id,"sessionId":config.session_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
             super::replay_recording::recording_path(&config.project_id, &config.session_id),
             move || {
                 let _ = wake.unbounded_send(());
@@ -198,7 +199,7 @@ impl NativeChatView {
             let at_top = at_top.clone();
             cx.defer(move |cx| {
                 let _ = chat.update(cx, |chat, cx| {
-                    chat.transcript_scrolled_at = Some(std::time::Instant::now());
+                    chat.transcript_scrolled_at = Some(instant::Instant::now());
                     if chat.list.is_following_tail() && chat.snapshot["composerCollapsed"] == true {
                         chat.invoke(json!({"type":"composerExpand"}), cx);
                     }
@@ -517,7 +518,7 @@ impl NativeChatView {
         {
             return;
         }
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         if let Some(at) = self.last_notified
             && now.duration_since(at) < NOTIFY_MIN_INTERVAL
         {
@@ -528,7 +529,7 @@ impl NativeChatView {
                     cx.background_executor().timer(wait).await;
                     let _ = this.update(cx, |this, cx| {
                         this.notify_scheduled = false;
-                        this.last_notified = Some(std::time::Instant::now());
+                        this.last_notified = Some(web_time::Instant::now());
                         cx.notify();
                     });
                 })
@@ -719,7 +720,7 @@ impl NativeChatView {
                 return super::attachments::import_paths(&config.remote, &params)
                     .map_err(|message| json!({"message":message,"endpoint":endpoint}));
             }
-            super::rpc::request(config.remote, &endpoint, &params)
+            super::rpc::request(config.remote, &endpoint, &params).await
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;

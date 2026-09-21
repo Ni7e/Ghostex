@@ -2532,6 +2532,7 @@ dependencies = [
  "gpui_platform",
  "icu_normalizer",
  "image",
+ "instant",
  "libc",
  "percent-encoding",
  "portable-pty",
@@ -2547,7 +2548,9 @@ dependencies = [
  "sysinfo",
  "tar",
  "ureq",
+ "uuid",
  "velopack",
+ "web-time",
  "windows-sys 0.61.2",
  "x11rb",
 ]

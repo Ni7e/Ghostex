@@ -82,6 +82,11 @@ scraper = { version = "0.24", default-features = false }
 sha2 = "0.10"
 tar = "0.4"
 ureq = { version = "3.3.0", default-features = false, features = ["platform-verifier", "rustls"] }
+# CDXC:SessionChat 2026-09-22 WHY: the Rust chat host mints the draft ids and the chat client id the brain must not generate itself (the core reads no random source), in the same v4 shape `crypto.randomUUID()` produces inside QuickJS. Already in the graph through packages/chat-runtime.
+uuid = { version = "1", features = ["v4"] }
+# CDXC:WebGpui 2026-09-22 WHY: `std::time::Instant::now()` panics on wasm32, and apps/gpui-web compiles the drawing files of this crate for the browser. `web_time::Instant` IS `std::time::Instant` on every native target (a re-export, already in the graph through gpui), so files shared with the web build name it instead.
+web-time = "1"
+instant = "0.1"
 
 # CDXC:CefRuntime 2026-07-04: the Linux CEF adapter (src/cef/linux_x11.rs)
 # positions/maps/focuses CEF child X11 windows through x11rb, pinned to the same

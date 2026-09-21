@@ -512,7 +512,7 @@ fn open(flags: OpenFlags) -> Result<Connection, &'static str> {
 /// third time: the pool, the 500 ms busy timeout and the `&'static str` error vocabulary are the
 /// ones every key in this database already uses, and a second pool would mean a second set of
 /// handles to keep in step with a file that can be replaced.
-pub(super) fn with_read_connection<T>(
+pub(crate) fn with_read_connection<T>(
     read: impl FnOnce(&Connection) -> Result<T, &'static str>,
 ) -> Result<T, &'static str> {
     let mut held = connections()
@@ -535,7 +535,7 @@ pub(super) fn with_read_connection<T>(
 /// A failed call drops the connection AND the cached preference totals, because a connection whose
 /// statement failed may have left the transaction open and the totals were measured against a
 /// database this process can no longer vouch for.
-pub(super) fn with_write_connection<T>(
+pub(crate) fn with_write_connection<T>(
     write: impl FnOnce(&Connection) -> Result<T, &'static str>,
 ) -> Result<T, &'static str> {
     let mut held = connections()

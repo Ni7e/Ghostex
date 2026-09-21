@@ -40,6 +40,16 @@ pub(crate) struct ChatRuntimeWorker {
     outputs: mpsc::Receiver<ChatRuntimeOutput>,
     /// True while the thread waits for work, so a synchronous query knows an answer is imminent.
     idle: Arc<AtomicBool>,
+    /// The Rust brain, when `chatBrain` is `rust`. It answers the same five calls, so nothing above
+    /// this file knows which brain it is driving.
+    ///
+    /// CDXC:SessionChat 2026-09-22 WHY:
+    /// Temporary. The chat's rules exist twice while the brain moves from the TypeScript bundle
+    /// running in QuickJS to `packages/gx-chat-core` (hosted by `src/app/gx_chat/`), and this is the
+    /// switch. With `quickjs`, the shipped default, none of the Rust host runs; with `rust`, no
+    /// QuickJS chat runtime is created for a chat view. Both this field and the setting behind it
+    /// are deleted with the TypeScript brain.
+    host: Option<crate::app::gx_chat::ChatHostHandle>,
 }
 
 impl ChatRuntimeWorker {
@@ -51,6 +61,20 @@ impl ChatRuntimeWorker {
         recording: Option<std::path::PathBuf>,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Self {
+        // The switch, read once per chat view, which is what "at chat runtime creation" means.
+        // `rust` creates no QuickJS runtime at all: no thread, no 96 MiB heap, no bundle evaluation.
+        if crate::shared_settings::shared_sidebar_settings_snapshot().chat_brain()
+            == crate::shared_settings::SharedChatBrain::Rust
+        {
+            let (commands, _unused_commands) = mpsc::channel::<Command>();
+            let (_unused_outputs, outputs) = mpsc::channel();
+            return Self {
+                commands,
+                outputs,
+                idle: Arc::new(AtomicBool::new(false)),
+                host: Some(crate::app::gx_chat::ChatHostHandle::start(config, wake)),
+            };
+        }
         let (commands, command_rx) = mpsc::channel::<Command>();
         let (output_tx, outputs) = mpsc::channel();
         let idle = Arc::new(AtomicBool::new(false));
@@ -155,16 +179,25 @@ impl ChatRuntimeWorker {
             commands,
             outputs,
             idle,
+            host: None,
         }
     }
 
     /// Queue a controller call; its output arrives through the wake callback.
     pub(crate) fn call(&self, method: &'static str, arguments: Vec<Value>) {
+        if let Some(host) = &self.host {
+            host.call(method, arguments);
+            return;
+        }
         let _ = self.commands.send(Command::Call { method, arguments });
     }
 
     /// Like `call` with one argument that is already JSON text; the runtime parses it itself.
     pub(crate) fn call_raw(&self, method: &'static str, raw: String) {
+        if let Some(host) = &self.host {
+            host.call_raw(method, raw);
+            return;
+        }
         let _ = self.commands.send(Command::CallRaw { method, raw });
     }
 
@@ -178,6 +211,9 @@ impl ChatRuntimeWorker {
         arguments: Vec<Value>,
         timeout: Duration,
     ) -> Option<Value> {
+        if let Some(host) = &self.host {
+            return host.query(method, arguments, timeout);
+        }
         if !self.idle.load(Ordering::Acquire) {
             return None;
         }
@@ -197,6 +233,9 @@ impl ChatRuntimeWorker {
         arguments: Vec<Value>,
         timeout: Duration,
     ) -> Option<Value> {
+        if let Some(host) = &self.host {
+            return host.query_for_gesture(method, arguments, timeout);
+        }
         let (reply, answer) = mpsc::channel();
         self.commands
             .send(Command::Query {
@@ -209,6 +248,20 @@ impl ChatRuntimeWorker {
     }
 
     pub(crate) fn take_outputs(&self) -> Vec<ChatRuntimeOutput> {
+        if let Some(host) = &self.host {
+            return host
+                .take_outputs()
+                .into_iter()
+                .map(|output| match output {
+                    crate::app::gx_chat::ChatHostOutput::Drained(value) => {
+                        ChatRuntimeOutput::Drained(value)
+                    }
+                    crate::app::gx_chat::ChatHostOutput::Error(error) => {
+                        ChatRuntimeOutput::Error(error)
+                    }
+                })
+                .collect();
+        }
         self.outputs.try_iter().collect()
     }
 }

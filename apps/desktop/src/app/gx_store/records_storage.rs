@@ -28,12 +28,12 @@
 
 use rusqlite::Connection;
 
-pub(super) use ghostex_chat_runtime::{RecordRead, RecordStore, RecordWrite};
+pub(crate) use ghostex_chat_runtime::{RecordRead, RecordStore, RecordWrite};
 
 use super::sidebar_ui_storage::{with_read_connection, with_write_connection};
 
 /// The `raw` payload of one record, if the catalog still admits it at `now_ms`.
-pub(super) fn read_record_raw(
+pub(crate) fn read_record_raw(
     store: RecordStore,
     key: &str,
     now_ms: i64,
@@ -44,7 +44,7 @@ pub(super) fn read_record_raw(
 }
 
 /// Stores one record in one immediate transaction.
-pub(super) fn write_record(
+pub(crate) fn write_record(
     store: RecordStore,
     key: &str,
     raw: &str,
