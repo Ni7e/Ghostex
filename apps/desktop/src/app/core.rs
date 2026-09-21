@@ -326,18 +326,16 @@ pub struct GhostexGpuiApp {
     /// every view it could show, instead of guessing one. The panel is open and `active_mode` is
     /// still `Agents`, which is the one state where those two disagree.
     pub(crate) view_panel_picker_open: bool,
-    /// The GPUI pages the open Ghostex tabs are showing. Built when the tab opens, dropped when it
-    /// closes, so a Resources page stops holding its process snapshot the moment it is gone.
-    pub(crate) ghostex_page_panels: HashMap<GhostexPage, Entity<GpuiTitlebarReadingPanel>>,
-    /// The picker's scroll position, and the Ask Ghostex page's, so a long list is reachable in a
-    /// short panel.
+    /// The picker's scroll position, so a long list is reachable in a short panel.
     pub(crate) view_picker_scroll: ScrollHandle,
-    pub(crate) ghostex_ask_page_scroll: ScrollHandle,
     /// The Dev servers start page of each Browser pane that is showing a blank tab.
     pub(crate) browser_start_pages:
         HashMap<BrowserPaneId, Entity<crate::app::window::remote_sites::RemoteSitesPanel>>,
-    /// The tab being dragged in the view panel's strip, and the index it would land at.
-    pub(crate) view_tab_drag: Option<GpuiViewTabDrag>,
+    /// Where a tab being dragged along the view panel's strip would land, as an index into the
+    /// drawn row.
+    pub(crate) view_strip_drop_index: Option<usize>,
+    /// The drawn order of the strip's tabs and which are pinned. See `GpuiViewStripLayout`.
+    pub(crate) view_strip_layout: GpuiViewStripLayout,
     /// The view the active project last had open, so closing the panel and reopening it comes back
     /// to the same view. Swapped with the rest of the project's view state on a project switch.
     pub(crate) last_open_view_mode: Option<TitlebarMode>,
@@ -456,7 +454,6 @@ pub struct GhostexGpuiApp {
     pub(crate) pending_keep_view_remote_focus: HashSet<GpuiRemoteAttachSessionKey>,
     pub(crate) agents_chat_page_states: HashMap<TerminalSessionId, SessionChatPageState>,
     pub(crate) session_chat_diagnostics: super::session_chat_diagnostics::SessionChatDiagnostics,
-    pub(crate) agents_chat_eviction_running: bool,
     pub(crate) agents_chat_prewarm_scheduled: bool,
     /// Sessions whose chat is in a visible pane, as of the last chat surface reconcile.
     pub(crate) native_chat_visible_sessions: HashSet<TerminalSessionId>,
@@ -468,32 +465,17 @@ pub struct GhostexGpuiApp {
     /// Tabs opened by project-header agent launches that are still waiting for their created session.
     pub(crate) agent_launch_placeholders:
         std::collections::VecDeque<super::sidebar_agent_launch_placeholder::AgentLaunchPlaceholder>,
-    pub(crate) agents_chat_eviction_retry_scheduled: bool,
     pub(crate) agents_chat_reconcile_scheduled: bool,
-    pub(crate) agents_chat_eviction_requested: bool,
-    pub(crate) session_chat_use_gpui: bool,
     pub(crate) native_chat_views:
         HashMap<TerminalSessionId, Entity<super::native_chat::state::NativeChatView>>,
-    pub(crate) agents_chat_surfaces: HashMap<TerminalSessionId, Entity<CefSurface>>,
     pub(crate) session_chat_broker_endpoints: HashMap<String, (String, String)>,
     pub(crate) session_chat_broker_epoch: Option<String>,
     pub(crate) session_chat_shared_snapshots:
         Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
     pub(crate) session_chat_presentations:
         Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
-    pub(crate) reusable_chat_renderers: Vec<(
-        Entity<CefSurface>,
-        u64,
-        Option<GpuiWorkspaceTerminalSessionKey>,
-        Instant,
-    )>,
     pub(crate) account_switch_progress:
         HashMap<GpuiWorkspaceTerminalSessionKey, SessionAccountSwitchProgress>,
-    /// When each currently hidden chat surface last became hidden, the clock the
-    /// RAM eviction pass ages out. A surface that is visible has no entry, so a
-    /// transient hide (a tab drag hides every surface for its duration) neither
-    /// resets a running timer nor starts a spurious one.
-    pub(crate) agents_chat_surface_hidden_since: HashMap<TerminalSessionId, Instant>,
     /// Chat surfaces whose page-side composer bridge has registered.
     pub(crate) session_chat_composer_ready_sessions: HashSet<TerminalSessionId>,
     /// Last composer-content report per chat page: `true` = the page said its
@@ -796,9 +778,6 @@ pub struct GhostexGpuiApp {
     pub(crate) browser_tab_scroll_handles: HashMap<BrowserPaneId, ScrollHandle>,
     /// The view panel has exactly one tab strip, so it needs one handle rather than a map.
     pub(crate) view_tab_scroll_handle: ScrollHandle,
-    /// The browser tabs in that strip are one scroller across every browser pane, so they share
-    /// one handle too, beside the per-pane ones the panes' own strips use.
-    pub(crate) view_browser_tab_scroll_handle: ScrollHandle,
     pub(crate) command_tab_scroll_handles: HashMap<CommandPaneGroupId, ScrollHandle>,
     pub(crate) command_collapsed_tab_scroll_handle: ScrollHandle,
     pub(crate) workspace_split_layout_metrics: HashMap<WorkspaceSplitId, SplitResizeMetrics>,

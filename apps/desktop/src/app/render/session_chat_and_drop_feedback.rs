@@ -94,21 +94,6 @@ impl GhostexGpuiApp {
                 .child(view.clone())
                 .into_any_element();
         }
-        if let Some(surface) = self
-            .agents_chat_surfaces
-            .get(&session_id)
-            .filter(|_| switching.is_none())
-        {
-            return div()
-                .id(format!("react-chat-{}", session_id.0))
-                .relative()
-                .size_full()
-                .min_w_0()
-                .min_h_0()
-                .overflow_hidden()
-                .child(surface.clone())
-                .into_any_element();
-        }
         {
             let bootstrap_missing = self.sidebar_gxserver_bootstrap.is_none();
             let (title, message) = if let Some(progress) = switching {
@@ -118,12 +103,10 @@ impl GhostexGpuiApp {
                     "Chat unavailable",
                     "Session Chat needs the local Ghostex server. Start it from the sidebar, then toggle Chat View again.",
                 )
-            } else if self.session_chat_use_gpui {
+            } else {
                 // A chat-mode tab whose native view does not exist yet: the session is still being
                 // created or mapped, so the pane shows the transcript skeleton, not a sentence.
                 return self.render_session_chat_skeleton();
-            } else {
-                ("Loading Chat...", "")
             };
             let hide_emails = shared_settings::shared_sidebar_settings_snapshot()
                 .object()

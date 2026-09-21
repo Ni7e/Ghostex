@@ -11,7 +11,6 @@ pub(crate) struct CefSurface {
     pub(crate) focus_handle: FocusHandle,
     id: String,
     visible: bool,
-    session_chat_pane_focused: Option<bool>,
     workarea_light_theme: Option<bool>,
 }
 
@@ -149,7 +148,6 @@ impl CefSurface {
             focus_handle: cx.focus_handle().tab_stop(false),
             id,
             visible,
-            session_chat_pane_focused: None,
             workarea_light_theme: None,
         }
     }
@@ -159,20 +157,7 @@ impl CefSurface {
     }
 
     pub(crate) fn load_url(&mut self, url: &str) {
-        self.session_chat_pane_focused = None;
         self.browser.load_url(url);
-    }
-
-    pub(crate) fn set_session_chat_pane_focused(&mut self, focused: bool, force: bool) {
-        if !force && self.session_chat_pane_focused == Some(focused) {
-            return;
-        }
-        let script = format!(
-            "(() => {{ const ns = window.ghostexGpui = window.ghostexGpui || {{}}; ns.sessionChatPaneFocused = {focused}; ns.onSessionChatPaneFocusChanged?.({focused}); }})();"
-        );
-        if self.execute_app_owned_script(&script) {
-            self.session_chat_pane_focused = Some(focused);
-        }
     }
 
     pub(crate) fn refresh_workarea_theme(&mut self, light: bool) {
@@ -213,24 +198,6 @@ impl CefSurface {
         */
         self.browser
             .refresh_sidebar_gxserver_bootstrap(gxserver_bootstrap);
-    }
-
-    pub(crate) fn activate_session_chat(
-        &mut self,
-        url: &str,
-        generation: &str,
-        bootstrap: cef::SidebarGxserverBootstrap,
-        initial_snapshot: Option<serde_json::Value>,
-        initial_presentation: Option<serde_json::Value>,
-    ) {
-        self.session_chat_pane_focused = None;
-        self.browser.activate_session_chat(
-            url,
-            generation,
-            bootstrap,
-            initial_snapshot,
-            initial_presentation,
-        );
     }
 
     pub(crate) fn refresh_session_chat_gxserver_bootstrap(
@@ -283,10 +250,6 @@ impl CefSurface {
         self.browser.zoom_level().abs() > BROWSER_ZOOM_EPSILON
     }
 
-    pub(crate) fn refresh_session_chat_zoom(&mut self) {
-        self.browser.refresh_session_chat_zoom();
-    }
-
     pub(crate) fn zoom_level(&self) -> f64 {
         self.browser.zoom_level()
     }
@@ -313,10 +276,6 @@ impl CefSurface {
 
     pub(crate) fn focus(&mut self) {
         self.browser.focus();
-    }
-
-    pub(crate) fn paste(&mut self) -> bool {
-        self.browser.paste()
     }
 
     /// CDXC:Onboarding 2026-08-18: forwards one host-side "f"

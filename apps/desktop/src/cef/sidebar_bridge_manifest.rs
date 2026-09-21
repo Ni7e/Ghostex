@@ -60,7 +60,6 @@ pub enum AppModalHostBridgeSurface {
     NativeWindow,
     Sidebar,
     Titlebar,
-    SessionChat,
     FindPrompts,
 }
 
@@ -219,7 +218,6 @@ pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY: &str =
 const APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW: &str = "nativeWindow";
 const APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR: &str = "sidebar";
 const APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR: &str = "titlebar";
-const APP_MODAL_HOST_BRIDGE_SURFACE_SESSION_CHAT: &str = "sessionChat";
 const APP_MODAL_HOST_BRIDGE_SURFACE_FIND_PROMPTS: &str = "findPrompts";
 pub(crate) const APP_MODAL_HOST_SURFACE_JS_FIELD: &str = "__ghostex_APP_MODAL_HOST_SURFACE__";
 pub(crate) const APP_MODAL_HOST_ID_JS_FIELD: &str = "__ghostex_APP_MODAL_HOST_ID__";
@@ -591,7 +589,7 @@ pub(crate) const PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS: [ProjectWorkareaBridgeF
     },
 ];
 
-pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_SPECS: [AppModalHostBridgeSurfaceSpec; 6] = [
+pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_SPECS: [AppModalHostBridgeSurfaceSpec; 5] = [
     AppModalHostBridgeSurfaceSpec {
         surface: AppModalHostBridgeSurface::NativeWindow,
         entry_file_name: "modal-host.html",
@@ -616,20 +614,6 @@ pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_SPECS: [AppModalHostBridgeSurface
         surface: AppModalHostBridgeSurface::Titlebar,
         entry_file_name: "titlebar-host.html",
         extra_info_value: APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR,
-        exposes_native_window_identity: false,
-    },
-    /*
-    CDXC:SessionChat 2026-07-31:
-    chat.html is the first-party per-session Session Chat pane surface. It is
-    registered here so the renderer installs the bounded ghostexAppModalHost
-    shim for the bundled entry only; it never receives the native-window
-    identity fields, and its gxserver bootstrap arrives through the dedicated
-    session-chat bootstrap process message, not the sidebar install path.
-    */
-    AppModalHostBridgeSurfaceSpec {
-        surface: AppModalHostBridgeSurface::SessionChat,
-        entry_file_name: "chat.html",
-        extra_info_value: APP_MODAL_HOST_BRIDGE_SURFACE_SESSION_CHAT,
         exposes_native_window_identity: false,
     },
     /*

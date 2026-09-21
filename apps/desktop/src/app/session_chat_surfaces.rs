@@ -1,16 +1,12 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::time::Instant;
 
 // RefCell backs cross-platform runtime state (window frame persistence), not
 // just the macOS-only shims that first introduced the import.
 
-use gpui::Entity;
 use gpui::Window;
-use gpui::rgb;
 
 use crate::app::consts::*;
-use crate::app::element::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
 use crate::*;
@@ -622,128 +618,6 @@ impl GhostexGpuiApp {
         }
     }
 
-    pub(crate) fn agents_session_chat_runtime_url(
-        &self,
-        session_id: TerminalSessionId,
-    ) -> Option<String> {
-        let agent = self.agents_session_chat_transcript_agent(session_id)?;
-        let (project_id, gxserver_session_id, remote) =
-            if let Some(key) = self.agents_chat_local_key_for_session(session_id) {
-                (key.project_id, key.session_id, false)
-            } else {
-                let key = self.agents_chat_remote_key_for_session(session_id)?;
-                (key.project_id, key.session_id, true)
-            };
-        let base_url = gpui_cef_html_entry_url("GHOSTEX_GPUI_CHAT_URL", "chat.html").ok()?;
-        let mut params = vec![
-            ("projectId", project_id),
-            ("sessionId", gxserver_session_id),
-            ("agentId", agent.to_string()),
-            (
-                "codeFileViewAvailable",
-                (self.titlebar_mode_available(TitlebarMode::Source)
-                    && self.embedded_code_editor_unavailable_reason().is_none())
-                .to_string(),
-            ),
-            (
-                "docsFileViewAvailable",
-                self.titlebar_mode_available(TitlebarMode::Manage)
-                    .to_string(),
-            ),
-            (
-                "hideAccountEmails",
-                shared_settings::shared_sidebar_settings_snapshot()
-                    .object()
-                    .get("hideAccountEmails")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-                    .to_string(),
-            ),
-            (
-                "theme",
-                gpui_session_chat_theme_from_settings(
-                    shared_settings::shared_sidebar_settings_snapshot().object(),
-                )
-                .to_string(),
-            ),
-            (
-                "initialTheme",
-                if gpui_session_chat_uses_light_theme(
-                    shared_settings::shared_sidebar_settings_snapshot().object(),
-                ) {
-                    "light"
-                } else {
-                    "dark"
-                }
-                .to_string(),
-            ),
-            (
-                "fontFamily",
-                gpui_session_chat_font_family_from_settings(
-                    shared_settings::shared_sidebar_settings_snapshot().object(),
-                ),
-            ),
-            (
-                "customTranscriptWidthEnabled",
-                gpui_session_chat_custom_transcript_width_enabled_from_settings(
-                    shared_settings::shared_sidebar_settings_snapshot().object(),
-                )
-                .to_string(),
-            ),
-            (
-                "transcriptWidthPercent",
-                gpui_session_chat_transcript_width_percent_from_settings(
-                    shared_settings::shared_sidebar_settings_snapshot().object(),
-                )
-                .to_string(),
-            ),
-            (
-                "modelPicksSessionOnly",
-                gpui_session_chat_model_picks_session_only_from_settings(
-                    shared_settings::shared_sidebar_settings_snapshot().object(),
-                )
-                .to_string(),
-            ),
-            (
-                "fileEditPreviews",
-                gpui_session_chat_file_edit_previews_from_settings(
-                    shared_settings::shared_sidebar_settings_snapshot().object(),
-                )
-                .to_string(),
-            ),
-            (
-                "verboseMode",
-                gpui_session_chat_verbose_mode_from_settings(
-                    shared_settings::shared_sidebar_settings_snapshot().object(),
-                )
-                .to_string(),
-            ),
-            (
-                "simpleMode",
-                gpui_session_chat_simple_mode_from_settings(
-                    shared_settings::shared_sidebar_settings_snapshot().object(),
-                )
-                .to_string(),
-            ),
-            (
-                "hotkeys",
-                shared_settings::shared_sidebar_settings_snapshot()
-                    .object()
-                    .get("hotkeys")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::Value::Object(Default::default()))
-                    .to_string(),
-            ),
-        ];
-        if remote {
-            if let Some(key) = self.agents_chat_remote_key_for_session(session_id) {
-                params.push(("remoteMachineId", key.remote_machine_id));
-            }
-            params.push(("remote", "true".to_string()));
-        }
-        Some(append_url_query_params(base_url, &params))
-    }
-
     pub(crate) fn agents_session_chat_gxserver_bootstrap(
         &self,
         session_id: TerminalSessionId,
@@ -907,172 +781,6 @@ impl GhostexGpuiApp {
         });
     }
 
-    /// The Chat CEF surface currently occupying a session's pane.
-    pub(crate) fn agents_pane_cef_surface(
-        &self,
-        session_id: TerminalSessionId,
-    ) -> Option<&Entity<CefSurface>> {
-        self.agents_chat_surfaces.get(&session_id)
-    }
-
-    pub(crate) fn ensure_agents_chat_surface(
-        &mut self,
-        session_id: TerminalSessionId,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<Entity<CefSurface>> {
-        if self.session_chat_use_gpui {
-            self.ensure_native_chat(session_id, cx);
-            None
-        } else {
-            self.create_legacy_react_chat_surface(session_id, cx)
-        }
-    }
-
-    fn create_legacy_react_chat_surface(
-        &mut self,
-        session_id: TerminalSessionId,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<Entity<CefSurface>> {
-        if let Some(surface) = self.agents_chat_surfaces.get(&session_id) {
-            return Some(surface.clone());
-        }
-        // The chat page cannot do anything without its owning gxserver
-        // bootstrap; later local bootstrap or remote reconnect availability
-        // retries through the normal visibility reconciliation path.
-        let bootstrap = self.agents_session_chat_gxserver_bootstrap(session_id)?;
-        let url = self.agents_session_chat_runtime_url(session_id)?;
-        let force_fresh_renderer = self
-            .agents_chat_page_states
-            .get(&session_id)
-            .is_some_and(|state| state.force_fresh_renderer);
-        let mut page_state = SessionChatPageState::new();
-        page_state.account_key = self.workspace_terminal_key_for_shell_session(session_id);
-        let initial_snapshot =
-            self.cached_session_chat_runtime_snapshot(page_state.account_key.as_ref());
-        let initial_presentation =
-            self.initial_session_chat_presentation(page_state.account_key.as_ref());
-        let generation = page_state.generation.to_string();
-        let url = append_url_query_params(
-            url,
-            &[("pageGeneration", page_state.generation.to_string())],
-        );
-        self.expire_reusable_chat_renderers();
-        let preferred_renderer = page_state
-            .account_key
-            .as_ref()
-            .and_then(|key| {
-                self.reusable_chat_renderers
-                    .iter()
-                    .rposition(|(_, _, previous_key, _)| previous_key.as_ref() == Some(key))
-            })
-            .or_else(|| self.reusable_chat_renderers.len().checked_sub(1));
-        if !force_fresh_renderer && let Some(index) = preferred_renderer {
-            let (surface, renderer_id, _, _) = self.reusable_chat_renderers.remove(index);
-            page_state.renderer_id = renderer_id;
-            page_state.awaiting_activation = true;
-            let activation_generation = page_state.generation;
-            let generation = activation_generation.to_string();
-            self.agents_chat_page_states.insert(session_id, page_state);
-            self.agents_chat_surfaces
-                .insert(session_id, surface.clone());
-            surface.update(cx, |surface, _| {
-                surface.set_session_chat_pane_focused(false, true);
-                surface.activate_session_chat(
-                    &url,
-                    &generation,
-                    bootstrap,
-                    initial_snapshot,
-                    initial_presentation,
-                );
-            });
-            self.watch_session_chat_activation(activation_generation, cx);
-            self.record_session_chat_lifecycle(
-                session_id,
-                "sessionChat.nativePageReused",
-                "ensure",
-            );
-            return Some(surface);
-        }
-        let host_action_handler =
-            self.session_chat_host_bridge_event_handler(page_state.renderer_id, cx);
-        let light_chat_theme = gpui_session_chat_uses_light_theme(
-            shared_settings::shared_sidebar_settings_snapshot().object(),
-        );
-        let prepaint_background = if light_chat_theme {
-            CEF_LIGHT_PREPAINT_BACKGROUND_COLOR
-        } else {
-            CEF_SESSION_CHAT_DARK_PREPAINT_BACKGROUND_COLOR
-        };
-        let background = if light_chat_theme {
-            rgb(0xfdfdfd).into()
-        } else {
-            rgb(0x0d0d0d).into()
-        };
-        /*
-        CDXC:ContextMenus 2026-08-21:
-        The first-party chat composer owns a shadcn context menu instead of
-        exposing Chromium's page/developer menu. Copy and Cut still use the
-        browser clipboard writer, while Paste is routed through CEF's native
-        edit command because Chromium does not consider this windowed page
-        focused. Grant only this bundled chat origin the same bounded clipboard
-        capability that the app-owned Source surface receives.
-        */
-        let trusted_clipboard_origin = Some(url.clone());
-        let chat_parent = self.parent_ns_view;
-        let surface = match CefSurface::try_new(
-            format!(
-                "ghostex-gpui-session-chat-renderer-{}",
-                page_state.renderer_id
-            ),
-            chat_parent,
-            url.clone(),
-            "session-chat".to_string(),
-            prepaint_background,
-            false,
-            background,
-            trusted_clipboard_origin,
-            true,
-            None,
-            None,
-            None,
-            None,
-            Some(bootstrap.clone()),
-            None,
-            None,
-            None,
-            Some(cef::AppModalHostBridgeSurface::SessionChat),
-            Some(host_action_handler),
-            None,
-            cx,
-        ) {
-            Ok(surface) => surface,
-            Err(error) => {
-                // Ensure-style reconcile: skip this pass, retried on the next
-                // visibility sync (CDXC:CefRuntime 2026-07-11).
-                support_logs::append(
-                    support_logs::GpuiSupportLog::CrashReports,
-                    "gpui.cefSurface.createFailed",
-                    serde_json::json!({ "surface": "sessionChat", "error": error }),
-                );
-                return None;
-            }
-        };
-        surface.update(cx, |surface, _| {
-            surface.activate_session_chat(
-                &url,
-                &generation,
-                bootstrap,
-                initial_snapshot,
-                initial_presentation,
-            )
-        });
-        self.agents_chat_page_states.insert(session_id, page_state);
-        self.agents_chat_surfaces
-            .insert(session_id, surface.clone());
-        self.record_session_chat_lifecycle(session_id, "sessionChat.nativePageCreated", "ensure");
-        Some(surface)
-    }
-
     pub(crate) fn reconcile_agents_chat_surfaces(&mut self, cx: &mut gpui::Context<Self>) {
         // Drop chat state for sessions that no longer exist in the shell.
         let live_session_ids = self
@@ -1091,53 +799,6 @@ impl GhostexGpuiApp {
         for id in stale_native {
             self.remove_agents_chat_surface_for_session(id, cx);
         }
-        /*
-        CDXC:Diagnostics 2026-08-28:
-        Only surfaces whose SESSION is gone are destroyed here. A live session
-        toggled back to the terminal view used to lose its page too, so every
-        chat↔terminal toggle reloaded chat.html from scratch — the visible
-        blank → "Loading conversation…" → chat flash on the way back. The
-        toggled-away page now just hides: the visibility loop below stamps its
-        hidden clock, and the RAM ceiling stays enforced by the eviction pass,
-        which is also the safer destroyer (it refuses pages holding unsent
-        composer text, which this teardown would have dropped). Dead sessions
-        cannot take that route — eviction treats an unknown session as
-        not-evictable — so they are still destroyed here, with the pending
-        draft-handoff guard keeping a mid-handoff page alive long enough to
-        answer.
-        */
-        let stale_surface_ids = self
-            .agents_chat_surfaces
-            .keys()
-            .copied()
-            .filter(|session_id| {
-                !live_session_ids.contains(session_id)
-                    && !self
-                        .pending_session_chat_draft_handoffs
-                        .contains(session_id)
-            })
-            .collect::<Vec<_>>();
-        for session_id in stale_surface_ids {
-            self.record_session_chat_lifecycle(
-                session_id,
-                "sessionChat.nativePageRemoved",
-                "sessionNoLongerInShell",
-            );
-            self.session_chat_composer_ready_sessions
-                .remove(&session_id);
-            self.session_chat_composer_empty_reports.remove(&session_id);
-            self.agents_chat_surface_hidden_since.remove(&session_id);
-            if let Some(state) = self.agents_chat_page_states.remove(&session_id) {
-                if let Some(key) = state.account_key.as_ref() {
-                    self.forget_session_chat_presentation(key);
-                }
-                self.release_session_chat_runtime_subscription(state.generation, cx);
-            }
-            if let Some(surface) = self.agents_chat_surfaces.remove(&session_id) {
-                surface.update(cx, |surface, _| surface.set_visible(false));
-            }
-        }
-
         let drag_active = self.workspace_tab_drag_active
             || self.browser_tab_drag_active
             || self.command_tab_drag_active;
@@ -1158,160 +819,12 @@ impl GhostexGpuiApp {
                 .collect::<HashSet<_>>()
         };
         for session_id in &visible_session_ids {
-            let _ = self.ensure_agents_chat_surface(*session_id, cx);
+            self.ensure_native_chat(*session_id, cx);
         }
         self.dismiss_native_chat_windows_leaving_view(&visible_session_ids, cx);
         self.native_chat_visible_sessions = visible_session_ids.clone();
         self.resume_visible_native_chat_runtimes(cx);
         self.schedule_native_chat_prewarm(cx);
-        let mut visibility_changed = false;
-        for (session_id, surface) in &self.agents_chat_surfaces {
-            let visible = visible_session_ids.contains(session_id)
-                && self
-                    .agents_chat_page_states
-                    .get(session_id)
-                    .is_some_and(|state| !state.awaiting_activation)
-                && self
-                    .session_account_switch_placeholder_progress(*session_id)
-                    .is_none();
-            surface.update(cx, |surface, _| surface.set_visible(visible));
-            /*
-            CDXC:SessionChat 2026-08-24:
-            The hidden clock the RAM eviction pass reads. A surface that is
-            already aging must keep its original
-            stamp across every later hidden pass, and only a pass that actually
-            showed it clears the clock. Reconcile runs on drags, mode switches,
-            and pane edits, so overwriting here would keep resetting the timer
-            and nothing would ever expire.
-            */
-            if visible {
-                visibility_changed |= self
-                    .agents_chat_surface_hidden_since
-                    .remove(session_id)
-                    .is_some();
-                if let Some(state) = self.agents_chat_page_states.get_mut(session_id) {
-                    state.pending_probe = None;
-                }
-            } else if !self
-                .agents_chat_surface_hidden_since
-                .contains_key(session_id)
-            {
-                visibility_changed = true;
-                self.agents_chat_surface_hidden_since
-                    .insert(*session_id, Instant::now());
-                self.session_chat_composer_empty_reports.remove(session_id);
-                // Which gate hid the page: the evidence a later re-activation is traced back to.
-                let reason = if drag_active {
-                    "dragActive"
-                } else if !visible_session_ids.contains(session_id) {
-                    "notInVisiblePanes"
-                } else if self
-                    .agents_chat_page_states
-                    .get(session_id)
-                    .is_some_and(|state| state.awaiting_activation)
-                {
-                    "awaitingActivation"
-                } else {
-                    "accountSwitchPlaceholder"
-                };
-                self.record_session_chat_lifecycle(
-                    *session_id,
-                    "sessionChat.nativePageHidden",
-                    reason,
-                );
-            }
-        }
-        if visibility_changed {
-            self.evict_expired_hidden_agents_chat_surfaces(cx);
-        }
-    }
-
-    /// Whether a hidden chat surface holds nothing that would be destroyed with
-    /// its page. See `evict_expired_hidden_agents_chat_surfaces`.
-    pub(crate) fn agents_chat_surface_evictable(
-        &self,
-        session_id: TerminalSessionId,
-        require_empty: bool,
-    ) -> bool {
-        // Provider work is retained by the shared broker. Only page-owned operations pin the hidden renderer.
-        let Some(_session) = self.agents_workspace.session(session_id) else {
-            return false;
-        };
-        if self
-            .agents_chat_page_states
-            .get(&session_id)
-            .is_none_or(|state| state.pending_native_requests != 0)
-            || self
-                .pending_session_chat_image_saves
-                .keys()
-                .any(|(id, _)| *id == session_id)
-            || self.session_account_switch_progress(session_id).is_some()
-        {
-            return false;
-        }
-        // A fresh probe replaces the ordinary empty report with a confirmed durable-release receipt.
-        // The readiness guard prevents reclaiming a page whose composer has not registered.
-        if !self
-            .session_chat_composer_ready_sessions
-            .contains(&session_id)
-            || (require_empty
-                && self.session_chat_composer_empty_reports.get(&session_id) != Some(&true))
-        {
-            return false;
-        }
-        // An armed delayed send is a promise to type into this session later.
-        if self.agents_delayed_send_timers.contains_key(&session_id)
-            || self
-                .agents_send_when_stopped_watchers
-                .contains_key(&session_id)
-        {
-            return false;
-        }
-        // In-flight handoffs and one-shot composer messages all terminate at a
-        // page that has to still be there to receive them.
-        if self
-            .pending_session_chat_draft_handoffs
-            .contains(&session_id)
-            || self
-                .pending_session_terminal_composer_insert
-                .contains_key(&session_id)
-            || self
-                .pending_session_chat_received_drafts
-                .contains_key(&session_id)
-            || self
-                .session_chat_draft_capture_in_flight
-                .contains(&session_id)
-            || self.pending_keyboard_handoff_targets_session(session_id)
-            || self
-                .pending_session_chat_composer_insert
-                .contains_key(&session_id)
-        {
-            return false;
-        }
-        true
-    }
-
-    pub(crate) fn start_agents_chat_surface_eviction_polling(
-        &mut self,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(GPUI_AGENTS_CHAT_SURFACE_EVICT_POLL_INTERVAL)
-                    .await;
-
-                if this
-                    .update(cx, |this, cx| {
-                        this.evict_expired_hidden_agents_chat_surfaces(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     #[track_caller]
@@ -1339,7 +852,6 @@ impl GhostexGpuiApp {
         self.session_chat_composer_ready_sessions
             .remove(&session_id);
         self.session_chat_composer_empty_reports.remove(&session_id);
-        self.agents_chat_surface_hidden_since.remove(&session_id);
         if let Some(state) = self.agents_chat_page_states.remove(&session_id) {
             if let Some(key) = state.account_key.as_ref() {
                 self.forget_session_chat_presentation(key);
@@ -1365,20 +877,15 @@ impl GhostexGpuiApp {
             .remove(&session_id);
         self.pending_session_chat_received_drafts
             .remove(&session_id);
-        if let Some(surface) = self.agents_chat_surfaces.remove(&session_id) {
-            surface.update(cx, |surface, _| surface.set_visible(false));
-        }
     }
 
     /*
     CDXC:SessionChat 2026-08-26:
-    An active-project switch parks the outgoing project's chat pages instead of
+    An active-project switch parks the outgoing project's chat views instead of
     destroying them, the same treatment the terminal runtime already gets on
-    that path. Destroying them closed every Chromium browser and made the next
-    reconcile reload chat.html from scratch, which is the visible kill + reload
-    on every project switch.
+    that path, so returning to the project does not rebuild every chat pane.
 
-    The surfaces and every companion map keyed by the same project-local shell
+    The views and every companion map keyed by the same project-local shell
     session ids leave together in one bundle, so the incoming project's colliding
     ids can never read the outgoing project's composer state. Chat-mode
     membership is cleared here and reinstated by the caller from the incoming
@@ -1395,29 +902,6 @@ impl GhostexGpuiApp {
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> ParkedAgentsChatRuntime {
-        let protected_sessions = self
-            .agents_delayed_send_timers
-            .keys()
-            .chain(self.agents_send_when_stopped_watchers.keys())
-            .chain(self.pending_session_chat_draft_handoffs.iter())
-            .chain(self.pending_session_terminal_composer_insert.keys())
-            .chain(
-                self.pending_session_chat_image_saves
-                    .keys()
-                    .map(|(session_id, _)| session_id),
-            )
-            .copied()
-            .collect();
-        // Captured before the loop below stamps every page as hidden.
-        let kept_alive_sessions = if self.project_switch_keep_alive().is_some() {
-            self.agents_chat_surfaces
-                .keys()
-                .copied()
-                .filter(|id| !self.agents_chat_surface_hidden_since.contains_key(id))
-                .collect()
-        } else {
-            HashSet::new()
-        };
         self.agents_chat_mode_sessions.clear();
         self.pending_agents_chat_launch_intents.clear();
         self.pending_session_terminal_composer_insert.clear();
@@ -1427,74 +911,28 @@ impl GhostexGpuiApp {
         for view in self.native_chat_views.values() {
             view.update(cx, |view, cx| view.dismiss_windows_for_hidden_pane(cx));
         }
-        for (session_id, surface) in &self.agents_chat_surfaces {
-            self.record_session_chat_lifecycle(
-                *session_id,
-                "sessionChat.nativePageParked",
-                "projectSwitch",
-            );
-            surface.update(cx, |surface, _| surface.set_visible(false));
-            // A parked surface is hidden by definition, so it must carry the
-            // eviction clock into the park or it would age forever. Same
-            // `or_insert_with` contract as the reconcile pass: a surface that is
-            // already aging keeps its original stamp.
-            self.agents_chat_surface_hidden_since
-                .entry(*session_id)
-                .or_insert_with(Instant::now);
-        }
         ParkedAgentsChatRuntime {
             auto_switch_observed_sessions: std::mem::take(
                 &mut self.agents_chat_auto_switch_observed_sessions,
             ),
             page_states: std::mem::take(&mut self.agents_chat_page_states),
-            protected_sessions,
             native_views: std::mem::take(&mut self.native_chat_views),
-            surfaces: std::mem::take(&mut self.agents_chat_surfaces),
-            surface_hidden_since: std::mem::take(&mut self.agents_chat_surface_hidden_since),
             composer_ready_sessions: std::mem::take(&mut self.session_chat_composer_ready_sessions),
             composer_empty_reports: std::mem::take(&mut self.session_chat_composer_empty_reports),
             pending_composer_insert: std::mem::take(&mut self.pending_session_chat_composer_insert),
-            kept_alive_sessions,
-            parked_at: Some(Instant::now()),
         }
     }
 
-    /// Reinstall a project's parked chat pages as the live ones. The caller has
+    /// Reinstall a project's parked chat views as the live ones. The caller has
     /// already restored that project's `WorkspaceModel` and session mappings, so
-    /// the restored surfaces match live session ids and `reconcile_agents_chat_surfaces`
-    /// makes them visible again through `ensure_agents_chat_surface` without
-    /// recreating a browser.
-    pub(crate) fn restore_parked_agents_chat_surfaces(
-        &mut self,
-        parked: ParkedAgentsChatRuntime,
-        cx: &mut gpui::Context<Self>,
-    ) {
+    /// the restored views match live session ids and `reconcile_agents_chat_surfaces`
+    /// shows them again without rebuilding them.
+    pub(crate) fn restore_parked_agents_chat_surfaces(&mut self, parked: ParkedAgentsChatRuntime) {
         self.agents_chat_auto_switch_observed_sessions = parked.auto_switch_observed_sessions;
         self.agents_chat_page_states = parked.page_states;
         self.native_chat_views = parked.native_views;
-        self.agents_chat_surfaces = parked.surfaces;
-        self.agents_chat_surface_hidden_since = parked.surface_hidden_since;
         self.session_chat_composer_ready_sessions = parked.composer_ready_sessions;
         self.session_chat_composer_empty_reports = parked.composer_empty_reports;
         self.pending_session_chat_composer_insert = parked.pending_composer_insert;
-        /*
-        CDXC:SessionChat 2026-07-31 (extended 2026-08-26):
-        A parked page still holds whichever gxserver bootstrap it had when it
-        went hidden, and a remote chat page points at an SSH tunnel whose local
-        port and token can be rebuilt while its project is away. Re-push each
-        restored page's bootstrap from its own session identity, so a restored
-        remote chat cannot keep talking to a dead tunnel.
-        */
-        for (session_id, surface) in &self.agents_chat_surfaces {
-            let bootstrap = self.agents_session_chat_gxserver_bootstrap(*session_id);
-            self.record_session_chat_lifecycle(
-                *session_id,
-                "sessionChat.nativePageRestored",
-                "projectSwitch",
-            );
-            surface.update(cx, |surface, _| {
-                surface.refresh_session_chat_gxserver_bootstrap(bootstrap);
-            });
-        }
     }
 }

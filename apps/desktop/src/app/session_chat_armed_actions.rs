@@ -24,7 +24,7 @@ impl GhostexGpuiApp {
             .unwrap_or_else(|| Value::Array(Vec::new()))
     }
 
-    /// Hand changed labels to every open chat: GPUI views re-render, React pages get a pushed update.
+    /// Hand changed labels to every open chat view.
     pub(crate) fn sync_session_chat_armed_actions(&mut self, cx: &mut gpui::Context<Self>) {
         let views = self
             .native_chat_views
@@ -39,42 +39,6 @@ impl GhostexGpuiApp {
                     cx.notify();
                 }
             });
-        }
-        let pages = self
-            .agents_chat_surfaces
-            .keys()
-            .copied()
-            .collect::<Vec<_>>();
-        for session_id in pages {
-            let actions = self.session_chat_armed_actions(session_id);
-            let sent = self
-                .agents_chat_page_states
-                .get(&session_id)
-                .and_then(|state| state.armed_actions_sent.as_ref());
-            if sent != Some(&actions) {
-                self.push_session_chat_armed_actions(session_id, cx);
-            }
-        }
-    }
-
-    /// Push the current labels to a React chat page; also answers the page's request on mount.
-    pub(crate) fn push_session_chat_armed_actions(
-        &mut self,
-        session_id: TerminalSessionId,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
-            return;
-        };
-        let actions = self.session_chat_armed_actions(session_id);
-        let script = format!(
-            "window.ghostexGpui?.onSessionChatArmedActionsChanged?.({actions}); undefined;"
-        );
-        surface.update(cx, |surface, _| {
-            surface.execute_app_owned_script(&script);
-        });
-        if let Some(state) = self.agents_chat_page_states.get_mut(&session_id) {
-            state.armed_actions_sent = Some(actions);
         }
     }
 }

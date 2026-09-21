@@ -265,67 +265,6 @@ pub(crate) fn gpui_session_chat_font_family_from_settings(
         .to_string()
 }
 
-pub(crate) fn gpui_session_chat_custom_transcript_width_enabled_from_settings(
-    settings: &serde_json::Map<String, serde_json::Value>,
-) -> bool {
-    settings
-        .get("sessionChatCustomTranscriptWidthEnabled")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-}
-
-pub(crate) fn gpui_session_chat_transcript_width_percent_from_settings(
-    settings: &serde_json::Map<String, serde_json::Value>,
-) -> u8 {
-    const MIN_PERCENT: f64 = 50.0;
-    const MAX_PERCENT: f64 = 100.0;
-    const STEP_PERCENT: f64 = 5.0;
-    const DEFAULT_PERCENT: f64 = 75.0;
-
-    let value = settings
-        .get("sessionChatTranscriptWidthPercent")
-        .and_then(serde_json::Value::as_f64)
-        .unwrap_or(DEFAULT_PERCENT)
-        .clamp(MIN_PERCENT, MAX_PERCENT);
-    ((value / STEP_PERCENT).round() * STEP_PERCENT) as u8
-}
-
-pub(crate) fn gpui_session_chat_model_picks_session_only_from_settings(
-    settings: &serde_json::Map<String, serde_json::Value>,
-) -> bool {
-    settings
-        .get("sessionChatModelPicksSessionOnly")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-}
-
-pub(crate) fn gpui_session_chat_file_edit_previews_from_settings(
-    settings: &serde_json::Map<String, serde_json::Value>,
-) -> bool {
-    settings
-        .get("sessionChatFileEditPreviews")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-}
-
-pub(crate) fn gpui_session_chat_verbose_mode_from_settings(
-    settings: &serde_json::Map<String, serde_json::Value>,
-) -> bool {
-    settings
-        .get("sessionChatVerboseMode")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-}
-
-pub(crate) fn gpui_session_chat_simple_mode_from_settings(
-    settings: &serde_json::Map<String, serde_json::Value>,
-) -> bool {
-    settings
-        .get("sessionChatSimpleMode")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-}
-
 /// CDXC:Workarea 2026-09-20 WHY:
 /// With a view open the workarea has to hold the Agents column, the split divider and the view panel,
 /// so the sidebar may only grow into what is left after all three.

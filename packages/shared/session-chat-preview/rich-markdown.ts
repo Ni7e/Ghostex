@@ -74,7 +74,7 @@ const RICH_MARKDOWN = [
   '```',
   '',
   '```json',
-  '{ "sessionChatUseGpui": false, "sessionChatVerboseMode": false, "sessionChatZoomPercent": 100 }',
+  '{ "sessionChatSimpleMode": false, "sessionChatVerboseMode": false, "sessionChatZoomPercent": 100 }',
   '```',
   '',
   'One fence deliberately refuses to wrap, so the horizontal scroll and the copy control can be compared:',

@@ -214,17 +214,12 @@ impl GhostexGpuiApp {
     /// CDXC:Workarea 2026-09-20 WHY:
     /// The visible two-pixel rail between the Agents column and the view panel is the resize control,
     /// as it was between the companion and the editor. The grab strip stays on the Agents side while
-    /// that side is GPUI-painted and straddles the rail when both sides are CEF pages, which is the
-    /// same rule every other rail in the workspace follows.
+    /// that side is GPUI-painted, which it always is: the Agents column holds only GPUI terminals and
+    /// GPUI chat.
     pub(crate) fn render_workarea_split_divider(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let hover_visible = self.workarea_split_divider_hover_visible;
-        // The view panel behind the rail is a CEF page. The Agents column is GPUI-painted unless one
-        // of its panes shows React chat, which is a CEF page of its own and takes the mouse itself.
-        let grab_side = if self.workspace_node_shows_cef_chat(&self.agents_workspace.root) {
-            ResizeRailGrabSide::Straddle
-        } else {
-            ResizeRailGrabSide::Leading
-        };
+        // The view panel behind the rail is a CEF page, so the grab strip stays on the Agents side.
+        let grab_side = ResizeRailGrabSide::Leading;
         div()
             .id("ghostex-gpui-workarea-split-divider")
             .relative()

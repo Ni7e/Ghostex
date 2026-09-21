@@ -19,14 +19,9 @@ wrap_client! {
         permission_handler: Option<PermissionHandler>,
         focus_handler: Option<FocusHandler>,
         keyboard_handler: Option<KeyboardHandler>,
-        drag_handler: Option<DragHandler>,
     }
 
     impl Client {
-        fn drag_handler(&self) -> Option<DragHandler> {
-            self.drag_handler.clone()
-        }
-
         fn focus_handler(&self) -> Option<FocusHandler> {
             self.focus_handler.clone()
         }
@@ -414,8 +409,6 @@ wrap_load_handler! {
 wrap_load_handler! {
     pub(crate) struct GhostexGpuiSessionChatGxserverBootstrapLoadHandler {
         gxserver_bootstrap: StdRc<RefCell<Option<SidebarGxserverBootstrap>>>,
-        activation: StdRc<RefCell<Option<SessionChatActivation>>>,
-        zoom: StdRc<SessionChatZoom>,
         entry_identity: Option<String>,
         page_load_end_handler: Option<PageLoadEndHandler>,
     }
@@ -439,10 +432,10 @@ wrap_load_handler! {
             }
 
             /*
-            CDXC:SessionChat 2026-07-31:
-            Session Chat CEF clients receive only the gxserver bootstrap so the
-            bundled chat.html page can call the session-chat endpoints and open
-            /api/events directly, matching the sidebar's loopback token scope.
+            CDXC:SessionChat 2026-09-21 WHY:
+            Bootstrap-only CEF clients receive only the gxserver bootstrap so the
+            bundled page can call gxserver and open /api/events directly,
+            matching the sidebar's loopback token scope.
             No sidebar post functions, runtime settings, or workarea bridges are
             installed for this surface, and ordinary Browser/workarea/modal
             clients never attach this load handler. The page polls for the
@@ -450,11 +443,6 @@ wrap_load_handler! {
             */
             if let Some(browser) = browser {
                 apply_page_color_scheme(browser, BrowserPageAppearance::System);
-                self.zoom.refresh(browser, true);
-            }
-            if let Some(activation) = self.activation.borrow().as_ref() {
-                send_session_chat_activation_process_message(frame, &activation.url, &activation.generation, activation.bootstrap.clone(), activation.initial_snapshot.clone(), activation.initial_presentation.clone());
-                return;
             }
             send_session_chat_gxserver_bootstrap_process_message(
                 frame,
@@ -561,7 +549,6 @@ wrap_render_process_handler! {
                 message_name == SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME;
             let is_gxserver_bootstrap_update =
                 message_name == SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME;
-            let is_session_chat_activation_message = message_name == SESSION_CHAT_ACTIVATE_MESSAGE_NAME;
             let is_session_chat_gxserver_bootstrap_message =
                 message_name == SESSION_CHAT_GXSERVER_BOOTSTRAP_MESSAGE_NAME;
             let is_project_workarea_install_message =
@@ -572,7 +559,6 @@ wrap_render_process_handler! {
                 && !is_runtime_settings_update
                 && !is_gxserver_bootstrap_update
                 && !is_session_chat_gxserver_bootstrap_message
-                && !is_session_chat_activation_message
                 && !is_project_workarea_install_message
                 && !is_extension_bridge_install_message
             {
@@ -584,7 +570,7 @@ wrap_render_process_handler! {
             if frame.is_main() == 0 {
                 return 1;
             }
-            if (is_session_chat_activation_message || is_session_chat_gxserver_bootstrap_message)
+            if is_session_chat_gxserver_bootstrap_message
                 && app_modal_host_bridge_surface_for_frame_url(&CefString::from(&frame.url()).to_string()).is_none()
             {
                 return 1;
@@ -623,13 +609,6 @@ wrap_render_process_handler! {
             } else if is_runtime_settings_update {
                 let runtime_settings = sidebar_runtime_settings_from_install_message(message);
                 update_sidebar_runtime_settings_v8_bridge(Some(&mut context), runtime_settings);
-            } else if is_session_chat_activation_message {
-                let activation = message.argument_list()
-                    .filter(|arguments| arguments.size() == 1 && arguments.get_type(0) == ValueType::STRING)
-                    .map(|arguments| CefString::from(&arguments.string(0)).to_string());
-                if let Some(activation) = activation {
-                    install_session_chat_activation_v8_bridge(&mut context, &activation);
-                }
             } else if is_session_chat_gxserver_bootstrap_message {
                 /*
                 CDXC:SessionChat 2026-07-31:

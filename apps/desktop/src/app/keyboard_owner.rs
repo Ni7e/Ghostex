@@ -131,9 +131,6 @@ impl GhostexGpuiApp {
             match self.first_responder_target {
                 FirstResponderTarget::TerminalSurface(FirstResponderTerminalSurface::Agents(
                     session_id,
-                ))
-                | FirstResponderTarget::CefSurface(FirstResponderCefSurface::SessionChat(
-                    session_id,
                 )) => return Some(KeyboardOwnerSession::Agents(session_id)),
                 FirstResponderTarget::TerminalSurface(FirstResponderTerminalSurface::Command(
                     session_id,
@@ -474,44 +471,26 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// Physical half of a chat handoff: GPUI handle, native CEF focus, the page's composer, then any draft waiting for that composer.
+    /// Physical half of a chat handoff: the chat view's composer, then any draft waiting for that composer.
     pub(crate) fn focus_session_chat_composer(
         &mut self,
         session_id: TerminalSessionId,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.cancel_session_chat_eviction_probe(session_id);
-        if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
-            self.reclaim_gpui_root_for_native_chat_composer(window);
-            view.update(cx, |view, cx| {
-                view.focus_requested = true;
-                view.ensure_input(window, cx);
-            });
-            if let Some(content) = self
-                .pending_session_chat_composer_insert
-                .remove(&session_id)
-            {
-                self.insert_prompt_into_session_chat(session_id, &content, cx);
-            }
-            return;
-        }
-        let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
+        let Some(view) = self.native_chat_views.get(&session_id).cloned() else {
             return;
         };
-        let focus_handle = surface.read(cx).focus_handle.clone();
-        focus_handle.focus(window, cx);
-        surface.update(cx, |surface, _| {
-            surface.focus();
-            surface.execute_app_owned_script(
-                "(function(){var ns=window.ghostexGpui;if(ns&&typeof ns.onSessionChatFocusComposerRequested==='function'){ns.onSessionChatFocusComposerRequested();}})(); undefined;",
-            );
+        self.reclaim_gpui_root_for_native_chat_composer(window);
+        view.update(cx, |view, cx| {
+            view.focus_requested = true;
+            view.ensure_input(window, cx);
         });
         if let Some(content) = self
             .pending_session_chat_composer_insert
             .remove(&session_id)
         {
-            let _ = self.insert_prompt_into_session_chat(session_id, &content, cx);
+            self.insert_prompt_into_session_chat(session_id, &content, cx);
         }
     }
 

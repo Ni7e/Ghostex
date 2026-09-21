@@ -116,7 +116,6 @@ impl GhostexGpuiApp {
             if !suppressed_by_programmatic_focus {
                 self.reconcile_project_workarea_cef_keyboard_ownership(window, cx);
                 self.reconcile_browser_cef_keyboard_ownership(window, cx);
-                self.reconcile_session_chat_cef_keyboard_ownership(window, cx);
                 if self.reconcile_shell_focus_with_first_responder_target() {
                     self.persist_shell_layout_state();
                     cx.notify();
@@ -130,7 +129,6 @@ impl GhostexGpuiApp {
             suppressed_by_programmatic_focus;
         self.reconcile_project_workarea_cef_keyboard_ownership(window, cx);
         self.reconcile_browser_cef_keyboard_ownership(window, cx);
-        self.reconcile_session_chat_cef_keyboard_ownership(window, cx);
         if !suppressed_by_programmatic_focus {
             if self.reconcile_shell_focus_with_first_responder_target() {
                 self.persist_shell_layout_state();
@@ -157,14 +155,6 @@ impl GhostexGpuiApp {
         let previous_browser_tab = self.browser_tabs.active_tab;
 
         match self.first_responder_target {
-            FirstResponderTarget::CefSurface(FirstResponderCefSurface::SessionChat(session_id)) => {
-                if self
-                    .record_shell_focus_for_session_chat(session_id)
-                    .is_none()
-                {
-                    return false;
-                }
-            }
             FirstResponderTarget::CefSurface(FirstResponderCefSurface::BrowserTab(tab_id))
                 if self.active_mode == TitlebarMode::Browser =>
             {
@@ -235,7 +225,7 @@ impl GhostexGpuiApp {
             self.first_responder_target,
             FirstResponderTarget::CefSurface(FirstResponderCefSurface::ProjectWorkarea(
                 ProjectWorkareaCefSurfaceSlotKey::Source | ProjectWorkareaCefSurfaceSlotKey::Manage
-            )) | FirstResponderTarget::CefSurface(FirstResponderCefSurface::SessionChat(_))
+            ))
         );
         let source_menu_changed =
             self.source_workarea_cef_menu_passthrough_active != source_cef_owns_focus;
@@ -320,37 +310,6 @@ impl GhostexGpuiApp {
             return;
         }
         let Some(surface) = self.browser_surfaces.get(&tab_id).cloned() else {
-            return;
-        };
-        let focus_handle = surface.read(cx).focus_handle.clone();
-        if !focus_handle.is_focused(window) {
-            focus_handle.focus(window, cx);
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    pub(crate) fn reconcile_session_chat_cef_keyboard_ownership(
-        &self,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        /*
-        CDXC:FocusRouting 2026-08-17:
-        Chat body clicks reach Chromium before GPUI's hitbox, so AppKit can
-        focus Chat while GPUI remains focused on the command terminal. Mirror
-        the other CEF surfaces by synchronizing the existing GPUI handle once
-        the registered Chat view owns native focus. Do not force the composer;
-        the original Chromium click target remains unchanged.
-        */
-        let FirstResponderTarget::CefSurface(FirstResponderCefSurface::SessionChat(session_id)) =
-            self.first_responder_target
-        else {
-            return;
-        };
-        // CDXC:PromptSearch 2026-08-20: the SessionChat responder class
-        // means "a CEF surface owns this session's pane", which is true of the
-        // Find surface too. Resolve whichever one is mounted.
-        let Some(surface) = self.agents_pane_cef_surface(session_id) else {
             return;
         };
         let focus_handle = surface.read(cx).focus_handle.clone();
@@ -512,24 +471,6 @@ impl GhostexGpuiApp {
             },
         ) {
             return Some(FirstResponderCefSurface::ProjectWorkarea(slot_key));
-        }
-        if let Some(session_id) =
-            self.agents_chat_surfaces
-                .iter()
-                .find_map(|(session_id, surface)| {
-                    surface
-                        .read(cx)
-                        .native_view_contains_responder(responder)
-                        .then_some(*session_id)
-                })
-        {
-            /*
-            CDXC:SessionChat 2026-07-31:
-            The chat pane is a first-class work surface: classifying its
-            responder keeps focus arbitration from reclaiming keyboard focus
-            while the user types in the chat composer.
-            */
-            return Some(FirstResponderCefSurface::SessionChat(session_id));
         }
         if self.titlebar_tips_panel.as_ref().is_some_and(|panel| {
             panel
@@ -778,9 +719,6 @@ impl GhostexGpuiApp {
             FirstResponderTarget::TerminalSurface(FirstResponderTerminalSurface::Agents(
                 responder_session_id,
             )) => responder_session_id == session_id,
-            FirstResponderTarget::CefSurface(FirstResponderCefSurface::SessionChat(
-                responder_session_id,
-            )) => active_session_is_in_chat_view && responder_session_id == session_id,
             FirstResponderTarget::GpuiWindow => {
                 if active_session_is_in_chat_view {
                     return true;

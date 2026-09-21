@@ -26,31 +26,31 @@ use cef::wrapper::resource_manager::{get_mime_type, get_url_without_query_or_fra
 use cef::{
     App, BrowserProcessHandler, BrowserSettings, Callback, CefString, Client, CommandLine,
     ContentSettingTypes, ContentSettingValues, ContextMenuHandler, ContextMenuParams,
-    DictionaryValue, DisplayHandler, DragData, DragHandler, DragOperationsMask, EventFlags,
-    FindHandler, FocusHandler, FocusSource, Frame, ImplApp, ImplBrowser as _, ImplBrowserHost as _,
-    ImplBrowserProcessHandler, ImplClient, ImplCommandLine as _, ImplContextMenuHandler,
-    ImplContextMenuParams as _, ImplDictionaryValue as _, ImplDisplayHandler, ImplDragData as _,
-    ImplDragHandler, ImplFindHandler, ImplFocusHandler, ImplFrame as _, ImplLifeSpanHandler,
-    ImplListValue as _, ImplLoadHandler, ImplMediaAccessCallback as _, ImplMenuModel as _,
-    ImplPermissionHandler, ImplPermissionPromptCallback as _, ImplProcessMessage as _,
-    ImplRenderProcessHandler, ImplRequest as _, ImplRequestContext as _, ImplRequestHandler,
-    ImplResourceHandler, ImplResourceRequestHandler, ImplResponse as _, ImplStreamReader as _,
-    ImplTask, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, KeyboardHandler,
-    LifeSpanHandler, LoadHandler, MediaAccessCallback, MediaAccessPermissionTypes, MenuModel,
-    PermissionHandler, PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes,
-    PopupFeatures, ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler,
-    ResourceHandler, ResourceReadCallback, ResourceRequestHandler, Response, ReturnValue, State,
-    StreamReader, Task, TerminationStatus, ThreadId, UnresponsiveProcessCallback, V8Handler,
-    V8Propertyattribute, V8Value, ValueType, WindowInfo, WindowOpenDisposition, WrapApp,
-    WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler, WrapDisplayHandler,
-    WrapDragHandler, WrapFindHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
-    WrapPermissionHandler, WrapRenderProcessHandler, WrapRequestHandler, WrapResourceHandler,
-    WrapResourceRequestHandler, WrapTask, WrapV8Handler, ZoomCommand, post_task,
-    stream_reader_create_for_file, string_multimap_alloc, string_multimap_append, wrap_app,
-    wrap_browser_process_handler, wrap_client, wrap_context_menu_handler, wrap_display_handler,
-    wrap_drag_handler, wrap_find_handler, wrap_focus_handler, wrap_life_span_handler,
-    wrap_load_handler, wrap_permission_handler, wrap_render_process_handler, wrap_request_handler,
-    wrap_resource_handler, wrap_resource_request_handler, wrap_task, wrap_v8_handler,
+    DictionaryValue, DisplayHandler, EventFlags, FindHandler, FocusHandler, FocusSource, Frame,
+    ImplApp, ImplBrowser as _, ImplBrowserHost as _, ImplBrowserProcessHandler, ImplClient,
+    ImplCommandLine as _, ImplContextMenuHandler, ImplContextMenuParams as _,
+    ImplDictionaryValue as _, ImplDisplayHandler, ImplFindHandler, ImplFocusHandler,
+    ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
+    ImplMediaAccessCallback as _, ImplMenuModel as _, ImplPermissionHandler,
+    ImplPermissionPromptCallback as _, ImplProcessMessage as _, ImplRenderProcessHandler,
+    ImplRequest as _, ImplRequestContext as _, ImplRequestHandler, ImplResourceHandler,
+    ImplResourceRequestHandler, ImplResponse as _, ImplStreamReader as _, ImplTask,
+    ImplV8Context as _, ImplV8Handler, ImplV8Value as _, KeyboardHandler, LifeSpanHandler,
+    LoadHandler, MediaAccessCallback, MediaAccessPermissionTypes, MenuModel, PermissionHandler,
+    PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes, PopupFeatures,
+    ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler, ResourceHandler,
+    ResourceReadCallback, ResourceRequestHandler, Response, ReturnValue, State, StreamReader, Task,
+    TerminationStatus, ThreadId, UnresponsiveProcessCallback, V8Handler, V8Propertyattribute,
+    V8Value, ValueType, WindowInfo, WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler,
+    WrapClient, WrapContextMenuHandler, WrapDisplayHandler, WrapFindHandler, WrapFocusHandler,
+    WrapLifeSpanHandler, WrapLoadHandler, WrapPermissionHandler, WrapRenderProcessHandler,
+    WrapRequestHandler, WrapResourceHandler, WrapResourceRequestHandler, WrapTask, WrapV8Handler,
+    ZoomCommand, post_task, stream_reader_create_for_file, string_multimap_alloc,
+    string_multimap_append, wrap_app, wrap_browser_process_handler, wrap_client,
+    wrap_context_menu_handler, wrap_display_handler, wrap_find_handler, wrap_focus_handler,
+    wrap_life_span_handler, wrap_load_handler, wrap_permission_handler,
+    wrap_render_process_handler, wrap_request_handler, wrap_resource_handler,
+    wrap_resource_request_handler, wrap_task, wrap_v8_handler,
 };
 use cef::{
     ImplKeyboardHandler, KeyEvent, KeyEventType, WrapKeyboardHandler, wrap_keyboard_handler,
@@ -103,15 +103,14 @@ const SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME: &str =
 const SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.gxserverBootstrapChanged";
 /*
-CDXC:SessionChat 2026-07-31:
-The Session Chat pane surface needs only the gxserver bootstrap
-(baseUrl/token/protocolVersion), never the sidebar post-function bridge. The
-sidebar bootstrap-update path deliberately refuses pages without the full
-installed sidebar bridge, so chat surfaces use this dedicated message that
-installs exactly `window.ghostexGpui.gxserverBootstrap` on the bundled
-chat.html renderer.
+CDXC:SessionChat 2026-09-21 WHY:
+Bootstrap-only pages (Search by Prompt, gxserver-backed modal pages) need only
+the gxserver bootstrap (baseUrl/token/protocolVersion), never the sidebar
+post-function bridge. The sidebar bootstrap-update path deliberately refuses
+pages without the full installed sidebar bridge, so these pages use this
+dedicated message that installs exactly `window.ghostexGpui.gxserverBootstrap`.
+The message keeps its session-chat name from the removed desktop chat.html page.
 */
-const SESSION_CHAT_ACTIVATE_MESSAGE_NAME: &str = "ghostex.gpui.sessionChat.activate";
 const SESSION_CHAT_GXSERVER_BOOTSTRAP_MESSAGE_NAME: &str =
     "ghostex.gpui.sessionChat.gxserverBootstrap";
 const SIDEBAR_RUNTIME_SETTINGS_JS_OBJECT: &str = "runtimeSettings";
@@ -195,7 +194,6 @@ mod message_routing;
 mod native_view;
 mod remote_browser;
 mod request_handling;
-mod session_chat_zoom;
 mod v8_bridges;
 
 pub(crate) use browser::*;
@@ -207,5 +205,4 @@ pub(crate) use message_routing::*;
 pub(crate) use native_view::*;
 pub(crate) use remote_browser::*;
 pub(crate) use request_handling::*;
-pub(crate) use session_chat_zoom::*;
 pub(crate) use v8_bridges::*;

@@ -254,44 +254,6 @@ impl GhostexGpuiApp {
         })
     }
 
-    /*
-    CDXC:SessionChat 2026-07-31:
-    The chat CEF surface renders its own top-right [Terminal View][Agent
-    Actions] cluster because a gpui-drawn overlay cannot paint above the
-    native CEF view. Button clicks arrive over the already-installed
-    app-modal-host bridge shim as `sessionChatHostAction` messages; this
-    handler routes them into the same agent-action dispatch the terminal
-    overlay uses.
-    */
-    pub(crate) fn session_chat_host_bridge_event_handler(
-        &self,
-        renderer_id: u64,
-        cx: &mut gpui::Context<Self>,
-    ) -> cef::AppModalHostBridgeEventHandler {
-        let app = cx.entity().downgrade();
-        let async_cx = cx.to_async();
-        let foreground = cx.foreground_executor().clone();
-        Rc::new(move |event: cef::AppModalHostBridgeEvent| {
-            let cef::AppModalHostBridgeEvent::Message(payload) = event else {
-                return;
-            };
-            let app = app.clone();
-            let mut async_cx = async_cx.clone();
-            foreground
-                .spawn(async move {
-                    let _ = app.update_in(&mut async_cx, |this, window, cx| {
-                        this.receive_session_chat_renderer_action(
-                            renderer_id,
-                            &payload,
-                            window,
-                            cx,
-                        );
-                    });
-                })
-                .detach();
-        })
-    }
-
     pub(crate) fn receive_session_chat_host_action(
         &mut self,
         session_id: TerminalSessionId,
@@ -304,12 +266,6 @@ impl GhostexGpuiApp {
         let Ok(message) = serde_json::from_str::<serde_json::Value>(payload) else {
             return;
         };
-        if message.get("type").and_then(serde_json::Value::as_str)
-            == Some("sessionChatExtensionBridgeRequest")
-        {
-            self.handle_chat_bar_extension_bridge_request(session_id, &message, cx);
-            return;
-        }
         /*
         Composer option-pill failures post the shared app-toast request over
         this same shim. The chat surface's handler otherwise ignores anything
@@ -318,11 +274,6 @@ impl GhostexGpuiApp {
         */
         if message.get("type").and_then(serde_json::Value::as_str) == Some("toast") {
             self.receive_gpui_app_toast_bridge_message(&message, cx);
-            return;
-        }
-        // CDXC:Clipboard 2026-09-15 SEE-ALSO: chat.html has its own bridge receiver, so the shared copy-sound message (packages/core-ui/copy-sound.ts) needs this arm as well as the app-modal one.
-        if message.get("type").and_then(serde_json::Value::as_str) == Some("playCopySound") {
-            gpui_play_copy_sound();
             return;
         }
         // CDXC:Settings 2026-09-06 WHY: The chat bridge previously dropped Settings opens as unknown chat actions, so the account settings shortcut did nothing. Route this modal through the existing native modal owner.
@@ -352,10 +303,6 @@ impl GhostexGpuiApp {
             if let Some(details) = message.get("details") {
                 support_logs::append_session_chat_send_failure(details.clone());
             }
-            return;
-        }
-        if action == "armedActionsRequest" {
-            self.push_session_chat_armed_actions(session_id, cx);
             return;
         }
         if action == "setSimpleMode" {
@@ -446,21 +393,15 @@ impl GhostexGpuiApp {
             return;
         }
         if action == "composerReady" {
-            if let Some(state) = self.agents_chat_page_states.get_mut(&session_id) {
-                state.awaiting_activation = false;
-            }
             self.reconcile_agents_chat_surfaces(cx);
             self.deliver_pending_session_chat_received_draft(session_id, cx);
             if self.agents_chat_mode_sessions.contains(&session_id)
-                && (self.agents_chat_surfaces.contains_key(&session_id)
-                    || self.native_chat_views.contains_key(&session_id))
+                && self.native_chat_views.contains_key(&session_id)
             {
                 self.session_chat_composer_ready_sessions.insert(session_id);
-                self.flush_pending_chat_bar_extension_toggles(session_id, cx);
             }
-            self.cancel_session_chat_eviction_probe(session_id);
             self.drain_pending_keyboard_handoff(window, cx);
-            self.sync_session_chat_pane_focus(window, cx, true);
+            self.sync_session_chat_pane_focus(window, cx);
             /*
             CDXC:Drafts 2026-08-18:
             A transferred draft also has to reach a chat surface the user is
@@ -569,32 +510,6 @@ impl GhostexGpuiApp {
                 );
                 self.reconcile_agents_chat_surfaces(cx);
             }
-            return;
-        }
-        /*
-        CDXC:Clipboard 2026-08-28:
-        Chromium rejects navigator.clipboard.read() in a windowed CEF chat
-        page when GPUI owns the surrounding window focus, even though Monaco
-        is accepting routed keyboard input. Execute CEF's own Paste command
-        for the exact visible, focused chat surface instead. This produces the
-        normal paste event, so text and image clipboard payloads keep using
-        the same Monaco/composer handlers as Cmd+V.
-        */
-        if action == "pasteIntoComposer" {
-            if !self.agents_chat_mode_sessions.contains(&session_id)
-                || self.focused_agents_or_companion_shell_session_id() != Some(session_id)
-            {
-                return;
-            }
-            let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
-                return;
-            };
-            let focus_handle = surface.read(cx).focus_handle.clone();
-            focus_handle.focus(window, cx);
-            surface.update(cx, |surface, _| {
-                surface.focus();
-                let _ = surface.paste();
-            });
             return;
         }
         /*
@@ -756,6 +671,28 @@ impl GhostexGpuiApp {
             let _ = self.dispatch_gpui_workspace_terminal_switch_account(session_id, agent_id, cx);
             return;
         }
+        if action == "handoffToModel" {
+            let text = |key: &str| {
+                message
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+            };
+            let (Some(provider), Some(model)) = (
+                text("provider").filter(|provider| !provider.is_empty()),
+                text("model").filter(|model| !model.is_empty()),
+            ) else {
+                return;
+            };
+            let _ = self.dispatch_gpui_workspace_terminal_handoff_to_model(
+                session_id,
+                provider,
+                model,
+                text("effort").unwrap_or_default(),
+                cx,
+            );
+            return;
+        }
         if action == "splitSessionRight" {
             self.split_existing_agents_session_right(session_id, cx);
             return;
@@ -884,52 +821,16 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    pub(crate) fn deliver_session_chat_image_save(
-        &mut self,
-        session_id: TerminalSessionId,
-        request_id: &str,
-        error: Option<&str>,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
-            return;
-        };
-        let payload = serde_json::json!({
-            "error": error,
-            "requestId": request_id,
-        });
-        let literal = payload
-            .to_string()
-            .replace('\u{2028}', "\\u2028")
-            .replace('\u{2029}', "\\u2029");
-        let script = format!(
-            "(function(){{var ns=window.ghostexGpui;if(ns&&typeof ns.onSessionChatImageSaved==='function'){{ns.onSessionChatImageSaved({literal});}}}})(); undefined;"
-        );
-        surface.update(cx, |surface, _| {
-            surface.execute_app_owned_script(&script);
-        });
-    }
-
     pub(crate) fn request_session_chat_stash_prompt(
         &mut self,
         session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.cancel_session_chat_eviction_probe(session_id);
         if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
             view.update(cx, |view, cx| {
                 view.invoke(serde_json::json!({"type":"stash","text":view.draft}), cx)
             });
-            return;
         }
-        let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
-            return;
-        };
-        surface.update(cx, |surface, _| {
-            surface.execute_app_owned_script(
-                "(function(){var ns=window.ghostexGpui;if(ns&&typeof ns.onSessionChatStashPromptRequested==='function'){ns.onSessionChatStashPromptRequested();}})(); undefined;",
-            );
-        });
     }
 
     pub(crate) fn request_session_chat_handoff_to_terminal(
@@ -937,9 +838,8 @@ impl GhostexGpuiApp {
         session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.cancel_session_chat_eviction_probe(session_id);
         // This is the Chat View button's directional command, not the shared
-        // toggle hotkey. Its CEF bridge message crosses an async queue, so it
+        // toggle hotkey. Its host message crosses an async hop, so it
         // may arrive after a newer native Chat View click has already switched
         // the session back from terminal. Ignore that stale request instead of
         // toggling from whichever state happens to be current when it lands.
@@ -951,31 +851,6 @@ impl GhostexGpuiApp {
                 self.pending_session_chat_draft_handoffs.insert(session_id);
                 view.update(cx, |view, cx| view.invoke(serde_json::json!({"type":"handoff","text":view.draft,"draftVersion":{"draftId":view.draft_id,"revision":view.draft_revision}}), cx));
             }
-            self.toggle_agents_session_chat_mode(session_id, cx);
-            return;
-        }
-        /*
-        CDXC:SessionChat 2026-08-21:
-        A view switch is unconditional UI state, not the success result of a
-        draft-copy handshake. Ask a ready chat composer to copy its draft in
-        the background, retain that hidden CEF surface until it answers, and
-        show the terminal immediately. If the bridge is not ready, the draft
-        remains in the chat composer's per-session storage for the return trip.
-        */
-        if self
-            .session_chat_composer_ready_sessions
-            .contains(&session_id)
-            && !self
-                .session_chat_draft_capture_in_flight
-                .contains(&session_id)
-            && self.pending_session_chat_draft_handoffs.insert(session_id)
-            && let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned()
-        {
-            surface.update(cx, |surface, _| {
-                surface.execute_app_owned_script(
-                    "(function(){var ns=window.ghostexGpui;if(ns&&typeof ns.onSessionChatHandoffToTerminalRequested==='function'){ns.onSessionChatHandoffToTerminalRequested();}})(); undefined;",
-                );
-            });
         }
         self.toggle_agents_session_chat_mode(session_id, cx);
     }
@@ -1075,29 +950,15 @@ impl GhostexGpuiApp {
         content: &str,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        self.cancel_session_chat_eviction_probe(session_id);
-        if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
-            if !view.read(cx).composer_ready {
-                self.pending_session_chat_composer_insert
-                    .insert(session_id, content.to_owned());
-                return true;
-            }
-            view.update(cx, |view, cx| view.insert_prompt(content, cx));
-            return true;
-        }
-        let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
+        let Some(view) = self.native_chat_views.get(&session_id).cloned() else {
             return false;
         };
-        let literal = serde_json::json!({ "content": content })
-            .to_string()
-            .replace('\u{2028}', "\\u2028")
-            .replace('\u{2029}', "\\u2029");
-        let script = format!(
-            "(function(){{var ns=window.ghostexGpui;if(ns&&typeof ns.onSessionChatInsertPromptRequested==='function'){{ns.onSessionChatInsertPromptRequested({literal});}}}})(); undefined;"
-        );
-        surface.update(cx, |surface, _| {
-            surface.execute_app_owned_script(&script);
-        });
+        if !view.read(cx).composer_ready {
+            self.pending_session_chat_composer_insert
+                .insert(session_id, content.to_owned());
+            return true;
+        }
+        view.update(cx, |view, cx| view.insert_prompt(content, cx));
         true
     }
 

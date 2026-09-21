@@ -75,6 +75,16 @@ impl GhostexGpuiApp {
         let floating = layout == AgentsWorkspaceLayout::Floating;
         let meets_header = !floating && self.agents_column_meets_gpui_chat();
         let flows_under_header = !floating && self.agents_column_flows_under_workarea_header(cx);
+        let solo_chat = self
+            .agents_column_solo_gpui_chat()
+            .filter(|_| flows_under_header)
+            .map(|chat| chat.entity_id());
+        for chat in self.native_chat_views.values() {
+            let under = solo_chat == Some(chat.entity_id());
+            if chat.read(cx).under_workarea_header != under {
+                chat.update(cx, |chat, cx| chat.set_under_workarea_header(under, cx));
+            }
+        }
         let top_inset = if floating {
             0.0
         } else {
@@ -275,16 +285,8 @@ impl GhostexGpuiApp {
         let split_id = split.id;
         let axis = split.axis;
         let hover_visible = self.workspace_split_hover_line_visible(split_id);
-        // A pane showing React chat is a CEF page, which takes the mouse itself, so the grab strip moves
-        // wholly onto the other side when only one side of the rail has such a pane.
-        let grab_side = match (
-            self.workspace_node_shows_cef_chat(&split.first),
-            self.workspace_node_shows_cef_chat(&split.second),
-        ) {
-            (true, false) => ResizeRailGrabSide::Trailing,
-            (false, true) => ResizeRailGrabSide::Leading,
-            _ => ResizeRailGrabSide::Straddle,
-        };
+        // Both sides are GPUI-painted panes, so the grab strip straddles the rail.
+        let grab_side = ResizeRailGrabSide::Straddle;
         let rail = div()
             .id(format!(
                 "ghostex-gpui-workspace-split-handle-{}",
@@ -331,18 +333,6 @@ impl GhostexGpuiApp {
             }),
         ))
         .into_any_element()
-    }
-
-    pub(crate) fn workspace_node_shows_cef_chat(&self, node: &WorkspaceNode) -> bool {
-        match node {
-            WorkspaceNode::Split(split) => {
-                self.workspace_node_shows_cef_chat(&split.first)
-                    || self.workspace_node_shows_cef_chat(&split.second)
-            }
-            WorkspaceNode::Leaf(leaf) => leaf.tab_group.active_session_id().is_some_and(|id| {
-                self.agents_chat_mode_sessions.contains(&id) && !self.session_chat_use_gpui
-            }),
-        }
     }
 
     pub(crate) fn render_workspace_leaf(

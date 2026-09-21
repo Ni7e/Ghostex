@@ -1055,9 +1055,9 @@ impl GhostexGpuiApp {
         self.agents_terminal_runtime_osc_states = restored_terminal_runtime.runtime_osc_states;
         self.agents_gpui_engine_close_confirms =
             restored_terminal_runtime.gpui_engine_close_confirms;
-        // The incoming project's chat pages come back with the workspace model
-        // whose session ids they are keyed by, so `ensure_agents_chat_surface`
-        // finds them and the reconcile pass below only has to make them visible.
+        // The incoming project's chat views come back with the workspace model
+        // whose session ids they are keyed by, so `ensure_native_chat` finds
+        // them and the reconcile pass below only has to make them visible.
         let restored_chat_runtime = self
             .agents_workspace_project_id
             .as_ref()
@@ -1066,7 +1066,7 @@ impl GhostexGpuiApp {
                     .remove(project_id)
             })
             .unwrap_or_default();
-        self.restore_parked_agents_chat_surfaces(restored_chat_runtime, cx);
+        self.restore_parked_agents_chat_surfaces(restored_chat_runtime);
 
         /*
         Shell, pane, and runtime ids are intentionally project-local. Tear down
@@ -1137,7 +1137,6 @@ impl GhostexGpuiApp {
         self.restore_gpui_agents_delayed_sends(delayed_send_restore_intents, cx);
         self.apply_project_view_state_for_active_project(cx);
         self.reconcile_agents_chat_surfaces(cx);
-        self.evict_expired_hidden_agents_chat_surfaces(cx);
         self.ensure_project_keep_alive_expiry_scheduled(cx);
         self.persist_shell_layout_state();
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);

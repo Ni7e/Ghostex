@@ -112,12 +112,7 @@ impl GhostexGpuiApp {
             .values()
             .filter(|parked| !parked.kept_alive_viewer_sessions.is_empty())
             .filter_map(|parked| keep_alive_remaining(parked.parked_at, keep));
-        let chats = self
-            .parked_agents_chat_runtimes_by_project
-            .values()
-            .filter(|parked| !parked.kept_alive_sessions.is_empty())
-            .filter_map(|parked| keep_alive_remaining(parked.parked_at, keep));
-        workarea.chain(terminals).chain(chats).min()
+        workarea.chain(terminals).min()
     }
 
     /// One timer covers every kept project: it fires at the earliest expiry, runs the ordinary
@@ -141,7 +136,6 @@ impl GhostexGpuiApp {
                 this.project_keep_alive_expiry_scheduled = false;
                 this.expire_parked_project_workarea_surfaces();
                 this.release_unused_agents_gpui_terminal_viewers(false, &HashSet::new(), cx);
-                this.evict_expired_hidden_agents_chat_surfaces(cx);
                 this.ensure_project_keep_alive_expiry_scheduled(cx);
                 cx.notify();
             });

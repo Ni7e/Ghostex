@@ -55,13 +55,12 @@ const SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME: &str =
 const SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.gxserverBootstrapChanged";
 /*
-CDXC:SessionChat 2026-07-31:
-Session Chat surfaces receive only the gxserver bootstrap through this
+CDXC:SessionChat 2026-09-21 WHY:
+Bootstrap-only pages receive only the gxserver bootstrap through this
 dedicated message; unlike the sidebar bootstrap-update path it must not
-require the installed sidebar post-function bridge, because chat.html never
-gets one. Keep in sync with the macOS renderer bridge in cef/shell.rs.
+require the installed sidebar post-function bridge, because those pages never
+get one. Keep in sync with the macOS renderer bridge in cef/shell.rs.
 */
-const SESSION_CHAT_ACTIVATE_MESSAGE_NAME: &str = "ghostex.gpui.sessionChat.activate";
 const SESSION_CHAT_GXSERVER_BOOTSTRAP_MESSAGE_NAME: &str =
     "ghostex.gpui.sessionChat.gxserverBootstrap";
 const SIDEBAR_RUNTIME_SETTINGS_JS_OBJECT: &str = "runtimeSettings";
@@ -371,7 +370,6 @@ wrap_render_process_handler! {
                 message_name == SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME;
             let is_gxserver_bootstrap_update =
                 message_name == SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME;
-            let is_session_chat_activation_message = message_name == SESSION_CHAT_ACTIVATE_MESSAGE_NAME;
             let is_session_chat_gxserver_bootstrap_message =
                 message_name == SESSION_CHAT_GXSERVER_BOOTSTRAP_MESSAGE_NAME;
             let is_project_workarea_install_message =
@@ -382,7 +380,6 @@ wrap_render_process_handler! {
                 && !is_runtime_settings_update
                 && !is_gxserver_bootstrap_update
                 && !is_session_chat_gxserver_bootstrap_message
-                && !is_session_chat_activation_message
                 && !is_project_workarea_install_message
                 && !is_extension_bridge_install_message
             {
@@ -394,7 +391,7 @@ wrap_render_process_handler! {
             if frame.is_main() == 0 {
                 return 1;
             }
-            if (is_session_chat_activation_message || is_session_chat_gxserver_bootstrap_message)
+            if is_session_chat_gxserver_bootstrap_message
                 && app_modal_host_bridge_surface_for_frame_url(&CefString::from(&frame.url()).to_string()).is_none()
             {
                 return 1;
@@ -440,13 +437,6 @@ wrap_render_process_handler! {
             } else if is_runtime_settings_update {
                 let runtime_settings = sidebar_runtime_settings_from_install_message(message);
                 update_sidebar_runtime_settings_v8_bridge(Some(&mut context), runtime_settings);
-            } else if is_session_chat_activation_message {
-                let activation = message.argument_list()
-                    .filter(|arguments| arguments.size() == 1 && arguments.get_type(0) == ValueType::STRING)
-                    .map(|arguments| CefString::from(&arguments.string(0)).to_string());
-                if let Some(activation) = activation {
-                    install_session_chat_activation_v8_bridge(&mut context, &activation);
-                }
             } else if is_session_chat_gxserver_bootstrap_message {
                 let gxserver_bootstrap = sidebar_gxserver_bootstrap_from_process_message(message, 0);
                 install_session_chat_gxserver_bootstrap_v8_bridge(

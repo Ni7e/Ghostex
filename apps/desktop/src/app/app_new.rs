@@ -231,11 +231,10 @@ impl GhostexGpuiApp {
                 open_views: shell_layout_state.open_views,
                 view_panel_maximized: shell_layout_state.view_panel_maximized,
                 view_panel_picker_open: shell_layout_state.view_panel_picker_open,
-                ghostex_page_panels: HashMap::new(),
                 view_picker_scroll: ScrollHandle::new(),
-                ghostex_ask_page_scroll: ScrollHandle::new(),
                 browser_start_pages: HashMap::new(),
-                view_tab_drag: None,
+                view_strip_drop_index: None,
+                view_strip_layout: shell_layout_state.view_strip_layout,
                 last_open_view_mode: shell_layout_state.last_open_view_mode,
                 view_pane_layouts: shell_layout_state.view_pane_layouts,
                 sidebar_visibility_memory,
@@ -267,30 +266,19 @@ impl GhostexGpuiApp {
                 pending_keep_view_remote_focus: HashSet::new(),
                 agents_chat_page_states: HashMap::new(),
                 session_chat_diagnostics: Default::default(),
-                agents_chat_eviction_running: false,
                 agents_chat_prewarm_scheduled: false,
                 native_chat_visible_sessions: HashSet::new(),
                 session_chat_subscribe_requests: HashMap::new(),
                 session_chat_paused_generations: HashSet::new(),
                 native_chat_pool_pass_scheduled: false,
                 agent_launch_placeholders: Default::default(),
-                agents_chat_eviction_retry_scheduled: false,
                 agents_chat_reconcile_scheduled: false,
-                agents_chat_eviction_requested: false,
-                session_chat_use_gpui: shared_settings_snapshot
-                    .object()
-                    .get("sessionChatUseGpui")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(true),
                 native_chat_views: HashMap::new(),
-                agents_chat_surfaces: HashMap::new(),
                 session_chat_broker_endpoints: HashMap::new(),
                 session_chat_broker_epoch: None,
                 session_chat_shared_snapshots: Vec::new(),
                 session_chat_presentations: Vec::new(),
-                reusable_chat_renderers: Vec::new(),
                 account_switch_progress: HashMap::new(),
-                agents_chat_surface_hidden_since: HashMap::new(),
                 session_chat_composer_ready_sessions: HashSet::new(),
                 session_chat_composer_empty_reports: HashMap::new(),
                 pending_session_chat_composer_insert: HashMap::new(),
@@ -413,7 +401,6 @@ impl GhostexGpuiApp {
                 workspace_tab_scroll_handles: HashMap::new(),
                 browser_tab_scroll_handles: HashMap::new(),
                 view_tab_scroll_handle: ScrollHandle::new(),
-                view_browser_tab_scroll_handle: ScrollHandle::new(),
                 command_tab_scroll_handles: HashMap::new(),
                 command_collapsed_tab_scroll_handle: ScrollHandle::new(),
                 workspace_split_layout_metrics: HashMap::new(),
@@ -615,7 +602,6 @@ impl GhostexGpuiApp {
             this.start_command_action_status_polling(cx);
             this.start_command_pane_auto_minimize_polling(window, cx);
             this.start_session_chat_queued_count_polling(cx);
-            this.start_agents_chat_surface_eviction_polling(cx);
             this.start_prompt_editor_daemon_polling(cx);
             this.start_gpui_remote_gxserver_watchdog(cx);
             this.sync_gx_store_transport(cx);

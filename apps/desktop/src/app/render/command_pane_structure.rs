@@ -305,12 +305,9 @@ impl GhostexGpuiApp {
     }
 
     /// The workarea above the command pane boundary is partly a CEF page whenever a view panel is
-    /// open, and in the Agents column whenever a pane shows React chat; the grab strip then lies
-    /// wholly over the command pane, which is always GPUI-painted.
+    /// open; the grab strip then lies wholly over the command pane, which is always GPUI-painted.
     fn command_pane_boundary_grab_side(&self) -> ResizeRailGrabSide {
-        let workspace_is_cef = self.view_panel_shows_cef_page()
-            || self.workspace_node_shows_cef_chat(&self.agents_workspace.root);
-        if workspace_is_cef {
+        if self.view_panel_shows_cef_page() {
             ResizeRailGrabSide::Trailing
         } else {
             ResizeRailGrabSide::Straddle

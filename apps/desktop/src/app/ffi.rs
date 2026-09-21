@@ -122,27 +122,7 @@ pub extern "C" fn GhostexGpuiKeyboardOwnerUsesRendererEditHotkeys(
                         FirstResponderCefSurface::ProjectWorkarea(
                             ProjectWorkareaCefSurfaceSlotKey::Source
                                 | ProjectWorkareaCefSurfaceSlotKey::Manage
-                        ) | FirstResponderCefSurface::SessionChat(_)
-                    ))
-                )
-            }) as std::ffi::c_int
-    })
-}
-
-#[cfg(target_os = "macos")]
-#[unsafe(no_mangle)]
-pub extern "C" fn GhostexGpuiKeyboardOwnerIsSessionChat(
-    gpui_root_view: *mut std::ffi::c_void,
-) -> std::ffi::c_int {
-    GPUI_KEYBOARD_ROUTER_TARGETS.with(|targets| {
-        targets
-            .borrow()
-            .get(&(gpui_root_view as usize))
-            .is_some_and(|target| {
-                matches!(
-                    target.owner,
-                    GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
-                        FirstResponderCefSurface::SessionChat(_)
+                        )
                     ))
                 )
             }) as std::ffi::c_int

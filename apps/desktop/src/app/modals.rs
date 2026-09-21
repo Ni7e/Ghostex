@@ -1184,9 +1184,12 @@ impl GhostexGpuiApp {
             };
             let _ = this.update(cx, |this, cx| {
                 this.titlebar_tips_sidebar_agent_ids = Some(sidebar_agent_ids.clone());
-                if let Some(panel) = this.ghostex_page_panels.get(&GhostexPage::Tips).cloned() {
-                    panel.update(cx, |panel, cx| {
-                        panel.update_tips_sidebar_agent_ids(sidebar_agent_ids, cx);
+                if this.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Tips)
+                    && let Some(handle) = this.titlebar_popup_window.clone()
+                {
+                    let _ = handle.update(cx, |popup, window, cx| {
+                        popup.update_tips_sidebar_agent_ids(sidebar_agent_ids, cx);
+                        window.refresh();
                     });
                 }
             });
@@ -2016,93 +2019,7 @@ impl GhostexGpuiApp {
         let sidebar_state_message =
             self.gpui_app_modal_sidebar_state_message_from_settings_snapshot(settings_snapshot);
         self.refresh_open_gpui_app_modal_sidebar_state(sidebar_state_message, cx);
-        let chat_theme = gpui_session_chat_theme_from_settings(settings_snapshot.object());
-        let chat_theme_literal =
-            serde_json::to_string(chat_theme).unwrap_or_else(|_| "\"dark\"".to_string());
-        let chat_theme_script =
-            format!("window.ghostexSetSessionChatTheme?.({chat_theme_literal});undefined;");
-        let chat_font_family =
-            gpui_session_chat_font_family_from_settings(settings_snapshot.object());
-        let chat_font_family_literal =
-            serde_json::to_string(&chat_font_family).unwrap_or_else(|_| "\"\"".to_string());
-        let chat_font_family_script = format!(
-            "window.ghostexSetSessionChatFontFamily?.({chat_font_family_literal});undefined;"
-        );
-        let chat_custom_transcript_width_enabled =
-            gpui_session_chat_custom_transcript_width_enabled_from_settings(
-                settings_snapshot.object(),
-            );
-        let chat_custom_transcript_width_script = format!(
-            "window.ghostexSetSessionChatCustomTranscriptWidthEnabled?.({chat_custom_transcript_width_enabled});undefined;"
-        );
-        let chat_transcript_width_percent =
-            gpui_session_chat_transcript_width_percent_from_settings(settings_snapshot.object());
-        let chat_transcript_width_script = format!(
-            "window.ghostexSetSessionChatTranscriptWidthPercent?.({chat_transcript_width_percent});undefined;"
-        );
-        let code_file_view_available = self.titlebar_mode_available(TitlebarMode::Source)
-            && self.embedded_code_editor_unavailable_reason().is_none();
-        let docs_file_view_available = self.titlebar_mode_available(TitlebarMode::Manage);
-        let chat_file_views_script = format!(
-            "window.ghostexSetSessionChatFileViews?.({code_file_view_available},{docs_file_view_available});undefined;"
-        );
-        let chat_file_edit_previews =
-            gpui_session_chat_file_edit_previews_from_settings(settings_snapshot.object());
-        let chat_file_edit_previews_script = format!(
-            "window.ghostexSetSessionChatFileEditPreviews?.({chat_file_edit_previews});undefined;"
-        );
-        let chat_model_picks_session_only =
-            gpui_session_chat_model_picks_session_only_from_settings(settings_snapshot.object());
-        let chat_model_picks_session_only_script = format!(
-            "window.ghostexSetSessionChatModelPicksSessionOnly?.({chat_model_picks_session_only});undefined;"
-        );
-        let chat_simple_mode =
-            gpui_session_chat_simple_mode_from_settings(settings_snapshot.object());
-        let chat_simple_mode_script =
-            format!("window.ghostexSetSessionChatSimpleMode?.({chat_simple_mode});undefined;");
-        let chat_verbose_mode =
-            gpui_session_chat_verbose_mode_from_settings(settings_snapshot.object());
-        let chat_verbose_mode_script =
-            format!("window.ghostexSetSessionChatVerboseMode?.({chat_verbose_mode});undefined;");
-        let chat_hotkeys = settings_snapshot
-            .object()
-            .get("hotkeys")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        let chat_hotkeys_script =
-            format!("window.ghostexSetSessionChatHotkeys?.({chat_hotkeys});undefined;");
-        let hide_account_emails = settings_snapshot
-            .object()
-            .get("hideAccountEmails")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        let account_privacy_script =
-            format!("window.ghostexSetHideAccountEmails?.({hide_account_emails});undefined;");
         self.sync_titlebar_account_privacy(cx);
-        for surface in self.agents_chat_surfaces.values().chain(
-            self.parked_agents_chat_runtimes_by_project
-                .values()
-                .flat_map(|parked| parked.surfaces.values()),
-        ) {
-            surface.update(cx, |surface, _| {
-                surface.refresh_session_chat_zoom();
-                surface.execute_app_owned_script(&account_privacy_script);
-                surface.execute_app_owned_script(&chat_file_edit_previews_script);
-                surface.execute_app_owned_script(&chat_model_picks_session_only_script);
-                surface.execute_app_owned_script(&chat_file_views_script);
-                surface.execute_app_owned_script(&chat_simple_mode_script);
-                surface.execute_app_owned_script(&chat_hotkeys_script);
-            });
-        }
-        for surface in self.agents_chat_surfaces.values() {
-            surface.update(cx, |surface, _| {
-                surface.execute_app_owned_script(&chat_theme_script);
-                surface.execute_app_owned_script(&chat_font_family_script);
-                surface.execute_app_owned_script(&chat_custom_transcript_width_script);
-                surface.execute_app_owned_script(&chat_transcript_width_script);
-                surface.execute_app_owned_script(&chat_verbose_mode_script);
-            });
-        }
         // Newly saved hotkey chords bind immediately. The save boundary first
         // adds targeted Unbind markers for the prior Ghostex action chords, so
         // removed/remapped entries stop dispatching without clearing GPUI or
@@ -2289,10 +2206,13 @@ impl GhostexGpuiApp {
             }
             _ => {}
         }
-        if let Some(panel) = self.ghostex_page_panels.get(&GhostexPage::Tips).cloned() {
+        if self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Tips)
+            && let Some(handle) = self.titlebar_popup_window.clone()
+        {
             let payload = payload.clone();
-            panel.update(cx, |panel, cx| {
-                panel.update_tips_runtime_status(payload, cx);
+            let _ = handle.update(cx, |popup, window, cx| {
+                popup.update_tips_runtime_status(payload, cx);
+                window.refresh();
             });
         }
         let Some(project_state_update) =

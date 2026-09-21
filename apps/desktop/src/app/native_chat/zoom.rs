@@ -1,12 +1,9 @@
 //! Keyboard zoom for the chat pane: Cmd+= / Cmd+- / Cmd+0 (Ctrl on Windows and Linux).
 //!
-//! React chat is a CEF page, so those chords reach Chromium's own page zoom: the responder chain
-//! forwards the three standard zoom commands to the chat view (`cef/shell/native_view.rs`) and
-//! `cef/shell/session_chat_zoom.rs` applies `sessionChatZoomPercent` as that page's default level.
-//! GPUI chat paints everything at `ChatAppearance::scale`, so the same chords step a per-pane
-//! override that the appearance prefers over the configured default. Like Chromium's page zoom the
-//! override is temporary: it belongs to this view, is never written to Settings, and a change to
-//! the configured default drops it.
+//! GPUI chat paints everything at `ChatAppearance::scale`, so the chords step a per-pane override
+//! that the appearance prefers over the configured `sessionChatZoomPercent`. Like Chromium's page
+//! zoom the override is temporary: it belongs to this view, is never written to Settings, and a
+//! change to the configured default drops it.
 
 use super::{appearance::ChatAppearance, state::NativeChatView};
 use gpui::{App, Context, KeyBinding, Window};
@@ -19,12 +16,11 @@ const ZOOM_PERCENT_KEY: &str = "keyboardZoomPercent";
 
 /// CDXC:SessionChat 2026-09-19 WHY:
 /// The rungs are Chromium's preset zoom factors kept inside the 70% to 200% range Settings offers,
-/// so the same number of presses lands on the same percentage in either chat, and every rung is
-/// also a multiple of the shared 5% step. Cmd+0 drops the override and returns the pane to the
+/// so the same number of presses lands on the same percentage as React chat on web and mobile, and
+/// every rung is also a multiple of the shared 5% step. Cmd+0 drops the override and returns the pane to the
 /// configured default instead of to a flat 100%, which is what a reset means once the default is a
 /// user setting.
-/// SEE-ALSO: packages/shared/ghostex-settings/types.ts owns the range, step and default;
-/// apps/desktop/src/cef/shell/session_chat_zoom.rs applies that default to React chat.
+/// SEE-ALSO: packages/shared/ghostex-settings/types.ts owns the range, step and default.
 const ZOOM_PERCENT_RUNGS: [f32; 10] = [
     70.0, 75.0, 80.0, 90.0, 100.0, 110.0, 125.0, 150.0, 175.0, 200.0,
 ];

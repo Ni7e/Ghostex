@@ -30,7 +30,6 @@ pub(crate) fn show_browser_dev_tools(
         None,
         Some(GhostexGpuiCefFocusHandler::new()),
         None,
-        None,
     ));
     host.show_dev_tools(
         Some(&window_info),
@@ -354,70 +353,26 @@ wrap_display_handler! {
                 // borrowed wrapper out instead so the URLs CEF supplied remain
                 // visible to the iterator for the lifetime of this callback.
                 let icon_urls = std::mem::take(icon_urls);
-                icon_urls.into_iter().find_map(|url| {
-                    let url = url.trim().to_string();
-                    if url.is_empty() { None } else { Some(url) }
-                })
+                let urls = icon_urls
+                    .into_iter()
+                    .map(|url| url.trim().to_string())
+                    .filter(|url| !url.is_empty())
+                    .collect::<Vec<_>>();
+                // The tab icon decodes bitmaps only, so a page that offers both (GitHub lists a
+                // PNG beside its SVG) is represented by the one that can be drawn.
+                let is_svg = |url: &String| {
+                    url.split(['?', '#'])
+                        .next()
+                        .is_some_and(|path| path.to_ascii_lowercase().ends_with(".svg"))
+                };
+                urls.iter()
+                    .find(|url| !is_svg(url))
+                    .or_else(|| urls.first())
+                    .cloned()
             });
             (self.page_metadata_handler)(BrowserPageMetadataEvent::FaviconUrlChanged(
                 representative_url,
             ));
-        }
-    }
-}
-
-wrap_drag_handler! {
-    pub(crate) struct GhostexGpuiSessionChatDragHandler;
-
-    impl DragHandler {
-        fn on_drag_enter(
-            &self,
-            browser: Option<&mut cef::Browser>,
-            drag_data: Option<&mut DragData>,
-            _mask: DragOperationsMask,
-        ) -> c_int {
-            /*
-            CDXC:Clipboard 2026-08-29:
-            Chromium never exposes an OS file drag's absolute paths to the
-            page, so the browser process is the only place a Session Chat
-            drop can resolve to real local paths (folders included). Publish
-            the drag's paths onto the bundled chat page's `ghostexGpui`
-            namespace at drag-enter — a non-file drag publishes the empty
-            list, clearing any earlier drag's paths — and let the drop itself
-            proceed normally. Installed only for Session Chat surfaces; the
-            page-side transport reads the paths only for a session running on
-            this machine, so a remote chat keeps uploading bytes and never
-            hands this machine's paths to an agent elsewhere.
-            */
-            let paths: Vec<String> = drag_data
-                .filter(|drag_data| drag_data.is_file() == 1)
-                .map(|drag_data| {
-                    let mut file_paths = cef::CefStringList::default();
-                    if drag_data.file_paths(Some(&mut file_paths)) == 1 {
-                        file_paths
-                            .into_iter()
-                            .filter(|path| !path.trim().is_empty())
-                            .collect()
-                    } else {
-                        Vec::new()
-                    }
-                })
-                .unwrap_or_default();
-            if let Some(browser) = browser
-                && let Some(frame) = browser.main_frame()
-                && let Ok(paths_json) = serde_json::to_string(&paths)
-            {
-                let script = format!(
-                    "window.ghostexGpui = window.ghostexGpui || {{}}; \
-                     window.ghostexGpui.sessionChatDropPaths = {paths_json};"
-                );
-                frame.execute_java_script(
-                    Some(&CefString::from(script.as_str())),
-                    Some(&CefString::from(BROWSER_APP_OWNED_SCRIPT_URL)),
-                    1,
-                );
-            }
-            0
         }
     }
 }

@@ -1,10 +1,9 @@
 /*
  * CDXC:SessionChat 2026-08-22:
  * The transcript's typeface. Imported here rather than from a host entry point
- * because this sheet is the one file all three chat surfaces load (gpui's
- * chat.html through sidebar/styles.css, the web host through the same, and the
- * mobile WebView through mobile-chat/session-chat.css), so one import covers
- * them all. The mobile build inlines `.woff2` as a data URL, so its single-file
+ * because this sheet is the one file both chat surfaces load (the web host
+ * through sidebar/styles.css and the mobile WebView through
+ * mobile-chat/session-chat.css), so one import covers them all. The mobile build inlines `.woff2` as a data URL, so its single-file
  * page keeps the face with no external request.
  *
  * A variable face specifically: the transcript needs 400 for running prose and
@@ -22,13 +21,10 @@
  * with the shadcn chat components (message-scroller, message, bubble,
  * attachment, marker) styled by tailwind utility classes in the generated
  * sheet, so this file keeps only the pieces tailwind cannot express per-host:
- * markdown typography inside chat bubbles and the empty/failure states that
- * the gpui chat.html bootstrap failure path renders without React helpers.
+ * markdown typography inside chat bubbles and the empty/failure states.
  */
 
-/* --- gpui chat.html shell ---------------------------------------------------- */
-
-/* The gpui Session Chat page wraps the view in .native-sidebar-shell, whose
+/* The mobile Session Chat page wraps the view in .native-sidebar-shell, whose
    implicit grid row is auto-sized; pin it to the page height so the
    MessageScroller viewport owns the scrolling instead of the document. */
 .native-sidebar-shell.gpui-session-chat {

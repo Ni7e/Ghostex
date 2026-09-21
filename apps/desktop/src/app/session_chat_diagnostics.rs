@@ -31,7 +31,7 @@ impl GhostexGpuiApp {
                 GpuiWorkspaceTerminalSessionKey::Remote(key) => key.session_id,
             }),
             "pageGeneration": self.agents_chat_page_states.get(&session_id).map(|state| state.generation),
-            "hasSurface": self.agents_chat_surfaces.contains_key(&session_id),
+            "hasView": self.native_chat_views.contains_key(&session_id),
             "composerReady": self.session_chat_composer_ready_sessions.contains(&session_id),
             "composerEmpty": self.session_chat_composer_empty_reports.get(&session_id),
         });
@@ -44,11 +44,11 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn record_session_chat_render(&self, session_id: TerminalSessionId) {
-        let has_surface = self.agents_chat_surfaces.contains_key(&session_id);
+        let has_view = self.native_chat_views.contains_key(&session_id);
         let switching = self.session_account_switch_progress(session_id).is_some();
         let snapshot = serde_json::json!({
             "projectId": self.agents_workspace_project_id,
-            "hasSurface": has_surface,
+            "hasView": has_view,
             "accountSwitching": switching,
             "bootstrapAvailable": self.sidebar_gxserver_bootstrap.is_some(),
             "pageGeneration": self.agents_chat_page_states.get(&session_id).map(|state| state.generation),
@@ -64,10 +64,10 @@ impl GhostexGpuiApp {
                 rendered.remove(&old_id);
             }
         }
-        let regression = !has_surface
+        let regression = !has_view
             && !switching
             && previous.as_ref().is_some_and(|old| {
-                old["hasSurface"] == true && old["projectId"] == snapshot["projectId"]
+                old["hasView"] == true && old["projectId"] == snapshot["projectId"]
             });
         let event = if regression {
             "sessionChat.nativeLoadingRegressionWarning"

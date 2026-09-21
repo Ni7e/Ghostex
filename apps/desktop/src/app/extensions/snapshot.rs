@@ -89,9 +89,7 @@ impl GhostexGpuiApp {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.extensions_refresh_in_flight = false;
-                if let Ok((mut snapshot, projects, session_details)) = result {
-                    snapshot.pending_chat_bar_toggles =
-                        std::mem::take(&mut this.extensions_snapshot.pending_chat_bar_toggles);
+                if let Ok((snapshot, projects, session_details)) = result {
                     let pinned_popup_runtimes = snapshot
                         .installed
                         .values()

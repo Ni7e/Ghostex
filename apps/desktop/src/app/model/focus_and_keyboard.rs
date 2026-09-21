@@ -78,7 +78,6 @@ pub(crate) enum FirstResponderCefSurface {
     TitlebarExtensionPopup,
     TitlebarTips,
     AppModal,
-    SessionChat(TerminalSessionId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

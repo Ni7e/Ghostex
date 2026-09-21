@@ -256,19 +256,6 @@ impl GhostexGpuiApp {
                 surface.refresh_sidebar_gxserver_bootstrap(next_bootstrap.clone());
             });
         }
-        /*
-        CDXC:SessionChat 2026-07-31:
-        Session Chat surfaces carry either the local loopback bootstrap or the
-        owning remote machine's loopback SSH-tunnel bootstrap. Refresh each
-        surface from its session identity so a local bootstrap replay cannot
-        redirect an already-open remote chat to the local daemon.
-        */
-        for (session_id, surface) in &self.agents_chat_surfaces {
-            let bootstrap = self.agents_session_chat_gxserver_bootstrap(*session_id);
-            surface.update(cx, |surface, _| {
-                surface.refresh_session_chat_gxserver_bootstrap(bootstrap);
-            });
-        }
         self.reconcile_agents_pane_surfaces(cx);
         true
     }
@@ -1995,7 +1982,7 @@ impl GhostexGpuiApp {
             .border_t_1()
             .border_color(titlebar_button_border_color())
             .bg(sidebar_divider_line_color())
-            // The workspace beside the sidebar is often a CEF page (React chat, Browser, Docs), so the
+            // The workspace beside the sidebar is often a CEF page (Browser, Docs), so the
             // whole grab strip lies over the native sidebar.
             .child(resize_rail_deferred_strip(
                 resize_rail_grab_strip(

@@ -378,20 +378,11 @@ pub(crate) fn route_gpui_native_keyboard_event(
         if sessions_scope_shortcut {
             return None;
         }
-        let renderer_passthrough_route = if matches!(
-            owner,
-            GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
-                FirstResponderCefSurface::SessionChat(_)
-            ))
-        ) && native_hotkey_text.as_deref() == Some("cmd+f")
-        {
-            Some("sessionChatRendererPassthrough")
-        } else if gpui_keyboard_owner_uses_docs_editor_hotkeys(owner)
+        let renderer_passthrough_route = if gpui_keyboard_owner_uses_docs_editor_hotkeys(owner)
             && matches!(
                 native_hotkey_text.as_deref(),
                 Some("cmd+f" | "cmd+alt+f" | "cmd+y")
-            )
-        {
+            ) {
             Some("docsEditorRendererPassthrough")
         } else {
             None

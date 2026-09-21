@@ -15,15 +15,15 @@ impl GhostexGpuiApp {
     The user's approval for the header-over-transcript overlap, and its scope, are recorded on the
     header itself in `shell.rs`; this decides which column may take it. Only GPUI-painted scrolling
     content may pass under the header: a CEF page and a libghostty terminal are AppKit child views
-    of the window's content view, so they paint *over* everything GPUI draws, and a view surface, a
-    React chat page or a native terminal that reached the top of the column would cover the header
+    of the window's content view, so they paint *over* everything GPUI draws, and a view surface or
+    a native terminal that reached the top of the column would cover the header
     instead of fading under it. A terminal grid is also sized from its
     body, so two of its rows would sit behind the header where a full-screen TUI needs them. That
     leaves the GPUI chat transcript, which is a scrolling document, and only while the pane tab bar
     is hidden: the tab bar is chrome, and chrome under the header would be chrome the user cannot
     see or click. Every other column keeps its old top edge, one header height below the window.
     */
-    fn agents_column_solo_gpui_chat(
+    pub(crate) fn agents_column_solo_gpui_chat(
         &self,
     ) -> Option<&gpui::Entity<crate::app::native_chat::state::NativeChatView>> {
         if self.agents_workspace_tab_bar_visible() {
@@ -34,7 +34,7 @@ impl GhostexGpuiApp {
             return None;
         };
         let session_id = self.agents_workspace.active_session_in_pane(pane_id)?;
-        if !self.session_chat_use_gpui || !self.agents_chat_mode_sessions.contains(&session_id) {
+        if !self.agents_chat_mode_sessions.contains(&session_id) {
             return None;
         }
         self.native_chat_views.get(&session_id)
@@ -81,7 +81,7 @@ impl GhostexGpuiApp {
             || self.workspace_tab_drag_active
             || self.command_tab_drag_active
             || self.browser_tab_drag_active
-            || self.view_tab_drag.is_some())
+            || self.view_strip_drop_index.is_some())
     }
 
     /// The colour the header row paints, which is the colour of whatever is directly beneath it:

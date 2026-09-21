@@ -32,24 +32,6 @@ pub(crate) const GPUI_SESSION_CHAT_QUEUE_COUNT_POLL_INTERVAL: Duration = Duratio
 
 pub(crate) const GPUI_SESSION_CHAT_QUEUE_COUNT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Confirmed idle, empty pages enter the reusable renderer pool once they have been hidden for `GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE`.
-/// Age and count limits apply to unused pooled renderers; protected session bindings stay mounted until their fresh release probe succeeds.
-pub(crate) const GPUI_AGENTS_CHAT_SURFACE_HIDDEN_EVICT_AFTER: Duration =
-    Duration::from_secs(5 * 60);
-
-/// CDXC:SessionChat 2026-09-16 WHY:
-/// A page was pooled 50 to 120 ms after it stopped being visible, so any momentary hide (a reconcile pass during a tab drag, an activation still pending, a pane briefly not rendered) cost a fresh generation, a new activation and a full snapshot re-render on the very next pass.
-/// A short grace keeps a just-hidden page bound to its session; switching back inside it re-shows the page without any activation, and the spare-page count and five-minute expiry are unchanged.
-pub(crate) const GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE: Duration = Duration::from_secs(2);
-
-/// CDXC:SessionChat 2026-09-13 DECISION:
-/// User approved app-wide shared chat state and renderer ownership tied to visible panes, retaining the three spare pages and five-minute expiry.
-/// Durable drafts and active streams outlive mounted pages; only unfinished UI operations and unconfirmed draft transfers protect a hidden binding.
-/// Carve-out 2026-09-19: pages that were on screen when their project was left stay bound for the `projectSwitchKeepAliveMinutes` window (see `project_keep_alive.rs`) before these rules apply.
-pub(crate) const GPUI_AGENTS_CHAT_SURFACE_HIDDEN_MAX: usize = 3;
-
-pub(crate) const GPUI_AGENTS_CHAT_SURFACE_EVICT_POLL_INTERVAL: Duration = Duration::from_secs(60);
-
 #[cfg(target_os = "linux")]
 pub(crate) static GPUI_LINUX_WINDOW_ICON: std::sync::OnceLock<Arc<image::RgbaImage>> =
     std::sync::OnceLock::new();
@@ -72,19 +54,23 @@ pub(crate) static GPUI_TITLEBAR_FOREGROUND_RGB: AtomicU64 = AtomicU64::new(0xfff
 
 pub(crate) const DEFAULT_SIDEBAR_WIDTH: f32 = 235.0;
 
-pub(crate) const SIDEBAR_MIN_WIDTH: f32 = 150.0;
+/// CDXC:Sidebar 2026-09-21 DECISION:
+/// User: the sidebar cannot be dragged narrower than 190px (was 150px). A saved width below it is clamped up on the next start.
+pub(crate) const SIDEBAR_MIN_WIDTH: f32 = 190.0;
 
 pub(crate) const SIDEBAR_MAX_WIDTH: f32 = 520.0;
 
 pub(crate) const SIDEBAR_RESET_WIDTH: f32 = 235.0;
 
-/// CDXC:Sidebar 2026-09-20 DECISION:
-/// User: below this width the Search and Commands rows stop being full-width rows and become
-/// icon-only buttons with their label and shortcut in a tooltip, and every button in those rows
-/// aligns left. Above it both rows keep their label, their shortcut hint and their trailing
-/// controls. Sits below the 235px default so a sidebar at its normal width is never compact; the
-/// macOS traffic-light reserve is what makes the narrow Search row run out of room first.
-pub(crate) const SIDEBAR_COMPACT_ROWS_WIDTH: f32 = 220.0;
+/// CDXC:Sidebar 2026-09-21 DECISION:
+/// User: the Search row collapses to an icon-only button below a 340px sidebar and the Commands
+/// row below 260px, each with its label and shortcut moved into a tooltip and its buttons aligned
+/// right. Search goes first because the traffic-light reserve and the sidebar toggle leave it the
+/// least room. This supersedes the 300px Search threshold and the single 220px threshold both
+/// rows shared, so at the 235px default both rows are compact.
+pub(crate) const SIDEBAR_COMPACT_SEARCH_WIDTH: f32 = 340.0;
+
+pub(crate) const SIDEBAR_COMPACT_COMMANDS_WIDTH: f32 = 260.0;
 
 /*
 CDXC:Sidebar 2026-09-20 DECISION:
@@ -132,8 +118,6 @@ pub(crate) const SIDEBAR_DIVIDER_HOVER_FADE_DURATION: Duration = Duration::from_
 pub(crate) const COMMAND_ACTION_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 pub(crate) const CEF_DARK_PREPAINT_BACKGROUND_COLOR: u32 = 0xFF0E0E0E;
-
-pub(crate) const CEF_SESSION_CHAT_DARK_PREPAINT_BACKGROUND_COLOR: u32 = 0xFF0D0D0D;
 
 /* Find keeps the older near-black its own page paints; only the chat surface
 moved. */
@@ -583,7 +567,8 @@ pub(crate) const GPUI_NATIVE_APP_SHOT_PROMPT_MAX_CHARS: usize = 24 * 1024;
 
 pub(crate) const GPUI_SIDEBAR_VISIBLE_SESSION_IDS_MAX: usize = 64;
 
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TAB_SESSIONS_MAX: usize = 128;
+/// CDXC:Workarea 2026-09-21 WHY: This is a sanity bound on a renderer payload, not a product limit, and nothing limits how many sessions a project holds. At 128 the project's 129th session made Rust refuse every focus-state payload whole (and the persisted session mappings on the next start), so the tab list froze: no session there was chat eligible, the terminal agent bar disappeared, Chat View did nothing, and no focus stamp was ever confirmed again. Keep it far above any real project.
+pub(crate) const GPUI_SIDEBAR_WORKSPACE_TAB_SESSIONS_MAX: usize = 4096;
 
 pub(crate) const GPUI_STATUS_INDICATOR_MAX_PROJECTS: usize = 32;
 
@@ -660,11 +645,13 @@ pub(crate) const TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_EXPAND: &str =
 
 pub(crate) const TITLEBAR_ICON_LAYOUT_BOARD_SPLIT: &str = "titlebar/layout-board-split.svg";
 
-pub(crate) const TITLEBAR_ICON_LAYOUT_SPLIT_VERTICAL: &str = "titlebar/layout-split-vertical.svg";
-
 pub(crate) const TITLEBAR_ICON_LAYOUT_SINGLE_PANE: &str = "titlebar/layout-single-pane.svg";
 
 pub(crate) const TITLEBAR_ICON_LAYOUT_COLUMNS: &str = "titlebar/layout-columns.svg";
+
+pub(crate) const TITLEBAR_ICON_PANEL_BOTTOM: &str = "titlebar/panel-bottom.svg";
+
+pub(crate) const TITLEBAR_ICON_PANEL_RIGHT: &str = "titlebar/panel-right.svg";
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub(crate) const TITLEBAR_ICON_WINDOW_MINIMIZE: &str = "titlebar/window-minimize.svg";
@@ -704,9 +691,13 @@ pub(crate) const TITLEBAR_ICON_FILE_TEXT: &str = "titlebar/file-text.svg";
 
 pub(crate) const TITLEBAR_ICON_PLUS: &str = "titlebar/plus.svg";
 
+pub(crate) const TITLEBAR_ICON_EYE_OFF: &str = "titlebar/eye-off.svg";
+
 pub(crate) const TITLEBAR_ICON_X: &str = "titlebar/x.svg";
 
 pub(crate) const TITLEBAR_ICON_EXTERNAL_LINK: &str = "titlebar/external-link.svg";
+
+pub(crate) const TITLEBAR_ICON_MAXIMIZE: &str = "titlebar/maximize.svg";
 
 pub(crate) const TITLEBAR_ICON_ARROWS_DIAGONAL: &str = "titlebar/arrows-diagonal.svg";
 
@@ -761,11 +752,18 @@ pub(crate) const FIND_BAR_CLOSE_BUTTON_WIDTH: f32 = 41.0;
 
 pub(crate) const BROWSER_TOOLBAR_HEIGHT: f32 = 35.0;
 
-pub(crate) const BROWSER_TOOLBAR_BUTTON_ICON_SIZE: f32 = 16.0;
+/// CDXC:Browser 2026-09-21 DECISION:
+/// User: the address bar's buttons match the look of the view tab strip's buttons above them and line up with them. They use the strip's panel-toggle metrics (`TITLEBAR_CONTROL_HEIGHT` tall, `TITLEBAR_BUTTON_HORIZONTAL_PADDING` either side of an 18px icon, `TITLEBAR_BUTTON_RADIUS` corners, a 2px gap), start at the strip's 6px leading inset and end at `WORKAREA_HEADER_EDGE_PADDING`. The Docs header mirrors the same numbers in `apps/desktop/views/manage/styles.ts`.
+pub(crate) const BROWSER_TOOLBAR_BUTTON_ICON_SIZE: f32 = TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE;
+
+pub(crate) const BROWSER_TOOLBAR_BUTTON_WIDTH: f32 =
+    BROWSER_TOOLBAR_BUTTON_ICON_SIZE + 2.0 * TITLEBAR_BUTTON_HORIZONTAL_PADDING;
+
+pub(crate) const BROWSER_TOOLBAR_LEADING_PADDING: f32 = 6.0;
 
 pub(crate) const BROWSER_TOOLBAR_HORIZONTAL_PADDING: f32 = 12.0;
 
-pub(crate) const BROWSER_TOOLBAR_ITEM_GAP: f32 = 0.0;
+pub(crate) const BROWSER_TOOLBAR_ITEM_GAP: f32 = 2.0;
 
 pub(crate) const BROWSER_TOOLBAR_ADDRESS_GAP: f32 = 18.0;
 
@@ -1008,6 +1006,8 @@ pub(crate) const TITLEBAR_POPUP_GIT_WIDTH: f32 = 300.0;
 pub(crate) const TITLEBAR_POPUP_EXTENSIONS_WIDTH: f32 = 340.0;
 
 pub(crate) const TITLEBAR_POPUP_TIPS_WIDTH: f32 = 556.0;
+
+pub(crate) const TITLEBAR_POPUP_HELP_WIDTH: f32 = 380.0;
 
 pub(crate) const TITLEBAR_POPUP_RESOURCES_WIDTH: f32 = 656.0;
 
