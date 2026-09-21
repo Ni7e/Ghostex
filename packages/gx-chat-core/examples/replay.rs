@@ -102,7 +102,16 @@ fn replay(input: &Path) -> Result<Report, String> {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let context = ChatContext::at(record.get("ms").and_then(Value::as_f64).unwrap_or(0.0));
+        // `ms` is the record's own `now_ms` and `r` is every `Math.random()` the live run read
+        // during this call, in order: the two queues the core draws from instead of reading a
+        // clock or a random source (`docs/2026-09-21/rust-chat/REPLAY.md`).
+        let mut context =
+            ChatContext::at(record.get("ms").and_then(Value::as_f64).unwrap_or(0.0));
+        if let Some(draws) = record.get("r").and_then(Value::as_array) {
+            for (slot, draw) in draws.iter().take(context.random_units.len()).enumerate() {
+                context.random_units[slot] = draw.as_f64().unwrap_or(0.0);
+            }
+        }
 
         match kind {
             "in" => {
