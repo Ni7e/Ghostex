@@ -121,13 +121,35 @@ fn with_index<T>(
     force_refresh: bool,
     action: impl FnOnce(&mut CachedIndex) -> Result<T, PromptSearchError>,
 ) -> Result<T, PromptSearchError> {
+    with_index_policy(paths, force_refresh, true, action)
+}
+
+/// Run `action` against whatever index is warm, building one only when none exists.
+///
+/// CDXC:PromptSearch 2026-09-21 WHY:
+/// Opening a result acts on a row the warm index already served, addressed by a key that survives rebuilds. Letting that call rebuild an index older than `INDEX_MAX_AGE` put a full history scan between Enter and the modal closing whenever the user had browsed for more than 90 seconds.
+fn with_warm_index<T>(
+    paths: &crate::paths::GxserverPaths,
+    action: impl FnOnce(&mut CachedIndex) -> Result<T, PromptSearchError>,
+) -> Result<T, PromptSearchError> {
+    with_index_policy(paths, false, false, action)
+}
+
+fn with_index_policy<T>(
+    paths: &crate::paths::GxserverPaths,
+    force_refresh: bool,
+    rebuild_when_stale: bool,
+    action: impl FnOnce(&mut CachedIndex) -> Result<T, PromptSearchError>,
+) -> Result<T, PromptSearchError> {
     let mut guard = cache().lock().map_err(|_| PromptSearchError {
         code: "internalError",
         message: "The prompt index lock was poisoned.".to_string(),
     })?;
     let needs_build = match guard.as_ref() {
         None => true,
-        Some(cached) => force_refresh || cached.built_at.elapsed() > INDEX_MAX_AGE,
+        Some(cached) => {
+            force_refresh || (rebuild_when_stale && cached.built_at.elapsed() > INDEX_MAX_AGE)
+        }
     };
     if needs_build {
         let next_epoch = guard.as_ref().map(|cached| cached.epoch + 1).unwrap_or(1);
@@ -527,7 +549,7 @@ fn session_owns_agent_conversation(
 pub fn resolve_agent_prompt_launch(
     paths: &crate::paths::GxserverPaths,
     params: &Map<String, Value>,
-    live_sessions: &[PromptLaunchSession],
+    read_conversation_sessions: impl FnOnce(&str) -> Result<Vec<PromptLaunchSession>, PromptSearchError>,
     accept_all_default: bool,
 ) -> Result<Value, PromptSearchError> {
     let action = params
@@ -553,7 +575,7 @@ pub fn resolve_agent_prompt_launch(
         None => None,
     };
 
-    with_index(paths, false, |cached| {
+    with_warm_index(paths, |cached| {
         let index = resolve_record_index(cached, params)?;
         let rec = cached.index.records[index].clone();
         let plan = match action {
@@ -564,7 +586,8 @@ pub fn resolve_agent_prompt_launch(
                         rec.agent.label()
                     )));
                 }
-                let owner = open_session_owner(live_sessions, &rec.session, rec.agent)
+                let conversation_sessions = read_conversation_sessions(&rec.session)?;
+                let owner = open_session_owner(&conversation_sessions, &rec.session, rec.agent)
                     .map(|candidate| &candidate.session);
                 match owner {
                     Some(session) => PromptLaunchPlan::Focus {

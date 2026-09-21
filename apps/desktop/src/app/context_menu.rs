@@ -302,6 +302,9 @@ impl GpuiContextMenu {
                 .flex()
                 .flex_1()
                 .min_w_0()
+                // Without nowrap the label wraps at its first space during layout and the
+                // ellipsis lands there, so a roomy row still drew "Browser Tab" as "Browser…".
+                .whitespace_nowrap()
                 .text_ellipsis()
                 .items_center()
                 .min_h(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT))

@@ -637,6 +637,30 @@ impl<'a> DomainRepository<'a> {
             .collect()
     }
 
+    /// Full session rows whose recorded agent conversation is `agent_session_id`, in `list_sessions` order.
+    ///
+    /// CDXC:PromptSearch 2026-09-21 WHY:
+    /// Opening a Find result only needs the rows that own one conversation, but it used to hydrate every row through `list_sessions`. On a registry with 9,000 stopped rows that was most of a second between Enter and the modal closing; the JSON filter runs in SQLite and hydrates the handful of rows that match.
+    pub fn list_sessions_with_agent_session_id(
+        &self,
+        agent_session_id: &str,
+    ) -> DomainResult<Vec<Value>> {
+        let mut statement = self
+            .db
+            .prepare(
+                "SELECT * FROM sessions WHERE json_extract(runtimeSettingsJson, '$.agentSessionId') = ?1 ORDER BY updatedAt DESC, projectId ASC, sessionId ASC",
+            )
+            .map_err(sql_error)?;
+        let rows = statement
+            .query_map([agent_session_id], session_row_from_sql)
+            .map_err(sql_error)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sql_error)?;
+        rows.into_iter()
+            .map(|row| session_from_row(&self.server_id, row))
+            .collect()
+    }
+
     pub fn get_session(&self, project_id: &str, session_id: &str) -> DomainResult<Option<Value>> {
         let row = self
             .db

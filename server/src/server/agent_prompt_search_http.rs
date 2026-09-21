@@ -50,7 +50,7 @@ pub(crate) fn handle_search_agent_prompts_http(
     body: &Value,
 ) -> RoutedResponse {
     let outcome = agent_prompt_search_params(body).and_then(|params| {
-        let sessions = read_sessions_for_prompt_launch(state, false)?;
+        let sessions = read_open_sessions_for_prompt_search(state)?;
         crate::agent_prompt_search::search_agent_prompts(&state.paths, &params, &sessions)
     });
     agent_prompt_search_response(endpoint_path, request_id, outcome)
@@ -87,12 +87,11 @@ pub(crate) fn handle_resolve_agent_prompt_launch_http(
     body: &Value,
 ) -> RoutedResponse {
     let outcome = agent_prompt_search_params(body).and_then(|params| {
-        let sessions = read_sessions_for_prompt_launch(state, true)?;
         let accept_all_default = read_agent_accept_all_enabled_for_prompt_launch(state);
         crate::agent_prompt_search::resolve_agent_prompt_launch(
             &state.paths,
             &params,
-            &sessions,
+            |agent_session_id| read_sessions_owning_agent_conversation(state, agent_session_id),
             accept_all_default,
         )
     });
@@ -116,30 +115,16 @@ pub(crate) fn read_agent_accept_all_enabled_for_prompt_launch(state: &AppState) 
         .unwrap_or(false)
 }
 
-/// Stored session rows, each paired with the agent family its launch
-/// configuration resumes with, so the resolver can decide whether an open
-/// Ghostex session already owns an agent conversation. Opening a result reads
-/// every row, because a stopped row whose provider still exists owns its
-/// conversation too; a search runs per keystroke and only names rows, so it
-/// skips the stopped history.
-pub(crate) fn read_sessions_for_prompt_launch(
+/// Session rows that are not stopped, each paired with the agent family its launch configuration resumes with.
+/// A search runs per keystroke and only names rows, so it skips the stopped history.
+pub(crate) fn read_open_sessions_for_prompt_search(
     state: &AppState,
-    include_stopped: bool,
 ) -> Result<Vec<PromptLaunchSession>, crate::agent_prompt_search::PromptSearchError> {
-    let db = open_gxserver_database(&state.paths).map_err(|error| {
-        crate::agent_prompt_search::PromptSearchError {
-            code: "internalError",
-            message: format!("SQLite gxserver state error: {error}"),
-        }
-    })?;
+    let db = open_prompt_launch_database(state)?;
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
-    let domain_error = |error: DomainStateError| crate::agent_prompt_search::PromptSearchError {
-        code: error.code,
-        message: error.message,
-    };
     let projects = repository
         .list_projects()
-        .map_err(domain_error)?
+        .map_err(prompt_launch_domain_error)?
         .into_iter()
         .filter_map(|project| {
             let project_id = project
@@ -149,12 +134,9 @@ pub(crate) fn read_sessions_for_prompt_launch(
             Some((project_id, project))
         })
         .collect::<HashMap<String, Value>>();
-    let sessions = if include_stopped {
-        repository.list_sessions(None)
-    } else {
-        repository.list_sessions_excluding_stopped(None)
-    }
-    .map_err(domain_error)?;
+    let sessions = repository
+        .list_sessions_excluding_stopped(None)
+        .map_err(prompt_launch_domain_error)?;
     Ok(sessions
         .into_iter()
         .map(|session| {
@@ -164,15 +146,65 @@ pub(crate) fn read_sessions_for_prompt_launch(
                 .and_then(|project_id| projects.get(project_id))
                 .cloned()
                 .unwrap_or(Value::Null);
-            let agent_family_id = crate::agents::session_agent_family_id(&project, &session);
-            let named_title = prompt_launch_session_named_title(&project, &session);
-            PromptLaunchSession {
-                session,
-                agent_family_id,
-                named_title,
-            }
+            prompt_launch_session(&project, session)
         })
         .collect())
+}
+
+/// Every session row recorded against one agent conversation, so the resolver can decide whether an open Ghostex session already owns it.
+/// Stopped rows are included, because a stopped row whose provider still exists owns its conversation too.
+pub(crate) fn read_sessions_owning_agent_conversation(
+    state: &AppState,
+    agent_session_id: &str,
+) -> Result<Vec<PromptLaunchSession>, crate::agent_prompt_search::PromptSearchError> {
+    let db = open_prompt_launch_database(state)?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let sessions = repository
+        .list_sessions_with_agent_session_id(agent_session_id)
+        .map_err(prompt_launch_domain_error)?;
+    sessions
+        .into_iter()
+        .map(|session| {
+            let project = match session.get("projectId").and_then(Value::as_str) {
+                Some(project_id) => repository
+                    .get_project(project_id)
+                    .map_err(prompt_launch_domain_error)?
+                    .unwrap_or(Value::Null),
+                None => Value::Null,
+            };
+            Ok(prompt_launch_session(&project, session))
+        })
+        .collect()
+}
+
+fn open_prompt_launch_database(
+    state: &AppState,
+) -> Result<rusqlite::Connection, crate::agent_prompt_search::PromptSearchError> {
+    open_gxserver_database(&state.paths).map_err(|error| {
+        crate::agent_prompt_search::PromptSearchError {
+            code: "internalError",
+            message: format!("SQLite gxserver state error: {error}"),
+        }
+    })
+}
+
+fn prompt_launch_domain_error(
+    error: DomainStateError,
+) -> crate::agent_prompt_search::PromptSearchError {
+    crate::agent_prompt_search::PromptSearchError {
+        code: error.code,
+        message: error.message,
+    }
+}
+
+fn prompt_launch_session(project: &Value, session: Value) -> PromptLaunchSession {
+    let agent_family_id = crate::agents::session_agent_family_id(project, &session);
+    let named_title = prompt_launch_session_named_title(project, &session);
+    PromptLaunchSession {
+        session,
+        agent_family_id,
+        named_title,
+    }
 }
 
 /// The session's own title, or `None` while it is still the agent's placeholder
