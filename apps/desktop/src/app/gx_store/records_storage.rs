@@ -144,6 +144,44 @@ pub(crate) fn write_record(
     })
 }
 
+/// Removes one record and rebuilds the table's bookkeeping, in one immediate transaction.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// A real DELETE, because "write the empty string" is NOT a delete on this table and the other
+/// reader of these rows proves it. `getItem` in `packages/client-storage/service.ts` answers
+/// `entry.raw`, so an emptied row reads back as `""` rather than as absent, `managedKeys` still
+/// lists it, and `SessionChatStorageIndex` (`packages/core-ui/chat/session-chat-storage-index.ts`)
+/// decodes every key of its namespace with `JSON.parse`, which THROWS on `""` and takes the whole
+/// index down with it: one emptied `ghostex.sessionChat.outbox.` row would make `pendingDrafts`
+/// return nothing for every session, so the TypeScript brain would stop retrying every unsaved
+/// draft on the computer. The store codecs say the same thing from the other side: `draftOutbox`
+/// and `sentHistory` are object codecs and `writeManaged` refuses a value they cannot decode.
+///
+/// The metadata is recomputed rather than adjusted, for the reason `storage_metadata.rs` gives:
+/// two writers keeping one counter incrementally drift for the life of the installation.
+pub(crate) fn remove_record(key: &str) -> Result<(), &'static str> {
+    with_write_connection(|connection| {
+        connection
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|_| "begin")?;
+        let removed = match connection.execute("DELETE FROM records WHERE key=?1", [key]) {
+            Ok(removed) => removed,
+            Err(_) => {
+                finish_without_writing(connection)?;
+                return Err("write");
+            }
+        };
+        if removed == 0 {
+            return finish_without_writing(connection);
+        }
+        if ghostex_chat_runtime::recompute_record_metadata(connection).is_err() {
+            finish_without_writing(connection)?;
+            return Err("metadata");
+        }
+        connection.execute_batch("COMMIT").map_err(|_| "commit")
+    })
+}
+
 /// Ends a transaction that wrote nothing.
 ///
 /// CDXC:Settings 2026-09-21 WHY:

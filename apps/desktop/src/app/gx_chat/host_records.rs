@@ -134,7 +134,7 @@ pub(super) fn is_dismissed(
 }
 
 /// `["<sessionKey>","<draftId>"]`, which is a JSON array INSIDE the key rather than in front of it.
-fn dismissal_suffix(session_key: &str, draft_id: &str) -> String {
+pub(super) fn dismissal_suffix(session_key: &str, draft_id: &str) -> String {
     Value::Array(vec![
         Value::String(session_key.to_string()),
         Value::String(draft_id.to_string()),
@@ -244,6 +244,9 @@ pub(super) fn record_sent_prompt(
             .map(|part| (*part).to_string()),
     };
     let raw = serde_json::to_string(&prompt).map_err(|_| "schema")?;
+    // `listSentSessionChatMessages()` runs on both sides of `sentIndex.set`, and this door needs
+    // the first pass more than the TypeScript does: see `prune_sent_history`.
+    prune_sent_history(MAX_SENT_MESSAGES - 1, now_ms);
     storage::write(
         &StorageKey {
             store: "sentHistory".to_string(),
@@ -252,7 +255,57 @@ pub(super) fn record_sent_prompt(
         Some(&raw),
         now_ms,
     )?;
+    prune_sent_history(MAX_SENT_MESSAGES, now_ms);
     Ok(true)
+}
+
+/// Keeps the newest `keep` sent prompts and deletes the rest, the way
+/// `listSentSessionChatMessages` does.
+///
+/// CDXC:SavedPrompts 2026-09-22 WHY:
+/// Without it the history froze at the first 50 prompts for ever. The catalog gives `sentHistory`
+/// a `cache` policy, where the client-storage service EVICTS the oldest row to make room; the Rust
+/// record door refuses instead, on purpose (`gx_store/records_storage.rs`), so the 51st send was
+/// refused and the user's Up-arrow recall kept showing the OLDEST fifty rather than the newest. The
+/// TypeScript prunes after its write because its service made room; this prunes before it too, so
+/// the write is admitted at all.
+///
+/// The order is the TypeScript's: `createdAt` descending, then `promptId` descending. Both are
+/// compared byte by byte here where `localeCompare` compares them by collation, which agrees for
+/// the values these fields hold (an ISO-8601 stamp and `sent:` plus a UUID).
+fn prune_sent_history(keep: usize, now_ms: i64) {
+    let Ok(rows) = storage::scan("sentHistory", "", now_ms) else {
+        return;
+    };
+    if rows.len() <= keep {
+        return;
+    }
+    let mut prompts: Vec<(String, String, String)> = rows
+        .into_iter()
+        .filter_map(|(suffix, raw)| {
+            let value: Value = serde_json::from_str(&raw).ok()?;
+            Some((
+                value.get("createdAt")?.as_str()?.to_string(),
+                value
+                    .get("promptId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                suffix,
+            ))
+        })
+        .collect();
+    prompts.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    for (_, _, suffix) in prompts.into_iter().skip(keep) {
+        let _ = storage::write(
+            &StorageKey {
+                store: "sentHistory".to_string(),
+                suffix,
+            },
+            None,
+            now_ms,
+        );
+    }
 }
 
 /// Records a delivery the daemon reported, once.

@@ -114,7 +114,7 @@ mod workspace_groups;
 /// same connection pool rather than opening a second one: there is one client-storage database and
 /// one busy timeout, and a second pool would deadlock against this one.
 pub(crate) use records_storage::{
-    read_record_raw, scan_record_raw, write_record, RecordRead, RecordStore,
+    read_record_raw, remove_record, scan_record_raw, write_record, RecordRead, RecordStore,
 };
 pub(crate) use sidebar_ui_storage::{with_read_connection, with_write_connection};
 

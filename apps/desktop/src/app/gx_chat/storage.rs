@@ -20,7 +20,7 @@
 use ghostex_gx_chat_core::StorageKey;
 
 use crate::app::gx_store::{
-    RecordRead, RecordStore, read_record_raw, scan_record_raw, write_record,
+    RecordRead, RecordStore, read_record_raw, remove_record, scan_record_raw, write_record,
 };
 
 const KIB: i64 = 1024;
@@ -327,9 +327,9 @@ pub(super) fn write(
         }),
         Backend::Records(definition) => match value {
             Some(raw) => write_record(definition, &name, raw, now_ms).map(|_| ()),
-            // The record door has no remove. A deleted record and one holding the store's empty
-            // value read back the same through `decode`, which is what every caller here does.
-            None => write_record(definition, &name, "", now_ms).map(|_| ()),
+            // `removeItem`, which is a real DELETE. An emptied row is not the same as an absent one
+            // on this table: `remove_record` says why, and what it costs the TypeScript reader.
+            None => remove_record(&name),
         },
     }
 }

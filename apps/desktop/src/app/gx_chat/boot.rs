@@ -19,7 +19,7 @@ use super::storage;
 /// Every read that fails is treated as "nothing stored", which is what the TypeScript's `catch`
 /// around each accessor does; the caller counts the refusals.
 pub(super) fn read(session_key: &str, now_ms: i64, errors: &mut usize) -> ComposerBootRead {
-    let client_id = load("chatClient", "", now_ms, errors).unwrap_or_default();
+    let client_id = client_id(now_ms, errors);
     let stored = load("drafts", session_key, now_ms, errors).map(|raw| decode_stored_draft(&raw));
     let entry = entry_with_version(stored.as_ref());
     let model_catalog = parse(load("modelCatalog", "", now_ms, errors));
@@ -47,6 +47,55 @@ pub(super) fn read(session_key: &str, now_ms: i64, errors: &mut usize) -> Compos
             None => Value::Null,
         },
     }
+}
+
+/// `sessionChatDraftClientId()`: this computer's opaque draft-origin id, minted on first sight.
+///
+/// CDXC:Drafts 2026-09-10 WHY:
+/// It is PERSISTED, and the startup outbox replay uses the same one as the composer: a fresh id
+/// every mount makes this client's own last push look like another device and pops the conflict bar
+/// against itself. The Step 4 host read the record and answered with an empty string when it was
+/// absent, which is a fresh install, a new profile, or any user who had never opened chat: every
+/// draft echo then came back unattributed and the outbox rows carried no `clientId` at all. The
+/// shape is `packages/shared/session-chat-controller/client-id.ts`'s, `gx-` then two base-36 runs,
+/// because an id is compared and stored but never parsed. A refused write is counted and the
+/// in-memory id is used anyway, which is what the TypeScript's `catch` does for private mode.
+fn client_id(now_ms: i64, errors: &mut usize) -> String {
+    let key = StorageKey {
+        store: "chatClient".to_string(),
+        suffix: String::new(),
+    };
+    if let Some(stored) = load("chatClient", "", now_ms, errors) {
+        return stored;
+    }
+    let created = format!(
+        "gx-{}{}",
+        base36(u64::from_be_bytes(
+            uuid::Uuid::new_v4().into_bytes()[..8]
+                .try_into()
+                .unwrap_or_default()
+        )),
+        base36(now_ms.max(0) as u64)
+    );
+    if storage::write(&key, Some(&created), now_ms).is_err() {
+        *errors += 1;
+    }
+    created
+}
+
+/// `Number.prototype.toString(36)`: lower-case digits, most significant first.
+fn base36(mut value: u64) -> String {
+    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if value == 0 {
+        return "0".to_string();
+    }
+    let mut out = Vec::new();
+    while value > 0 {
+        out.push(DIGITS[(value % 36) as usize]);
+        value /= 36;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
 }
 
 /// One stored record, or `None` when it is absent, empty or unreadable.
