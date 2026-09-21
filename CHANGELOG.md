@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 10.0.1 - 2026-09-22
+
+**Ghostex 10.0.1 is out.** It brings the whole 10.0 release (views beside your sessions, the fully native sidebar, the new model picker, and the accent that follows your background tint) to Linux and Windows, and makes opening a result from prompt search faster on every platform.
+
+### 🐧 Ghostex 10 on Linux and Windows
+- **Linux and Windows now get everything in 10.0.** Their 10.0.0 builds did not complete, so this is the first Ghostex 10 release for them; see the 10.0.0 notes for the full list of changes.
+- **The Add Worktree dialog opens on Linux and Windows.** It was missing from the new native dialogs outside macOS.
+
+### 🔎 Faster prompt search
+- **Opening a prompt search result no longer stalls.** Pressing Enter on a result after browsing for a while used to rescan your whole history before the dialog closed; it now opens straight away.
+- **Menu labels no longer cut off early.** Items like Browser Tab show in full instead of being shortened to "Browser…" in roomy menus.
+
 ## 10.0.0 - 2026-09-21
 
 **Ghostex 10.0.0 is out.** A new layout: the titlebar row is gone, views open as tabs beside your sessions instead of over them, and browser pages share the same tab strip. The sidebar now runs fully natively, the chat model picker gains favorites and one-click settings, and the accent color follows your background tint.
