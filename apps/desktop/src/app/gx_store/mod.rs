@@ -47,7 +47,8 @@
 //! `runtime_facts.rs` ingests the runtime's one-way channel of the facts the list still borrows
 //! from the old projection (the HUD, a project's git numbers, the two armed timers and a reveal
 //! request) and compares it with the publish, with `diagnostics_runtime_facts.rs` writing its
-//! periodic line;
+//! periodic line, and `sidebar_clock.rs` owns the once-a-second tick the armed-timer labels and
+//! the menu-host re-read ride;
 //! `diagnostics.rs` writes the log lines.
 
 mod added_project;
@@ -74,6 +75,7 @@ mod shadow_diff;
 mod sidebar_accounts;
 mod sidebar_actions;
 mod sidebar_bulk;
+mod sidebar_clock;
 mod sidebar_close_project;
 mod sidebar_drag;
 mod sidebar_drop_queue;

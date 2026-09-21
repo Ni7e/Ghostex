@@ -70,7 +70,7 @@ fn session_kind(kind: &SessionKind) -> String {
 }
 
 /// The daemon's delayed send, when it published one; the host's own timer otherwise.
-fn delayed_send(
+pub(crate) fn delayed_send(
     session: &PresentationSession,
     local: Option<&DelayedSendInput>,
 ) -> Option<DelayedSendView> {

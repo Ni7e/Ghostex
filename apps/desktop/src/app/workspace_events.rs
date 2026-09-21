@@ -501,7 +501,7 @@ impl GhostexGpuiApp {
                 self.receive_native_quick_access_update(&payload, cx);
             }
             cef::SidebarBridgeEvent::SidebarRuntimeFacts(payload) => {
-                self.receive_sidebar_runtime_facts(&payload);
+                self.receive_sidebar_runtime_facts(&payload, cx);
             }
             cef::SidebarBridgeEvent::ResourcesSnapshotRequest(payload) => {
                 self.receive_sidebar_resources_snapshot_request_payload(&payload, cx);
@@ -516,7 +516,7 @@ impl GhostexGpuiApp {
                 self.receive_sidebar_ghostex_hotkey_action_payload(&payload, window, cx);
             }
             cef::SidebarBridgeEvent::SessionCompletionSound(payload) => {
-                self.receive_sidebar_session_completion_sound_payload(&payload);
+                self.receive_sidebar_session_completion_sound_payload(&payload, cx);
             }
             cef::SidebarBridgeEvent::SessionStatusIndicators(payload) => {
                 self.receive_sidebar_session_status_indicators_payload(&payload, cx);

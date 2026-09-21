@@ -185,8 +185,9 @@ pub(crate) struct NativeSidebarClockRow {
     pub(crate) session_id: String,
     pub(crate) timer_label: Option<String>,
     pub(crate) last_interaction_label: Option<String>,
-    #[serde(default)]
-    pub(crate) armed_actions: Option<Value>,
+    // The page still sends `armedActions`; serde drops it. The store derives the chat's armed
+    // labels itself since M4d part 2 step 3 (gx_store/sidebar_clock.rs), so reading the page's
+    // copy would be a second writer of one map.
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]

@@ -114,7 +114,7 @@ impl GhostexGpuiApp {
         if launcher && command["action"] == "launch" && self.sidebar.is_some() {
             self.stage_agent_launch_placeholder(command, cx);
         }
-        let menu_host = self.gx_store_menu_host(self.native_sidebar.projection.clone().as_deref());
+        let menu_host = self.gx_store_menu_host();
         let host = AccountMenuHost {
             menu: &menu_host,
             hide_account_emails: hide_account_emails(),
@@ -261,7 +261,7 @@ impl GhostexGpuiApp {
         let session_working = request.session_id().is_some_and(|session_id| {
             account_session_working(self.gx_store.sidebar_list.view(), session_id)
         });
-        let menu_host = self.gx_store_menu_host(self.native_sidebar.projection.clone().as_deref());
+        let menu_host = self.gx_store_menu_host();
         let host = AccountMenuHost {
             menu: &menu_host,
             hide_account_emails: hide_account_emails(),

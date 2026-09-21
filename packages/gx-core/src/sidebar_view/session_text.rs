@@ -457,7 +457,7 @@ pub(crate) fn timer_trailing_label(row: &SessionRow, now_ms: u64) -> Option<Stri
         .then(|| CLOSE_AFTER_DONE_ARMED_REMAINING_LABEL.to_string())
 }
 
-fn deadline_countdown(deadline_at: &str, now_ms: u64) -> Option<String> {
+pub(crate) fn deadline_countdown(deadline_at: &str, now_ms: u64) -> Option<String> {
     let deadline = parse_iso_ms(deadline_at)?;
     Some(format_timer_countdown(deadline - now_ms as i64))
 }

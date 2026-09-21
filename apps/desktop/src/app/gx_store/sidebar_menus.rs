@@ -10,10 +10,11 @@
 //! the install path.
 //!
 //! What the menus still read from outside the store is one list, and it is all HUD (M5): the
-//! agents the launcher offers and the Saved Actions pinned to a project header. The agent the
-//! user launched last and the keep-awake duration are client storage, read through
-//! `sidebar_ui_storage.rs` behind a one-second cache, because the TypeScript writes both while
-//! the app runs.
+//! agents the launcher offers and the Saved Actions pinned to a project header. Since M4d part 2
+//! step 3 the HUD arrives on the runtime's own facts channel (`runtime_facts.rs`) instead of
+//! riding the old projection's publish. The agent the user launched last and the keep-awake
+//! duration are client storage, read through `sidebar_ui_storage.rs` behind a one-second cache,
+//! because the TypeScript writes both while the app runs.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -22,7 +23,6 @@ use ghostex_gx_core::{HeaderCommand, HoverAction, LauncherAgent, MenuHost, Sideb
 use serde_json::Value;
 
 use crate::GhostexGpuiApp;
-use crate::app::native_sidebar::model::NativeSidebarSnapshot;
 
 /// How long the two client-storage values are reused. Reading them is one indexed row each on an
 /// open connection, and an install can run several times a second.
@@ -100,12 +100,10 @@ impl GhostexGpuiApp {
     }
 
     /// The facts the menus read that are neither the store nor the settings.
-    pub(super) fn gx_store_menu_host(
-        &mut self,
-        published: Option<&NativeSidebarSnapshot>,
-    ) -> MenuHost {
+    pub(super) fn gx_store_menu_host(&mut self) -> MenuHost {
         self.gx_store_menu_host_generation();
-        let hud = published.map(|snapshot| &snapshot.hud);
+        let hud = self.gx_store.runtime_facts.hud.clone();
+        let hud = hud.as_ref();
         // The selected tab and the connect states are the store's own since M4d, so Add Project on
         // a remote machine is decided by the same list the tabs are drawn from.
         let selected = self.gx_store.sidebar_ui.selected_machine_id().to_string();
@@ -147,8 +145,7 @@ impl GhostexGpuiApp {
         };
         let owner_id = command["ownerId"].as_str().unwrap_or_default().to_string();
         let action = command["action"].as_str().and_then(HoverAction::from_id);
-        let published = self.native_sidebar.projection.clone();
-        let host = self.gx_store_menu_host(published.as_deref());
+        let host = self.gx_store_menu_host();
         let now_ms = super::host::now_ms();
         let items = {
             let list = &self.gx_store.sidebar_list;

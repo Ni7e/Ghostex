@@ -137,6 +137,8 @@ pub use crate::sidebar_ui::{
     SIDEBAR_WINDOW_SCOPE_ID,
 };
 pub use crate::sidebar_view::{
+    armed_actions_by_session, ArmedAction, ARMED_ACTION_CLOSE_AFTER_DONE,
+    ARMED_ACTION_DELAYED_SEND,
     close_project_group_is_active, close_project_successor_candidates,
     close_project_successor_group_order, first_awake_successor_session_id, is_awake_successor_row,
     plan_space_switch_restore, project_slot_plan, rendered_session_ids, reveal_plan,

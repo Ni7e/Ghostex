@@ -7,11 +7,15 @@
 //! is the store's view model, and since M4c so are the menus, the hover buttons, the header
 //! buttons, the more menu and the agent artwork (`sidebar_menus.rs`).
 //!
-//! What is still taken from the old projection's newest publish is named here and nowhere else:
-//! the HUD, the reveal and rename requests, the daemon revision, the sanitized failure message a
-//! machine tab carries, and the project facts no milestone has moved (`canRemoveProject`, the
-//! editor state, the theme). Each of those belongs to M5. Nothing here derives product state: a
-//! value is either the view model's or the old projection's, and this file says which.
+//! CDXC:Sidebar 2026-09-21 WHY:
+//! Nothing here is taken from the old projection's publish any more (M4d part 2 step 3). What the
+//! view model does not decide now has a Rust owner named at the call site
+//! (`gx_store_install_sidebar_list`): the HUD is the runtime's facts channel, the reveal is the
+//! newest request from that channel or from the titlebar, the rename is the store's pending
+//! collection rename, the two hotkey labels are the hotkey settings formatted here, and a machine
+//! tab's sanitized failure message is this app's own connect state. The daemon revision and the
+//! project facts the publish carried beside the store's (`canRemoveProject`, the editor identity,
+//! the theme) are gone rather than carried: no renderer file reads one.
 //!
 //! M4d moved the machine tabs, their connection state and their counts, a group's `isStale` and
 //! its remote machine context into the view model, so a remote machine's list is drawn from the
@@ -30,7 +34,8 @@ use serde_json::{Map, Value, json};
 
 use crate::app::native_sidebar::model::{
     NativeSidebarCollection, NativeSidebarGroup, NativeSidebarMachine, NativeSidebarOrderItem,
-    NativeSidebarSection, NativeSidebarSession, NativeSidebarSnapshot,
+    NativeSidebarRenameRequest, NativeSidebarRevealRequest, NativeSidebarSection,
+    NativeSidebarSession, NativeSidebarSnapshot,
 };
 
 /// What a cached session element was built from, so a focus change rebuilds two rows rather than
@@ -146,12 +151,9 @@ pub(super) struct SnapshotCache {
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct InstallPhases {
     /// Reading the two client-storage values the menus need, behind its own one-second cache.
-    /// Measured and written by the caller for the same reason as `fingerprint_us`.
+    /// Measured and written by the caller, because it runs before the build and the build resets
+    /// these.
     pub(super) host_us: u64,
-    /// Hashing the values the installed list still takes from a publish, which walks the whole HUD
-    /// document. Measured and written by the caller AFTER the build, because it runs before it and
-    /// the build resets these.
-    pub(super) fingerprint_us: u64,
     pub(super) key_us: u64,
     /// The rows of every group, summed.
     ///
@@ -236,92 +238,17 @@ impl SnapshotCache {
     }
 }
 
-/// One number over every value the installed list still takes from a publish.
-///
-/// CDXC:Sidebar 2026-09-20 WHY:
-/// Kept as a fingerprint rather than as the publish itself. Holding the `Arc` made the clock
-/// branch's `Arc::make_mut` deep-copy the whole published snapshot once a second and after every
-/// publish, because this was a second owner; holding clones of the values instead would copy the
-/// settings object out of the HUD on every install. Hashing walks them without allocating. A
-/// collision would skip one install of a value the renderer draws, and it would be picked up by
-/// the next change to any of them.
-///
-/// The set is exactly what `snapshot_from_view` reads from `published`, minus the revision, which
-/// nothing the renderer draws reads.
-pub(super) fn carry_fingerprint(published: &NativeSidebarSnapshot) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    hash_json(&published.hud, &mut hasher);
-    // Only the sanitized failure message is still taken from a publish; the tab itself, its state
-    // and its counts are the view model's.
-    for machine in &published.machines {
-        machine.id.hash(&mut hasher);
-        machine.message.hash(&mut hasher);
-    }
-    if let Some(request) = &published.rename_request {
-        request.collection_id.hash(&mut hasher);
-        request.request_id.hash(&mut hasher);
-    }
-    if let Some(request) = &published.reveal_request {
-        request.session_id.hash(&mut hasher);
-        request.request_id.hash(&mut hasher);
-    }
-    published.search_shortcut.hash(&mut hasher);
-    published.commands_shortcut.hash(&mut hasher);
-    for group in &published.groups {
-        group.group_id.hash(&mut hasher);
-        match &group.project_context {
-            Some(context) => hash_json(context, &mut hasher),
-            None => 0u8.hash(&mut hasher),
-        }
-    }
-    hasher.finish()
-}
-
-/// `serde_json::Value` has no `Hash`: a float has none, and the map is ordered so its entries can
-/// be walked in one order.
-fn hash_json(value: &Value, hasher: &mut impl std::hash::Hasher) {
-    use std::hash::Hash;
-    match value {
-        Value::Null => 0u8.hash(hasher),
-        Value::Bool(value) => {
-            1u8.hash(hasher);
-            value.hash(hasher);
-        }
-        Value::Number(number) => {
-            2u8.hash(hasher);
-            match number.as_f64() {
-                Some(number) => number.to_bits().hash(hasher),
-                None => number.to_string().hash(hasher),
-            }
-        }
-        Value::String(value) => {
-            3u8.hash(hasher);
-            value.hash(hasher);
-        }
-        Value::Array(items) => {
-            4u8.hash(hasher);
-            items.len().hash(hasher);
-            for item in items {
-                hash_json(item, hasher);
-            }
-        }
-        Value::Object(object) => {
-            5u8.hash(hasher);
-            object.len().hash(hasher);
-            for (key, item) in object {
-                key.hash(hasher);
-                hash_json(item, hasher);
-            }
-        }
-    }
-}
-
 /// Everything one install needs besides the view and the cache.
 pub(super) struct SnapshotInput<'a> {
     pub(super) menus: &'a SidebarMenus<'a>,
-    /// The old projection's newest snapshot; the fields named in the module comment come from it.
-    pub(super) published: &'a NativeSidebarSnapshot,
+    /// The sidebar HUD, from the runtime's facts channel.
+    pub(super) hud: &'a Value,
+    /// The collection whose inline rename the renderer opens next, and the row it scrolls to.
+    pub(super) rename_request: Option<NativeSidebarRenameRequest>,
+    pub(super) reveal_request: Option<NativeSidebarRevealRequest>,
+    /// The two hotkey labels the empty state and the Commands row draw.
+    pub(super) search_shortcut: Option<String>,
+    pub(super) commands_shortcut: Option<String>,
     pub(super) settings: &'a SidebarSettings,
     pub(super) hidden_items: &'a SidebarHiddenItems,
     pub(super) host: &'a MenuHost,
@@ -339,17 +266,7 @@ pub(super) fn snapshot_from_view(
     input: &SnapshotInput<'_>,
     cache: &mut SnapshotCache,
 ) -> NativeSidebarSnapshot {
-    let SnapshotInput {
-        menus,
-        published,
-        now_ms,
-        ..
-    } = *input;
-    let published_groups: HashMap<&str, &NativeSidebarGroup> = published
-        .groups
-        .iter()
-        .map(|group| (group.group_id.as_str(), group))
-        .collect();
+    let SnapshotInput { menus, now_ms, .. } = *input;
 
     let started = std::time::Instant::now();
     cache.phases = InstallPhases::default();
@@ -382,7 +299,6 @@ pub(super) fn snapshot_from_view(
         .groups
         .iter()
         .map(|group| {
-            let published = published_groups.get(group.core.group_id.as_str()).copied();
             let rows_started = std::time::Instant::now();
             let sessions = group
                 .core
@@ -395,7 +311,7 @@ pub(super) fn snapshot_from_view(
                 })
                 .collect();
             let rows_us = rows_started.elapsed().as_micros() as u64;
-            let built = native_group(group, menus, published, sessions, cache);
+            let built = native_group(group, menus, sessions, cache);
             cache.phases.rows_us += rows_us;
             built
         })
@@ -435,14 +351,13 @@ pub(super) fn snapshot_from_view(
 
     let snapshot = NativeSidebarSnapshot {
         version: 1,
-        // The daemon document the old projection published. Carried rather than derived, and
-        // deliberately not part of what decides an install: nothing the renderer draws reads it
-        // (the settings patches quote the zustand store's own revision, controller.ts:138), and it
-        // moves on nearly every publish.
-        revision: published.revision,
+        // The daemon document revision the old projection published. Nothing the renderer draws
+        // reads it (the settings patches quote the zustand store's own revision,
+        // controller.ts:138), so the store's list does not invent one.
+        revision: 0,
         scroll_scope: view.scroll_scope.clone(),
-        rename_request: published.rename_request.clone(),
-        reveal_request: published.reveal_request.clone(),
+        rename_request: input.rename_request.clone(),
+        reveal_request: input.reveal_request.clone(),
         ready: view.ready,
         empty_state: json!({
             "loading": view.empty_state.loading,
@@ -450,7 +365,7 @@ pub(super) fn snapshot_from_view(
             "canAddProject": view.empty_state.can_add_project,
             "copy": view.empty_state.copy,
         }),
-        hud: published.hud.clone(),
+        hud: input.hud.clone(),
         groups,
         selected_machine_id: view.selected_machine_id.clone(),
         machines: view
@@ -463,12 +378,10 @@ pub(super) fn snapshot_from_view(
                 label: machine.label.clone(),
                 state: machine.state.clone(),
                 // The sanitized failure summary the header shows under a machine that could not
-                // connect is still the old projection's (M5, with the rest of the connect state).
-                message: published
-                    .machines
-                    .iter()
-                    .find(|published| published.id == machine.id)
-                    .and_then(|published| published.message.clone()),
+                // connect: this app's own, from the connect transition that produced it
+                // (os_integration/toast_and_status_dispatch.rs), carried into the tabs by
+                // `remote_machine_tabs`.
+                message: machine.message.clone(),
             })
             .collect(),
         spaces: view
@@ -501,10 +414,10 @@ pub(super) fn snapshot_from_view(
             })
             .collect(),
         more_menu,
-        // The two hotkey labels are the hotkey settings formatted for the current platform, not a
-        // menu; they move with the rest of the HUD in M5.
-        search_shortcut: published.search_shortcut.clone(),
-        commands_shortcut: published.commands_shortcut.clone(),
+        // The two hotkey labels are the hotkey settings formatted for the current platform, which
+        // the list re-reads whenever the settings file's content hash moves.
+        search_shortcut: input.search_shortcut.clone(),
+        commands_shortcut: input.commands_shortcut.clone(),
     };
     cache.phases.tail_us = phase.elapsed().as_micros() as u64;
     snapshot
@@ -550,7 +463,6 @@ fn more_menu(
 fn native_group(
     group: &GroupView,
     menus: &SidebarMenus<'_>,
-    published: Option<&NativeSidebarGroup>,
     sessions: Vec<Arc<NativeSidebarSession>>,
     cache: &mut SnapshotCache,
 ) -> NativeSidebarGroup {
@@ -591,7 +503,7 @@ fn native_group(
         is_active: core.is_active,
         is_chat_collection: core.group_id == ghostex_gx_core::CHATS_GROUP_ID,
         is_stale: core.is_stale,
-        project_context: project_context(group, published),
+        project_context: project_context(group),
         remote_machine_context: core.remote_machine.as_ref().map(|remote| {
             let mut context = json!({
                 "machineId": remote.machine_id,
@@ -648,14 +560,17 @@ fn group_menus(
     (menu, header_actions)
 }
 
-/// The project facts a header draws: the view model's values, over whatever else the old
-/// projection's object carried (the editor identity its menus and the agent launcher read).
-fn project_context(group: &GroupView, published: Option<&NativeSidebarGroup>) -> Option<Value> {
+/// The project facts a header draws, all of them the view model's.
+///
+/// CDXC:Sidebar 2026-09-21 WHY:
+/// This used to start from the old projection's own object for the same group, so the store's
+/// values were written OVER the publish's `canRemoveProject`, its editor identity and its theme.
+/// Every renderer file that reads a project context reads one of the keys written here
+/// (`native_sidebar/rows.rs`, `project_status.rs`, `project_header.rs`,
+/// `sidebar_agent_launch_placeholder.rs`), so the merge only kept keys nothing draws alive.
+fn project_context(group: &GroupView) -> Option<Value> {
     let context = group.core.project_context.as_ref()?;
-    let mut object = match published.and_then(|group| group.project_context.clone()) {
-        Some(Value::Object(object)) => object,
-        _ => Map::new(),
-    };
+    let mut object = Map::new();
     object.insert("path".to_string(), Value::String(context.path.clone()));
     insert_optional(&mut object, "iconDataUrl", context.icon_data_url.clone());
     insert_optional(
@@ -663,42 +578,31 @@ fn project_context(group: &GroupView, published: Option<&NativeSidebarGroup>) ->
         "discoveredIconDataUrl",
         context.discovered_icon_data_url.clone(),
     );
-    match &context.worktree {
-        Some(worktree) => {
-            object.insert(
-                "worktree".to_string(),
-                json!({
-                    "branch": worktree.branch,
-                    "name": worktree.name,
-                    "parentProjectId": worktree.parent_project_id,
-                    "parentProjectName": worktree.parent_project_name,
-                    "parentProjectPath": worktree.parent_project_path,
-                }),
-            );
-        }
-        None => {
-            object.remove("worktree");
-        }
+    if let Some(worktree) = &context.worktree {
+        object.insert(
+            "worktree".to_string(),
+            json!({
+                "branch": worktree.branch,
+                "name": worktree.name,
+                "parentProjectId": worktree.parent_project_id,
+                "parentProjectName": worktree.parent_project_name,
+                "parentProjectPath": worktree.parent_project_path,
+            }),
+        );
     }
-    let mut editor = match object.remove("editor") {
-        Some(Value::Object(editor)) => editor,
-        _ => Map::new(),
-    };
-    editor.insert(
-        "projectId".to_string(),
-        Value::String(context.project_id.clone()),
-    );
-    editor.insert(
-        "diffStats".to_string(),
+    object.insert(
+        "editor".to_string(),
         json!({
-            "additions": context.diff_stats.additions,
-            "deletions": context.diff_stats.deletions,
-            "files": context.diff_stats.files,
-            "isLoading": context.diff_stats.is_loading,
-            "isRepo": context.diff_stats.is_repo,
+            "projectId": context.project_id,
+            "diffStats": {
+                "additions": context.diff_stats.additions,
+                "deletions": context.diff_stats.deletions,
+                "files": context.diff_stats.files,
+                "isLoading": context.diff_stats.is_loading,
+                "isRepo": context.diff_stats.is_repo,
+            },
         }),
     );
-    object.insert("editor".to_string(), Value::Object(editor));
     Some(Value::Object(object))
 }
 

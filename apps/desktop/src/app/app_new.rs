@@ -215,6 +215,7 @@ impl GhostexGpuiApp {
                 keep_awake_previous_working_session_count: 0,
                 keep_awake_working_session_grace_until: None,
                 remote_machine_connect_states: HashMap::new(),
+                remote_machine_status_messages: HashMap::new(),
                 remote_gxserver_connections: HashMap::new(),
                 remote_browser: Default::default(),
                 remote_gxserver_connect_generations: HashMap::new(),

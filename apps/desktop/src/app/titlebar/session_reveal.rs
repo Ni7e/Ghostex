@@ -24,10 +24,12 @@ impl GhostexGpuiApp {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("current time is after the Unix epoch")
             .as_micros() as u64;
-        // This reveal is this app's own, so the runtime never posts it on the facts channel and
-        // the comparison must not read the publish that carries it as a reveal the channel lost
-        // (gx_store/runtime_facts.rs).
-        self.gx_store_note_local_sidebar_reveal(request_id);
+        // This reveal is this app's own, so the runtime never posts it on the facts channel: the
+        // store records it as the newest request (which is what the installed list carries and what
+        // scrolls the row into view) and answers it here rather than waiting for the publish that
+        // used to carry it back (gx_store/runtime_facts.rs).
+        self.gx_store_note_local_sidebar_reveal(session_id, request_id);
+        self.gx_store_note_sidebar_reveal(session_id, request_id, cx);
         self.dispatch_gpui_sidebar_host_message(
             serde_json::json!({
                 "type": "revealSidebarSession",

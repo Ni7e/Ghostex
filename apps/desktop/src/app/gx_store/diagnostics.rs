@@ -621,7 +621,6 @@ impl GxStoreDiagnostics {
                 // menu, or the tail that copies what a publish still owns.
                 "install": {
                     "hostUs": phases.host_us,
-                    "fingerprintUs": phases.fingerprint_us,
                     "keyUs": phases.key_us,
                     "rowsUs": phases.rows_us,
                     "groupsUs": phases.groups_us,

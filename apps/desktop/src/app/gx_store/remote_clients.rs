@@ -548,9 +548,13 @@ impl GhostexGpuiApp {
                     .get(machine_id.as_str())
                     .cloned()
                     .unwrap_or_else(|| "disconnected".to_string()),
-                // The sanitized failure summary is the old projection's; it moves with the rest of
-                // the connect state in M5.
-                message: None,
+                // The sanitized failure summary of the newest connect transition, which the tab's
+                // header draws. This app's own since M4d part 2 step 3; it used to be carried out
+                // of the old projection's publish.
+                message: self
+                    .remote_machine_status_messages
+                    .get(machine_id.as_str())
+                    .cloned(),
                 // "The store can draw this machine's list", which is what `supported` gates the
                 // renderer on. Three machines qualify: one the host has a client for, running or
                 // waiting out a backoff; one whose rows are still held after its stream dropped;

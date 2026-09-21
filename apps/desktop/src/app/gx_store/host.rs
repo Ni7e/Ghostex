@@ -354,6 +354,9 @@ impl GhostexGpuiApp {
         self.gx_store
             .restore_focus_once(&self.sidebar_gxserver_presentation_focus_state);
         self.start_gx_store_layout_persist_task(cx);
+        // The sidebar's own once-a-second tick, which the armed-timer labels and the menu-host
+        // re-read ride (sidebar_clock.rs). Started once, and not tied to having a transport.
+        self.gx_store_start_sidebar_clock(cx);
         // The sidebar's own state is read once, and again later if that read failed.
         self.gx_store_restore_sidebar_ui(cx);
         // A machine may already have connected before the store came up, and the machine tabs are

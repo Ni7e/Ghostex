@@ -237,7 +237,11 @@ impl GhostexGpuiApp {
         let _ = self.send_enter_key_to_local_agents_workspace_session(&message, cx);
     }
 
-    pub(crate) fn receive_sidebar_session_completion_sound_payload(&mut self, payload: &str) {
+    pub(crate) fn receive_sidebar_session_completion_sound_payload(
+        &mut self,
+        payload: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
         /*
         Session-attention completion sound (macOS parity): the sidebar runtime
         owns the attention transition edge, the attention-event dedupe, and the
@@ -246,10 +250,28 @@ impl GhostexGpuiApp {
         whitelist normalization so no renderer-provided path or file name can
         reach the player.
         */
-        let Ok(sound) = gpui_sidebar_session_completion_sound_from_json(payload) else {
+        let Ok((sound, session_id)) = gpui_sidebar_session_completion_sound_from_json(payload)
+        else {
             return;
         };
         let _ = gpui_play_completion_sound(&sound);
+        /*
+        CDXC:Sessions 2026-09-21 WHY:
+        The card's completion flash rides the same message as the sound, because they are the same
+        event: the runtime posted both from one place and the flash only took the long way round,
+        through the old projection's snapshot bridge (`native-sidebar/controller.ts`), which M4d
+        part 2 deletes.
+        */
+        let Some(session_id) = session_id else {
+            return;
+        };
+        self.native_sidebar
+            .completion_flashes
+            .retain(|_, started| started.elapsed().as_secs_f32() < 3.0);
+        self.native_sidebar
+            .completion_flashes
+            .insert(session_id, std::time::Instant::now());
+        cx.notify();
     }
 
     pub(crate) fn send_enter_key_to_local_agents_workspace_session(

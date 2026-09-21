@@ -47,8 +47,8 @@ pub(super) fn runtime_facts_difference(
         json!({
             "family": family,
             // `missingInChannel`: the publish carries the entry and the channel does not.
-            // `missingInPublish`: the channel carries it and the publish does not.
             // `valueDiffers`: both carry it and `field` names the first one that moved.
+            // The channel-only direction is counted only, in `projectDiffStatsChannelOnly`.
             "kind": kind,
             "field": log_text(field.unwrap_or("none")),
         }),

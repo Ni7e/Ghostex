@@ -269,6 +269,13 @@ pub struct GhostexGpuiApp {
     restored remote tab explains itself instead of showing an empty rectangle.
     */
     pub(crate) remote_machine_connect_states: HashMap<String, String>,
+    /// CDXC:RemoteMachines 2026-09-21 WHY:
+    /// The already-sanitized failure summary of the same transition, which the machine tab's header
+    /// draws under a machine that could not connect. Written at the same choke point and kept
+    /// beside the state rather than inside it, because the state is a bounded wire word and this is
+    /// free text; the sidebar page used to keep its own copy (`native-sidebar/metadata.ts`
+    /// `connections`) and the store's list carried it from that publish until M4d part 2 step 3.
+    pub(crate) remote_machine_status_messages: HashMap<String, String>,
     pub(crate) remote_gxserver_connections: HashMap<String, GpuiRemoteGxserverConnection>,
     pub(crate) remote_browser: crate::app::remote_browser::RemoteBrowserRuntime,
     pub(crate) remote_gxserver_connect_generations: HashMap<String, u64>,

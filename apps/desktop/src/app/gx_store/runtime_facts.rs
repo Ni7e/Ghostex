@@ -9,12 +9,15 @@
 //! dies with QuickJS in M8.
 //!
 //! CDXC:Sidebar 2026-09-21 WHY:
-//! This step only INGESTS and COMPARES: every reader still takes its value from the publish
-//! (`sidebar_list_inputs.rs`, `sidebar_snapshot.rs`), and the counters here say whether the two
-//! agree. A clock-derived field cannot be compared that way, because the publish computes
-//! `remainingMs` and `remainingLabel` when it projects and the channel computes them when it
-//! posts, so the comparison judges `armed`, the deadline and the two send-when flags and carries
-//! the rest for the reader that follows in step 3.
+//! Since step 3 the list, its menus and the snapshot it installs READ this channel
+//! (`sidebar_list_inputs.rs`, `sidebar_menus.rs`, `sidebar_snapshot.rs`); the comparison against
+//! the publish stays on beside them until the publish is deleted, so a channel that started
+//! carrying something else shows as a counter rather than as a wrong sidebar. A clock-derived
+//! field cannot be compared that way, because the publish computes `remainingMs` and
+//! `remainingLabel` when it projects and the channel computes them when it posts, so the
+//! comparison judges `armed`, the deadline and the two send-when flags; the labels a row and a
+//! chat's working row draw are formatted from the deadline against the host's clock and never from
+//! either copy of them (gx-core `timer_trailing_label`, `armed_actions_by_session`).
 //!
 //! SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/sidebar-runtime-facts.ts,
 //! apps/desktop/src/app/gx_store/diagnostics_runtime_facts.rs.
@@ -25,7 +28,7 @@ use ghostex_gx_core::{CloseAfterDoneInput, DelayedSendInput, ProjectDiffStats};
 use serde_json::Value;
 
 use crate::GhostexGpuiApp;
-use crate::app::native_sidebar::model::NativeSidebarSnapshot;
+use crate::app::native_sidebar::model::{NativeSidebarRevealRequest, NativeSidebarSnapshot};
 
 use super::diagnostics_runtime_facts::runtime_facts_difference;
 
@@ -37,8 +40,16 @@ pub(crate) struct SidebarRuntimeFacts {
     pub(super) project_diff_stats: HashMap<String, ProjectDiffStats>,
     pub(super) close_after_done: HashMap<String, CloseAfterDoneInput>,
     pub(super) delayed_sends: HashMap<String, DelayedSendInput>,
+    /// Bumped when a post really replaced the HUD, and when one replaced the per-row facts. The
+    /// two are apart so a rows post, which arrives with every publish, does not make the list
+    /// re-read the HUD's Recent Projects.
+    pub(super) hud_generation: u64,
+    pub(super) rows_generation: u64,
     /// The newest reveal the runtime asked for: its sidebar session id and its request id.
     pub(super) reveal: Option<(String, u64)>,
+    /// The newest reveal from either side, which is what the installed list carries: the runtime's
+    /// on the channel, or this app's own from the titlebar.
+    pub(super) newest_reveal: Option<NativeSidebarRevealRequest>,
     /// The reveals this app asked for itself (the titlebar's Reveal Active Session), which the
     /// runtime never sees and the publish carries all the same.
     pub(super) local_reveals: Vec<u64>,
@@ -73,16 +84,23 @@ pub(crate) struct RuntimeFactsCounters {
 const MAX_LOCAL_REVEALS: usize = 8;
 
 impl GhostexGpuiApp {
-    /// A channel payload. Parsed into the parallel fields; nothing here is read by the list yet.
-    pub(crate) fn receive_sidebar_runtime_facts(&mut self, payload: &str) {
+    /// A channel payload. Every value the list, its menus and its snapshot take from outside the
+    /// store arrives here, so a post brings the list up to date the way a publish used to.
+    pub(crate) fn receive_sidebar_runtime_facts(
+        &mut self,
+        payload: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
         let Ok(value) = serde_json::from_str::<Value>(payload) else {
             self.gx_store.runtime_facts.counters.unparsable += 1;
             return;
         };
+        let mut reveal: Option<NativeSidebarRevealRequest> = None;
         let facts = &mut self.gx_store.runtime_facts;
         match value.get("kind").and_then(Value::as_str) {
             Some("hud") => {
                 facts.hud = value.get("hud").cloned();
+                facts.hud_generation += 1;
                 facts.counters.hud_posts += 1;
             }
             Some("rows") => {
@@ -116,6 +134,7 @@ impl GhostexGpuiApp {
                             .collect()
                     })
                     .unwrap_or_default();
+                facts.rows_generation += 1;
                 facts.counters.row_posts += 1;
             }
             Some("reveal") => {
@@ -123,19 +142,41 @@ impl GhostexGpuiApp {
                 let request_id = value.get("requestId").and_then(Value::as_u64);
                 if let (Some(session_id), Some(request_id)) = (session_id, request_id) {
                     facts.reveal = Some((session_id.to_string(), request_id));
+                    facts.newest_reveal = Some(NativeSidebarRevealRequest {
+                        session_id: session_id.to_string(),
+                        request_id,
+                    });
+                    reveal = facts.newest_reveal.clone();
                     facts.counters.reveal_posts += 1;
                 } else {
                     facts.counters.unparsable += 1;
                 }
             }
-            _ => facts.counters.unparsable += 1,
+            _ => {
+                facts.counters.unparsable += 1;
+                return;
+            }
         }
+        // The sidebar's own state answers a reveal, and it used to learn of one only on the publish
+        // that carried it. Taking the request id here and again in the receiver is harmless: the
+        // second call finds it already taken and returns (`take_reveal_request`).
+        if let Some(reveal) = reveal {
+            self.gx_store_note_sidebar_reveal(&reveal.session_id, reveal.request_id, cx);
+        }
+        // Everything the list still borrows moved with this post, so it is brought up to date the
+        // way `gx_store_sidebar_projection_published` does it for a publish.
+        self.gx_store_sidebar_state_changed(cx);
     }
 
-    /// Remembers a reveal this app asked the page for itself, so the comparison does not read it as
-    /// a reveal the channel lost.
-    pub(crate) fn gx_store_note_local_sidebar_reveal(&mut self, request_id: u64) {
-        let reveals = &mut self.gx_store.runtime_facts.local_reveals;
+    /// Remembers a reveal this app asked for itself, so the comparison does not read it as a reveal
+    /// the channel lost, and so the installed list carries it.
+    pub(crate) fn gx_store_note_local_sidebar_reveal(&mut self, session_id: &str, request_id: u64) {
+        let facts = &mut self.gx_store.runtime_facts;
+        facts.newest_reveal = Some(NativeSidebarRevealRequest {
+            session_id: session_id.to_string(),
+            request_id,
+        });
+        let reveals = &mut facts.local_reveals;
         reveals.push(request_id);
         if reveals.len() > MAX_LOCAL_REVEALS {
             reveals.remove(0);
@@ -200,15 +241,11 @@ impl GhostexGpuiApp {
             .keys()
             .filter(|project_id| !published_project_ids.contains(project_id.as_str()))
             .count() as u64;
-        if channel_only > 0 {
-            facts.counters.project_diff_stats_channel_only += channel_only;
-            runtime_facts_difference(
-                &mut facts.difference_details,
-                "projectDiffStats",
-                "missingInPublish",
-                None,
-            );
-        }
+        // Counted and not spelled out: a project the channel offers and no published group asks
+        // about is expected (the reader looks an entry up per drawn row), and a detail line per
+        // comparison for it spent the whole twenty-line budget before a real difference could use
+        // one.
+        facts.counters.project_diff_stats_channel_only += channel_only;
         for (session_id, close) in &published_close_after_done {
             let outcome = match facts.close_after_done.get(session_id) {
                 None => Some(("missingInChannel", None)),

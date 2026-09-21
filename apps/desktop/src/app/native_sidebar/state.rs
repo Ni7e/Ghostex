@@ -120,15 +120,12 @@ impl GhostexGpuiApp {
                     .clone()
                     .expect("assigned above");
                 if self.gx_store_sidebar_draws_store_list() {
-                    // The store's list owns its menus since M4c and its machine tabs since M4d;
-                    // only the HUD, the two requests, a few per-group facts and the focus marks of
-                    // a remote row still ride on a publish, so a publish is installed when one of
-                    // THOSE moved and skipped otherwise.
+                    // Since M4d part 2 step 3 a publish carries NOTHING the store's list reads: its
+                    // rows, menus and machine tabs are the view model's, and the HUD, the two
+                    // requests and the two hotkey labels have Rust owners
+                    // (`gx_store_sidebar_carry_key`). The count is what says the old page is still
+                    // projecting at all.
                     self.gx_store_note_sidebar_publish_seen();
-                    if self.gx_store_sidebar_carry_changed(&published) {
-                        self.gx_store_note_sidebar_install_from_carry();
-                        self.gx_store_install_sidebar_list(cx);
-                    }
                 } else {
                     self.install_native_sidebar_snapshot(published, cx);
                 }
@@ -156,19 +153,14 @@ impl GhostexGpuiApp {
                 }
             }
             NativeSidebarUpdate::Clock { version: 1, rows } => {
-                for row in &rows {
-                    match &row.armed_actions {
-                        Some(actions) => self
-                            .native_sidebar
-                            .armed_actions
-                            .insert(row.session_id.clone(), actions.clone()),
-                        None => self.native_sidebar.armed_actions.remove(&row.session_id),
-                    };
-                }
-                self.sync_session_chat_armed_actions(cx);
-                // The clock rows carry the labels the old projection formats. The store's list
-                // formats its own against the host clock and books its own wake, so they are
-                // applied to the projection and reach the screen only while it is what is drawn.
+                // The armed-timer labels the chat's working row draws are the store's own since
+                // M4d part 2 step 3: `gx_store_refresh_armed_actions` derives them from the runtime
+                // facts channel and the presentation on the sidebar's own tick
+                // (gx_store/sidebar_clock.rs), so `row.armed_actions` is no longer read.
+                //
+                // The clock rows' own labels are the old projection's. The store's list formats its
+                // own against the host clock and books its own wake, so they are applied to the
+                // projection and reach the screen only while it is what is drawn.
                 let drawn_is_projection = !self.gx_store_sidebar_draws_store_list();
                 let Some(snapshot) = self.native_sidebar.projection.as_mut() else {
                     return;
@@ -203,11 +195,6 @@ impl GhostexGpuiApp {
                 }
                 if drawn_is_projection {
                     self.native_sidebar.snapshot = self.native_sidebar.projection.clone();
-                } else {
-                    // The sidebar's own one-second tick, and the only cadence that notices a
-                    // Keep Awake armed from the titlebar or an agent launched from another
-                    // surface (gx_store/sidebar_menus.rs).
-                    self.gx_store_poll_menu_host(cx);
                 }
             }
             _ => return,

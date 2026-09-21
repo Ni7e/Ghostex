@@ -198,6 +198,13 @@ impl GhostexGpuiApp {
         */
         self.remote_machine_connect_states
             .insert(remote_machine_id.to_string(), state.to_string());
+        // The sanitized summary of THIS transition, which the machine tab draws
+        // (gx_store/remote_clients.rs). The page's copy was never cleared either: a transition
+        // without a message leaves the last one standing, exactly as `metadata.ts` did.
+        if let Some(message) = message.map(str::trim).filter(|message| !message.is_empty()) {
+            self.remote_machine_status_messages
+                .insert(remote_machine_id.to_string(), message.to_string());
+        }
         // Every connect transition funnels through here, so this is also where the store learns
         // whether it still has a daemon to subscribe to on that machine: a client starts on the
         // connected edge and is retired on every other one, which leaves the machine's rows on
