@@ -450,6 +450,38 @@ function mutateBulk(name: string | undefined, entry: Json): Json {
         delete clone.request;
       }
       return clone;
+    // A remote machine the store has no rows for answered with an empty set instead of refused.
+    // The old runtime still holds that machine's LAST SEEN presentation, so it resolves a real set
+    // from it; answering "nothing" here is a project's Sleep silently doing nothing on every
+    // machine that has disconnected.
+    case 'answer-an-unloaded-remote-machine':
+      if (Array.isArray(clone.handOffCalls) && clone.owned !== true) {
+        clone.owned = true;
+        clone.request = { action: 'sleep', focusProject: null, intervalMs: 350, messages: [] };
+      }
+      return clone;
+    // A remote project wake that moves the active project. `wakeProjectSleepingSessions` calls
+    // `focusProjectId` on its LOCAL branch only, so this would jump the user onto a remote project
+    // every time they woke one.
+    case 'remote-wake-moves-the-project':
+      if (
+        ((clone.remoteMachines ?? []) as string[]).length &&
+        String((clone.payload as Json)?.type) === 'wakeProjectSleepingSessions' &&
+        clone.request
+      )
+        clone.request.focusProject = String((clone.payload as Json)?.groupId ?? '').replace(':group:', ':project:');
+      return clone;
+    // The remote set fanned out as THIS computer's ids, which is a sleep sent to the wrong daemon.
+    case 'remote-rows-as-local-ids':
+      if (clone.request)
+        clone.request.messages = ((clone.request.messages ?? []) as Json[]).map((message) => ({
+          ...message,
+          sessionId: String(message.sessionId).replace(
+            /^remote:[^:]+:session:([^:]+):(.+)$/u,
+            'combined-session:$1:$2'
+          ),
+        }));
+      return clone;
     // The same decision broken the other way: the set reaches for the project's app tabs again.
     // This is the mutation that proves the comparison can SEE a tab leg, in whichever half it
     // comes back: the shipped TypeScript calls nothing for a tab now, so one extra browser message
@@ -567,6 +599,9 @@ const BULK_MUTATIONS = [
   'refuse-a-project-with-tabs',
   'sleep-the-app-tabs',
   'answer-an-unloaded-project',
+  'answer-an-unloaded-remote-machine',
+  'remote-wake-moves-the-project',
+  'remote-rows-as-local-ids',
   'batch-keeps-the-selection',
   'reorder-the-batch',
 ];
@@ -880,6 +915,9 @@ async function compare([outDir, ...flags]: string[]) {
   let bulkRefusals = 0;
   let bulkTabsIgnored = 0;
   let bulkNotLoaded = 0;
+  let bulkRemoteSets = 0;
+  let bulkRemoteMessages = 0;
+  let bulkRemoteHandOffsWork = 0;
   let reloadPlans = 0;
   let reloadLegs = 0;
   let reloadHandOffs = 0;
@@ -978,6 +1016,29 @@ async function compare([outDir, ...flags]: string[]) {
           );
         else bulkNotLoaded += 1;
       }
+      // The remote hand-off probe. The machine the store never loaded is one the old runtime still
+      // has a last-seen presentation for, so a refusal here is only correct if the TypeScript then
+      // resolves the set itself. It is asserted rather than counted, and against the exact set
+      // rather than against "did anything at all": `handOffCalls` is what the LOADED machine
+      // resolves for the same payload with the machine id swapped, and both machines hold the same
+      // rows, so an empty set is a legitimate answer for a project with no eligible row and a
+      // WRONG set is still caught.
+      if (Array.isArray(entry.handOffCalls)) {
+        const theirCalls = (theirs?.calls ?? []) as Json[];
+        const expected = (entry.handOffCalls as Json[]).map((message) => ({
+          call: message.type === 'closeSession' ? 'close' : message.sleeping === true ? 'sleep' : 'wake',
+          session: message.sessionId,
+        }));
+        if (mine.owned === true)
+          differences.push(
+            `${where}: answered a remote machine the store has no rows for, where the old runtime answers from its last-seen copy`
+          );
+        else if (canonical(theirCalls) !== canonical(expected))
+          differences.push(
+            `${where}: the remote hand-off resolved ${canonical(theirCalls)} where the same rows on a loaded machine give ${canonical(expected)}`
+          );
+        else if (expected.length) bulkRemoteHandOffsWork += 1;
+      }
       if (mine.owned !== true) {
         bulkRefusals += 1;
         continue;
@@ -988,6 +1049,10 @@ async function compare([outDir, ...flags]: string[]) {
         session: message.sessionId,
       }));
       bulkMessages += myCalls.length;
+      if (((entry.remoteMachines ?? []) as string[]).length) {
+        bulkRemoteSets += 1;
+        bulkRemoteMessages += myCalls.filter((call) => String(call.session).startsWith('remote:')).length;
+      }
       if (canonical(myCalls) !== canonical(theirs?.calls ?? []))
         differences.push(`${where}: rust ${canonical(myCalls)} ts ${canonical(theirs?.calls ?? [])}`);
       const myFocus = (mine.request?.focusProject ?? null) as string | null;
@@ -1392,7 +1457,7 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} forkGroupWrites ${forkGroupWrites} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} openPlans ${openPlans} openCalls ${openCalls} openRefusals ${openRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkTabsIgnored ${bulkTabsIgnored} bulkNotLoaded ${bulkNotLoaded} reloadPlans ${reloadPlans} reloadLegs ${reloadLegs} reloadHandOffs ${reloadHandOffs} reloadEarlyReturns ${reloadEarlyReturns} splitHandOffs ${splitHandOffs} splitEarlyReturns ${splitEarlyReturns} splitWakes ${splitWakes} splitFocuses ${splitFocuses} splitNothings ${splitNothings} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
+    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} forkGroupWrites ${forkGroupWrites} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} openPlans ${openPlans} openCalls ${openCalls} openRefusals ${openRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkTabsIgnored ${bulkTabsIgnored} bulkNotLoaded ${bulkNotLoaded} bulkRemoteSets ${bulkRemoteSets} bulkRemoteMessages ${bulkRemoteMessages} bulkRemoteHandOffsWork ${bulkRemoteHandOffsWork} reloadPlans ${reloadPlans} reloadLegs ${reloadLegs} reloadHandOffs ${reloadHandOffs} reloadEarlyReturns ${reloadEarlyReturns} splitHandOffs ${splitHandOffs} splitEarlyReturns ${splitEarlyReturns} splitWakes ${splitWakes} splitFocuses ${splitFocuses} splitNothings ${splitNothings} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
@@ -1420,6 +1485,9 @@ async function compare([outDir, ...flags]: string[]) {
     ['bulkRefusals', bulkRefusals],
     ['bulkTabsIgnored', bulkTabsIgnored],
     ['bulkNotLoaded', bulkNotLoaded],
+    ['bulkRemoteSets', bulkRemoteSets],
+    ['bulkRemoteMessages', bulkRemoteMessages],
+    ['bulkRemoteHandOffsWork', bulkRemoteHandOffsWork],
     ['reloadPlans', reloadPlans],
     ['reloadLegs', reloadLegs],
     ['reloadHandOffs', reloadHandOffs],

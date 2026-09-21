@@ -66,6 +66,15 @@ const SYNTHETIC_SESSION_IDS: [&str; 5] = [
 /// ORIGINAL, so a padded string must reach the clipboard with its padding.
 const SYNTHETIC_TEXTS: [&str; 5] = ["Copy me", "  padded  ", "   ", "", "\n"];
 
+/// A remote machine the store has LOADED, for the project-scoped bulk probes. No recording carries
+/// one, so the same snapshot is fed to a second machine id and both halves are given it.
+const BULK_REMOTE_MACHINE: &str = "remote-ab12";
+
+/// A remote machine the store has NOT loaded while the old runtime still holds its LAST SEEN
+/// presentation, which is the state a machine that has disconnected is really in. It is what makes
+/// the not-loaded refusal load-bearing rather than equivalent to answering with no rows.
+const BULK_REMOTE_LAST_SEEN: &str = "remote-zz99";
+
 fn main() -> ExitCode {
     let Some(directory) = std::env::args().nth(1) else {
         eprintln!("usage: sidebar_action_parity <scenario-dir>");
@@ -1394,6 +1403,15 @@ const RELOAD_SESSIONS_PER_SCENARIO: usize = 12;
 /// the same two are handed to the TypeScript half, and the comparison asks that the payload is
 /// PERFORMED over the project's sessions and that neither side calls anything for a tab. A
 /// leftover browser leg on either side shows up as an extra call in the set comparison.
+///
+/// **The remote probes are BUILT for the same reason**, and in two states rather than one. A
+/// machine the store has LOADED must be answered, with that machine's scoped session ids and with
+/// no active-project move, because `wakeProjectSleepingSessions` calls `focusProjectId` on its
+/// local branch only. A machine the store has NOT loaded must be REFUSED while the old runtime
+/// still holds its last-seen presentation, which is exactly what a disconnected machine looks like:
+/// the TypeScript resolves a real set from that copy, so the two answers are only the same if the
+/// refusal is there. `expectHandOffWork` is what the comparison demands of it, because a hand-off
+/// nobody performs proves nothing.
 fn bulk_entries(core: &Core, scenario: &Value) -> Vec<Value> {
     let project_ids: Vec<String> = scenario
         .pointer("/snapshot/projects")
@@ -1499,6 +1517,51 @@ fn bulk_entries(core: &Core, scenario: &Value) -> Vec<Value> {
             Vec::new(),
         ));
     }
+    // The remote arm, against a store that has loaded ONE remote machine with this scenario's own
+    // rows. The second machine id is never loaded here and is the old runtime's last-seen copy.
+    let remote_core = core_with_remote_machine(scenario);
+    let mut remote_payloads: Vec<(Value, Option<Value>)> = Vec::new();
+    for project_id in project_ids.iter().take(BULK_REMOTE_PROJECTS_PER_SCENARIO) {
+        let loaded_group = format!("remote:{BULK_REMOTE_MACHINE}:group:{project_id}");
+        let last_seen_group = format!("remote:{BULK_REMOTE_LAST_SEEN}:group:{project_id}");
+        for payload in project_payloads(&loaded_group) {
+            remote_payloads.push((payload, None));
+        }
+        // The same five payloads against the machine the store never loaded. Each carries the set
+        // the LOADED machine resolves for the same payload, with the machine id swapped: both
+        // machines hold the same rows, so that is exactly what the old runtime must produce from
+        // its last-seen copy. Comparing against it rather than against "did anything at all" is
+        // what keeps a project with no eligible row from reading as a refusal that hands over
+        // nothing.
+        for payload in project_payloads(&last_seen_group) {
+            let on_loaded = payload
+                .as_object()
+                .map(|fields| {
+                    let mut swapped = fields.clone();
+                    swapped.insert("groupId".to_string(), Value::String(loaded_group.clone()));
+                    Value::Object(swapped)
+                })
+                .unwrap_or_else(|| payload.clone());
+            let hand_off = plan_bulk_request(&remote_core, &on_loaded).map(|request| {
+                Value::Array(
+                    request
+                        .messages
+                        .iter()
+                        .map(|message| rescope_message(message, BULK_REMOTE_LAST_SEEN))
+                        .collect(),
+                )
+            });
+            remote_payloads.push((payload, hand_off));
+        }
+    }
+    // A project the loaded remote machine does not have: answered, with nothing in the set, which
+    // is a different answer from the refusal above and must not collapse into it.
+    for payload in project_payloads(&format!(
+        "remote:{BULK_REMOTE_MACHINE}:group:does-not-exist"
+    )) {
+        remote_payloads.push((payload, None));
+    }
+
     payloads
         .into_iter()
         .map(|(payload, tabs)| bulk_entry(plan_bulk_request(core, &payload), payload, tabs, false))
@@ -1510,7 +1573,72 @@ fn bulk_entries(core: &Core, scenario: &Value) -> Vec<Value> {
                 true,
             )
         }))
+        .chain(remote_payloads.into_iter().map(|(payload, hand_off)| {
+            let mut entry = bulk_entry(
+                plan_bulk_request(&remote_core, &payload),
+                payload,
+                Vec::new(),
+                false,
+            );
+            let object = entry.as_object_mut().expect("object");
+            // Both machines are handed to the TypeScript half with this scenario's rows; only the
+            // first is loaded on the Rust side.
+            object.insert(
+                "remoteMachines".to_string(),
+                json!([BULK_REMOTE_MACHINE, BULK_REMOTE_LAST_SEEN]),
+            );
+            if let Some(hand_off) = hand_off {
+                object.insert("handOffCalls".to_string(), hand_off);
+            }
+            entry
+        }))
         .collect()
+}
+
+/// One fan-out message with its machine id replaced, which is how the set the LOADED machine
+/// resolves becomes the set the old runtime must resolve from its last-seen copy of another.
+fn rescope_message(message: &Value, machine_id: &str) -> Value {
+    let Some(session_id) = message.get("sessionId").and_then(Value::as_str) else {
+        return message.clone();
+    };
+    let Some(key) = SessionKey::parse_remote_scoped_session_id(session_id) else {
+        return message.clone();
+    };
+    let rescoped = SessionKey::remote(machine_id, key.project_id, key.session_id);
+    let mut fields = message.as_object().cloned().unwrap_or_default();
+    fields.insert(
+        "sessionId".to_string(),
+        Value::String(rescoped.to_sidebar_session_id()),
+    );
+    Value::Object(fields)
+}
+
+/// This scenario's rows loaded twice: once as this computer's daemon and once as
+/// `BULK_REMOTE_MACHINE`. `BULK_REMOTE_LAST_SEEN` is deliberately never loaded.
+fn core_with_remote_machine(scenario: &Value) -> Core {
+    let mut core = Core::new();
+    let snapshot = scenario.get("snapshot").cloned().unwrap_or(json!({}));
+    let revision = scenario
+        .pointer("/snapshot/revision")
+        .cloned()
+        .unwrap_or(json!(1));
+    let frame = json!({
+        "type": "presentationSnapshot",
+        "protocolVersion": 1,
+        "serverId": "parity",
+        "clientId": "parity",
+        "revision": revision,
+        "snapshot": snapshot,
+    })
+    .to_string();
+    for machine in [
+        MachineId::Local,
+        MachineId::Remote(BULK_REMOTE_MACHINE.to_string()),
+    ] {
+        core.handle_raw_frame(machine, &frame, 0)
+            .expect("the parity frame parses");
+    }
+    core
 }
 
 /// One probe's answer, together with the facts the TypeScript half must start from rather than
@@ -1543,6 +1671,9 @@ fn bulk_entry(
 /// resolution reads only the project's own rows, so a sixth project adds no branch.
 const BULK_PROJECTS_PER_SCENARIO: usize = 5;
 const BULK_SELECTED_PER_SCENARIO: usize = 4;
+/// Two is enough for the remote arm: the branch reads only the project's own rows, and each project
+/// is probed in both machine states.
+const BULK_REMOTE_PROJECTS_PER_SCENARIO: usize = 2;
 
 /// The renderer's batch envelope, which is a pass-through and is compared as one.
 fn batch_entries() -> Vec<Value> {

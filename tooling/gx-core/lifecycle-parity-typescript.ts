@@ -572,7 +572,16 @@ export async function runTypeScriptBulk(scenario: Json, rustActions: Json): Prom
     // opposite of and which no recording can produce.
     runtime.presentation = entry.presentation === 'none' ? undefined : orderedPresentation(scenario.snapshot as Json);
     runtime.browserTabs = (entry.browserTabs ?? []) as Json[];
-    runtime.remotePresentations = new Map();
+    // The remote arm. Every machine the entry names gets this scenario's rows, INCLUDING the one
+    // the Rust store never loaded: that is the old runtime's last-seen copy of a machine that has
+    // disconnected, and it is what makes the store's not-loaded refusal mean something. Without it
+    // a port that answered an unloaded machine with an empty set would look identical.
+    runtime.remotePresentations = new Map(
+      ((entry.remoteMachines ?? []) as string[]).map((machineId) => [
+        machineId,
+        orderedPresentation(scenario.snapshot as Json),
+      ])
+    );
     // The shape `getGpuiWorkspaceSessionSubgroups` indexes: a user-made session group id reaches
     // it before anything else in `setGroupSleeping`, and the port refuses exactly that shape.
     runtime.workspaceGroups = { groups: {}, projectOrder: [], projects: {} };

@@ -50,6 +50,10 @@ pub(crate) struct SidebarBulkCounters {
     /// A resolved set with nothing in it, which is a real answer: every row of the project is
     /// already in the state the action asks for.
     pub(crate) empty_requests: u64,
+    /// Of those, the ones whose project is on a REMOTE machine, so every leg goes down that
+    /// machine's tunnel. A run in which the user used a remote project's Sleep, Wake, Sleep
+    /// Inactive or Close Inactive and this is zero means the payload was handed back instead.
+    pub(crate) remote_requests: u64,
     /// Payloads the store owns but did not answer because the renderer is not drawing its list.
     pub(crate) declined_source: u64,
     /// Paced legs whose answer the next one waited for (`BulkRequest::waits_for_each`).
@@ -119,16 +123,21 @@ impl GhostexGpuiApp {
             self.gx_store.sidebar_bulk.declined_source += 1;
             return false;
         }
-        // A remote group and a user-made session group are refused inside the planner, each for a
-        // reason written down there. A project's app tabs are not part of these payloads any more
-        // (`CDXC:SessionSleep 2026-09-21 DECISION` on `plan_bulk_request`), so nothing here reads
-        // or needs the app-tab list.
+        // A user-made session group and a machine whose rows the store has not loaded are refused
+        // inside the planner, each for a reason written down there. A REMOTE project group is
+        // answered: its legs are the same per-session messages, carrying that machine's scoped
+        // ids, and the dispatcher below routes each one down that machine's tunnel. A project's app
+        // tabs are not part of these payloads any more (`CDXC:SessionSleep 2026-09-21 DECISION` on
+        // `plan_bulk_request`), so nothing here reads or needs the app-tab list.
         let planned = plan_bulk_request(&self.gx_store.core, message);
         let Some(request) = planned else {
             return false;
         };
         self.gx_store.sidebar_bulk.bulk_requests += 1;
         self.gx_store.sidebar_bulk.bulk_messages += request.messages.len() as u64;
+        if request.is_remote_project() {
+            self.gx_store.sidebar_bulk.remote_requests += 1;
+        }
         if request.messages.is_empty() {
             self.gx_store.sidebar_bulk.empty_requests += 1;
         }

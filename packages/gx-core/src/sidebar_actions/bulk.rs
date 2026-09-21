@@ -121,8 +121,14 @@ pub struct BulkRequest {
     pub messages: Vec<Value>,
     /// Milliseconds between requests, or zero for the concurrent fan-out.
     pub interval_ms: u64,
-    /// `focusProjectId` runs BEFORE the fan-out for a project wake, and for nothing else.
+    /// `focusProjectId` runs BEFORE the fan-out for a project wake, and for nothing else. A REMOTE
+    /// project wake leaves it `None`: the remote branch of `wakeProjectSleepingSessions` never
+    /// moves the active project.
     pub focus_project: Option<ProjectKey>,
+    /// The project a project-scoped payload resolved, or `None` for the two explicit id lists,
+    /// whose ids can name any machine. Kept so a host can report which machine acted without
+    /// reading an id back out of a message.
+    pub project: Option<ProjectKey>,
 }
 
 impl BulkRequest {
@@ -139,11 +145,20 @@ impl BulkRequest {
         self.interval_ms > 0
     }
 
+    /// Whether the resolved project is on a remote machine. `false` for the two explicit id lists,
+    /// which carry no project of their own.
+    pub fn is_remote_project(&self) -> bool {
+        self.project
+            .as_ref()
+            .is_some_and(|project| !project.machine.is_local())
+    }
+
     pub fn to_json(&self) -> Value {
         json!({
             "action": self.action.as_str(),
             "intervalMs": self.interval_ms,
             "waitsForEach": self.waits_for_each(),
+            "remoteProject": self.is_remote_project(),
             "focusProject": self
                 .focus_project
                 .as_ref()
@@ -186,9 +201,21 @@ pub fn owns_batch_command(command: &Value) -> bool {
 /// for. Wake used to open each sleeping tab in the Browser view one after another, which is what
 /// "waking" a tab meant there.
 ///
+/// A REMOTE group is answered here too, since the per-row legs were ported: each row becomes the
+/// same `setSessionSleeping` or `closeSession` message a local row does, carrying that machine's
+/// scoped session id, and the host sends it down that machine's tunnel. The one thing the remote
+/// branch does NOT do is move the active project: `wakeProjectSleepingSessions` calls
+/// `focusProjectId` only on its local branch, so a remote project wake wakes the rows and leaves
+/// the user where they are.
+///
 /// Refused, with the reason at each refusal:
 ///
-/// - **A remote group**, which needs that machine's tunnel.
+/// - **A machine whose rows this store has not loaded.** For this computer that is
+///   `!this.presentation`, an early return that happens BEFORE a project wake moves the active
+///   project. For a remote machine the reason is different and stronger: the old runtime keeps the
+///   LAST SEEN presentation of a machine that is not connected, so it can still resolve a set the
+///   store has no rows for, and answering with zero rows would silently do nothing where the old
+///   runtime acts.
 /// - **A user-made session group** (`gpui-wsg:`), whose membership is the workspace session groups
 ///   document, the fourth client-storage key with its own writer and its own pending-push guard.
 /// - **A group id that does not parse**, which is the TypeScript's own early return.
@@ -211,21 +238,24 @@ pub fn plan_bulk_request(core: &Core, message: &Value) -> Option<BulkRequest> {
                 true => BulkAction::Sleep,
                 false => BulkAction::Wake,
             };
-            Some(bulk(action, ids, None))
+            Some(bulk(action, ids, None, None))
         }
         "closeSessions" => {
             let ids = explicit_session_ids(message)?;
-            Some(bulk(BulkAction::Close, ids, None))
+            Some(bulk(BulkAction::Close, ids, None, None))
         }
         // The project-scoped ones resolve their own set.
         kind => {
-            let project = local_project_of_group(message)?;
+            let project = project_of_group(message)?;
             // `if (!projectId || !this.presentation) return`. Three of the four payloads would
             // answer a machine with no presentation with an empty set, which is what the early
             // return does anyway, but `wakeProjectSleepingSessions` moves the active project FIRST
             // and the early return happens before it: answering here would jump the user to a
             // project whose rows nobody has yet. This is the store's not-loaded state, not an empty
-            // one, and it is the refusal PLAN.md asks for rather than a guess at zero rows.
+            // one, and it is the refusal PLAN.md asks for rather than a guess at zero rows. On a
+            // REMOTE machine the same test refuses for the other reason above: the old runtime can
+            // still resolve the set from its last-seen copy, so not answering hands it work rather
+            // than dropping it.
             core.presentation().loaded(&project.machine)?;
             let (action, rows) = match kind {
                 "setGroupSleeping" => {
@@ -272,19 +302,28 @@ pub fn plan_bulk_request(core: &Core, message: &Value) -> Option<BulkRequest> {
                 })
                 .collect();
             // Only the project wake moves the active project, and it does so BEFORE the fan-out,
-            // which is why it is part of the request rather than a follow-up.
+            // which is why it is part of the request rather than a follow-up. `focusProjectId` is
+            // on the LOCAL branch of `wakeProjectSleepingSessions` only; the remote branch resolves
+            // its set and calls nothing else, so a remote wake must not move the user.
             let focus = match kind {
-                "wakeProjectSleepingSessions" => Some(project),
+                "wakeProjectSleepingSessions" if project.machine.is_local() => {
+                    Some(project.clone())
+                }
                 _ => None,
             };
-            Some(bulk(action, ids, focus))
+            Some(bulk(action, ids, focus, Some(project)))
         }
     }
 }
 
 /// The plan for one resolved set. The pacing rule lives here so the four project payloads and the
 /// two explicit ones cannot answer it differently.
-fn bulk(action: BulkAction, ids: Vec<String>, focus_project: Option<ProjectKey>) -> BulkRequest {
+fn bulk(
+    action: BulkAction,
+    ids: Vec<String>,
+    focus_project: Option<ProjectKey>,
+    project: Option<ProjectKey>,
+) -> BulkRequest {
     BulkRequest {
         messages: ids.iter().map(|id| action.message(id)).collect(),
         // `runGpuiSidebarBulkSleepPaced` is reached only by the SLEEP direction of
@@ -295,6 +334,7 @@ fn bulk(action: BulkAction, ids: Vec<String>, focus_project: Option<ProjectKey>)
         },
         action,
         focus_project,
+        project,
     }
 }
 
@@ -309,12 +349,12 @@ fn explicit_session_ids(message: &Value) -> Option<Vec<String>> {
     )
 }
 
-/// `parseGxserverPresentationProjectGroupId`, which is a string parse and asks the store nothing.
-/// A remote group and a user-made session group are refused here rather than parsed.
-fn local_project_of_group(message: &Value) -> Option<ProjectKey> {
+/// `parseGpuiRemotePresentationGroupId` then `parseGxserverPresentationProjectGroupId`, which are
+/// string parses and ask the store nothing. A user-made session group (`gpui-wsg:`), the Chats
+/// collection and anything else that is not a project group fail the parse and are refused here.
+fn project_of_group(message: &Value) -> Option<ProjectKey> {
     let group_id = text_field(message, "groupId")?;
-    let project = ProjectKey::parse_sidebar_group_id(group_id)?;
-    project.machine.is_local().then_some(project)
+    ProjectKey::parse_sidebar_group_id(group_id)
 }
 
 /// `isGpuiInactiveProjectPresentationSession`: awake, and neither working nor waiting on the user.
@@ -370,6 +410,10 @@ pub fn bulk_request_summary(request: &BulkRequest) -> Value {
     summary.insert(
         "focusProject".to_string(),
         Value::Bool(request.focus_project.is_some()),
+    );
+    summary.insert(
+        "remoteProject".to_string(),
+        Value::Bool(request.is_remote_project()),
     );
     Value::Object(summary)
 }
