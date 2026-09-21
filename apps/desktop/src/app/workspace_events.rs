@@ -835,11 +835,31 @@ impl GhostexGpuiApp {
         CDXC:FocusRouting 2026-06-24-21:07:
         React may return only the gxserver presentation session ids it already owns from daemon create/focus/fork/restore flows. Store the parsed focus state in runtime memory, refresh only the sidebar bootstrap bridge on changes, and ignore malformed payloads without logging raw renderer JSON or deriving ids from terminal tabs, labels, paths, project names, or command text.
         */
-        let Ok((next_state, echo)) =
-            gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_json(payload)
-        else {
-            return;
-        };
+        // CDXC:FocusRouting 2026-09-21 WHY: a refused payload used to vanish without a trace, and because the contract is all or nothing one bad row froze the tab list, chat eligibility and every focus stamp for the whole project (the 128-row bound, see `GPUI_SIDEBAR_WORKSPACE_TAB_SESSIONS_MAX`). Only the error kind is written, never the payload, and only when it changes, since the runtime posts this message many times a minute.
+        static LAST_REFUSED_KIND: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+        let (next_state, echo) =
+            match gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_json(
+                payload,
+            ) {
+                Ok(parsed) => {
+                    LAST_REFUSED_KIND.store(0, std::sync::atomic::Ordering::Relaxed);
+                    parsed
+                }
+                Err(error) => {
+                    let kind = error as u8 + 1;
+                    if LAST_REFUSED_KIND.swap(kind, std::sync::atomic::Ordering::Relaxed) != kind {
+                        support_logs::append(
+                            support_logs::GpuiSupportLog::TerminalFocus,
+                            "gpui.terminalFocus.focusStatePayloadError",
+                            serde_json::json!({
+                                "contractError": format!("{error:?}"),
+                                "payloadBytes": payload.len(),
+                            }),
+                        );
+                    }
+                    return;
+                }
+            };
         // CDXC:FocusRouting 2026-09-19 WHY: the sidebar runtime must never override a newer local selection (user decision in gx_store/local_focus.rs). A payload produced against an older focus stamp keeps its tab list and loses its selection, active project and visible set before anything below reads it (gx_store/local_focus.rs).
         let (next_state, stale) =
             self.gx_store_admit_old_runtime_focus_state(next_state, &echo, cx);
@@ -867,7 +887,7 @@ impl GhostexGpuiApp {
         if self.gx_store_focus_request_lost_to_local_selection(&message) {
             return;
         }
-        self.adopt_agent_launch_placeholder(&message);
+        self.adopt_agent_launch_placeholder(&message, cx);
         support_logs::append_temporary(
             support_logs::GpuiSupportLog::TerminalFocus,
             "TEMP.gpui.sessionSwitchLatency.bridgeReceived",
