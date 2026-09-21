@@ -24,8 +24,8 @@
 use std::time::Duration;
 
 use ghostex_gx_core::{
-    Event, Intent, SidebarUiIntent, owns_batch_command, owns_bulk_message, plan_batch,
-    plan_bulk_request,
+    Event, Intent, SidebarUiIntent, owns_batch_command, owns_bulk_message,
+    owns_remote_session_message, plan_batch, plan_bulk_request,
 };
 use serde_json::Value;
 
@@ -52,6 +52,8 @@ pub(crate) struct SidebarBulkCounters {
     pub(crate) empty_requests: u64,
     /// Payloads the store owns but did not answer because the renderer is not drawing its list.
     pub(crate) declined_source: u64,
+    /// Paced legs whose answer the next one waited for (`BulkRequest::waits_for_each`).
+    pub(crate) paced_legs_waited: u64,
 }
 
 impl GhostexGpuiApp {
@@ -153,26 +155,64 @@ impl GhostexGpuiApp {
         }
         self.gx_store.sidebar_bulk.paced_requests += 1;
         // One request at a time with the interval between them, which is what
-        // `runGpuiSidebarBulkSleepPaced` does. The wait is between requests and not before the
-        // first, so a single-row sleep is as fast as a plain one.
+        // `runGpuiSidebarBulkSleepPaced` does: it AWAITS each sleep and only then waits the
+        // interval, so a request is never sent while the one before it is still in flight. The
+        // wait is between requests and not before the first, so a single-row sleep is as fast as a
+        // plain one.
         let interval = Duration::from_millis(request.interval_ms);
+        let waits_for_each = request.waits_for_each();
         let messages = request.messages;
         cx.spawn(async move |this, cx| {
             for (index, message) in messages.into_iter().enumerate() {
                 if index > 0 {
                     cx.background_executor().timer(interval).await;
                 }
-                if this
-                    .update(cx, |this, cx| {
-                        this.dispatch_native_sidebar_command(message, cx);
-                    })
-                    .is_err()
-                {
-                    return;
+                let started = this.update(cx, |this, cx| {
+                    this.gx_store_start_paced_message(message, waits_for_each, cx)
+                });
+                match started {
+                    Err(_) => return,
+                    Ok(Some(PacedLeg::Local(task))) => {
+                        task.await;
+                    }
+                    Ok(Some(PacedLeg::Remote(task))) => task.await,
+                    Ok(None) => {}
                 }
             }
         })
         .detach();
         true
     }
+
+    /// Sends one message of a paced fan-out and hands back what to wait for.
+    ///
+    /// The route is the dispatcher's: a remote row's sleep goes down its machine's tunnel, a local
+    /// row's through the single-session path, and anything the store does not own to the old
+    /// runtime, which is the one leg nothing here can wait for (that runtime runs it on its own).
+    fn gx_store_start_paced_message(
+        &mut self,
+        message: Value,
+        waits_for_each: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<PacedLeg> {
+        if waits_for_each && self.gx_store_sidebar_draws_store_list() {
+            if owns_remote_session_message(&message) {
+                if let Some(task) = self.gx_store_start_remote(&message, cx) {
+                    self.gx_store.sidebar_bulk.paced_legs_waited += 1;
+                    return Some(PacedLeg::Remote(task));
+                }
+            } else if let Some(task) = self.gx_store_start_lifecycle(&message, cx) {
+                self.gx_store.sidebar_bulk.paced_legs_waited += 1;
+                return Some(PacedLeg::Local(task));
+            }
+        }
+        self.dispatch_native_sidebar_command(message, cx);
+        None
+    }
+}
+
+/// What a paced leg hands back to wait on.
+enum PacedLeg {
+    Local(gpui::Task<ghostex_gx_core::LifecycleAnswer>),
+    Remote(gpui::Task<()>),
 }

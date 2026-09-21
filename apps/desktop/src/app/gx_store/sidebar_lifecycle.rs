@@ -74,6 +74,8 @@ pub(crate) struct SidebarLifecycleCounters {
     /// Full Reloads answered here, and the legs they ran.
     pub(crate) reloads: u64,
     pub(crate) reload_legs: u64,
+    /// Full Reloads whose sleep call failed, so the wake was never asked for.
+    pub(crate) reloads_stopped: u64,
     /// Wakes that asked the workspace to tear the dead terminal down first, which is the leg that
     /// makes a Full Reload a reload rather than a sleep and a wake.
     pub(crate) remounts: u64,
@@ -115,18 +117,20 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// The same sleep or wake, as a task the caller can WAIT for.
+    /// The same sleep or wake, as a task the caller can WAIT for, which resolves to the answer.
     ///
     /// Full Reload needs the sleep to have come home before the wake goes out, which is what the
-    /// TypeScript's two awaits do and which issuing both at once would race. Rather than a second
-    /// copy of the call, the single-session path hands back its task and the composition awaits it
-    /// (`gx_store/sidebar_reload.rs`). `None` means this path does not own the message, which is
-    /// the same answer the boolean above reports.
+    /// TypeScript's two awaits do and which issuing both at once would race, and it needs the
+    /// ANSWER, because a sleep whose call failed stops the reload (`reload_continues_after`). The
+    /// paced bulk sleep waits on it too. Rather than a second copy of the call, the single-session
+    /// path hands back its task and the composition awaits it (`gx_store/sidebar_reload.rs`,
+    /// `gx_store/sidebar_bulk.rs`). `None` means this path does not own the message, which is the
+    /// same answer the boolean above reports.
     pub(super) fn gx_store_start_lifecycle(
         &mut self,
         message: &Value,
         cx: &mut gpui::Context<Self>,
-    ) -> Option<gpui::Task<()>> {
+    ) -> Option<gpui::Task<LifecycleAnswer>> {
         // A browser row, a remote row and the bulk payloads are refused inside the planner and
         // stay the old runtime's, each one for a reason written down there.
         let request = plan_lifecycle_request(&self.gx_store.core, message)?;
@@ -135,7 +139,8 @@ impl GhostexGpuiApp {
             LifecycleCall::Wake => self.gx_store.sidebar_lifecycle.wakes += 1,
         }
         // The Quick Automations row: both sides return before the call, so this is answered and
-        // nothing happens.
+        // nothing happens. It resolves as accepted because the TypeScript's `await` of it resolves:
+        // a reload of that row goes on to its wake, which returns early the same way.
         if request.rpc_path.is_empty() {
             self.gx_store.diagnostics.sidebar_lifecycle_ran(
                 &request,
@@ -143,7 +148,7 @@ impl GhostexGpuiApp {
                 0,
                 self.gx_store.sidebar_lifecycle,
             );
-            return Some(gpui::Task::ready(()));
+            return Some(gpui::Task::ready(LifecycleAnswer::Accepted));
         }
         let path = request.rpc_path;
         let params = request.rpc_params.clone();
@@ -156,9 +161,11 @@ impl GhostexGpuiApp {
                 )
                 .await;
             let round_trip_ms = started.elapsed().as_millis() as u64;
-            let _ = this.update(cx, |this, cx| {
-                this.gx_store_apply_lifecycle_answer(&request, result, round_trip_ms, cx);
-            });
+            this.update(cx, |this, cx| {
+                this.gx_store_apply_lifecycle_answer(&request, result, round_trip_ms, cx)
+            })
+            // The app is gone, so nothing waits on this answer any more.
+            .unwrap_or(LifecycleAnswer::Failed)
         }))
     }
 
@@ -388,7 +395,7 @@ impl GhostexGpuiApp {
         result: Result<Value, String>,
         round_trip_ms: u64,
         cx: &mut gpui::Context<Self>,
-    ) {
+    ) -> LifecycleAnswer {
         let answer = LifecycleAnswer::read(result.as_ref().map_err(String::as_str));
         match answer {
             LifecycleAnswer::Accepted => self.gx_store.sidebar_lifecycle.accepted += 1,
@@ -445,6 +452,7 @@ impl GhostexGpuiApp {
             round_trip_ms,
             self.gx_store.sidebar_lifecycle,
         );
+        answer
     }
 
     /// `focusLocalWorkspaceSession` with no options, which is what most of these paths send: the

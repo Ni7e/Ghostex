@@ -15,7 +15,8 @@
 //! `sidebar_modals.rs` the two that only open a dialog and `sidebar_snooze.rs` the two that read
 //! the clock and the local calendar, `sidebar_reload.rs` Full Reload and Split Right,
 //! `sidebar_bulk.rs` the plural payloads and the renderer's
-//! batch envelope, `sidebar_drag.rs` the session moves and what their order messages write, and
+//! batch envelope, `sidebar_remote.rs` every per-session action of a row on a remote machine,
+//! `sidebar_drag.rs` the session moves and what their order messages write, and
 //! `workspace_groups.rs` the client-owned groups document those writes land in, with its stored
 //! key, its debounced push and the guard that refuses the daemon's echo while one is outstanding;
 //! `project_docs.rs` the PROJECT moves (reorder, into and out of a collection, Space membership)
@@ -39,13 +40,14 @@ mod shadow_diff;
 mod sidebar_actions;
 mod sidebar_bulk;
 mod sidebar_drag;
-mod sidebar_reload;
 mod sidebar_flags;
 mod sidebar_lifecycle;
 mod sidebar_list;
 mod sidebar_list_inputs;
 mod sidebar_menus;
 mod sidebar_modals;
+mod sidebar_reload;
+mod sidebar_remote;
 mod sidebar_scratch_compare;
 mod sidebar_shadow;
 mod sidebar_shadow_compare;

@@ -111,6 +111,8 @@ pub(crate) struct GxStoreHost {
     pub(super) sidebar_snooze: super::sidebar_snooze::SidebarSnoozeCounters,
     pub(super) sidebar_bulk: super::sidebar_bulk::SidebarBulkCounters,
     pub(super) sidebar_drag: super::sidebar_drag::SidebarDragCounters,
+    /// A remote row's session actions: their counters and their log budgets.
+    pub(super) sidebar_remote: super::sidebar_remote::SidebarRemoteHost,
     /// The client-owned workspace session groups document, its stored key and its pending-push
     /// guard.
     pub(crate) workspace_groups: super::workspace_groups::WorkspaceGroupsHost,

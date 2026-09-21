@@ -18,5 +18,6 @@ pub(crate) mod project_browse_and_add;
 pub(crate) mod reconnect;
 pub(crate) mod settings_and_install_probe;
 pub(crate) mod sidebar_request_and_recent_projects;
+pub(crate) mod sidebar_rpc;
 #[cfg(target_os = "windows")]
 mod windows_environment;

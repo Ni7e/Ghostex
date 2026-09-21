@@ -18,7 +18,7 @@
 
 use ghostex_gx_core::{
     FocusOptions, SplitAction, owns_reload_message, owns_split_message, plan_full_reload,
-    plan_split_right,
+    plan_split_right, reload_continues_after,
 };
 use serde_json::Value;
 
@@ -57,12 +57,19 @@ impl GhostexGpuiApp {
             for leg in legs {
                 // Each leg goes through the single-session path, which owns the call, the declined
                 // leg, the replacement focus and the echo guard. The wait is for the ANSWER and not
-                // for a timer: the provider has to be dead before it is asked to come back.
+                // for a timer: the provider has to be dead before it is asked to come back, and a
+                // sleep whose call failed stops the reload, as the TypeScript's first `await`
+                // rejecting does.
                 let started = this.update(cx, |this, cx| this.gx_store_start_lifecycle(&leg, cx));
                 let Ok(Some(task)) = started else {
                     return;
                 };
-                task.await;
+                if !reload_continues_after(task.await) {
+                    let _ = this.update(cx, |this, _| {
+                        this.gx_store.sidebar_lifecycle.reloads_stopped += 1;
+                    });
+                    return;
+                }
             }
         })
         .detach();

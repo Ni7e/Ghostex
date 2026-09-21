@@ -1191,6 +1191,7 @@ impl GxStoreDiagnostics {
                 "legs": plan.legs.len() as u64,
                 "reloads": counters.reloads,
                 "reloadLegs": counters.reload_legs,
+                "reloadsStopped": counters.reloads_stopped,
                 "remounts": counters.remounts,
                 "declinedSource": counters.declined_source,
             }),
@@ -1660,7 +1661,7 @@ impl GxStoreDiagnostics {
 /// rounds and quietly stopped reporting the nine timings at the end of it. Checking a record by
 /// eye is how all three got through, so it is checked here instead, on the way out, in every debug
 /// build.
-fn record(event: &'static str, details: serde_json::Value) {
+pub(super) fn record(event: &'static str, details: serde_json::Value) {
     debug_assert_loggable(&details, 0, event);
     append(event, details);
 }

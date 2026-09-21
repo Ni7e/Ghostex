@@ -107,6 +107,12 @@ impl GhostexGpuiApp {
         if self.gx_store_answer_session_menu(&command, cx) {
             return;
         }
+        // A row on a REMOTE machine: its sleep, wake, close, fork, flags, snooze and Full Reload
+        // are calls down that machine's tunnel, sent through the same function the old runtime's
+        // bridge message reaches, and nothing local moves (gx_store/sidebar_remote.rs).
+        if self.gx_store_run_sidebar_remote(&command, cx) {
+            return;
+        }
         // An action the store owns is performed here and goes no further: the old runtime resolved
         // the same ids and came straight back over the fixed native bridge, so sending it on would
         // run the action twice (gx_store/sidebar_actions.rs).
