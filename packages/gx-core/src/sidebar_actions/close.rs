@@ -120,7 +120,8 @@ impl CloseFollowUp {
 /// The `closeSession` payload, or `None` when this file does not own it.
 ///
 /// Refused, each one a subsystem rather than a branch: a browser row closes an app tab through the
-/// browser bridge; a remote row needs that machine's tunnel; the Quick Automations row is not a
+/// browser bridge; a REMOTE row is `remote.rs`'s, where a close is `/api/killSession` down that
+/// machine's tunnel with no hide and no replacement focus; the Quick Automations row is not a
 /// close at all but a teardown of four pieces of the old runtime's own state (its overview flag,
 /// its visible set, its focus and its active project), none of which the store holds; and
 /// `closeSessions` is the bulk payload.

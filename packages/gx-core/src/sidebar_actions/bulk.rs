@@ -127,10 +127,24 @@ pub struct BulkRequest {
 }
 
 impl BulkRequest {
+    /// Whether each request must come HOME before the interval starts and the next one goes out.
+    ///
+    /// CDXC:SessionSleep 2026-09-21 WHY:
+    /// `runGpuiSidebarBulkSleepPaced` awaits `sleepTarget` and only then waits the interval, so a
+    /// paced sleep is one request at a time in the strict sense: the second is not sent while the
+    /// first is still in flight. The host used to post one message every 350 ms without waiting,
+    /// which overlaps teardowns whenever a sleep takes longer than the interval, and a remote sleep
+    /// always does (the tunnel, then the machine's own snapshot re-read). Wake and close go through
+    /// `Promise.all` and wait for nothing.
+    pub fn waits_for_each(&self) -> bool {
+        self.interval_ms > 0
+    }
+
     pub fn to_json(&self) -> Value {
         json!({
             "action": self.action.as_str(),
             "intervalMs": self.interval_ms,
+            "waitsForEach": self.waits_for_each(),
             "focusProject": self
                 .focus_project
                 .as_ref()

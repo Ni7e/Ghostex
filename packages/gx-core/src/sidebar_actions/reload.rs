@@ -12,7 +12,10 @@
 //! respawn it; issuing both at once would race the wake against a session that is still running and
 //! leave the user with a reload that reloaded nothing. The host therefore waits for each leg to
 //! come home, which is a different wait from the bulk sleep's 350 ms timer and is why it is a
-//! sequence here rather than a paced fan-out.
+//! sequence here rather than a paced fan-out. It also READS what came home: a sleep whose call
+//! failed ends the reload (`reload_continues_after`). The first host awaited the sleep and sent
+//! the wake whatever it said, which woke a session whose sleep never reached the daemon and
+//! remounted its terminal for nothing.
 //!
 //! **`forceRemount` rides on the second leg** and is the reason the wake is not an ordinary one.
 //! `/api/sleepSession` zmx-kills the daemon and the CLI inside it, so the local terminal the
@@ -29,7 +32,7 @@ use serde_json::{json, Value};
 use crate::core::Core;
 use crate::keys::SessionKey;
 
-use super::lifecycle::plan_lifecycle_request;
+use super::lifecycle::{plan_lifecycle_request, LifecycleAnswer};
 use super::resolve::text_field;
 
 /// The two legs of a Full Reload, in the order they go out.
@@ -61,9 +64,8 @@ pub fn owns_reload_message(message: &Value) -> bool {
 ///
 /// Refused, with the reason at each refusal:
 ///
-/// - **A remote row.** `fullReloadSession` deliberately does NOT return early for one: it runs both
-///   legs against that machine's tunnel, which this path cannot reach. Handing it over is a
-///   hand-off of real work, and the gate asserts the TypeScript still makes those calls.
+/// - **A remote row**, which `remote.rs` answers with the same two legs
+///   (`reload_leg_messages`), each one a call down that machine's tunnel.
 /// - **A browser row and an id that does not parse**, which are the TypeScript's own early return
 ///   (`!remoteSession && (!reference || !this.client)`): it does nothing at all for either, and the
 ///   gate asserts that it makes no call, so the hand-off costs the user nothing.
@@ -76,25 +78,38 @@ pub fn plan_full_reload(core: &Core, message: &Value) -> Option<ReloadPlan> {
     if !owns_reload_message(message) {
         return None;
     }
-    let sidebar_session_id = text_field(message, "sessionId")?;
-    let sleep = json!({
-        "type": "setSessionSleeping",
-        "sessionId": sidebar_session_id,
-        "sleeping": true,
-    });
+    let [sleep, wake] = reload_leg_messages(text_field(message, "sessionId")?);
     // Asked rather than re-derived. Every refusal of the single-session path is a refusal here, and
     // the one place that decides them stays one place.
     let session = plan_lifecycle_request(core, &sleep)?.session;
     Some(ReloadPlan {
         session,
-        legs: vec![
-            sleep,
-            json!({
-                "type": "setSessionSleeping",
-                "sessionId": sidebar_session_id,
-                "sleeping": false,
-                "forceRemount": true,
-            }),
-        ],
+        legs: vec![sleep, wake],
     })
+}
+
+/// The two `setSessionSleeping` messages a Full Reload is, in order, for either machine.
+pub(super) fn reload_leg_messages(sidebar_session_id: &str) -> [Value; 2] {
+    [
+        json!({
+            "type": "setSessionSleeping",
+            "sessionId": sidebar_session_id,
+            "sleeping": true,
+        }),
+        json!({
+            "type": "setSessionSleeping",
+            "sessionId": sidebar_session_id,
+            "sleeping": false,
+            "forceRemount": true,
+        }),
+    ]
+}
+
+/// Whether the wake may follow a sleep that came back with this answer.
+///
+/// `fullReloadSession` is two `await`s, so a sleep whose call REJECTS stops the reload before the
+/// wake is asked for, while a sleep the daemon DECLINED returns normally and the wake still goes
+/// out. The rule is here so the host and the gate ask the same question (see the module comment).
+pub fn reload_continues_after(answer: LifecycleAnswer) -> bool {
+    answer != LifecycleAnswer::Failed
 }

@@ -97,8 +97,9 @@ impl ForkFollowUp {
 ///
 /// Refused, with the reason at each refusal:
 ///
-/// - A REMOTE row: the fork is made by that machine's daemon over its tunnel, and every machine is
-///   disabled.
+/// - A REMOTE row, which `remote.rs` answers: the fork is made by that machine's daemon over its
+///   tunnel, with the same body (`fork_params`) and none of the activation or pane placement below,
+///   because the remote leg of `forkSession` has neither.
 /// - A row the store does not hold: the TypeScript returns before the call for exactly this,
 ///   because a fork of a row that is not in the presentation has no source.
 /// - A row inside a USER-MADE session group: the fork is then also written into the workspace
@@ -144,13 +145,18 @@ pub fn plan_fork_request(core: &Core, message: &Value) -> Option<ForkRequest> {
         && focus.active_group.as_ref() == Some(&ActiveGroup::Project(project.clone()));
     Some(ForkRequest {
         rpc_path: "/api/forkSession",
-        rpc_params: json!({
-            "projectId": session.project_id,
-            "reason": "gpui-sidebar",
-            "sessionId": session.session_id,
-        }),
+        rpc_params: fork_params(&session),
         activate: (!already_active).then(|| project.clone()),
         session,
+    })
+}
+
+/// The body of `/api/forkSession`, which is the same on either machine: that machine's raw ids.
+pub(super) fn fork_params(session: &SessionKey) -> Value {
+    json!({
+        "projectId": session.project_id,
+        "reason": "gpui-sidebar",
+        "sessionId": session.session_id,
     })
 }
 
