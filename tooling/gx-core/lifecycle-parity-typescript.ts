@@ -308,6 +308,12 @@ function closeRowIsDrawn(runtime: Json, reference: { projectId: string; sessionI
  * records its session and its placement target. `postSidebarActionToast` records the level and
  * the title; its description is the daemon's or the transport's text, which the two clients word
  * differently by construction, so only its presence is compared.
+ *
+ * `workspaceGroups` is the document the Rust side planned against, and
+ * `workspaceSubgroupSidebarIdForSession` is NOT stubbed: it is the function that decides the
+ * source group, so it runs as it ships over that same document. `persistWorkspaceGroups` is the
+ * fourth seam and records the document the fork wrote, which is the whole of what the group leg
+ * does that a pane move cannot show.
  */
 export async function runTypeScriptFork(scenario: Json, rustActions: Json): Promise<Json[]> {
   resetBrowserStorage();
@@ -327,7 +333,9 @@ export async function runTypeScriptFork(scenario: Json, rustActions: Json): Prom
       runtime.browserTabs = [];
       runtime.latestGroups = latestGroups;
       runtime.presentation = scenario.snapshot;
-      runtime.workspaceGroups = { groups: {}, projectOrder: [] };
+      runtime.workspaceGroups = JSON.parse(
+        JSON.stringify(entry.workspaceGroups ?? { projectOrder: [], projects: {} })
+      ) as Json;
       // The starting pair the Rust side actually planned against, not a label. A loaded snapshot
       // re-homes the focus to some project on its own, so "elsewhere" is a real project and for a
       // session of that project it means the opposite of what it is called.
@@ -337,8 +345,13 @@ export async function runTypeScriptFork(scenario: Json, rustActions: Json): Prom
       runtime.publishPresentation = () => {};
       runtime.setLocalPresentationSessionFocus = () => {};
       runtime.refreshDomainPresentationSnapshotFromClient = () => Promise.resolve();
-      runtime.workspaceSubgroupSidebarIdForSession = () => undefined;
       const follow: Json[] = [];
+      // The document write, recorded where the shipped code persists it, so an edit that never
+      // reaches storage is a difference rather than an invisible one. The runtime has already
+      // replaced `this.workspaceGroups` by the time this runs, which is the document to compare.
+      runtime.persistWorkspaceGroups = () => {
+        follow.push({ follow: 'editDocument', document: runtime.workspaceGroups });
+      };
       runtime.postLocalWorkspaceTerminalFocus = (
         projectId: string,
         sessionId: string,

@@ -22,11 +22,11 @@
 use std::time::Duration;
 
 use ghostex_gx_core::{
-    CloseAnswer, CloseFollowUp, CloseRequest, Event, FocusOptions, ForkFollowUp, ForkRequest,
-    Intent, LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, SessionKey,
-    apply_close_answer, apply_fork_answer, apply_lifecycle_answer, close_optimistic_follow_ups,
-    owns_close_message, owns_fork_message, owns_lifecycle_message, plan_close_request,
-    plan_fork_request, plan_lifecycle_request,
+    ActiveGroup, CloseAnswer, CloseFollowUp, CloseRequest, Event, FocusOptions, ForkFollowUp,
+    ForkRequest, Intent, LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest,
+    SessionKey, apply_close_answer, apply_fork_answer, apply_lifecycle_answer,
+    close_optimistic_follow_ups, owns_close_message, owns_fork_message, owns_lifecycle_message,
+    plan_close_request, plan_fork_request, plan_lifecycle_request,
 };
 use serde_json::Value;
 
@@ -71,6 +71,11 @@ pub(crate) struct SidebarLifecycleCounters {
     pub(crate) forks: u64,
     pub(crate) forks_placed: u64,
     pub(crate) forks_failed: u64,
+    /// Forks whose SOURCE row sits in a user-made group, so the group was activated before the
+    /// call, and of those the ones whose answer really moved the new session into that group. The
+    /// second is lower than the first whenever the group was deleted while the call was in flight.
+    pub(crate) forks_from_group: u64,
+    pub(crate) forks_joined_group: u64,
     /// Full Reloads answered here, and the legs they ran.
     pub(crate) reloads: u64,
     pub(crate) reload_legs: u64,
@@ -178,8 +183,13 @@ impl GhostexGpuiApp {
     ///
     /// Nothing local happens until the daemon has made the session, so there is no optimistic
     /// half here and nothing to take back: the only thing that moves before the call is which
-    /// project is active, and a failed fork leaves the user looking at the row they clicked
+    /// group is active, and a failed fork leaves the user looking at the row they clicked
     /// (packages/gx-core/src/sidebar_actions/fork.rs).
+    ///
+    /// The source group is the ROW's, so a fork from inside a user-made group activates that group
+    /// and the new session joins it once the daemon answers. That makes this a reader of the
+    /// workspace session groups document, which is why the stored copy has to be in hand first,
+    /// exactly as the order writes demand it.
     pub(crate) fn gx_store_run_sidebar_fork(
         &mut self,
         command: &Value,
@@ -198,18 +208,32 @@ impl GhostexGpuiApp {
             self.gx_store.sidebar_lifecycle.declined_source += 1;
             return false;
         }
+        if !self.gx_store_restore_workspace_groups(cx) {
+            self.gx_store.sidebar_lifecycle.declined_source += 1;
+            return false;
+        }
         let Some(request) = plan_fork_request(&self.gx_store.core, message) else {
             return false;
         };
         self.gx_store.sidebar_lifecycle.forks += 1;
-        if let Some(project) = request.activate.clone() {
-            let output = self
-                .gx_store
-                .core
-                .handle(Event::Intent(Intent::FocusProject { project }), now_ms());
-            if !output.changes.is_empty() {
-                self.gx_store.sidebar_list.note_changes(&output.changes);
-                self.gx_store_update_sidebar_list(cx);
+        if let Some(group) = request.activate.clone() {
+            // A chat project's fork is refused in the planner, so `Chats` cannot arrive; if it ever
+            // did, the fork still goes out and only the activation is skipped, because the group
+            // the store would activate is one its own list draws no row for.
+            let intent = match group {
+                ActiveGroup::Subgroup { project, group_id } => {
+                    self.gx_store.sidebar_lifecycle.forks_from_group += 1;
+                    Some(Intent::FocusSubgroup { project, group_id })
+                }
+                ActiveGroup::Project(project) => Some(Intent::FocusProject { project }),
+                ActiveGroup::Chats(_) => None,
+            };
+            if let Some(intent) = intent {
+                let output = self.gx_store.core.handle(Event::Intent(intent), now_ms());
+                if !output.changes.is_empty() {
+                    self.gx_store.sidebar_list.note_changes(&output.changes);
+                    self.gx_store_update_sidebar_list(cx);
+                }
             }
         }
         let path = request.rpc_path;
@@ -238,10 +262,17 @@ impl GhostexGpuiApp {
         round_trip_ms: u64,
         cx: &mut gpui::Context<Self>,
     ) {
-        let follow_ups = apply_fork_answer(request, result.as_ref().map_err(String::as_str));
+        let follow_ups = {
+            let document = self.gx_store.workspace_groups.sync.document();
+            apply_fork_answer(document, request, result.as_ref().map_err(String::as_str))
+        };
         let mut placed = false;
         for follow_up in follow_ups {
             match follow_up {
+                ForkFollowUp::EditDocument { document } => {
+                    self.gx_store.sidebar_lifecycle.forks_joined_group += 1;
+                    self.gx_store_edit_workspace_groups(document, cx);
+                }
                 ForkFollowUp::PlacePane {
                     session,
                     placement_target,

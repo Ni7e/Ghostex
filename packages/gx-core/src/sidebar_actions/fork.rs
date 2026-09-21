@@ -22,7 +22,8 @@ use serde_json::{json, Value};
 
 use crate::core::Core;
 use crate::focus::ActiveGroup;
-use crate::keys::{ProjectKey, SessionKey};
+use crate::keys::SessionKey;
+use crate::workspace_groups::WorkspaceGroupsDocument;
 
 use super::plan::ToastLevel;
 use super::resolve::text_field;
@@ -33,18 +34,22 @@ pub struct ForkRequest {
     pub session: SessionKey,
     pub rpc_path: &'static str,
     pub rpc_params: Value,
-    /// The project's own group to make active before the call, when it is not active already.
-    /// `None` means the user is already looking at the right place. It is a GROUP and not just a
-    /// project because the TypeScript compares both and a project can be active with another of
-    /// its groups selected.
-    pub activate: Option<ProjectKey>,
+    /// The SOURCE group to make active before the call, when it is not active already. `None`
+    /// means the user is already looking at the right place. It is a GROUP and not just a project
+    /// because the TypeScript compares both and a project can be active with another of its groups
+    /// selected, and because the source of a fork from inside a user-made group is that group.
+    pub activate: Option<ActiveGroup>,
+    /// The user-made group the SOURCE row sits in, which the forked session joins once the daemon
+    /// has answered. `None` for a row in the project's own list, which is most of them.
+    pub source_subgroup: Option<String>,
 }
 
 impl ForkRequest {
     pub fn to_json(&self) -> Value {
         json!({
             "rpc": { "path": self.rpc_path, "params": self.rpc_params },
-            "activate": self.activate.as_ref().map(ProjectKey::to_sidebar_group_id),
+            "activate": self.activate.as_ref().map(ActiveGroup::to_sidebar_group_id),
+            "sourceSubgroup": self.source_subgroup,
         })
     }
 }
@@ -52,6 +57,11 @@ impl ForkRequest {
 /// What the host does once the daemon has answered.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ForkFollowUp {
+    /// The workspace session groups document after the forked session joined the source row's
+    /// user-made group. It goes through the same `WorkspaceGroupsSync::edit` an order write uses,
+    /// and it comes FIRST, because the selection that follows reads which group the new session is
+    /// in and would otherwise land on the project's own group for one frame.
+    EditDocument { document: WorkspaceGroupsDocument },
     /// Select the new session and append its pane beside the row it was forked from.
     PlacePane {
         session: SessionKey,
@@ -71,6 +81,9 @@ pub enum ForkFollowUp {
 impl ForkFollowUp {
     pub fn to_json(&self) -> Value {
         match self {
+            Self::EditDocument { document } => {
+                json!({ "follow": "editDocument", "document": document.to_json() })
+            }
             Self::PlacePane {
                 session,
                 placement_target,
@@ -102,11 +115,11 @@ impl ForkFollowUp {
 ///   because the remote leg of `forkSession` has neither.
 /// - A row the store does not hold: the TypeScript returns before the call for exactly this,
 ///   because a fork of a row that is not in the presentation has no source.
-/// - A row inside a USER-MADE session group: the fork is then also written into the workspace
-///   groups document, which is client storage with a debounced write-through, an indefinite retry
-///   and a guard that refuses the daemon's echo while a push is pending. That document is a
-///   two-writer problem of its own and belongs with the order writes, not here, so a fork from
-///   inside a group stays with the old runtime until then.
+/// A row inside a USER-MADE session group is NOT refused any more. The reason it was, that the
+/// fork is also written into the workspace session groups document and that document had a second
+/// writer, stopped holding when the store became its owner: the edit goes through the same
+/// `WorkspaceGroupsSync` an order write uses, with the same debounce, retry and pending-push guard,
+/// and the host asks for the stored document before it plans, as every other reader of it does.
 pub fn plan_fork_request(core: &Core, message: &Value) -> Option<ForkRequest> {
     if text_field(message, "type")? != "forkSession" {
         return None;
@@ -133,20 +146,23 @@ pub fn plan_fork_request(core: &Core, message: &Value) -> Option<ForkRequest> {
     {
         return None;
     }
+    // `workspaceSubgroupSidebarIdForSession(projectId, sessionId) ?? the project's own group id`:
+    // the source group is the row's, not the user's. `group_of_session` is the same question the
+    // focus asks, over the same document, so a fork and a click cannot disagree about which group
+    // a row is in.
+    let source_group = core.presentation().group_of_session(&session);
+    let source_subgroup = match &source_group {
+        ActiveGroup::Subgroup { group_id, .. } => Some(group_id.clone()),
+        _ => None,
+    };
     let focus = core.focus();
-    // The TypeScript reads `workspaceSubgroupSidebarIdForSession` here and forks from the
-    // subgroup when the row is in one. That leg is refused above, so the source group is always
-    // the project's own.
-    if matches!(focus.active_group.as_ref(), Some(ActiveGroup::Subgroup { project: active, .. }) if *active == project)
-    {
-        return None;
-    }
     let already_active = focus.active_project.as_ref() == Some(&project)
-        && focus.active_group.as_ref() == Some(&ActiveGroup::Project(project.clone()));
+        && focus.active_group.as_ref() == Some(&source_group);
     Some(ForkRequest {
         rpc_path: "/api/forkSession",
         rpc_params: fork_params(&session),
-        activate: (!already_active).then(|| project.clone()),
+        activate: (!already_active).then_some(source_group),
+        source_subgroup,
         session,
     })
 }
@@ -163,29 +179,57 @@ pub(super) fn fork_params(session: &SessionKey) -> Value {
 /// What to do with the answer. `/api/forkSession` answers `{ fork: { session: { sessionId } } }`,
 /// and a result without that id is a failure even though the call succeeded: the TypeScript
 /// throws its own error for it and lands in the same toast.
-pub fn apply_fork_answer(request: &ForkRequest, result: Result<&Value, &str>) -> Vec<ForkFollowUp> {
+///
+/// The document is read HERE and not when the fork was planned, because the TypeScript reads
+/// `this.workspaceGroups` at this moment too: a group made, renamed or emptied while the call was
+/// in flight is part of the document the fork joins.
+pub fn apply_fork_answer(
+    document: &WorkspaceGroupsDocument,
+    request: &ForkRequest,
+    result: Result<&Value, &str>,
+) -> Vec<ForkFollowUp> {
     let forked = result.ok().and_then(|value| {
         let session_id = value.pointer("/fork/session/sessionId")?.as_str()?;
         // `normalizeNonEmptyString`: a blank id is no id.
         (!session_id.trim().is_empty()).then(|| session_id.to_string())
     });
-    match forked {
-        Some(session_id) => vec![ForkFollowUp::PlacePane {
-            session: SessionKey {
-                machine: request.session.machine.clone(),
-                project_id: request.session.project_id.clone(),
-                session_id,
-            },
-            // The placement target is the row the user clicked, not whichever pane happens to be
-            // focused when the call comes back.
-            placement_target: request.session.clone(),
-        }],
-        None => vec![ForkFollowUp::Toast {
+    let Some(session_id) = forked else {
+        return vec![ForkFollowUp::Toast {
             level: ToastLevel::Error,
             title: "Could not fork session".to_string(),
             has_description: true,
-        }],
+        }];
+    };
+    let session = SessionKey {
+        machine: request.session.machine.clone(),
+        project_id: request.session.project_id.clone(),
+        session_id,
+    };
+    let mut follow_ups = Vec::new();
+    // `moveGpuiWorkspaceSessionToSubgroup(..., sourceSubgroup.groupId)` then
+    // `persistWorkspaceGroups()`. A group that is gone by now hands back the document unchanged
+    // there, and an unchanged document is not written here: the sync would book a push of what it
+    // already holds, and a write that changes nothing is not a write.
+    if let Some(group_id) = request.source_subgroup.as_deref() {
+        let project_id = request.session.project_key().to_workspace_project_id();
+        if let Some(edited) = document.move_session_to_subgroup(
+            &project_id,
+            &session.session_id,
+            Some(group_id),
+            None,
+        ) {
+            if &edited != document {
+                follow_ups.push(ForkFollowUp::EditDocument { document: edited });
+            }
+        }
     }
+    follow_ups.push(ForkFollowUp::PlacePane {
+        session,
+        // The placement target is the row the user clicked, not whichever pane happens to be
+        // focused when the call comes back.
+        placement_target: request.session.clone(),
+    });
+    follow_ups
 }
 
 /// Whether this payload is one this file answers.

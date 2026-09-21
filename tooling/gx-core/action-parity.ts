@@ -241,6 +241,19 @@ function mutateFork(name: string | undefined, entry: Json): Json {
     case 'always-activate':
       if (clone.request) clone.request.activate = `combined-project:x`;
       return clone;
+    // The group leg dropped: the fork still happens and the pane still lands, and the new session
+    // is simply not in the group its source is in. Nothing but the document shows it, which is why
+    // the document is compared rather than inferred from the pane move.
+    case 'fork-ignores-the-group':
+      for (const [answer, follows] of Object.entries(clone.answers ?? {}) as [string, Json[]][])
+        clone.answers[answer] = follows.filter((follow) => follow.follow !== 'editDocument');
+      return clone;
+    // The source group forgotten before the call, so the fork runs from the project instead of
+    // from the group the user clicked in and the user is moved out of their group.
+    case 'fork-activates-the-project':
+      if (typeof clone.request?.activate === 'string' && clone.request.activate.startsWith('gpui-wsg:'))
+        clone.request.activate = `combined-project:${clone.request.activate.slice('gpui-wsg:'.length).split(':')[0]}`;
+      return clone;
     default:
       return clone;
   }
@@ -655,7 +668,13 @@ const FLAGS_MUTATIONS = [
   'park-never-sleeps',
 ];
 
-const FORK_MUTATIONS = ['place-a-pane-with-no-session', 'forget-the-placement-target', 'always-activate'];
+const FORK_MUTATIONS = [
+  'place-a-pane-with-no-session',
+  'forget-the-placement-target',
+  'always-activate',
+  'fork-ignores-the-group',
+  'fork-activates-the-project',
+];
 
 const CLOSE_MUTATIONS = [
   'never-restore-the-row',
@@ -778,6 +797,7 @@ async function compare([outDir, ...flags]: string[]) {
   let transitions = 0;
   let closes = 0;
   let forks = 0;
+  let forkGroupWrites = 0;
   let flagCalls = 0;
   let modalOpens = 0;
   let modalRefusals = 0;
@@ -1149,8 +1169,15 @@ async function compare([outDir, ...flags]: string[]) {
         differences.push(`${name} fork #${index}: the TypeScript side produced no answer`);
         continue;
       }
-      const where = `${name} fork #${index} active=${entry.active}`;
+      const where = `${name} fork #${index} active=${entry.active} groups=${String(entry.groupsCase)}`;
       const mine = mutate ? mutateFork(mutationName, entry) : entry;
+      // The group leg, counted where it really happened rather than where it was set up: a fork
+      // whose source row is in a user-made group must write the document, and a run in which no
+      // probe did is a run that proved nothing about it.
+      if (entry.groupsCase === 'inGroup') {
+        const wrote = ((mine.answers?.accepted ?? []) as Json[]).some((follow) => follow.follow === 'editDocument');
+        if (wrote) forkGroupWrites += 1;
+      }
       if (canonical(mine.request?.rpc ?? null) !== canonical(theirs.rpc))
         differences.push(`${where} rpc: rust ${canonical(mine.request?.rpc ?? null)} ts ${canonical(theirs.rpc)}`);
       if (canonical(mine.request?.activate ?? null) !== canonical(theirs.activate))
@@ -1257,7 +1284,7 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkTabsIgnored ${bulkTabsIgnored} bulkNotLoaded ${bulkNotLoaded} reloadPlans ${reloadPlans} reloadLegs ${reloadLegs} reloadHandOffs ${reloadHandOffs} reloadEarlyReturns ${reloadEarlyReturns} splitHandOffs ${splitHandOffs} splitEarlyReturns ${splitEarlyReturns} splitWakes ${splitWakes} splitFocuses ${splitFocuses} splitNothings ${splitNothings} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
+    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} forkGroupWrites ${forkGroupWrites} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkTabsIgnored ${bulkTabsIgnored} bulkNotLoaded ${bulkNotLoaded} reloadPlans ${reloadPlans} reloadLegs ${reloadLegs} reloadHandOffs ${reloadHandOffs} reloadEarlyReturns ${reloadEarlyReturns} splitHandOffs ${splitHandOffs} splitEarlyReturns ${splitEarlyReturns} splitWakes ${splitWakes} splitFocuses ${splitFocuses} splitNothings ${splitNothings} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
@@ -1268,6 +1295,7 @@ async function compare([outDir, ...flags]: string[]) {
   // coverage counter counts a probe that exists at all, and a zero there is the clock file missing
   // or a probe list that silently came back empty.
   const measured: [string, number][] = [
+    ['forkGroupWrites', forkGroupWrites],
     ['overlayKept', overlayKept],
     ['closesRestored', closesRestored],
     ['stoppedUnhidden', stoppedUnhidden],

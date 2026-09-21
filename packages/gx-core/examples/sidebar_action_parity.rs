@@ -32,8 +32,9 @@ use ghostex_gx_core::{
     plan_snooze_action, plan_snooze_request, plan_split_right, rename_seed_title,
     session_is_snoozed, snooze_wake_ms, ActiveGroup, CloseAnswer, CloseFollowUp, Core, Event,
     FlagsFollowUp, ForkFollowUp, Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, ProjectKey,
-    SectionCollapse, SessionKey, SidebarInputs, SidebarView, SidebarViewModel, SnoozeClock,
-    SnoozeFollowUp, QUICK_AUTOMATIONS_PROJECT_ID, READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS,
+    SectionCollapse, SessionKey, SideStateUpdate, SidebarInputs, SidebarView, SidebarViewModel,
+    SnoozeClock, SnoozeFollowUp, WorkspaceGroupsDocument, QUICK_AUTOMATIONS_PROJECT_ID,
+    READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS,
 };
 use serde_json::{json, Map, Value};
 
@@ -954,6 +955,15 @@ fn row_is_drawn(core: &Core, session: &SessionKey) -> bool {
 /// that succeeds, one that succeeds with nothing usable in it, one that fails, and one that never
 /// comes home. Only the first places a pane; the other three must all land in the same toast and
 /// move nothing.
+///
+/// **The user-made group is BUILT here**, the same way the app-tab probe is: no recording carries
+/// a workspace session groups document, so a fork from inside a group was unreachable on both
+/// sides and a port that answered it any way at all would have passed. Each probed row is run
+/// twice, once against an empty document and once against one that holds that row in `group-1`,
+/// and the document the probe planned against rides in the entry so the TypeScript half starts
+/// from the same one rather than from a label. What that second run compares is the whole of what
+/// the group leg does: the group that becomes active BEFORE the call, and the document the answer
+/// writes.
 fn fork_entries(core: &Core, scenario: &Value, now_ms: u64) -> Vec<Value> {
     let rows: Vec<Value> = scenario
         .pointer("/snapshot/sessions")
@@ -974,64 +984,117 @@ fn fork_entries(core: &Core, scenario: &Value, now_ms: u64) -> Vec<Value> {
     let mut entries = Vec::new();
     for (project_id, session_id) in &targets {
         let session = SessionKey::local(project_id, session_id);
-        for active in ["elsewhere", "already"] {
-            let mut base = core.clone();
-            if active == "already" {
-                base.handle(
-                    Event::Intent(Intent::FocusSession {
-                        session: session.clone(),
-                        visible: None,
+        for (groups_case, groups_json) in [
+            ("noGroups", empty_workspace_groups()),
+            ("inGroup", workspace_groups_holding(project_id, session_id)),
+        ] {
+            let document = WorkspaceGroupsDocument::parse(&groups_json);
+            for active in ["elsewhere", "already"] {
+                let mut base = core.clone();
+                if let Ok(state) = serde_json::from_value::<
+                    ghostex_gx_protocol::WorkspaceSessionGroupsState,
+                >(groups_json.clone())
+                {
+                    base.handle(
+                        Event::Intent(Intent::SetSideState {
+                            machine: MachineId::Local,
+                            update: Box::new(SideStateUpdate::WorkspaceGroups(state)),
+                        }),
+                        now_ms,
+                    );
+                }
+                if active == "already" {
+                    base.handle(
+                        Event::Intent(Intent::FocusSession {
+                            session: session.clone(),
+                            visible: None,
+                        }),
+                        now_ms,
+                    );
+                }
+                // Recorded rather than assumed. A loaded snapshot already re-homes the focus to SOME
+                // project, so "do nothing" does not mean "no project is active", and for a session of
+                // that project it silently means the opposite of what the case is called. The
+                // TypeScript half starts from this exact pair instead of from a label.
+                let focus = base.focus();
+                let active_before = json!({
+                    "project": focus.active_project.as_ref().map(ProjectKey::to_workspace_project_id),
+                    "group": focus.active_group.as_ref().map(ActiveGroup::to_sidebar_group_id),
+                });
+                let Some(request) = plan_fork_request(
+                    &base,
+                    &json!({
+                        "type": "forkSession",
+                        "sessionId": session.to_sidebar_session_id(),
                     }),
-                    now_ms,
-                );
-            }
-            // Recorded rather than assumed. A loaded snapshot already re-homes the focus to SOME
-            // project, so "do nothing" does not mean "no project is active", and for a session of
-            // that project it silently means the opposite of what the case is called. The
-            // TypeScript half starts from this exact pair instead of from a label.
-            let focus = base.focus();
-            let active_before = json!({
-                "project": focus.active_project.as_ref().map(ProjectKey::to_workspace_project_id),
-                "group": focus.active_group.as_ref().map(ActiveGroup::to_sidebar_group_id),
-            });
-            let Some(request) = plan_fork_request(
-                &base,
-                &json!({
-                    "type": "forkSession",
-                    "sessionId": session.to_sidebar_session_id(),
-                }),
-            ) else {
-                entries.push(json!({
-                    "sessionId": session.to_sidebar_session_id(),
-                    "active": active,
-                    "activeBefore": active_before,
-                    "owned": false,
-                }));
-                continue;
-            };
-            let mut answers = Map::new();
-            for (name, result) in fork_answers(session_id) {
-                answers.insert(
-                    name.to_string(),
-                    Value::Array(
-                        apply_fork_answer(&request, result.as_ref().map_err(String::as_str))
+                ) else {
+                    entries.push(json!({
+                        "sessionId": session.to_sidebar_session_id(),
+                        "active": active,
+                        "groupsCase": groups_case,
+                        "workspaceGroups": groups_json,
+                        "activeBefore": active_before,
+                        "owned": false,
+                    }));
+                    continue;
+                };
+                let mut answers = Map::new();
+                for (name, result) in fork_answers(session_id) {
+                    answers.insert(
+                        name.to_string(),
+                        Value::Array(
+                            apply_fork_answer(
+                                &document,
+                                &request,
+                                result.as_ref().map_err(String::as_str),
+                            )
                             .iter()
                             .map(ForkFollowUp::to_json)
                             .collect(),
-                    ),
-                );
+                        ),
+                    );
+                }
+                entries.push(json!({
+                    "sessionId": session.to_sidebar_session_id(),
+                    "active": active,
+                    "groupsCase": groups_case,
+                    "workspaceGroups": groups_json,
+                    "activeBefore": active_before,
+                    "owned": true,
+                    "request": request.to_json(),
+                    "answers": Value::Object(answers),
+                }));
             }
-            entries.push(json!({
-                "sessionId": session.to_sidebar_session_id(),
-                "active": active,
-                "activeBefore": active_before,
-                "owned": true,
-                "request": request.to_json(),
-                "answers": Value::Object(answers),
-            }));
         }
     }
     entries
+}
+
+/// A document with nothing in it, which is what every scenario really has.
+fn empty_workspace_groups() -> Value {
+    json!({ "projectOrder": [], "projects": {} })
+}
+
+/// A document that holds one row in a user-made group, with a second group beside it so a port
+/// that always picks the first group is a difference, and a second member so the forked session
+/// landing anywhere but at the END of the list is one too.
+fn workspace_groups_holding(project_id: &str, session_id: &str) -> Value {
+    json!({
+        "projectOrder": [project_id],
+        "projects": {
+            project_id: {
+                "groups": [
+                    { "groupId": "group-2", "sessionIds": ["not-a-real-session"], "title": "Other" },
+                    {
+                        "groupId": "group-1",
+                        "sessionIds": ["probe-member", session_id],
+                        "title": "Review",
+                    },
+                ],
+                "nextGroupNumber": 3,
+            },
+        },
+    })
 }
 
 /// The four things `/api/forkSession` can do, in the shape the host hands them on.
