@@ -384,6 +384,14 @@ impl Render for GhostexGpuiApp {
             .on_action(cx.listener(|this, _: &OpenBrowserHistory, window, cx| {
                 this.show_browser_history_popup(this.browser_tabs.focused_pane, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &ReloadFocusedBrowser, _window, cx| {
+                // Propagating lets the same chord reach its configured hotkey (primary+R renames a session) when the keyboard is not in a Browser pane.
+                let ShellFocusTarget::BrowserPane(pane_id) = this.shell_focus else {
+                    cx.propagate();
+                    return;
+                };
+                this.perform_browser_toolbar_action(pane_id, BrowserToolbarAction::Reload, cx);
+            }))
             .on_action(cx.listener(|this, _: &OpenCommandPane, window, cx| {
                 this.open_command_pane_from_keyboard(window, cx);
             }))

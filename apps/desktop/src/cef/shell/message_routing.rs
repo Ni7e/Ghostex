@@ -378,6 +378,7 @@ pub struct SidebarGxserverBootstrap {
 
 pub enum BrowserPageMetadataEvent {
     HistoryRequested,
+    FindRequested,
     AddressChanged(String),
     CloseRequested,
     FaviconUrlChanged(Option<String>),

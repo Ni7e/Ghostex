@@ -11,6 +11,7 @@ gpui::actions!(
         PasteIntoFocusedTerminal,
         FindInFocusedTerminal,
         OpenBrowserHistory,
+        ReloadFocusedBrowser,
         FindNextInFocusedBrowser,
         FindPreviousInFocusedBrowser,
         ZoomInFocusedSurface,

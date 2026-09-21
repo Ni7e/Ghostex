@@ -1214,7 +1214,10 @@ impl GhostexGpuiApp {
             )
         });
         self.command_pane_project_id = new_project_id;
-        self.apply_command_view_pane_state();
+        // The incoming pane keeps the mode saved in its own model (CDXC:Workarea 2026-09-21 in
+        // model/view_pane_layouts.rs); only the outgoing pane's countdown and hover chrome go.
+        self.command_pane_auto_minimize.idle_since = None;
+        self.clear_command_resize_hover_state();
 
         /*
         CDXC:CommandPane 2026-07-10:
@@ -1392,6 +1395,15 @@ impl GhostexGpuiApp {
                 if let Some(pane_id) = find_browser_leaf_id_for_tab(&self.browser_tabs.root, tab_id)
                 {
                     self.show_browser_history_popup(pane_id, window, cx);
+                }
+            }
+            cef::BrowserPageMetadataEvent::FindRequested => {
+                if let Some(pane_id) = find_browser_leaf_id_for_tab(&self.browser_tabs.root, tab_id)
+                    && self.browser_tabs.active_tab_id_for_pane(pane_id) == Some(tab_id)
+                    && self.browser_tabs.focus_pane(pane_id)
+                {
+                    self.focus_shell_target(ShellFocusTarget::BrowserPane(pane_id), cx);
+                    self.start_find_in_focused_browser(window, cx);
                 }
             }
             cef::BrowserPageMetadataEvent::AddressChanged(url) => {

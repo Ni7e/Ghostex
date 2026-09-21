@@ -31,6 +31,7 @@ pub type BrowserPopupOpenHandler = Rc<dyn Fn(String, BrowserPopupPlacement)>;
 
 pub enum BrowserPageMetadataEvent {
     HistoryRequested,
+    FindRequested,
     AddressChanged(String),
     CloseRequested,
     FaviconUrlChanged(Option<String>),

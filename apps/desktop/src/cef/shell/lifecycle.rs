@@ -314,7 +314,7 @@ type SurfaceKeyOsEvent<'a> = Option<&'a mut cef::sys::XEvent>;
 
 /*
 CDXC:Browser 2026-09-09 SEE-ALSO:
-Browser CEF child views own page keystrokes, so history must be handled here as well as the GPUI Browser key context in main.rs.
+Browser CEF child views own page keystrokes, so history, reload (F5 and primary+R) and non-macOS find must be handled here as well as the GPUI Browser key context in main.rs.
 Other pages keep their page-owned shortcuts; Windows retains its existing surface zoom commands.
 */
 wrap_keyboard_handler! {
@@ -350,6 +350,30 @@ wrap_keyboard_handler! {
             if event.windows_key_code == history_key && modifiers == history_modifier {
                 if let Some(handler) = &self.page_metadata_handler {
                     handler(BrowserPageMetadataEvent::HistoryRequested);
+                    return 1;
+                }
+            }
+            let primary = if cfg!(target_os = "macos") {
+                command
+            } else {
+                control
+            };
+            // CDXC:Browser 2026-09-21 WHY:
+            // Windows and Linux deliver keys straight to the focused Chromium child window, so the GPUI Find binding never sees Ctrl+F while the page owns the keyboard. macOS reaches that binding through AppKit key equivalents, so raising it here too would be a second path for the same chord.
+            if cfg!(not(target_os = "macos"))
+                && event.windows_key_code == 0x46
+                && modifiers == primary
+            {
+                if let Some(handler) = &self.page_metadata_handler {
+                    handler(BrowserPageMetadataEvent::FindRequested);
+                    return 1;
+                }
+            }
+            let reload_chord = (event.windows_key_code == 0x74 && modifiers == 0)
+                || (event.windows_key_code == 0x52 && modifiers == primary);
+            if reload_chord && self.page_metadata_handler.is_some() {
+                if let Some(browser) = browser.as_deref() {
+                    browser.reload();
                     return 1;
                 }
             }

@@ -279,6 +279,12 @@ fn main() {
                 OpenBrowserHistory,
                 Some(BROWSER_KEY_CONTEXT),
             ),
+            KeyBinding::new("f5", ReloadFocusedBrowser, Some(BROWSER_KEY_CONTEXT)),
+            gpui_key_binding_from_shared_hotkey(
+                "cmd+r",
+                ReloadFocusedBrowser,
+                Some(BROWSER_KEY_CONTEXT),
+            ),
             gpui_key_binding_from_shared_hotkey("cmd+v", PasteIntoFocusedTerminal, None),
             gpui_key_binding_from_shared_hotkey("cmd+f", FindInFocusedTerminal, None),
             gpui_key_binding_from_shared_hotkey("cmd+g", FindNextInFocusedBrowser, None),
