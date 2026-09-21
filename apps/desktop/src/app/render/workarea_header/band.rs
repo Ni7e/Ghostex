@@ -68,10 +68,13 @@ impl GhostexGpuiApp {
             )
             .when(hosts_tab_strip, |band| {
                 band.child(
+                    // CDXC:Workarea 2026-09-21 DECISION:
+                    // User: the view panel has a border line down its left from the top of the tab strip to the bottom of the panel. This column sits exactly above the split rail, so painting it the rail's colour continues that line through the band. It stays visual-only: the rail below remains the resize control.
                     div()
                         .flex_shrink_0()
                         .h_full()
-                        .w(px(WORKSPACE_SPLIT_HANDLE_THICKNESS)),
+                        .w(px(WORKSPACE_SPLIT_HANDLE_THICKNESS))
+                        .bg(project_editor_companion_divider_background_color()),
                 )
                 .child(
                     div()

@@ -707,9 +707,9 @@ pub(crate) fn workspace_pane_border_color_for_state(state: WorkspacePaneBorderSt
     }
 }
 
-/// CDXC:Theming 2026-09-14 DECISION:
-/// User: restore the one-pixel Browser pane border to #d4d4d4 in light mode, including the left edge and top edge above the address bar; keep dark mode unchanged.
-/// This supersedes the 2026-09-13 decision to blend the frame into the white surround; explicit focus/attention indicators remain.
+/// CDXC:Theming 2026-09-21 DECISION:
+/// User: remove the border line around the Browser pane from its left and top; the view panel's own left border line, which runs from the top of the tab strip to the bottom of the panel, is the edge there, and nothing is drawn between the tab strip and the address bar.
+/// This supersedes the 2026-09-14 decision that restored the left and top edges. The remaining right and bottom edges keep #d4d4d4 in light mode with dark mode unchanged, and still carry the focus/attention colours.
 pub(crate) fn browser_pane_border_color_for_state(state: WorkspacePaneBorderState) -> Hsla {
     match state {
         WorkspacePaneBorderState::Neutral => chrome_color(0x202020, 0xd4d4d4).into(),

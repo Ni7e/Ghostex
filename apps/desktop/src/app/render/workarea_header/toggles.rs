@@ -4,10 +4,12 @@
 use gpui::InteractiveElement as _;
 use gpui::IntoElement;
 use gpui::MouseButton;
+use gpui::ParentElement as _;
 use gpui::Styled as _;
 use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
+use gpui_component::h_flex;
 use gpui_component::tooltip::ManagedTooltipExt as _;
 use gpui_component::tooltip::ManagedTooltipPlacement;
 
@@ -71,6 +73,33 @@ pub(crate) fn header_panel_toggle_button(
 }
 
 impl GhostexGpuiApp {
+    /// CDXC:Titlebar 2026-09-21 DECISION:
+    /// User: the command terminal and view panel toggles never move from the top right of the app
+    /// when the view panel opens or closes; with the panel open they sit right of its Expand
+    /// button. So the pair is the last thing in whichever half of the band reaches the window's
+    /// trailing edge: the header while the panel is closed, the view tab strip while it is open.
+    pub(crate) fn render_workarea_panel_toggles(
+        &self,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .flex_shrink_0()
+            .h(px(TITLEBAR_CONTROL_HEIGHT))
+            .items_center()
+            .gap(px(2.0))
+            .child(
+                // Visual-only separator: a plain div with no id and no interactivity, so it
+                // registers no hitbox and the band's drag area keeps the gap.
+                div()
+                    .w(px(1.0))
+                    .h(px(16.0))
+                    .mx(px(3.0))
+                    .bg(titlebar_button_border_color()),
+            )
+            .child(self.render_workarea_header_command_terminal_toggle(cx))
+            .child(self.render_workarea_header_view_panel_toggle(cx))
+    }
+
     pub(crate) fn render_sidebar_collapse_button(
         &self,
         cx: &mut gpui::Context<Self>,
@@ -101,7 +130,7 @@ impl GhostexGpuiApp {
             }),
         )
         .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, {
-            let tooltip = titlebar_tooltip_label("Hide sidebar", "toggleSidebarCollapsed");
+            let tooltip = titlebar_tooltip_label("Toggle sidebar", "toggleSidebarCollapsed");
             move |window, cx| titlebar_tooltip(tooltip.clone(), window, cx)
         })
     }
@@ -114,14 +143,10 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let expanded = self.command_pane.is_expanded();
-        let tooltip = if expanded {
-            titlebar_tooltip_label("Hide command terminal", "openCommandsPanel")
-        } else {
-            titlebar_tooltip_label("Show command terminal", "openCommandsPanel")
-        };
+        let tooltip = titlebar_tooltip_label("Toggle bottom panel", "openCommandsPanel");
         header_panel_toggle_button(
             "ghostex-gpui-workarea-header-command-terminal-toggle",
-            TITLEBAR_ICON_LAYOUT_SPLIT_VERTICAL,
+            TITLEBAR_ICON_PANEL_BOTTOM,
             0.0,
             true,
         )
@@ -154,14 +179,10 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let open = self.view_panel_open();
-        let tooltip = if open {
-            titlebar_tooltip_label("Close the view panel", "toggleViewPanel")
-        } else {
-            titlebar_tooltip_label("Open the view panel", "toggleViewPanel")
-        };
+        let tooltip = titlebar_tooltip_label("Toggle side panel", "toggleViewPanel");
         header_panel_toggle_button(
             "ghostex-gpui-workarea-header-view-panel-toggle",
-            TITLEBAR_ICON_LAYOUT_COLUMNS,
+            TITLEBAR_ICON_PANEL_RIGHT,
             0.0,
             true,
         )

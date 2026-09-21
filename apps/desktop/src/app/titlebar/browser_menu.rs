@@ -51,8 +51,9 @@ impl GhostexGpuiApp {
             .flex()
             .flex_shrink_0()
             .when(in_toolbar, |this| {
-                this.h(px(BROWSER_TOOLBAR_HEIGHT - 1.0))
-                    .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
+                this.h(px(TITLEBAR_CONTROL_HEIGHT))
+                    .w(px(BROWSER_TOOLBAR_BUTTON_WIDTH))
+                    .rounded(px(TITLEBAR_BUTTON_RADIUS))
             })
             .when(!in_toolbar, |this| {
                 this.h_full()

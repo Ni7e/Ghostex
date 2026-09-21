@@ -463,21 +463,16 @@ impl GhostexGpuiApp {
             .flex_shrink_0()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .items_center()
+            .gap(px(2.0))
+            .ml(px(4.0))
             // Everything occasional lives behind the trailing ⋯ menu.
             .when(self.titlebar_more_menu_visible(), |this| {
                 this.child(self.render_titlebar_more_button(cx))
             })
-            .child(
-                // Visual-only separator: a plain div with no id and no interactivity, so it
-                // registers no hitbox and the header's drag area keeps the gap.
-                div()
-                    .w(px(1.0))
-                    .h(px(16.0))
-                    .mx(px(5.0))
-                    .bg(titlebar_button_border_color()),
-            )
-            .child(self.render_workarea_header_command_terminal_toggle(cx))
-            .child(self.render_workarea_header_view_panel_toggle(cx))
+            // With a view open the toggles end the view tab strip instead (render_workarea_panel_toggles).
+            .when(!self.workarea_header_hosts_view_tab_strip(), |this| {
+                this.child(self.render_workarea_panel_toggles(cx))
+            })
             .child(self.render_titlebar_extension_popup_panel(window, cx));
         let controls = h_flex()
             .flex_shrink(1.0)

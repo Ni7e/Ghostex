@@ -7,6 +7,7 @@ use gpui::ObjectFit;
 use gpui::ParentElement as _;
 use gpui::Styled as _;
 use gpui::StyledImage as _;
+use gpui::div;
 use gpui::img;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
@@ -67,9 +68,18 @@ impl GhostexGpuiApp {
         which reserves the macOS traffic lights there. Collapsed, this header is what sits in that
         corner, so it reserves them instead. Windows and Linux reserve nothing on the left; their
         caption buttons are trailing children of this same header.
+        CDXC:Titlebar 2026-09-21 WHY:
+        Collapsed, the reveal's edge strip sits left of this header, so the reserve is measured from
+        the window edge minus that strip. Without it the sidebar toggle drew 10px right of where the
+        docked sidebar's Search row draws it.
         */
         let leading_inset = if self.sidebar_collapsed {
-            WINDOW_CONTROLS_LEADING_RESERVE.max(WORKAREA_HEADER_EDGE_PADDING)
+            let strip = if self.floating_reveal_edge_strip_visible() {
+                crate::app::floating_reveal::model::FLOATING_REVEAL_EDGE_WIDTH
+            } else {
+                0.0
+            };
+            (WINDOW_CONTROLS_LEADING_RESERVE - strip).max(WORKAREA_HEADER_EDGE_PADDING)
         } else {
             WORKAREA_HEADER_EDGE_PADDING
         };
@@ -80,7 +90,17 @@ impl GhostexGpuiApp {
             .max_w(px(620.0))
             .min_w_0()
             .items_center()
-            .child(self.render_sidebar_collapse_button(cx))
+            // On macOS the docked sidebar's Search row draws the toggle (native_sidebar/navigation.rs).
+            // The docked Search row puts the button's top at 5pt, while this 36pt row centres the
+            // 27pt button at 4.5pt; the half point keeps it from jumping when the sidebar collapses.
+            .when(self.sidebar_collapsed || !cfg!(target_os = "macos"), |this| {
+                this.child(
+                    div()
+                        .relative()
+                        .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
+                        .child(self.render_sidebar_collapse_button(cx)),
+                )
+            })
             /*
             CDXC:Navigation 2026-08-19:
             Back/Forward sit LEFT of the project name, next to the sidebar
@@ -106,6 +126,10 @@ impl GhostexGpuiApp {
                     .whitespace_nowrap()
                     .px(px(3.0))
                     .ml(px(5.0))
+                    // The glyphs sit high in their line box next to the icon buttons, so the label
+                    // is nudged down to share the buttons' visual centre line.
+                    .relative()
+                    .top(px(3.0))
                     .text_size(px(13.5))
                     .line_height(px(TITLEBAR_CONTROL_HEIGHT))
                     .when_some(project_icon, |this, image| {
@@ -126,13 +150,14 @@ impl GhostexGpuiApp {
                     */
                     .when(show_project_name, |this| {
                         this.child(
-                            h_flex()
+                            div()
                                 // Capped so a long project name cannot push the session title out
                                 // of the breadcrumb, the way the old project slot was capped.
                                 .max_w(px(210.0))
-                                .min_w_0()
-                                .items_center()
+                                .flex_shrink_0()
                                 .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(titlebar_project_text_color())
                                 .child(self.project_name.clone()),
@@ -150,11 +175,12 @@ impl GhostexGpuiApp {
                     })
                     .when_some(session_title, |this, title| {
                         this.child(
-                            h_flex()
+                            div()
+                                .flex_shrink(1.0)
                                 .min_w_0()
-                                .items_center()
                                 .overflow_hidden()
                                 .whitespace_nowrap()
+                                .text_ellipsis()
                                 .text_color(titlebar_text_color())
                                 .child(title),
                         )

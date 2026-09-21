@@ -39,10 +39,14 @@ export const MANAGE_STYLES = `
      * 32px convention. Header bars keep their own 35px row height.
      */
     --manage-control-height: 32px;
-    --manage-header-button-size: 28px;
+    --manage-header-button-size: 27px;
+    --manage-header-button-width: 32px;
+    --manage-header-button-radius: 7px;
+    --manage-header-button-gap: 2px;
+    --manage-header-edge-padding: 9px;
     --manage-toolbar-icon-color: light-dark(#3f3f46, #a3a3a3);
     --manage-toolbar-disabled-color: light-dark(#b5b5bd, #55555d);
-    --manage-sidebar-edge-button-width: 41px;
+    --manage-sidebar-edge-button-width: var(--manage-header-button-width);
     --manage-green: light-dark(#376c51, #9db6aa);
     --manage-red: light-dark(#be123c, #fda4af);
     --manage-yellow: light-dark(#85632f, #c6ad80);
@@ -295,13 +299,13 @@ export const MANAGE_STYLES = `
     border-bottom: 1px solid var(--manage-border);
     box-sizing: border-box;
     display: flex;
-    gap: 1px;
+    gap: var(--manage-header-button-gap);
     height: 35px;
     justify-content: flex-end;
     max-height: 35px;
     min-height: 35px;
     overflow: visible;
-    padding: 0 3px;
+    padding: 0 var(--manage-header-edge-padding);
   }
 
   .manage-sidebar-header[data-root-drop-target="true"] {
@@ -313,7 +317,7 @@ export const MANAGE_STYLES = `
     align-self: stretch;
     display: inline-flex;
     flex: 0 0 auto;
-    gap: 1px;
+    gap: var(--manage-header-button-gap);
     height: 100%;
     position: relative;
   }
@@ -345,7 +349,7 @@ export const MANAGE_STYLES = `
   .manage-sidebar-restore-button {
     background: transparent;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--manage-header-button-radius);
     box-shadow: none;
     box-sizing: border-box;
     color: var(--manage-toolbar-icon-color);
@@ -353,17 +357,17 @@ export const MANAGE_STYLES = `
     max-height: var(--manage-header-button-size);
     min-height: var(--manage-header-button-size);
     padding: 0;
-    width: var(--manage-header-button-size);
+    width: var(--manage-header-button-width);
   }
 
   /*
-   * CDXC:Docs 2026-09-14 DECISION:
-   * User: make the document, formatting, and file-sidebar header actions match the compact, borderless toolbar reference, with darker enabled icons in light mode so disabled controls are obvious.
-   * Icons sit in 28px controls with 1px gaps and rounded hover fills, superseding the earlier full-height, titlebar-aligned segments.
+   * CDXC:Docs 2026-09-21 DECISION:
+   * User: make the buttons on the top right of the Docs view match the look, gap, and right-edge alignment of the native view tab strip buttons above them.
+   * The document and file-sidebar header actions use the metrics of the strip's panel toggles, which sit directly above them: 32px by 27px tiles, 7px radius, 2px gap, 18px stroke-2 icons, and a 9px right inset (TITLEBAR_CONTROL_HEIGHT, TITLEBAR_BUTTON_HORIZONTAL_PADDING, TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE, TITLEBAR_BUTTON_RADIUS, WORKAREA_HEADER_EDGE_PADDING); the 26px/14px size of the strip's smaller icon buttons was tried first and the user rejected it as smaller than the buttons above. The native Browser address bar uses the same numbers (BROWSER_TOOLBAR_BUTTON_WIDTH). This supersedes the 2026-09-14 28px/1px-gap toolbar reference and the hidden sidebar's 41px expand button. Darker enabled icons in light mode still keep disabled controls obvious.
    */
   .manage-sidebar-header .manage-icon-button {
-    flex: 0 0 var(--manage-header-button-size);
-    width: var(--manage-header-button-size);
+    flex: 0 0 var(--manage-header-button-width);
+    width: var(--manage-header-button-width);
   }
 
   .manage-sidebar-restore-button {
@@ -392,7 +396,7 @@ export const MANAGE_STYLES = `
   .manage-sidebar-restore-button svg {
     height: 18px;
     width: 18px;
-    stroke-width: 1.7;
+    stroke-width: 2;
   }
 
   .manage-sidebar-tree-toggle svg {
@@ -483,26 +487,26 @@ export const MANAGE_STYLES = `
   }
 
   .manage-sidebar-restore-button {
-    left: 3px;
+    left: var(--manage-header-edge-padding);
     position: absolute;
-    top: 3px;
+    top: calc((35px - var(--manage-header-button-size)) / 2);
     z-index: 5;
   }
 
   .manage-shell[data-sidebar-side="right"] .manage-sidebar-restore-button {
     left: auto;
-    right: 3px;
+    right: var(--manage-header-edge-padding);
   }
 
   .manage-shell[data-sidebar-hidden="true"] .manage-preview-header,
   .manage-shell[data-sidebar-floating="true"] .manage-preview-header {
-    padding-left: calc(var(--manage-sidebar-edge-button-width) + 16px);
+    padding-left: calc(var(--manage-header-edge-padding) + var(--manage-sidebar-edge-button-width) + 13px);
   }
 
   .manage-shell[data-sidebar-hidden="true"][data-sidebar-side="right"] .manage-preview-header,
   .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-header {
     padding-left: 16px;
-    padding-right: calc(var(--manage-sidebar-edge-button-width) + 16px);
+    padding-right: calc(var(--manage-header-edge-padding) + var(--manage-sidebar-edge-button-width) + 13px);
   }
 
   /*
@@ -522,7 +526,7 @@ export const MANAGE_STYLES = `
   .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="markdown"] .manage-preview-header,
   .manage-shell[data-sidebar-hidden="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="html"] .manage-preview-header,
   .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="html"] .manage-preview-header {
-    padding-right: calc(var(--manage-sidebar-edge-button-width) + 7px);
+    padding-right: calc(var(--manage-header-edge-padding) + var(--manage-sidebar-edge-button-width) + var(--manage-header-button-gap));
   }
 
   /*
@@ -1009,7 +1013,7 @@ export const MANAGE_STYLES = `
     min-height: 35px;
     min-width: 0;
     overflow: visible;
-    padding: 0 3px 0 13px;
+    padding: 0 var(--manage-header-edge-padding) 0 13px;
   }
 
   .manage-preview-content[data-kind="drawing"] .manage-preview-header {
@@ -1086,7 +1090,7 @@ export const MANAGE_STYLES = `
     align-self: stretch;
     display: inline-flex;
     flex: 0 0 auto;
-    gap: 1px;
+    gap: var(--manage-header-button-gap);
     height: 100%;
     min-width: 0;
   }
@@ -1204,7 +1208,7 @@ export const MANAGE_STYLES = `
   .manage-preview-header-actions button:where(:not(.manage-review-menu button)) {
     background: transparent;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--manage-header-button-radius);
     box-shadow: none;
     box-sizing: border-box;
     color: var(--manage-toolbar-icon-color);
@@ -1214,7 +1218,7 @@ export const MANAGE_STYLES = `
     line-height: var(--manage-header-button-size);
     max-height: var(--manage-header-button-size);
     min-height: var(--manage-header-button-size);
-    min-width: var(--manage-header-button-size);
+    min-width: var(--manage-header-button-width);
     padding: 0 7px;
   }
 
@@ -1282,9 +1286,9 @@ export const MANAGE_STYLES = `
   .manage-preview-header-actions .manage-copy-feedback-button,
   .manage-preview-header-actions .manage-clear-annotations-button,
   .manage-preview-header-actions .manage-file-reload-button {
-    flex: 0 0 var(--manage-header-button-size);
+    flex: 0 0 var(--manage-header-button-width);
     padding: 0;
-    width: var(--manage-header-button-size);
+    width: var(--manage-header-button-width);
   }
 
   .manage-preview-header-actions .manage-add-global-comment-button > span,
@@ -1308,7 +1312,7 @@ export const MANAGE_STYLES = `
     flex: 0 0 auto;
     height: 18px;
     width: 18px;
-    stroke-width: 1.7;
+    stroke-width: 2;
   }
 
   .manage-preview-header-actions .manage-file-reload-button {
@@ -1962,9 +1966,9 @@ export const MANAGE_STYLES = `
   }
 
   .manage-preview-header-actions .manage-review-menu-trigger {
-    flex: 0 0 var(--manage-header-button-size);
+    flex: 0 0 var(--manage-header-button-width);
     padding: 0;
-    width: var(--manage-header-button-size);
+    width: var(--manage-header-button-width);
   }
 
   /*
@@ -2541,7 +2545,7 @@ export const MANAGE_STYLES = `
   @media (max-width: 560px) {
     .manage-preview-header-actions .manage-send-feedback-button {
       padding: 0;
-      width: var(--manage-header-button-size);
+      width: var(--manage-header-button-width);
     }
 
     .manage-preview-header-actions .manage-send-feedback-button > span {

@@ -252,6 +252,8 @@ impl GhostexGpuiApp {
             .h(px(BROWSER_TOOLBAR_HEIGHT))
             .w_full()
             .items_center()
+            .pl(px(BROWSER_TOOLBAR_LEADING_PADDING))
+            .pr(px(WORKAREA_HEADER_EDGE_PADDING))
             .bg(browser_toolbar_background())
             .border_b_1()
             .border_color(chrome_color(0x252525, 0xd4d4d4))
@@ -331,7 +333,6 @@ impl GhostexGpuiApp {
                 h_flex()
                     .items_center()
                     .gap(px(BROWSER_TOOLBAR_ITEM_GAP))
-                    .child(self.render_browser_toolbar_new_tab_button(pane_id, cx))
                     .when(is_page_zoomed, |this| {
                         this.child(self.render_browser_toolbar_button(
                             "reset-zoom",

@@ -126,6 +126,8 @@ impl GhostexGpuiApp {
         h_flex()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .mt(px(2.0))
+            .ml(px(2.0))
+            .gap(px(2.0))
             .flex_shrink_0()
             .items_center()
             .child(self.render_titlebar_navigation_history_button(true, cx))
