@@ -2036,6 +2036,10 @@ export function SessionChatView({
                                     contextDetailsStatus={contextDetailsStatus}
                                     onEditContextDetails={() => setContextDetailsOpen(true)}
                                     onSwitchingChange={setSessionOptionSwitching}
+                                    onReturnFocusToComposer={() => composerRef.current?.focus()}
+                                    {...(hostActions?.onHandoffToModel
+                                      ? { onHandoffToModel: hostActions.onHandoffToModel }
+                                      : {})}
                                     {...(onSwitchToTerminalForAgentPicker || hostActions?.onSwitchToTerminal
                                       ? {
                                           onSwitchToTerminal:

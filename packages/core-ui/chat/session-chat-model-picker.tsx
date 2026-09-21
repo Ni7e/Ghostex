@@ -4,7 +4,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
   type CSSProperties,
 } from 'react';
@@ -32,10 +31,7 @@ import {
   modelPickerChooseModel,
   modelPickerChooseEffort,
   modelPickerNextEffortIndex,
-  modelPickerPrimaryScope,
   modelPickerSupportsSessionScope,
-  modelPicksSessionOnly,
-  subscribeModelPicksSessionOnly,
   MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON,
   type ModelPickerRequest,
   type ModelPickerSelection,
@@ -95,10 +91,10 @@ export function SessionChatModelPicker({
   const effortIndex = request.efforts.findIndex((effort) => effort.value === selection.effort);
   const agent = getDefaultSidebarAgentById(request.provider)!;
   const sessionScope = modelPickerSupportsSessionScope(request.provider);
-  const sessionOnlyPicks = useSyncExternalStore(subscribeModelPicksSessionOnly, modelPicksSessionOnly);
-  const defaultScope = modelPickerPrimaryScope(request.provider, sessionOnlyPicks);
-  const sessionKey = defaultScope === 'session' ? 'Enter' : 'EnterAlternate';
-  const defaultKey = defaultScope === 'default' ? 'Enter' : 'EnterAlternate';
+  // Enter saves the agent's default, Shift+Enter applies to this session alone; see modelPickScope.
+  const defaultScope: SessionChatModelSelectionScope = 'default';
+  const sessionKey: PickerControl = 'EnterAlternate';
+  const defaultKey: PickerControl = 'Enter';
   const {
     narrow,
     viewportHeight,
@@ -196,7 +192,7 @@ export function SessionChatModelPicker({
     if (control === 'ArrowRight') moveEffort(1);
     if (control === 'Enter') finish(true);
     if (control === 'EnterAlternate' && sessionScope)
-      finish(true, selection, defaultScope === 'session' ? 'default' : 'session');
+      finish(true, selection, 'session');
     if (control === 'Escape') finish(false);
   };
   useModelPickerWheelNavigation(popup, navigate);
@@ -527,7 +523,7 @@ export function SessionChatModelPicker({
                 aria-describedby={sessionScope ? undefined : 'model-picker-scope-reason'}
                 onClick={() => finish(true, selection, 'session')}
               >
-                <kbd>{sessionKey === 'Enter' ? '↵' : '⇧↵'}</kbd>
+                <kbd>⇧↵</kbd>
                 <span>Use in this session</span>
               </button>
               <button
@@ -536,7 +532,7 @@ export function SessionChatModelPicker({
                 disabled={closing || committing}
                 onClick={() => finish(true, selection, 'default')}
               >
-                <kbd>{defaultKey === 'Enter' ? '↵' : '⇧↵'}</kbd>
+                <kbd>↵</kbd>
                 <span>Set as default</span>
               </button>
               {sessionScope ? null : (

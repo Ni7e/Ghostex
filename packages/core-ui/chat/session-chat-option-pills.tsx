@@ -17,15 +17,12 @@ import {
 import { computeSessionChatOptions } from '@/packages/shared/session-chat-controller/session-options';
 import { SessionChatComposerOptionsMenu } from './session-chat-composer-options-menu';
 import { modelPickerProvider } from './session-chat-model-picker-request';
-import { Switch } from '@/packages/components/ui/switch';
 import {
-  modelPicksSessionOnly,
-  modelScopeAlsoSetDefault,
-  modelScopeForPills,
-  modelScopeMenuRow,
-  subscribeModelPicksSessionOnly,
+  modelPickScope,
+  modelPickerSupportsSessionScope,
 } from '@/packages/shared/session-chat-presentation/model-picker';
-import { modelScopeDefaultPersistence } from '@/packages/shared/session-chat-controller/model-selection';
+import { modelMenuPick, type ModelMenuContext } from '@/packages/shared/session-chat-controller/model-menu';
+import { SessionChatModelMenu, type SessionChatModelMenuExtraRow } from './session-chat-model-menu';
 import { QUICK_MODEL_PICKER_ENABLED } from './session-chat-model-picker-platform';
 import { resolveContextDetailStatus, type ContextDetailStatus } from './session-chat-context-details-agents';
 import type { AccountIconColor } from '@/packages/shared/agent-accounts';
@@ -47,17 +44,7 @@ import type { SessionChatPendingModelSelection } from '@/packages/shared/session
 
 import { SessionChatModelPickerLauncher, type ModelPickerActions } from './session-chat-model-picker-launcher';
 import { IconBoltFilled, IconChevronDown, IconMap } from '@tabler/icons-react';
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { postAppModalHostMessage } from '../app-modal-host-bridge';
 import { AppTooltip } from '../app-tooltip';
 import { formatSidebarHotkeyLabel } from '../hotkey-label';
@@ -255,6 +242,17 @@ export interface SessionChatSessionOptionPillsProps {
   draftAgentId?: string | null;
   /** Runs `/api/switchDraftAgent`; rejections are shown, never swallowed. */
   onSwitchDraftAgent?: (agentId: string) => Promise<void>;
+  /**
+   * The model picker chose another agent's model in a real conversation: the host opens Handoff with
+   * that agent selected. Absent on a host with no such route, where only this agent's models are offered.
+   */
+  onHandoffToModel?: (target: {
+    provider: 'claude' | 'codex' | 'cursor' | 'grok' | 'antigravity';
+    model: string;
+    effort: string;
+  }) => void;
+  /** Escape in the model picker hands the keyboard back to the composer. */
+  onReturnFocusToComposer?: () => void;
 }
 
 /*
@@ -472,8 +470,10 @@ export function SessionChatSessionOptionPills({
   onDispatchCommand,
   onDispatchKey,
   onEditContextDetails,
+  onHandoffToModel,
   onPickModel,
   onQueueModel,
+  onReturnFocusToComposer,
   pendingModelSelection,
   onSwitchDraftAgent,
   onSwitchingChange,
@@ -528,22 +528,6 @@ export function SessionChatSessionOptionPills({
   );
 
   const pickerProvider = modelPickerProvider(catalog?.modelIcon);
-  const [storedAlsoSetDefault, setAlsoSetDefaultState] = useState(() =>
-    modelScopeDefaultPersistence.read(controller.sessionKey ?? '')
-  );
-  const sessionOnlyPicks = useSyncExternalStore(subscribeModelPicksSessionOnly, modelPicksSessionOnly);
-  const alsoSetDefault = modelScopeAlsoSetDefault(storedAlsoSetDefault, sessionOnlyPicks);
-  useEffect(
-    () => setAlsoSetDefaultState(modelScopeDefaultPersistence.read(controller.sessionKey ?? '')),
-    [controller.sessionKey]
-  );
-  const setAlsoSetDefault = useCallback(
-    (next: boolean) => {
-      modelScopeDefaultPersistence.write(controller.sessionKey ?? '', next);
-      setAlsoSetDefaultState(next);
-    },
-    [controller.sessionKey]
-  );
   /**
    * CDXC:SessionChat 2026-09-18 DECISION:
    * User: when a model choice cannot be applied, say so where it was chosen.
@@ -551,23 +535,15 @@ export function SessionChatSessionOptionPills({
    */
   const selectionError =
     pendingModelSelection?.state === 'failed' ? (pendingModelSelection.errorMessage ?? null) : null;
-  const scopeMenuRow = useCallback(
-    (descriptor: SessionChatOptionDescriptor) =>
-      descriptor.id === catalog?.model.id || descriptor.id === 'effort'
-        ? modelScopeMenuRow(pickerProvider, alsoSetDefault)
-        : null,
-    [alsoSetDefault, catalog?.model.id, pickerProvider]
-  );
-
   const dispatch = useCallback(
-    (descriptor: SessionChatOptionDescriptor, value?: string): void => {
+    (descriptor: SessionChatOptionDescriptor, value?: string, secondary = false): void => {
       if (
         queueSessionChatOption(descriptor, value, {
           catalog,
           state,
           queuedControls,
           quickPicker,
-          scope: modelScopeForPills(pickerProvider, alsoSetDefault),
+          scope: modelPickScope(pickerProvider, secondary),
           picker: modelPickerActions.current,
         })
       )
@@ -599,7 +575,6 @@ export function SessionChatSessionOptionPills({
       queuedControls,
       quickPicker,
       pickerProvider,
-      alsoSetDefault,
       canSend,
       isWorking,
       beginDispatch,
@@ -810,51 +785,11 @@ export function SessionChatSessionOptionPills({
         </DropdownMenuRadioGroup>
       );
       const sections = rows.sections;
-      /**
-       * CDXC:SessionChat 2026-09-18 DECISION:
-       * User: the pills get this checkbox rather than silently applying every pick to the session only.
-       * Unticked, a pick leaves the agent's saved default alone; Codex shows it ticked and disabled because its picker cannot.
-       */
-      const scopeRow = scopeMenuRow(descriptor);
-      const withScopeRow = (body: ReactNode): ReactNode =>
-        scopeRow ? (
-          <>
-            {body}
-            <DropdownMenuSeparator />
-            <DropdownMenuCheckboxItem
-              checked={scopeRow.checked}
-              className='rounded-md'
-              disabled={scopeRow.disabled}
-              onCheckedChange={(checked) => setAlsoSetDefault(checked)}
-              showIndicator={false}
-            >
-              <span className='grid min-w-0 gap-0.5'>
-                <span className='truncate'>{scopeRow.label}</span>
-                {scopeRow.description ? (
-                  <span className='text-xs font-normal text-muted-foreground'>{scopeRow.description}</span>
-                ) : null}
-              </span>
-              {/*
-                The row owns the click and announces the state, so the switch renders as a plain span:
-                a nested button would take focus inside the menu and compete for the same activation.
-              */}
-              <Switch
-                aria-hidden
-                checked={scopeRow.checked}
-                className='pointer-events-none ml-auto'
-                render={<span />}
-                size='sm'
-              />
-            </DropdownMenuCheckboxItem>
-          </>
-        ) : (
-          body
-        );
       if (sections.length === 1 && sections[0]?.kind === 'choices') {
         return (
           <>
             {errorRow}
-            {withScopeRow(radioGroup(sections[0].choices))}
+            {radioGroup(sections[0].choices)}
           </>
         );
       }
@@ -868,34 +803,30 @@ export function SessionChatSessionOptionPills({
       return (
         <>
           {errorRow}
-          {withScopeRow(
-            <>
-              {sections.map((section) =>
-                section.kind === 'choices' ? (
-                  <Fragment key={section.key}>{radioGroup(section.choices)}</Fragment>
-                ) : (
-                  <DropdownMenuSub key={section.key}>
-                    <DropdownMenuSubTrigger className='rounded-md'>
-                      <span className='grid min-w-0 gap-0.5'>
-                        <span className='truncate'>{section.group.label}</span>
-                        {section.group.description ? (
-                          <span className='text-xs font-normal text-muted-foreground'>{section.group.description}</span>
-                        ) : null}
-                      </span>
-                      {(() => {
-                        const selected = section.choices.find((choice) => choice.value === current?.value);
-                        return selected ? (
-                          <span className='ml-auto truncate text-xs text-muted-foreground'>{selected.label}</span>
-                        ) : null;
-                      })()}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className='ghostex-session-chat-popup w-64 rounded-xl [--radius:0.625rem]'>
-                      {radioGroup(section.choices)}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                )
-              )}
-            </>
+          {sections.map((section) =>
+            section.kind === 'choices' ? (
+              <Fragment key={section.key}>{radioGroup(section.choices)}</Fragment>
+            ) : (
+              <DropdownMenuSub key={section.key}>
+                <DropdownMenuSubTrigger className='rounded-md'>
+                  <span className='grid min-w-0 gap-0.5'>
+                    <span className='truncate'>{section.group.label}</span>
+                    {section.group.description ? (
+                      <span className='text-xs font-normal text-muted-foreground'>{section.group.description}</span>
+                    ) : null}
+                  </span>
+                  {(() => {
+                    const selected = section.choices.find((choice) => choice.value === current?.value);
+                    return selected ? (
+                      <span className='ml-auto truncate text-xs text-muted-foreground'>{selected.label}</span>
+                    ) : null;
+                  })()}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className='ghostex-session-chat-popup w-64 rounded-xl [--radius:0.625rem]'>
+                  {radioGroup(section.choices)}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )
           )}
         </>
       );
@@ -1155,6 +1086,149 @@ export function SessionChatSessionOptionPills({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+      </>
+    );
+  }
+
+  /**
+   * CDXC:SessionChat 2026-09-21 DECISION:
+   * User: the model and effort pills merge into one pill that opens one picker, a click saves the agent's default and a right-click applies to this session only.
+   * Every agent with a published lineup gets it; the Cursor context pill and the draft's Switch Agent CLI submenu become footer rows of the same card. The mode pill and the context ring stay where they were, and only the ring still moves into More actions when the row runs out of room.
+   * SEE-ALSO: packages/shared/session-chat-controller/native-host.ts (`modelMenuPick`, `modelMenuTrait`) applies the same picks for the GPUI chat.
+   */
+  if (pickerProvider) {
+    const menuContext: ModelMenuContext = {
+      provider: pickerProvider,
+      modelId: catalog.model.id,
+      modelDefault: catalog.model.defaultValue,
+      modelLabel,
+      descriptors: visibleOptions,
+      state,
+      caps: { canPickModel, queuedControls, canSendKey },
+      selectionError,
+      disabled: !canPickModel,
+    };
+    const isDraft = draftAgents !== undefined && draftAgents.length > 0;
+    const draftAgentFor = (provider: string) => agentRows?.find((row) => modelPickerProvider(row.icon) === provider);
+    // Where the agent tells the two scopes apart, picking the running value again still moves it between them.
+    const unchanged = (descriptor: SessionChatOptionDescriptor, value: string) =>
+      state[descriptor.id]?.value === value &&
+      !(
+        (descriptor.id === catalog.model.id || descriptor.id === 'effort') &&
+        modelPickerSupportsSessionScope(pickerProvider)
+      );
+    const extraRows: SessionChatModelMenuExtraRow[] = [];
+    if (contextWindow)
+      extraRows.push({
+        id: 'cursor-context',
+        label: 'Context Window',
+        valueLabel: contextWindow,
+        disabled,
+        choices: [{ value: 'cli', label: 'Change it in the CLI', selected: false, isDefault: false }],
+        onChoose: () => dispatch(CURSOR_MODEL_SETTINGS_PICKER),
+      });
+    // Tabs switch a draft to the first agent of a family; this row reaches every agent, custom ones included.
+    if (agentRows)
+      extraRows.push({
+        id: 'draft-agent',
+        label: 'Agent CLI',
+        valueLabel: currentDraftAgent?.name ?? null,
+        disabled: switchingAgent,
+        choices: agentRows.map((row) => ({
+          value: row.agentId,
+          label: row.name,
+          selected: row.agentId === draftAgentId,
+          isDefault: false,
+        })),
+        onChoose: (choice) => switchAgent(choice.value),
+      });
+    const pillTrailingIcon =
+      fastMode || planMode ? (
+        <>
+          {fastMode ? <FastModeIcon /> : null}
+          {planMode ? <PlanModeIcon /> : null}
+        </>
+      ) : undefined;
+    return (
+      <>
+        <SessionChatComposerOptionsMenu>
+          {contextMeterUsage || hasContextDetails ? contextMeter(true) : null}
+        </SessionChatComposerOptionsMenu>
+        <SessionChatModelPickerLauncher
+          key={controller.sessionKey}
+          actionsRef={modelPickerActions}
+          controller={controller}
+          onQueueModel={onQueueModel}
+          pendingModelSelection={pendingModelSelection}
+        />
+        <SessionChatModelMenu
+          canOfferProvider={(provider) =>
+            provider === pickerProvider ||
+            (isDraft ? draftAgentFor(provider) !== undefined : onHandoffToModel !== undefined)
+          }
+          context={menuContext}
+          extraRows={extraRows}
+          onPickRow={(row, secondary) => {
+            const pick = modelMenuPick(row, menuContext);
+            if (pick.kind === 'select') {
+              if (!unchanged(catalog.model, pick.value)) dispatch(catalog.model, pick.value, secondary);
+              return;
+            }
+            // A draft has no conversation to hand over, so another agent's model switches the draft to that agent.
+            if (isDraft) {
+              const target = draftAgentFor(pick.provider);
+              if (target) switchAgent(target.agentId);
+              return;
+            }
+            onHandoffToModel?.(pick);
+          }}
+          onPickTrait={(trait, choice, secondary) => {
+            const descriptor =
+              trait.id === 'context' ? catalog.model : visibleOptions.find((entry) => entry.id === trait.id);
+            if (!descriptor || unchanged(descriptor, choice.value)) return;
+            dispatch(
+              choice.exitPlan ? { ...descriptor, dispatch: { kind: 'key', key: 'shift-tab', marker: '' } } : descriptor,
+              choice.value,
+              secondary
+            );
+          }}
+          onReturnFocus={onReturnFocusToComposer}
+          pill={{
+            ariaLabel: [modelTitle, optionsLabel].filter(Boolean).join(' · '),
+            disabled: switchingAgent,
+            icon: modelIcon,
+            loadingText: pillLoadingText('combined'),
+            suffixExtra: contextWindow,
+            tooltip: `Model and reasoning${pickerShortcutSuffix}`,
+            trailingIcon: pillTrailingIcon,
+          }}
+        />
+        {modeButton ? (
+          <DropdownMenu>
+            <PillTrigger
+              ariaLabel={modeTitle}
+              className='ghostex-chat-mode-pill ghostex-chat-mode-pill-icon-only'
+              disabled={optionsDisabled || (!queuedControls && modeValue === undefined)}
+              icon={modeIcon}
+              iconOnly
+              label={modeLabel ?? modeButton.label}
+              skeleton={queuedControls ? undefined : skeletonFor('mode', modeLabel)}
+              title={modeTitle}
+            />
+            <DropdownMenuContent align='end' className='ghostex-session-chat-popup w-60 rounded-xl [--radius:0.625rem]'>
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{modeButton.label}</DropdownMenuLabel>
+                {modeButton.description ? (
+                  <DropdownMenuLabel className='whitespace-normal pt-0'>{modeButton.description}</DropdownMenuLabel>
+                ) : null}
+                {menuRows(modeButton)}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+        {contextMeterUsage || hasContextDetails ? (
+          <span data-composer-option-overflow='context'>{contextMeter()}</span>
+        ) : null}
       </>
     );
   }

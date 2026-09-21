@@ -5,7 +5,6 @@ import {
   sessionChatOptionRows,
   visibleSessionChatOptions,
 } from '../session-chat-presentation/option-menu';
-import { modelScopeMenuRow } from '../session-chat-presentation/model-picker';
 import type { ModelPickerProvider } from '../session-chat-presentation/model-picker';
 import type { computeSessionChatOptions } from './session-options';
 import type { SessionChatOptionDescriptor } from '@/packages/core-ui/chat/session-chat-session-options';
@@ -39,7 +38,6 @@ export function nativeOptionMenus(
     draftAgents: readonly SessionChatAvailableAgent[] | null;
     draftAgentId: string | null;
     provider: ModelPickerProvider | undefined;
-    alsoSetDefault: boolean;
     /** Why the last selection was abandoned, shown above the rows that offered it. */
     selectionError?: string | null;
   }
@@ -47,29 +45,6 @@ export function nativeOptionMenus(
   const { catalog, state, optionDescriptors } = controller;
   const queuedControls = catalog?.modelIcon === 'codex' || catalog?.modelIcon === 'claude';
   const caps = { canPickModel: params.canPickModel, canSendKey: params.canSendKey, queuedControls };
-  /**
-   * CDXC:SessionChat 2026-09-18 DECISION:
-   * User: the model and effort pills get this checkbox rather than silently applying every pick to the session only.
-   * It mirrors the React menu row one-for-one; Codex shows it ticked and disabled because its picker cannot do otherwise.
-   */
-  const scopeRows = (descriptor: SessionChatOptionDescriptor): NativeChatMenuItem[] => {
-    if (descriptor.id !== catalog?.model.id && descriptor.id !== 'effort') return [];
-    const row = modelScopeMenuRow(params.provider, params.alsoSetDefault);
-    if (!row) return [];
-    return [
-      { id: `${descriptor.id}:scope-separator`, separator: true },
-      {
-        id: `${descriptor.id}:scope`,
-        label: row.label,
-        description: row.description,
-        checked: row.checked,
-        disabled: row.disabled,
-        keepOpen: true,
-        toggle: true,
-        command: { type: 'setModelScopeDefault', value: !row.checked },
-      },
-    ];
-  };
   const rows = (descriptor: SessionChatOptionDescriptor): NativeChatMenuItem[] => {
     const presentation = sessionChatOptionRows(descriptor, state, caps);
     const command = { type: 'selectOption', descriptorId: descriptor.id };
@@ -111,8 +86,7 @@ export function nativeOptionMenus(
                 children: choices,
               },
             ];
-      })
-      .concat(scopeRows(descriptor));
+      });
   };
   const model: NativeChatMenuItem[] = [];
   if (params.draftAgents?.length) {

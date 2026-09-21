@@ -11,18 +11,8 @@ impl GhostexGpuiApp {
         if !self.agents_chat_mode_sessions.contains(&session_id) {
             return self.open_terminal_model_picker(session_id, cx);
         }
-        if self.native_chat_views.contains_key(&session_id) {
-            return self.open_session_chat_model_picker(session_id, cx);
-        }
-        let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
-            return false;
-        };
-        surface.update(cx, |surface, _| {
-            surface.execute_app_owned_script(
-                "document.documentElement.dataset.ghostexModelPickerRequested = 'true'; window.dispatchEvent(new CustomEvent('ghostex-open-model-picker')); undefined;",
-            );
-        });
-        true
+        self.native_chat_views.contains_key(&session_id)
+            && self.open_session_chat_model_picker(session_id, cx)
     }
 
     /// CDXC:Hotkeys 2026-09-08 DECISION:
@@ -89,7 +79,6 @@ impl GhostexGpuiApp {
             "type": "open", "modal": modal.modal_id(),
             "projectId": project_id, "sessionId": session_id, "provider": provider,
             "hotkeys": settings.object().get("hotkeys"),
-            "modelPicksSessionOnly": gpui_session_chat_model_picks_session_only_from_settings(settings.object()),
             "connection": { "baseUrl": bootstrap.base_url, "authToken": bootstrap.auth_token,
                 "protocolVersion": bootstrap.protocol_version },
         });

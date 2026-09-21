@@ -30,7 +30,11 @@ import { NativeModelPicker } from './native-model-picker';
 import { currentAgentModelCatalog } from '../agent-model-catalog-state';
 import { createModelPickerRequest } from '../session-chat-presentation/model-picker-request';
 import { modelSelectionUnchanged } from './model-selection';
-import { modelScopeForPills } from '../session-chat-presentation/model-picker';
+import { modelPickScope, modelPickerSupportsSessionScope } from '../session-chat-presentation/model-picker';
+import { modelMenuPick, modelMenuProjection } from './model-menu';
+import { toggleModelFavorite } from './model-favorites';
+import { modelPickerProvider } from '../session-chat-presentation/model-picker-request';
+import type { ModelMenuTabId } from '../session-chat-presentation/model-menu';
 import { adoptAgentModelCatalog } from '../agent-model-catalog-state';
 import { computeNativeChatOptions, nativeOptionPersistence } from './native-options';
 import {
@@ -166,10 +170,10 @@ const suggestions = new NativeComposerSuggestions();
 const composerScrollGesture = createSessionChatComposerScrollGesture();
 let composerCollapsed = false;
 let detailRevision = 0;
-/** The tool rows GPUI has open; only these ship their arguments and result (native-transcript-rows.ts). */
-let openToolDetails: { key: string; messageId: string; index: number }[] = [];
-let toolDetails = '{}';
-let sentToolDetails: string | undefined;
+/** The rows GPUI draws open; only these ship their detail (apps/desktop/src/app/native_chat/row_details.rs). */
+let openRowDetails: { key: string; kind: string; messageId: string; index: number }[] = [];
+let rowDetails = '{}';
+let sentRowDetails: string | undefined;
 type NativeChatState = {
   workingStrip: ReturnType<typeof computeSessionChatWorkingStrip> & {
     presentation: ReturnType<typeof computeSessionChatActivity>;
@@ -203,6 +207,8 @@ let draftAttachmentCount = 0;
 let optionDispatchId: string | null = null;
 let optionSwitching = false;
 let modelPicker: NativeModelPicker | null = null;
+/** The picker's tab and search text. Rust owns whether it is open and resets this when it opens. */
+let modelMenuView: { tab: ModelMenuTabId | null; query: string } = { tab: null, query: '' };
 let promptKey: string | null = null;
 let dismissedPrompt: string | null = null;
 let questionIndex = 0;
@@ -409,10 +415,11 @@ function publish(state: NativeChatState): void {
   transcriptItems = projection.items;
   minimapMarkers = projection.minimap;
   subagentItems = subagentViewer.transcriptItems();
-  toolDetails = JSON.stringify(
+  rowDetails = JSON.stringify(
     Object.fromEntries(
-      openToolDetails.flatMap(({ key, messageId, index }) => {
-        const detail = presentation.toolDetail(messageId, index) ?? subagentViewer.toolDetail(messageId, index);
+      openRowDetails.flatMap(({ key, kind, messageId, index }) => {
+        const detail =
+          presentation.rowDetail(kind, messageId, index) ?? subagentViewer.rowDetail(kind, messageId, index);
         return detail ? [[key, detail]] : [];
       })
     )
@@ -472,6 +479,7 @@ function publish(state: NativeChatState): void {
         }
       : {}),
     modelPicker: modelPicker?.projection() ?? null,
+    modelMenu: state.modelMenuContext ? modelMenuProjection(state.modelMenuContext, modelMenuView) : null,
     contextStatusRows,
     suggestions: composerSuggestions,
     composerCommand: suggestions.nativeCommand(state),
@@ -772,8 +780,8 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
     return;
   }
   // Panel folds, transcript search, terminal-tail reads and the subagent viewer are pure view state: they never clear a send error.
-  if (command.type === 'toolDetails') {
-    openToolDetails = Array.isArray(command.open) ? command.open : [];
+  if (command.type === 'rowDetails') {
+    openRowDetails = Array.isArray(command.open) ? command.open : [];
     publish(chat);
     return;
   }
@@ -894,7 +902,12 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           (entry) => entry?.id === command.descriptorId
         );
         if (!descriptor) break;
-        if (command.value !== undefined && options.state[descriptor.id]?.value === command.value) break;
+        const scoped =
+          (descriptor.id === options.catalog?.model.id || descriptor.id === 'effort') &&
+          !!chat.modelProvider &&
+          modelPickerSupportsSessionScope(chat.modelProvider);
+        // Where the agent tells the two scopes apart, picking the running model again still moves it between them.
+        if (!scoped && command.value !== undefined && options.state[descriptor.id]?.value === command.value) break;
         const delivery = command.exitPlan
           ? { ...descriptor, dispatch: { kind: 'key' as const, key: 'shift-tab' as const, marker: '' } }
           : descriptor;
@@ -905,7 +918,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
             queuedControls: options.catalog?.modelIcon === 'codex' || options.catalog?.modelIcon === 'claude',
             quickPicker: !!chat.modelProvider,
             picker: chat.modelSelection,
-            scope: modelScopeForPills(chat.modelProvider, chat.modelSelection.alsoSetDefault),
+            scope: modelPickScope(chat.modelProvider, command.secondary === true),
           })
         )
           break;
@@ -1014,9 +1027,58 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       case 'modelPickerCancel':
         modelPicker?.finish(false);
         break;
-      case 'setModelScopeDefault':
-        controller.current().modelSelection.setAlsoSetDefault(command.value);
+      case 'modelMenuView':
+        modelMenuView = {
+          tab: command.tab === undefined ? modelMenuView.tab : command.tab,
+          query: typeof command.query === 'string' ? command.query : modelMenuView.query,
+        };
         break;
+      case 'modelMenuFavorite':
+        toggleModelFavorite(command.key);
+        break;
+      case 'modelMenuPick': {
+        const context = chat.modelMenuContext;
+        if (!context) break;
+        const row = modelMenuProjection(context, modelMenuView).rows.find((entry) => entry.key === command.key);
+        if (!row) break;
+        const pick = modelMenuPick(row, context);
+        if (pick.kind === 'select') {
+          await action({
+            type: 'selectOption',
+            descriptorId: context.modelId,
+            value: pick.value,
+            secondary: command.secondary,
+          });
+          break;
+        }
+        // A draft has no conversation to hand over, so another agent's model switches the draft to that agent.
+        const draftAgent = chat.availableAgents?.find((agent) => modelPickerProvider(agent.icon) === pick.provider);
+        if (chat.availableAgents) {
+          if (draftAgent) {
+            modelMenuView = { tab: null, query: '' };
+            await action({ type: 'switchDraftAgent', agentId: draftAgent.agentId });
+          }
+          break;
+        }
+        requests.push({
+          kind: 'host',
+          method: 'handoffToModel',
+          params: { provider: pick.provider, model: pick.model, effort: pick.effort },
+        });
+        break;
+      }
+      case 'modelMenuTrait': {
+        const context = chat.modelMenuContext;
+        if (!context) break;
+        await action({
+          type: 'selectOption',
+          descriptorId: command.id === 'context' ? context.modelId : command.id,
+          value: command.value,
+          exitPlan: command.exitPlan,
+          secondary: command.secondary,
+        });
+        break;
+      }
       case 'measureComposer':
         composerOverflow = fitChatComposerControls(command.measurements);
         break;
@@ -1698,7 +1760,7 @@ Object.assign(globalThis, {
         itemsSplice: transcriptItemsSplice(),
         minimap: sentMinimapMarkers === minimapMarkers ? undefined : (sentMinimapMarkers = minimapMarkers),
         subagentSplice: subagentItemsSplice(),
-        toolDetails: sentToolDetails === toolDetails ? undefined : JSON.parse((sentToolDetails = toolDetails)),
+        rowDetails: sentRowDetails === rowDetails ? undefined : JSON.parse((sentRowDetails = rowDetails)),
         revision,
         snapshot: lastRevision === revision ? undefined : snapshot,
         requests: requests.splice(0),

@@ -62,4 +62,14 @@ export interface SessionChatHostActions {
   /** The host's per-session action list; omit to hide the menu entirely. */
   actions?: readonly SessionChatHostAction[];
   onAction?: (id: string, value?: string) => void;
+  /**
+   * The model picker chose a model that belongs to another agent than the session's. The host opens
+   * Handoff / Export with that agent selected and starts the new session on the model. Omit it on a
+   * host with no such dialog route, and the picker does not offer other agents' models.
+   */
+  onHandoffToModel?: (target: {
+    provider: 'claude' | 'codex' | 'cursor' | 'grok' | 'antigravity';
+    model: string;
+    effort: string;
+  }) => void;
 }

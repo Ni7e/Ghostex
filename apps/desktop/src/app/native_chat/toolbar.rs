@@ -114,7 +114,9 @@ impl NativeChatView {
     ) -> AnyElement {
         let options_width = self.option_pills_width(p, window);
         let scale = p.scale;
-        let has_overflow_options = self.snapshot["optionLabels"]["showOptions"] == true
+        // With the merged model picker there is no options pill to move into More actions.
+        let has_overflow_options = (self.snapshot["optionLabels"]["showOptions"] == true
+            && !self.snapshot["modelMenu"].is_object())
             || self.snapshot["contextMeter"].is_object();
         // A control the host cannot serve is never drawn, so it must not claim room either.
         let controls: Vec<Value> = COMPOSER_CONTROLS

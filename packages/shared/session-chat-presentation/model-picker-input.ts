@@ -1,5 +1,5 @@
 export type PickerDirection = 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight';
-/** `EnterAlternate` is Shift+Enter: commit the same choice to the scope Enter does not use; see modelPickerPrimaryScope. */
+/** `EnterAlternate` is Shift+Enter: commit the same choice to this session only where the agent can; Enter saves the default. See modelPickScope. */
 export type PickerControl = PickerDirection | 'Enter' | 'EnterAlternate' | 'Escape';
 
 const controls: Record<string, PickerControl> = {

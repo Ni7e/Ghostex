@@ -70,7 +70,9 @@ impl NativeChatView {
         let mut rows = Vec::new();
         if self.snapshot["composerOverflow"]["optionsOverflowed"] == true {
             rows.push(json!({"heading":true,"label":"Model settings"}));
-            if self.snapshot["optionLabels"]["showOptions"] == true {
+            if self.snapshot["optionLabels"]["showOptions"] == true
+                && !self.snapshot["modelMenu"].is_object()
+            {
                 rows.push(json!({
                 "label": self.snapshot["optionLabels"]["optionsTitle"].as_str().unwrap_or("Options"),
                 "detail":self.snapshot["optionLabels"]["options"],

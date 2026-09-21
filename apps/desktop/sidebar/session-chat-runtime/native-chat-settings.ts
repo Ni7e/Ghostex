@@ -4,7 +4,6 @@ export function nativeChatSettings(sessionKey: string) {
   const state = sidebarStore.getState();
   return {
     hideAccountEmails: state.hud.settings?.hideAccountEmails === true,
-    modelPicksSessionOnly: state.hud.settings?.sessionChatModelPicksSessionOnly === true,
     title: state.sessionsById[sessionKey]?.displayTitle?.trim() || null,
   };
 }
@@ -16,12 +15,7 @@ export function subscribeNativeChatSettings(
   let previous = nativeChatSettings(sessionKey);
   return sidebarStore.subscribe(() => {
     const next = nativeChatSettings(sessionKey);
-    if (
-      next.title === previous.title &&
-      next.hideAccountEmails === previous.hideAccountEmails &&
-      next.modelPicksSessionOnly === previous.modelPicksSessionOnly
-    )
-      return;
+    if (next.title === previous.title && next.hideAccountEmails === previous.hideAccountEmails) return;
     previous = next;
     changed(next);
   });

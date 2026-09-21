@@ -1,10 +1,9 @@
 use super::window::ChatOptionMenuPanel;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, StatefulInteractiveElement as _, Styled as _, Window, div, px, svg,
+    Context, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, svg,
 };
-use serde_json::Value;
 
 impl ChatOptionMenuPanel {
     fn activate(
@@ -36,10 +35,13 @@ impl ChatOptionMenuPanel {
             }
             self.child = Some(index);
             let scale = self.menu.read(cx).appearance.scale;
+            let m = self.menu.read(cx).metrics();
             let mut anchor = window.bounds();
-            anchor.origin.y +=
-                px((7.0 + self.heights[..index].iter().sum::<f32>() + index as f32 * 2.0) * scale)
-                    + self.scroll.offset().y;
+            anchor.origin.y += px((m.chrome() / 2.0
+                + self.heights[..index].iter().sum::<f32>()
+                + index as f32 * m.gap)
+                * scale)
+                + self.scroll.offset().y;
             anchor.size.height = px(self.heights[index] * scale);
             let rows = children.clone();
             self.menu.update(cx, |menu, cx| {
@@ -63,30 +65,6 @@ impl ChatOptionMenuPanel {
                     cx,
                 )
             });
-        } else if row["keepOpen"] == true {
-            // CDXC:SessionChat 2026-09-18 DECISION:
-            // User: a checkbox in a pill menu has to stay open, so the box can be toggled and the model picked in one visit.
-            // The row flips its own check and its command's next value here; the controller owns the stored preference, and the label and description never change, so the panel keeps its measured heights.
-            let Some(command) = row.get("command").cloned() else {
-                return;
-            };
-            let rows = std::sync::Arc::make_mut(&mut self.rows);
-            let Some(row) = rows.get_mut(index) else {
-                return;
-            };
-            let checked = row["checked"] == true;
-            row["checked"] = Value::Bool(!checked);
-            row["command"]["value"] = Value::Bool(checked);
-            if let Some(chat) = self.menu.read(cx).chat.upgrade() {
-                chat.update(cx, |chat, cx| {
-                    chat.handle_action(
-                        &super::super::actions::NativeChatAction { command },
-                        window,
-                        cx,
-                    );
-                });
-            }
-            cx.notify();
         } else if let Some(command) = row.get("command") {
             let command = command.clone();
             if row["keepOpen"] == true {
@@ -250,7 +228,16 @@ impl ChatOptionMenuPanel {
 
 impl Render for ChatOptionMenuPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.model_menu.is_some() {
+            return self.render_model_menu(cx);
+        }
+        if let Some(setting) = self.rows.first().map(|row| row["modelMenuFlyout"].clone())
+            && setting.is_object()
+        {
+            return self.render_model_flyout(&setting, cx);
+        }
         let appearance = self.menu.read(cx).appearance.clone();
+        let m = self.menu.read(cx).metrics();
         let scale = appearance.scale;
         let foreground = gpui::rgb(if appearance.light { 0x292929 } else { 0xfcfcfc });
         let hover = gpui::rgb(if appearance.light { 0xefefef } else { 0x202020 });
@@ -263,7 +250,7 @@ impl Render for ChatOptionMenuPanel {
             .id("chat-option-menu-scroll")
             .flex()
             .flex_col()
-            .gap(px(2.0 * scale))
+            .gap(px(m.gap * scale))
             .size_full()
             .min_h_0()
             .overflow_y_scroll()
@@ -282,9 +269,9 @@ impl Render for ChatOptionMenuPanel {
                 body = body.child(
                     div()
                         .flex_shrink_0()
-                        .h(px(13.0 * scale))
+                        .h(px(m.separator * scale))
                         .px(px(4.0 * scale))
-                        .py(px(6.0 * scale))
+                        .py(px((m.separator - 1.0) / 2.0 * scale))
                         .child(div().h(px(1.0)).bg(border.opacity(0.7))),
                 );
                 continue;
@@ -296,7 +283,7 @@ impl Render for ChatOptionMenuPanel {
                     div()
                         .flex_shrink_0()
                         .h(px(self.heights[index] * scale))
-                        .px(px(10.0 * scale))
+                        .px(px(m.row_x * scale))
                         .pt(px(4.0 * scale))
                         .pb(px(2.0 * scale))
                         .text_size(px(11.0 * scale))
@@ -337,12 +324,12 @@ impl Render for ChatOptionMenuPanel {
                 .flex_shrink_0()
                 .flex()
                 .items_center()
-                .gap(px(8.0 * scale))
+                .gap(px(m.row_gap * scale))
                 .w_full()
                 .h(px(self.heights[index] * scale))
-                .px(px(10.0 * scale))
-                .py(px(8.0 * scale))
-                .rounded(px(6.0 * scale))
+                .px(px(m.row_x * scale))
+                .py(px(m.row_y * scale))
+                .rounded(px(m.row_radius * scale))
                 .opacity(if disabled { 0.42 } else { 1.0 })
                 .when(selected, |item| item.bg(hover))
                 .on_mouse_move(cx.listener(move |this, _, window, cx| {
@@ -363,7 +350,7 @@ impl Render for ChatOptionMenuPanel {
                     svg()
                         .path(icon_path)
                         .flex_shrink_0()
-                        .size(px(14.0 * scale))
+                        .size(px(m.icon * scale))
                         .text_color(foreground),
                 );
             }
@@ -407,42 +394,8 @@ impl Render for ChatOptionMenuPanel {
                         .child(detail.to_owned()),
                 );
             }
-            if row["toggle"] == true {
-                // CDXC:SessionChat 2026-09-18 DECISION:
-                // User: a row that turns something on or off wears the app's switch, not a check mark.
-                // Geometry and colours mirror the small size of packages/components/ui/switch.tsx: a 24x16 track with a 2px border and 6px radius, and a 12px thumb with a 4px radius that travels 8px.
-                let checked = row["checked"] == true;
-                item = item.child(
-                    div()
-                        .flex_shrink_0()
-                        .w(px(24.0 * scale))
-                        .h(px(16.0 * scale))
-                        .rounded(px(6.0 * scale))
-                        .border(px(2.0 * scale))
-                        .border_color(if checked {
-                            appearance.primary
-                        } else {
-                            gpui::transparent_black()
-                        })
-                        .bg(if checked {
-                            appearance.primary
-                        } else {
-                            appearance.input.opacity(0.9)
-                        })
-                        .child(
-                            div()
-                                .size(px(12.0 * scale))
-                                .ml(px(if checked { 8.0 } else { 0.0 } * scale))
-                                .rounded(px(4.0 * scale))
-                                .bg(if checked || appearance.light {
-                                    appearance.background
-                                } else {
-                                    appearance.foreground
-                                }),
-                        ),
-                );
-            } else if children || row.get("checked").is_some() {
-                item = item.child(div().flex_shrink_0().size(px(14.0 * scale)).when(
+            if children || row.get("checked").is_some() {
+                item = item.child(div().flex_shrink_0().size(px(m.icon * scale)).when(
                     children || row["checked"] == true,
                     |item| {
                         item.child(
@@ -452,7 +405,7 @@ impl Render for ChatOptionMenuPanel {
                                 } else {
                                     "titlebar/check.svg"
                                 })
-                                .size(px(14.0 * scale))
+                                .size(px(m.icon * scale))
                                 .text_color(foreground),
                         )
                     },
@@ -466,7 +419,7 @@ impl Render for ChatOptionMenuPanel {
             .track_focus(&self.focus)
             .size_full()
             .min_h_0()
-            .rounded(px(8.0 * scale))
+            .rounded(px(m.radius * scale))
             .border_1()
             .border_color(border)
             .bg(gpui::rgb(if appearance.light {
@@ -474,12 +427,13 @@ impl Render for ChatOptionMenuPanel {
             } else {
                 0x191919
             }))
-            .p(px(6.0 * scale))
+            .p(px(m.padding * scale))
             .font_family(appearance.font)
             .text_color(foreground)
-            .text_size(px(13.0 * scale))
-            .line_height(px(18.2 * scale))
+            .text_size(px(m.text * scale))
+            .line_height(px(m.line * scale))
             .on_key_down(cx.listener(Self::key))
             .child(body)
+            .into_any_element()
     }
 }

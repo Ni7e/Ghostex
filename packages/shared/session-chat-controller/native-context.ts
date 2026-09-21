@@ -16,7 +16,6 @@ import {
   formatSessionChatContextPercentage,
   formatSessionChatContextTokens,
 } from '../session-chat-presentation/context-usage';
-import { adoptModelPicksSessionOnly } from '../session-chat-presentation/model-picker';
 import { sessionChatStatusLineReserved } from '../session-chat-presentation/status-line-layout';
 import type { ChatLifecycle } from './lifecycle';
 
@@ -25,7 +24,7 @@ let preferences: Record<ContextDetailsAgent, SessionChatContextDetailsPreference
   codex: normalizeSessionChatContextDetailsPreferences(null, 'codex'),
 };
 export const currentNativeContextPreferences = () => preferences;
-let settings: { title: string | null; hideAccountEmails: boolean; modelPicksSessionOnly?: boolean } = {
+let settings: { title: string | null; hideAccountEmails: boolean } = {
   title: null,
   hideAccountEmails: false,
 };
@@ -33,7 +32,6 @@ export const nativeContextTitle = () => settings.title;
 export const nativeContextText = (text: string) => (settings.hideAccountEmails ? maskAccountText(text) : text);
 export function adoptNativeChatSettings(next: typeof settings) {
   settings = next;
-  adoptModelPicksSessionOnly(next.modelPicksSessionOnly === true);
   for (const listener of listeners) listener();
 }
 const listeners = new Set<() => void>();

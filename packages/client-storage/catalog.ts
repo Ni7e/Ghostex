@@ -208,6 +208,13 @@ export const storageCatalog = Object.freeze({
     objectCodec,
     cache
   ),
+  modelFavorites: define(
+    'modelFavorites',
+    'Starred models in the chat model picker',
+    'packages/shared/session-chat-controller/model-favorites.ts',
+    'ghostex.model-favorites',
+    stringListCodec
+  ),
   modelOutbox: define(
     'modelOutbox',
     'Pending model selections',
@@ -215,14 +222,6 @@ export const storageCatalog = Object.freeze({
     'ghostex.model-selection-outbox.',
     objectCodec,
     protectedDisk
-  ),
-  modelScopeDefault: define(
-    'modelScopeDefault',
-    'Model pills that also set the default',
-    chat + 'session-chat-model-picker-launcher.tsx',
-    'ghostex.model-selection-also-default.',
-    boolean,
-    cache
   ),
   retiredQuestions: define(
     'retiredQuestions',

@@ -7,9 +7,6 @@ import type {
 } from '../session-chat';
 import {
   modelPickerSupportsSessionScope,
-  modelPicksSessionOnly,
-  modelScopeAlsoSetDefault,
-  subscribeModelPicksSessionOnly,
   type ModelPickerRequest,
   type ModelPickerSelection,
 } from '../session-chat-presentation/model-picker';
@@ -30,13 +27,6 @@ export interface ModelSelectionPersistence {
 }
 
 const storage = storageScope(['modelOutbox']);
-/**
- * CDXC:SessionChat 2026-09-19 DECISION:
- * User: the composer's model and effort pills get a checkbox rather than silently becoming session-only, and it is per session.
- * Until a session touches it, it follows the Session-only model picks setting, which is off by default, so a pill pick saves the agent's default. This supersedes the 2026-09-18 default of unchecked.
- */
-const scopeStorage = storageScope(['modelScopeDefault']);
-const scopeStorageKey = (key: string) => `ghostex.model-selection-also-default.${key}`;
 const storageKey = (key: string) => `ghostex.model-selection-outbox.${key}`;
 export function storedModelSelectionKeys(sessionKey: string): string[] {
   return storage
@@ -63,25 +53,6 @@ export const modelSelectionPersistence: ModelSelectionPersistence = {
   },
   acknowledge(key, id) {
     if (modelSelectionPersistence.read(key)?.id === id) storage.removeItem(storageKey(key));
-  },
-};
-
-export const modelScopeDefaultPersistence = {
-  /** `null` means this session never touched the switch. */
-  read(key: string): boolean | null {
-    try {
-      const stored = scopeStorage.getItem(scopeStorageKey(key));
-      return stored === 'true' ? true : stored === 'false' ? false : null;
-    } catch {
-      return null;
-    }
-  },
-  write(key: string, value: boolean): void {
-    try {
-      scopeStorage.setItem(scopeStorageKey(key), value ? 'true' : 'false');
-    } catch {
-      /* The choice still applies to this mount. */
-    }
   },
 };
 
@@ -152,13 +123,6 @@ export function computeModelSelectionOutbox(
   const persistence = params.persistence ?? modelSelectionPersistence;
   const key = params.sessionKey ?? '';
   const [outbox, setOutbox] = useState<ModelSelectionIntent | null>(() => persistence.read(key));
-  const [storedAlsoSetDefault, setAlsoSetDefaultState] = useState(() => modelScopeDefaultPersistence.read(key));
-  const [sessionOnly, setSessionOnly] = useState(modelPicksSessionOnly);
-  useEffect(() => {
-    setSessionOnly(modelPicksSessionOnly());
-    return subscribeModelPicksSessionOnly(() => setSessionOnly(modelPicksSessionOnly()));
-  }, []);
-  const alsoSetDefault = modelScopeAlsoSetDefault(storedAlsoSetDefault, sessionOnly);
   const latest = useRef(outbox);
   const receipt = useRef<{
     id: string;
@@ -173,7 +137,6 @@ export function computeModelSelectionOutbox(
   useEffect(() => {
     latest.current = persistence.read(key);
     setOutbox(latest.current);
-    setAlsoSetDefaultState(modelScopeDefaultPersistence.read(key));
     receipt.current = null;
   }, [key, persistence]);
 
@@ -258,14 +221,6 @@ export function computeModelSelectionOutbox(
     outbox,
     /** The reason the last selection was abandoned, for the surface that offered it. */
     selectionError: params.pending?.state === 'failed' ? (params.pending.errorMessage ?? null) : null,
-    alsoSetDefault,
-    setAlsoSetDefault: useCallback(
-      (next: boolean) => {
-        modelScopeDefaultPersistence.write(key, next);
-        setAlsoSetDefaultState(next);
-      },
-      [key]
-    ),
     select: persist,
     selectOptions: useCallback(
       (options: SessionChatSelectionOptions) =>

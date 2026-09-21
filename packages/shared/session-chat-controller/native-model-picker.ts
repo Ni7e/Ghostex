@@ -6,9 +6,7 @@ import {
   modelPickerChooseModel,
   modelPickerLayout,
   modelPickerNextEffortIndex,
-  modelPickerPrimaryScope,
   modelPickerSupportsSessionScope,
-  modelPicksSessionOnly,
   MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON,
   type ModelPickerRequest,
   type ModelPickerSelection,
@@ -51,7 +49,7 @@ export class NativeModelPicker {
   }
 
   private get defaultScope(): SessionChatModelSelectionScope {
-    return modelPickerPrimaryScope(this.request.provider, modelPicksSessionOnly());
+    return 'default';
   }
 
   projection() {

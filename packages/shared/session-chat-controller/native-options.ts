@@ -24,6 +24,7 @@ import {
 } from './model-selection';
 import type { SessionChatOptionPersistence } from './option-state';
 import type { AgentAccountsState } from '../agent-accounts';
+import type { ModelMenuContext } from './model-menu';
 
 export interface NativeOptionSeed {
   sessionKey: string;
@@ -108,7 +109,6 @@ export function computeNativeChatOptions(
     draftAgents: chat.availableAgents,
     draftAgentId: chat.sessionAgentId,
     provider,
-    alsoSetDefault: modelSelection.alsoSetDefault,
     selectionError: modelSelection.selectionError,
   });
   const values = sessionChatOptionPillValues(
@@ -124,10 +124,31 @@ export function computeNativeChatOptions(
     }).filter((descriptor) => !isShiftTabModeCycler(descriptor))
   );
   const draftAgent = chat.availableAgents?.find((agent) => agent.agentId === chat.sessionAgentId);
+  const queuedControls = sessionOptions.catalog?.modelIcon === 'codex' || sessionOptions.catalog?.modelIcon === 'claude';
+  // Agents outside the model catalog keep their own model and options pills; the picker needs a provider's lineup.
+  const modelMenuContext: ModelMenuContext | null =
+    provider && sessionOptions.catalog
+      ? {
+          provider,
+          modelId: sessionOptions.catalog.model.id,
+          modelDefault: sessionOptions.catalog.model.defaultValue,
+          modelLabel: values.model,
+          descriptors: visibleSessionChatOptions(sessionOptions.optionDescriptors, {
+            canSendKey: !!chat.sendKey,
+            canPickModel: canQueue,
+            queuedControls,
+          }),
+          state: sessionOptions.state,
+          caps: { canPickModel: canQueue, queuedControls, canSendKey: !!chat.sendKey },
+          selectionError: modelSelection.selectionError,
+          disabled: !canQueue,
+        }
+      : null;
   return {
     sessionOptions,
     modelSelection,
     modelProvider: provider,
+    modelMenuContext,
     optionMenus: menus,
     optionLabels: {
       ...values,

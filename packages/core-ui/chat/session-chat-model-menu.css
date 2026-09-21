@@ -1,0 +1,343 @@
+/*
+ * CDXC:SessionChat 2026-09-21 DECISION:
+ * User: the composer's model picker is one card: agent tabs, a search, model rows and a footer of rows that open a side list.
+ * Every wash and hairline is mixed from --foreground so the same numbers read correctly in the light and the dark chat theme.
+ * SEE-ALSO: apps/desktop/src/app/native_chat/model_menu/ draws the same card natively and must keep these sizes.
+ */
+.ghostex-chat-model-menu-pill {
+  max-width: 15.5rem;
+}
+
+.ghostex-chat-model-menu-pill-suffix {
+  flex-shrink: 1000;
+  min-width: 0;
+  opacity: 0.7;
+}
+
+.ghostex-chat-model-menu {
+  --menu-hairline: color-mix(in srgb, var(--foreground) 8%, transparent);
+  --menu-muted: color-mix(in srgb, var(--foreground) 64%, transparent);
+  --menu-cursor: color-mix(in srgb, var(--foreground) 5%, transparent);
+  --menu-selected: color-mix(in srgb, var(--foreground) 11%, transparent);
+  width: 304px;
+  gap: 0;
+  padding: 0;
+  overflow: visible;
+  border: 1px solid var(--menu-hairline);
+  border-radius: 12px;
+  font-size: 0.8125rem;
+}
+
+.ghostex-chat-model-menu-tabs {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 40px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--menu-hairline);
+}
+
+.ghostex-chat-model-menu button.ghostex-chat-model-menu-tab {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  position: relative;
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--menu-muted);
+  cursor: pointer;
+}
+
+.ghostex-chat-model-menu button.ghostex-chat-model-menu-tab:not([data-active]):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+.ghostex-chat-model-menu button.ghostex-chat-model-menu-tab[data-active] {
+  color: var(--foreground);
+}
+
+/* The 32px tab is centred in a 40px row, so -4px lands the bar on the row's bottom hairline. */
+.ghostex-chat-model-menu-tab[data-active]::after {
+  position: absolute;
+  right: 6px;
+  bottom: -4px;
+  left: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ghostex-accent, var(--foreground));
+  content: '';
+}
+
+.ghostex-chat-model-menu-logo {
+  display: inline-block;
+  width: var(--logo-size);
+  height: var(--logo-size);
+  flex: none;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+
+.ghostex-chat-model-menu-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--menu-hairline);
+  color: var(--menu-muted);
+}
+
+.ghostex-chat-model-menu-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  outline: none;
+}
+
+.ghostex-chat-model-menu-search input::placeholder {
+  color: var(--menu-muted);
+}
+
+.ghostex-chat-model-menu-list {
+  display: flex;
+  max-height: 216px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--foreground) 2%, transparent);
+}
+
+.ghostex-chat-model-menu-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.ghostex-chat-model-menu-row[data-two-line] {
+  padding-block: 6px;
+}
+
+.ghostex-chat-model-menu-row[data-active] {
+  background: var(--menu-cursor);
+}
+
+/* An inset ring: a drop shadow behind a translucent row would show through it as a grey plate. */
+.ghostex-chat-model-menu-row[data-selected] {
+  background: var(--menu-selected);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 9%, transparent);
+}
+
+.ghostex-chat-model-menu-row[aria-disabled='true'],
+.ghostex-chat-model-menu-tray-row[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ghostex-chat-model-menu-row-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ghostex-chat-model-menu-row-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.ghostex-chat-model-menu-row-label {
+  max-width: 100%;
+  flex: none;
+  overflow: hidden;
+  font-size: 0.78125rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghostex-chat-model-menu-row-description,
+.ghostex-chat-model-menu-row-agent {
+  color: var(--menu-muted);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.ghostex-chat-model-menu-row-description {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ghostex-chat-model-menu-kbd {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--menu-cursor);
+  color: var(--menu-muted);
+  font-family: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
+  font-size: 0.625rem;
+}
+
+.ghostex-chat-model-menu button.ghostex-chat-model-menu-star {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--menu-muted);
+  cursor: pointer;
+}
+
+.ghostex-chat-model-menu button.ghostex-chat-model-menu-star:hover {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+.ghostex-chat-model-menu button.ghostex-chat-model-menu-star[data-favorite] {
+  color: oklch(82.8% 0.189 84.429);
+}
+
+.ghostex-chat-model-menu-empty {
+  padding: 24px 8px;
+  color: var(--menu-muted);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.ghostex-chat-model-menu-error {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.ghostex-chat-model-menu-error > :last-child {
+  color: var(--menu-muted);
+  font-weight: 400;
+}
+
+.ghostex-chat-model-menu-tray {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-top: 1px solid var(--menu-hairline);
+}
+
+.ghostex-chat-model-menu-tray-anchor {
+  position: relative;
+}
+
+.ghostex-chat-model-menu-tray-row {
+  display: flex;
+  height: 30px;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--foreground) 90%, transparent);
+  cursor: pointer;
+}
+
+.ghostex-chat-model-menu-tray-row[data-active] {
+  background: var(--menu-selected);
+  color: var(--foreground);
+}
+
+.ghostex-chat-model-menu-tray-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghostex-chat-model-menu-tray-value {
+  max-width: 100px;
+  overflow: hidden;
+  color: var(--menu-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghostex-chat-model-menu-tray-row > svg {
+  flex: none;
+  color: var(--menu-muted);
+}
+
+.ghostex-chat-model-menu-tray-row[aria-selected='true'] > svg {
+  color: var(--foreground);
+}
+
+/* The card opens upwards from the composer, so the side list grows upwards from its row too. */
+.ghostex-chat-model-menu-flyout {
+  position: absolute;
+  bottom: -4px;
+  left: calc(100% + 10px);
+  z-index: 1;
+  display: flex;
+  width: 232px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--menu-hairline);
+  border-radius: 12px;
+  background: var(--popover);
+  box-shadow: var(--shadow-lg, 0 10px 30px rgb(0 0 0 / 0.3));
+}
+
+.ghostex-chat-model-menu-flyout[data-side='left'] {
+  right: calc(100% + 10px);
+  left: auto;
+}
+
+.ghostex-chat-model-menu-flyout-heading {
+  padding: 6px 8px 4px;
+  color: var(--menu-muted);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ghostex-chat-model-menu-flyout-choices {
+  display: flex;
+  max-height: 240px;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.ghostex-chat-model-menu-default {
+  color: var(--menu-muted);
+  font-size: 0.625rem;
+  font-weight: 600;
+}

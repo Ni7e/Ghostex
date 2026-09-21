@@ -21,6 +21,8 @@ pub(in crate::app::native_chat) struct ChatOptionMenu {
     /// Where each depth's panel was anchored, so a panel can reopen in place.
     anchors: Vec<(Bounds<Pixels>, f32, bool)>,
     parent: *mut std::ffi::c_void,
+    /// Opened at the pointer (right-click menus), drawn with `MenuMetrics::CONTEXT`.
+    compact: bool,
 }
 
 pub(super) struct ChatOptionMenuPanel {
@@ -37,12 +39,22 @@ pub(super) struct ChatOptionMenuPanel {
     pub(super) accounts_customize: bool,
     /// Screen bounds of the panel's account preference select, where its dropdown opens.
     pub(super) select_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// The model picker's cursor, search field and open side list, when this panel is that picker.
+    pub(super) model_menu: Option<super::model_menu::ModelMenuState>,
     was_active: bool,
     _activation: Subscription,
     _chat_subscription: Option<Subscription>,
 }
 
 impl ChatOptionMenu {
+    pub(super) fn metrics(&self) -> super::geometry::MenuMetrics {
+        if self.compact {
+            super::geometry::MenuMetrics::CONTEXT
+        } else {
+            super::geometry::MenuMetrics::REGULAR
+        }
+    }
+
     pub(in crate::app::native_chat) fn close(
         &mut self,
         command: Option<Value>,
@@ -194,10 +206,17 @@ impl ChatOptionMenu {
         self.truncate(depth, false, cx);
         let scale = self.appearance.scale;
         let available = self.source_bounds;
+        let metrics = self.metrics();
+        let width = if self.compact {
+            super::geometry::fit_width(&rows, width, &self.appearance, cx)
+        } else {
+            width
+        };
         let width = px(width * scale).min(available.size.width - px(24.0 * scale));
         let heights = match super::geometry::measure_rows(
             &rows,
             f32::from(width) / scale,
+            metrics,
             &self.appearance,
             cx,
         ) {
@@ -210,9 +229,9 @@ impl ChatOptionMenu {
                 return;
             }
         };
-        let height = px((14.0
+        let height = px((metrics.chrome()
             + heights.iter().sum::<f32>()
-            + 2.0 * (rows.len().saturating_sub(1)) as f32)
+            + metrics.gap * (rows.len().saturating_sub(1)) as f32)
             * scale)
         .min(available.size.height - px(24.0 * scale));
         let margin = px(12.0 * scale);
@@ -246,6 +265,7 @@ impl ChatOptionMenu {
         let menu = cx.entity();
         let parent = self.parent;
         let accounts_customize = rows.first().is_some_and(|row| row["customize"] == true);
+        let compact = self.compact;
         self.opening = true;
         cx.defer(move |cx| {
             let result = cx.open_window(
@@ -265,6 +285,9 @@ impl ChatOptionMenu {
                 {
                     let menu = menu.clone();
                     move |window, cx| {
+                        if compact {
+                            super::platform::prepare_context_menu(window);
+                        }
                         crate::app::window::attach_gpui_app_modal_window_to_main_window(
                             window, parent,
                         );
@@ -361,9 +384,17 @@ impl ChatOptionMenu {
                                         },
                                     )
                                 })
+                            } else if rows.first().is_some_and(|row| row["modelMenu"].is_object()) {
+                                menu.read(cx).chat.upgrade().map(|chat| {
+                                    cx.observe(&chat, |panel: &mut ChatOptionMenuPanel, _, cx| {
+                                        panel.model_menu_changed(cx)
+                                    })
+                                })
                             } else {
                                 None
                             };
+                            let model_menu =
+                                super::model_menu::ModelMenuState::new(&rows, &menu, window, cx);
                             ChatOptionMenuPanel {
                                 menu,
                                 depth,
@@ -376,6 +407,7 @@ impl ChatOptionMenu {
                                 hover_task: None,
                                 accounts_customize,
                                 select_bounds: Rc::new(Cell::new(Bounds::default())),
+                                model_menu,
                                 was_active: window.is_window_active(),
                                 _activation: activation,
                                 _chat_subscription: chat_subscription,
@@ -501,6 +533,7 @@ impl NativeChatView {
             closed: false,
             anchors: vec![],
             parent,
+            compact: below,
         });
         let anchor = Bounds::new(source_bounds.origin + trigger.origin, trigger.size);
         menu.update(cx, |menu, cx| {

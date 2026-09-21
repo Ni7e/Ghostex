@@ -55,6 +55,16 @@ fn pill(
     } else {
         label
     };
+    // The merged pill: the picker's own label, then its reasoning and context window, muted.
+    let merged = kind == "model" && values["modelMenu"].is_object();
+    let display = values["modelMenu"]["pill"]["label"]
+        .as_str()
+        .filter(|_| merged)
+        .unwrap_or(display);
+    let suffix = values["modelMenu"]["pill"]["suffix"]
+        .as_str()
+        .filter(|_| merged && !loading)
+        .map(str::to_owned);
     let mut item = div()
         .id(format!("chat-{kind}-picker"))
         .relative()
@@ -62,7 +72,7 @@ fn pill(
         .aria_label(title.clone())
         .chat_cursor_pointer()
         .min_w_0()
-        .max_w(px(160.0 * scale))
+        .max_w(px(if merged { 248.0 } else { 160.0 } * scale))
         .h(px(24.0 * scale))
         .px(px(if icon_only { 6.0 } else { 10.0 } * scale))
         .flex()
@@ -154,6 +164,16 @@ fn pill(
             .when(!loading, |item| {
                 item.child(div().min_w_0().text_ellipsis().child(display.to_owned()))
             })
+            .when_some(suffix, |item, suffix| {
+                item.child(
+                    div()
+                        .min_w_0()
+                        .flex_shrink(1000.0)
+                        .text_ellipsis()
+                        .text_color(appearance.muted.opacity(0.8))
+                        .child(suffix),
+                )
+            })
             .when(loading, |item| {
                 item.child(
                     div()
@@ -163,7 +183,7 @@ fn pill(
                         .bg(appearance.primary.opacity(0.24)),
                 )
             });
-        if kind == "options" && !loading {
+        if (kind == "options" || merged) && !loading {
             for (key, icon) in [("fast", "bolt"), ("plan", "map")] {
                 if values[key] == true {
                     item = item.child(
@@ -184,7 +204,9 @@ fn pill(
         );
     }
     item.on_click(cx.listener(move |chat, _, window, cx| {
-        if kind == "model" || !loading {
+        if merged {
+            chat.show_model_menu(bounds.get(), window, cx);
+        } else if kind == "model" || !loading {
             chat.show_option_menu(kind, bounds.get(), window, cx);
         }
     }))
@@ -202,15 +224,37 @@ fn pill(
 }
 
 impl NativeChatView {
+    /// `optionLabels`, plus the picker's pill label when this agent has the merged model picker.
+    fn option_pill_values(&self) -> Value {
+        let mut values = self.snapshot["optionLabels"].clone();
+        if self.snapshot["modelMenu"].is_object() && values.is_object() {
+            values["modelMenu"] = serde_json::json!({"pill": self.snapshot["modelMenu"]["pill"]});
+        }
+        values
+    }
+
     pub(super) fn option_pills_width(
         &self,
         appearance: &ChatAppearance,
         window: &gpui::Window,
     ) -> f32 {
-        let values = &self.snapshot["optionLabels"];
+        let values = &self.option_pill_values();
+        let merged = values["modelMenu"].is_object();
         let scale = appearance.scale;
         let mut style = window.text_style();
         style.font_family = appearance.font.clone().into();
+        let text_width = |label: &str| {
+            window
+                .text_system()
+                .shape_line(
+                    label.to_owned().into(),
+                    px(13.0 * scale),
+                    &[style.to_run(label.len())],
+                    None,
+                )
+                .width
+                .as_f32()
+        };
         let measure = |kind: &str| {
             let label = values[if kind == "model" {
                 "modelDisplay"
@@ -219,19 +263,20 @@ impl NativeChatView {
             }]
             .as_str()
             .unwrap_or_default();
+            let pill = &values["modelMenu"]["pill"];
+            let label = pill["label"]
+                .as_str()
+                .filter(|_| kind == "model")
+                .unwrap_or(label);
+            // The merged pill's muted suffix, with the 4px gap that sets it off from the name.
+            let suffix = pill["suffix"]
+                .as_str()
+                .filter(|_| kind == "model" && !label.is_empty())
+                .map_or(0.0, |suffix| text_width(suffix) + 4.0 * scale);
             let text_width = if label.is_empty() {
                 (if kind == "model" { 52.0 } else { 36.0 }) * scale
             } else {
-                window
-                    .text_system()
-                    .shape_line(
-                        label.to_owned().into(),
-                        px(13.0 * scale),
-                        &[style.to_run(label.len())],
-                        None,
-                    )
-                    .width
-                    .as_f32()
+                text_width(label) + suffix
             };
             let agent = if kind == "model" && values["agentIcon"].is_string() {
                 if values["accountIndicator"]
@@ -245,7 +290,7 @@ impl NativeChatView {
             } else {
                 0.0
             };
-            let badges = if kind == "options" && !label.is_empty() {
+            let badges = if (kind == "options" || merged) && !label.is_empty() {
                 ["fast", "plan"]
                     .iter()
                     .filter(|key| values[**key] == true)
@@ -254,7 +299,8 @@ impl NativeChatView {
             } else {
                 0.0
             };
-            (text_width + (36.0 + agent + badges) * scale).min(160.0 * scale)
+            (text_width + (36.0 + agent + badges) * scale)
+                .min(if merged { 248.0 } else { 160.0 } * scale)
         };
         if values["showModel"] != true {
             return 0.0;
@@ -263,7 +309,7 @@ impl NativeChatView {
         if self.snapshot["contextMeter"].is_object() {
             width += 32.0 * scale;
         }
-        if values["showOptions"] == true {
+        if values["showOptions"] == true && !merged {
             width += measure("options") + 2.0 * scale;
         }
         if self.snapshot["optionMenus"]["mode"]
@@ -282,7 +328,8 @@ impl NativeChatView {
         appearance: &ChatAppearance,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let values = &self.snapshot["optionLabels"];
+        let values = &self.option_pill_values();
+        let merged = values["modelMenu"].is_object();
         let open =
             |kind: &str| self.chat_menu_is_open(super::menu_toggle::option_pill_trigger_id(kind));
         div()
@@ -298,6 +345,7 @@ impl NativeChatView {
             })
             .when(
                 values["showOptions"] == true
+                    && !merged
                     && self.snapshot["composerOverflow"]["optionsOverflowed"] != true,
                 |item| {
                     item.child(pill(
