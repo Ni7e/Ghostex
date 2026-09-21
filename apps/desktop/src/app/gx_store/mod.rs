@@ -33,13 +33,15 @@
 //! key, the debounced push and the echo funnel for any client-owned document, with
 //! `collection_menu.rs` holding the three Project Group menu items that write the same collections
 //! document (Rename, a colour, Ungroup), `space_editor.rs` the New/Edit Space dialog's result,
-//! `space_switch.rs` the row a Space switch restores the focus to, and
+//! `space_switch.rs` the row a Space switch restores the focus to,
+//! `added_project.rs` the Space and the order a newly added project joins, and
 //! `diagnostics_project_docs.rs` their record lines;
 //! `sidebar_ui_paths.rs` holds the three routes into the sidebar's own state that are NOT
 //! sidebar commands (the per-Space session memory, the Space-editor delete, and the project slot
 //! hotkey), and `sidebar_slot_jump.rs` the rest of that hotkey's jump, its focus and its reveal;
 //! `diagnostics.rs` writes the log lines.
 
+mod added_project;
 mod burst;
 mod client_document;
 mod collection_menu;

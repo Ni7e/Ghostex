@@ -18,8 +18,16 @@ export function receiveNativeSidebarEvent(
       delete ui.collapse.selectedSpaceIdBySectionKey[key];
   }
   if (message.type === 'promptGitCommit') openAppModal({ type: 'open', modal: 'gitCommit', gitCommitDraft: message });
-  if (message.type === 'assignAddedProjectToSelectedSpace') {
-    const machineId = message.remoteMachineId ?? 'local';
+  /*
+  CDXC:Spaces 2026-09-21 WHY:
+  THIS COMPUTER's leg is gone: the app writes the Space membership and holds the project id until
+  the daemon lists it, then posts the same `syncGroupOrder`
+  (apps/desktop/src/app/gx_store/added_project.rs). Doing it here as well would push the Spaces
+  document a second time and post a second order for one added project. A REMOTE machine is
+  unchanged, because `updateRemoteSidebarSpaces` is a direct call down that machine's tunnel.
+  */
+  if (message.type === 'assignAddedProjectToSelectedSpace' && message.remoteMachineId) {
+    const machineId = message.remoteMachineId;
     const section = describeNativeSidebarMachine(ui, machineId);
     const projectId = message.projectId.trim();
     if (!projectId) return;

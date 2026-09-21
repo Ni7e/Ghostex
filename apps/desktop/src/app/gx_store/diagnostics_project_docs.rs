@@ -15,6 +15,7 @@ use serde_json::json;
 
 use ghostex_gx_core::SpaceEditorMode;
 
+use super::added_project::AddedProjectCounters;
 use super::collection_menu::CollectionMenuCounters;
 use super::diagnostics::{
     GxStoreDiagnostics, MAX_SIDEBAR_ACTION_RECORDS, record, routine_logging_enabled,
@@ -99,6 +100,25 @@ impl GxStoreDiagnostics {
                 "groupRestores": counters.group_restores,
                 "empty": counters.empty,
                 "kept": counters.kept,
+                "handOffs": counters.hand_offs,
+            }),
+        );
+    }
+
+    /// One line per added project, on the way in and again when its group appears: the run's
+    /// totals and whether a project is still being held. Never the project's id or its path.
+    pub(super) fn added_project_noted(&mut self, counters: AddedProjectCounters, holding: bool) {
+        if !self.project_doc_edit_budget() {
+            return;
+        }
+        record(
+            "gxStore.addedProject",
+            json!({
+                "holding": holding,
+                "added": counters.added,
+                "spaceMemberships": counters.space_memberships,
+                "placements": counters.placements,
+                "placementsUnchanged": counters.placements_unchanged,
                 "handOffs": counters.hand_offs,
             }),
         );

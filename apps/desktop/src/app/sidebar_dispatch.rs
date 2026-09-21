@@ -489,7 +489,7 @@ impl GhostexGpuiApp {
 
     /// CDXC:Spaces 2026-09-15 DECISION:
     /// User: a project added through the Add Project dialog joins the Space that is open in the sidebar and goes to the top of it.
-    /// SidebarApp owns the Space document and the selected Space, so only the added project's raw id and the owning machine id cross, under the inbound `assignAddedProjectToSelectedSpace` type, and nothing is applied here.
+    /// The app applies both halves for THIS COMPUTER (gx_store/added_project.rs) and still tells the sidebar page, which keeps them for a remote machine and keeps its own selected Space; only the added project's raw id and the owning machine id cross under the inbound `assignAddedProjectToSelectedSpace` type.
     /// It must be dispatched before the project activation so the membership exists when the activation reveal resolves the project's Space.
     pub(crate) fn forward_gpui_added_project_to_sidebar(
         &mut self,
@@ -513,9 +513,11 @@ impl GhostexGpuiApp {
             "type".to_string(),
             serde_json::json!("assignAddedProjectToSelectedSpace"),
         );
-        if let Some(machine_id) = remote_machine_id.and_then(bounded) {
+        let remote_machine_id = remote_machine_id.and_then(bounded);
+        if let Some(machine_id) = &remote_machine_id {
             message.insert("remoteMachineId".to_string(), serde_json::json!(machine_id));
         }
+        self.gx_store_note_added_project(&project_id, remote_machine_id.as_deref(), cx);
         self.dispatch_gpui_sidebar_host_message(serde_json::Value::Object(message), cx)
     }
 

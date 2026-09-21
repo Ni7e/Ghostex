@@ -140,6 +140,8 @@ pub(crate) struct GxStoreHost {
     pub(super) space_editor: super::space_editor::SpaceEditorCounters,
     /// The focus a Space switch restores.
     pub(super) space_switch: super::space_switch::SpaceSwitchCounters,
+    /// The project the Add Project dialog last reported, and where it goes.
+    pub(super) added_project: super::added_project::AddedProjectHost,
     /// The last-seen copy of every remote machine: which ones owe a write, and what is unwritten.
     pub(crate) last_seen: super::remote_last_seen::RemoteLastSeenWriter,
     /// The collection a project move just created, which the renderer opens its Rename on. Held
@@ -489,6 +491,9 @@ impl GhostexGpuiApp {
         if self.gx_store_after_pump(outcome.tab_lists_changed, cx) {
             cx.notify();
         }
+        // A project the Add Project dialog reported is held until the daemon lists it; this is the
+        // burst that can be the one carrying it (gx_store/added_project.rs).
+        self.gx_store_place_added_project(cx);
         // The list reads the store, so it is brought up to date once per burst rather than per
         // event, and does nothing at all when the burst changed nothing it draws.
         self.gx_store_update_sidebar_list(cx);

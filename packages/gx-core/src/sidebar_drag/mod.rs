@@ -6,6 +6,9 @@
 //! messages do, which is either an edit of the workspace session groups document (under the
 //! pending-push guard in `crate::workspace_groups`) or the daemon's own `/api/updateSessionOrder`.
 //!
+//! `added_project` is the one placement that is not a gesture: the project the Add Project dialog
+//! just added joining the open Space and moving to the top of it.
+//!
 //! The PROJECT moves are `project_inventory` (the group order they are computed against),
 //! `project_move` (`moveGroup`, `moveToSpace`, `moveToCollection`, `moveCollection`, `moveSpace`,
 //! `projectMembership` and `spaceMembership`) and `project_order_write` (what the `syncGroupOrder`
@@ -14,13 +17,17 @@
 //! collection JOINS that collection in the same gesture, so a port that wrote only the project
 //! order would reorder the row and silently drop it out of its folder.
 
+mod added_project;
 mod inventory;
 mod order_write;
-mod project_inventory;
+pub(crate) mod project_inventory;
 mod project_move;
 mod project_order_write;
 mod session_move;
 
+pub use added_project::{
+    plan_added_project_placement, plan_added_project_space_membership, AddedProjectPlacement,
+};
 pub use inventory::sidebar_group_membership;
 pub use order_write::{
     owns_order_write_message, plan_order_write, OrderWrite, OrderWritePlan,
