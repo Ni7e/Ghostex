@@ -126,10 +126,14 @@ pub fn owns_order_write_message(message: &Value) -> bool {
 /// What an order message does to the document the sync holds.
 ///
 /// `None` means this payload is NOT ported and must reach the old runtime untouched. The one shape
-/// that reaches it is a REMOTE row or a remote group: the document keys a remote project by
-/// `remote:<machine>:project:<id>`, its echo comes back over that machine's tunnel, and the store
-/// reads user-made groups off THIS COMPUTER's side state only, so a remote edit here would write a
-/// document half the readers cannot see. Every machine is disabled today, so nothing exercises it.
+/// that reaches it is a REMOTE row or a remote group, and the document is NOT the reason: a remote
+/// project's user-made groups live in THIS computer's document under `remote:<machine>:project:<id>`,
+/// and the store reads them there (`PresentationStore::user_groups_of_project`). The reasons are
+/// these. `syncSessionOrder` and `moveSessionToGroup` naming a remote row are posted only by
+/// `reorderNativeSidebar`, which returns for a remote group before it posts anything, so neither
+/// can arrive from the sidebar. `createGroupFromSession` on a remote row CAN arrive (Move to New
+/// Group), and its edit is portable, but it then makes the new group active WITHOUT making its
+/// project active, which is remote focus, and remote focus is still the old runtime's.
 pub fn plan_order_write(
     document: &WorkspaceGroupsDocument,
     message: &Value,
