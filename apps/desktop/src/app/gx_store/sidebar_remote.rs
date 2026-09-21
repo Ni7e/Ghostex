@@ -85,7 +85,7 @@ pub(crate) struct SidebarRemoteHost {
     summary_at: Option<Instant>,
     summary_written: Option<(
         SidebarRemoteCounters,
-        [u64; 5],
+        [u64; 7],
         super::sidebar_remote_focus::SidebarRemoteFocusCounters,
     )>,
 }
@@ -298,6 +298,11 @@ impl GhostexGpuiApp {
             lifecycle.reload_sets,
             lifecycle.reload_set_rows,
             lifecycle.reload_sets_stopped,
+            // The More menu's sort rows, answered with the empty plan (gx_store/sidebar_open.rs).
+            // They ride here rather than only on the per-command line, so a run in which the user
+            // clicked neither still says so with both at zero.
+            self.gx_store.sidebar_open.sort_rows,
+            self.gx_store.sidebar_open.sort_rows_declined,
         ];
         let focus = self.gx_store_remote_focus_counters();
         let host = &mut self.gx_store.sidebar_remote;
@@ -321,6 +326,8 @@ impl GhostexGpuiApp {
             reload_sets,
             reload_set_rows,
             reload_sets_stopped,
+            sort_rows,
+            sort_rows_declined,
         ] = local;
         record(
             "gxStore.sidebarActions.summary",
@@ -333,6 +340,8 @@ impl GhostexGpuiApp {
                     "reloadSets": reload_sets,
                     "reloadSetRows": reload_set_rows,
                     "reloadSetsStopped": reload_sets_stopped,
+                    "sortRows": sort_rows,
+                    "sortRowsDeclined": sort_rows_declined,
                 },
             }),
         );

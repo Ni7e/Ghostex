@@ -60,6 +60,7 @@ impl GxStoreDiagnostics {
                 "closes": counters.closes,
                 "gxserverStarts": counters.gxserver_starts,
                 "nothing": counters.nothing,
+                "sortRows": counters.sort_rows,
                 "declinedSource": counters.declined_source,
             }),
         );

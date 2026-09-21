@@ -13,7 +13,7 @@
 //! store and the host opens one kind of thing.
 //!
 //! **The counters that prove this path fires in the app** are `opens`, `closes`,
-//! `gxserverStarts` and `nothing` on `gxStore.sidebarOpen`. A run where the user used the More
+//! `gxserverStarts`, `nothing` and `sortRows` on `gxStore.sidebarOpen`. A run where the user used the More
 //! menu, a machine's Configure, the Space editor or a project's Add Worktree and `opens` is zero
 //! means the command never reached here.
 //!
@@ -24,7 +24,7 @@
 
 use std::time::Instant;
 
-use ghostex_gx_core::{owns_open_command, plan_open_action};
+use ghostex_gx_core::{SORT_ACTIONS, owns_open_command, plan_open_action};
 use serde_json::Value;
 
 use crate::GhostexGpuiApp;
@@ -41,6 +41,13 @@ pub(crate) struct SidebarOpenCounters {
     pub(crate) gxserver_starts: u64,
     /// A command whose answer is deliberately nothing: a project row the drawn list does not hold.
     pub(crate) nothing: u64,
+    /// The More menu's two sort rows, whose answer is the empty plan because the old runtime's
+    /// path ends in `handleUnsupportedSidebarMessage` (gx-core `sidebar_actions/sort.rs`). Counted
+    /// apart from `nothing` so a click on either row is visible in the run.
+    pub(crate) sort_rows: u64,
+    /// Sort-row clicks that went to the old runtime because the renderer is not drawing the
+    /// store's list. Also inside `declined_source`.
+    pub(crate) sort_rows_declined: u64,
     /// Commands the store owns but did not answer because the renderer is not drawing its list.
     pub(crate) declined_source: u64,
 }
@@ -57,8 +64,16 @@ impl GhostexGpuiApp {
         if !owns_open_command(command) {
             return false;
         }
+        let sort_row = command.get("type").and_then(Value::as_str) == Some("sidebarAction")
+            && command
+                .get("action")
+                .and_then(Value::as_str)
+                .is_some_and(|action| SORT_ACTIONS.contains(&action));
         if !self.gx_store_sidebar_draws_store_list() {
             self.gx_store.sidebar_open.declined_source += 1;
+            if sort_row {
+                self.gx_store.sidebar_open.sort_rows_declined += 1;
+            }
             return false;
         }
         let started = Instant::now();
@@ -67,7 +82,9 @@ impl GhostexGpuiApp {
         };
         let plan_us = started.elapsed().as_micros() as u64;
         self.gx_store.sidebar_open.handled += 1;
-        if plan.effects.is_empty() {
+        if sort_row {
+            self.gx_store.sidebar_open.sort_rows += 1;
+        } else if plan.effects.is_empty() {
             self.gx_store.sidebar_open.nothing += 1;
         }
         for effect in &plan.effects {
