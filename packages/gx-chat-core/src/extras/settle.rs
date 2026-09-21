@@ -11,7 +11,9 @@ use serde_json::Value;
 
 use crate::effect::Effect;
 use crate::event::Event;
+use crate::extras::panels::FLEET_CLOCK_TICK_MS;
 use crate::extras::{panels, save_markdown, search, subagent, terminal_tail, working_strip};
+use crate::session::timers::TimerTable;
 use crate::state::{
     ChatContext, ChatState, LOADING_STAGE_BLANK, LOADING_STAGE_INDICATOR, LOADING_STAGE_RETRY,
 };
@@ -77,7 +79,7 @@ pub fn settle(
         terminal_tail::retire(&mut state.extras.terminal_tail);
     }
     search::settle(&mut state.extras.search, &items);
-    state.extras.next_wake_at_ms = next_wake(state, context);
+    arm_timers(state, context);
     effects
 }
 
@@ -151,38 +153,81 @@ fn transcript_items(state: &ChatState, context: &ChatContext) -> Vec<Value> {
         .collect()
 }
 
-/// The soonest moment family f wants to be re-published.
+/// Keeps family f's rows in the core's timer table, which is what the frame's `nextWakeMs` reads.
 ///
-/// Family a owns the single [`crate::Effect::SetTimer`], so this is family f's contribution to it
-/// rather than a timer of its own.
-fn next_wake(state: &ChatState, context: &ChatContext) -> Option<f64> {
-    let mut soonest: Option<f64> = None;
-    let mut consider = |at: f64| {
-        soonest = Some(soonest.map_or(at, |current: f64| current.min(at)));
-    };
-    // The fleet clock re-publishes once a second while any row's clock is still moving.
-    let (_, _, ticking) = panels::project(state, context);
-    if ticking {
-        consider(context.now_ms + panels::FLEET_CLOCK_TICK_MS);
-    }
-    if state.session.terminal_activity.is_some() {
-        consider(context.now_ms + crate::extras::activity::ACTIVITY_CLOCK_TICK_MS as f64);
-    }
-    if let Some(started) = state.extras.loading_started_at_ms {
-        for delay in [
-            crate::extras::welcome::LOADING_INDICATOR_DELAY_MS as f64,
-            crate::extras::welcome::LOADING_RETRY_DELAY_MS as f64,
-        ] {
-            if context.now_ms < started + delay {
-                consider(started + delay);
-            }
+/// The five clocks the TypeScript arms are all here: the fleet's once a second while any row's
+/// clock is moving, the terminal activity's once a second while the CLI painted one, the two
+/// loading stages, the subagent viewer's poll, and its settle hold. Each is a key, so re-arming is
+/// idempotent and a surface that goes away cancels its own row.
+fn arm_timers(state: &mut ChatState, context: &ChatContext) {
+    let (_, _, fleet_ticking) = panels::project(state, context);
+    let activity_ticking = state
+        .session
+        .terminal_activity
+        .as_ref()
+        .and_then(|activity| activity.get("elapsedSeconds"))
+        .is_some();
+    let loading = state.extras.loading_started_at_ms;
+    let poll = state.extras.subagent.poll_at_ms;
+    let hold = state.extras.subagent.hold_until_ms;
+    let now = context.now_ms;
+    let timers = &mut state.core.timers;
+
+    interval(timers, FLEET_CLOCK, fleet_ticking, now, FLEET_CLOCK_TICK_MS);
+    interval(
+        timers,
+        ACTIVITY_CLOCK,
+        activity_ticking,
+        now,
+        crate::extras::activity::ACTIVITY_CLOCK_TICK_MS as f64,
+    );
+    match loading {
+        Some(started) => {
+            deadline(
+                timers,
+                LOADING_INDICATOR,
+                Some(started + crate::extras::welcome::LOADING_INDICATOR_DELAY_MS as f64),
+                now,
+            );
+            deadline(
+                timers,
+                LOADING_RETRY,
+                Some(started + crate::extras::welcome::LOADING_RETRY_DELAY_MS as f64),
+                now,
+            );
+        }
+        None => {
+            timers.cancel(LOADING_INDICATOR);
+            timers.cancel(LOADING_RETRY);
         }
     }
-    if let Some(due) = state.extras.subagent.poll_at_ms {
-        consider(due);
+    deadline(timers, SUBAGENT_POLL, poll, now);
+    deadline(timers, SUBAGENT_HOLD, hold, now);
+}
+
+/// Family f's timer keys, namespaced so no other family can collide with them.
+const FLEET_CLOCK: &str = "extras.fleetClock";
+const ACTIVITY_CLOCK: &str = "extras.activityClock";
+const LOADING_INDICATOR: &str = "extras.loadingIndicator";
+const LOADING_RETRY: &str = "extras.loadingRetry";
+const SUBAGENT_POLL: &str = "extras.subagentPoll";
+const SUBAGENT_HOLD: &str = "extras.subagentHold";
+
+/// A repeating clock, armed while `live` and dropped when it stops.
+fn interval(timers: &mut TimerTable, key: &str, live: bool, now_ms: f64, every_ms: f64) {
+    if !live {
+        timers.cancel(key);
+    } else if !timers.is_armed(key) {
+        timers.arm_interval(key, now_ms, every_ms);
     }
-    if let Some(until) = state.extras.subagent.hold_until_ms {
-        consider(until);
+}
+
+/// A one-shot at an absolute moment, dropped when the deadline goes away.
+fn deadline(timers: &mut TimerTable, key: &str, at_ms: Option<f64>, now_ms: f64) {
+    match at_ms {
+        Some(at) => timers.arm(key, now_ms, (at - now_ms).max(0.0)),
+        None => {
+            timers.cancel(key);
+        }
     }
-    soonest
 }
