@@ -61,7 +61,7 @@ pub(crate) struct WorkareaHeaderSplitButton {
     pub(crate) kind: GpuiTitlebarPopupKind,
     pub(crate) icon: &'static str,
     pub(crate) icon_size: f32,
-    pub(crate) label: &'static str,
+    pub(crate) label: SharedString,
     pub(crate) tooltip: &'static str,
     /// The diagnostic name for a press on the main half, kept identical to the name the old
     /// titlebar button logged so the popup repro logs stay comparable.
@@ -70,6 +70,34 @@ pub(crate) struct WorkareaHeaderSplitButton {
     pub(crate) dimmed: bool,
     /// Replaces the icon with the shared busy spinner, as the Git button did.
     pub(crate) busy: bool,
+}
+
+/// A name longer than this is cut and given an ellipsis, so one verbose Action cannot push Open
+/// and Commit out of the header.
+const WORKAREA_HEADER_QUICK_ACTION_LABEL_MAX_CHARS: usize = 9;
+
+/// CDXC:Titlebar 2026-09-21 DECISION:
+/// User: the Quick Actions split button shows the name of the Action that was last used, like it
+/// already does for its icon, cut to nine characters with an ellipsis when it is longer. "Start"
+/// remains only when no Action is configured (or the name is blank). Supersedes the fixed "Start"
+/// label from the 2026-09-20 split-button decision.
+fn workarea_header_quick_action_label(action: Option<&GpuiTitlebarAction>) -> SharedString {
+    let Some(name) = action
+        .map(|action| action.name.trim())
+        .filter(|name| !name.is_empty())
+    else {
+        return SharedString::new_static("Start");
+    };
+    let mut chars = name.chars();
+    let head: String = chars
+        .by_ref()
+        .take(WORKAREA_HEADER_QUICK_ACTION_LABEL_MAX_CHARS)
+        .collect();
+    if chars.next().is_some() {
+        SharedString::from(format!("{head}…"))
+    } else {
+        SharedString::from(head)
+    }
 }
 
 fn run_quick_action(
@@ -345,6 +373,7 @@ impl GhostexGpuiApp {
     ) -> impl IntoElement {
         let active_action = self.active_gpui_titlebar_action();
         let actions_icon_path = titlebar_action_icon_path(active_action.as_ref());
+        let actions_label = workarea_header_quick_action_label(active_action.as_ref());
         /*
         Quick Actions is a discoverable header control on desktop, including
         before the first Action has been configured. Keep it visible on Windows
@@ -389,7 +418,7 @@ impl GhostexGpuiApp {
                             kind: GpuiTitlebarPopupKind::Actions,
                             icon: actions_icon_path,
                             icon_size: 16.0,
-                            label: "Start",
+                            label: actions_label,
                             tooltip: TITLEBAR_ACTIONS_TOOLTIP,
                             primary_intent: "runPrimaryAction",
                             dimmed: self.titlebar_quick_action_button_on_cooldown(),
@@ -412,7 +441,7 @@ impl GhostexGpuiApp {
                             kind: GpuiTitlebarPopupKind::OpenTargets,
                             icon: open_target_icon_path,
                             icon_size: 13.0,
-                            label: "Open",
+                            label: "Open".into(),
                             tooltip: TITLEBAR_OPEN_TARGETS_TOOLTIP,
                             primary_intent: "openPrimaryTarget",
                             dimmed: false,
@@ -439,7 +468,7 @@ impl GhostexGpuiApp {
                                 kind: GpuiTitlebarPopupKind::Git,
                                 icon: git_icon_path,
                                 icon_size: 16.0,
-                                label: "Commit",
+                                label: "Commit".into(),
                                 tooltip: TITLEBAR_GIT_TOOLTIP,
                                 primary_intent: "togglePopup",
                                 dimmed: false,
