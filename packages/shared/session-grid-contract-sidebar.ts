@@ -1200,13 +1200,14 @@ export type SidebarCommandRunStateClearedMessage = {
 };
 
 /**
- * CDXC:Browser 2026-08-18:
+ * CDXC:Sidebar 2026-09-20 WHY:
  * A host-owned request to make one existing session row visible in the sidebar:
  * expand every collapsed container above it and scroll it into view if it is
- * off screen. gpui sends this when the user opens a new Browser tab, because a
- * background tab (middle-click) has no other visible feedback. `requestId`
- * makes repeat reveals of the same row distinct one-shot requests, since a
- * second middle-click on the same link must reveal it again.
+ * off screen. `requestId` makes repeat reveals of the same row distinct one-shot
+ * requests, since the same row may have to be revealed twice in a row. This
+ * supersedes the 2026-08-18 note that named a new Browser tab as the sender:
+ * browser tabs are not sidebar rows any more, and a new one reveals itself in
+ * the view panel's tab strip instead.
  */
 export type SidebarRevealSessionMessage = {
   requestId: number;

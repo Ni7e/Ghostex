@@ -16,7 +16,8 @@ impl GhostexGpuiApp {
     /// CDXC:Sidebar 2026-09-20 DECISION:
     /// User (screen 10): "The hot zone is a real, exact edge strip, not an invisible overlay across
     /// the content." So it is a sibling of the workspace column in the body row, the width the user
-    /// picked for this gesture, taken from the workarea while the sidebar is collapsed, rather than
+    /// picked for this gesture, taken from the workarea while something is folded away (at the window's
+    /// edge with the sidebar collapsed, just past its divider with it docked), rather than
     /// a layer over the view or a window-level pointer hook. It paints the workspace background and
     /// carries nothing but its own hover, and it is the single trigger on all three platforms:
     /// AppKit used to read the pointer's screen position against a rectangle of its own, which

@@ -231,6 +231,14 @@ pub(crate) struct GpuiAccountUsageMeter {
     pub(crate) pressure: f64,
 }
 
+/// The badge text size beside a meter's glyph. A host that lines its meters up in columns
+/// needs it, and the renderer below, to agree on how wide a character cell is.
+pub(crate) const ACCOUNT_USAGE_BADGE_TEXT_SIZE: f32 = 9.5;
+
+/// The glyph box drawn beside the badge, and the gap between the two.
+pub(crate) const ACCOUNT_USAGE_BADGE_GLYPH_WIDTH: f32 = 19.2;
+pub(crate) const ACCOUNT_USAGE_BADGE_GAP: f32 = 4.0;
+
 /// The chrome the hosting surface wants around a meter. The meter renderer takes this
 /// rather than reading the titlebar constants, so one implementation serves every host.
 pub(crate) struct GpuiAccountUsageMeterHost {
@@ -469,7 +477,11 @@ impl GhostexGpuiApp {
         let open_background = host.open_background;
 
         let glyph = |size: f32| {
-            let size = if indicator.is_some() { 19.2 } else { size } * scale;
+            let size = if indicator.is_some() {
+                ACCOUNT_USAGE_BADGE_GLYPH_WIDTH
+            } else {
+                size
+            } * scale;
             div()
                 .relative()
                 .size(px(size))
@@ -578,15 +590,18 @@ impl GhostexGpuiApp {
             .map(|this| {
                 if show_badge {
                     this.child(
-                        h_flex().gap(px(4.0 * scale)).child(glyph(14.0)).child(
-                            v_flex()
-                                .text_size(px(9.5 * scale))
-                                .line_height(px(9.5 * scale))
-                                .font_family(ACCOUNT_INDICATOR_FONT_FAMILY)
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(chrome_color(0xb9b9b9, 0x404040))
-                                .children(badge_lines),
-                        ),
+                        h_flex()
+                            .gap(px(ACCOUNT_USAGE_BADGE_GAP * scale))
+                            .child(glyph(14.0))
+                            .child(
+                                v_flex()
+                                    .text_size(px(ACCOUNT_USAGE_BADGE_TEXT_SIZE * scale))
+                                    .line_height(px(ACCOUNT_USAGE_BADGE_TEXT_SIZE * scale))
+                                    .font_family(ACCOUNT_INDICATOR_FONT_FAMILY)
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(chrome_color(0xb9b9b9, 0x404040))
+                                    .children(badge_lines),
+                            ),
                     )
                 } else {
                     this.child(glyph(18.0))

@@ -736,22 +736,36 @@ impl GhostexGpuiApp {
             return;
         }
 
-        GpuiContextMenu::new()
-            .menu(
-                "Select Tab",
-                Box::new(SelectBrowserTabInPane {
+        /*
+        CDXC:Browser 2026-09-20 DECISION:
+        User: browser tabs left the sidebar for the view panel's tab strip, so the Sleep the sidebar
+        row carried comes with them. The row is offered only while the tab has a page to drop; a tab
+        that is already a restored placeholder has nothing to sleep.
+        */
+        let mut menu = GpuiContextMenu::new().menu(
+            "Select Tab",
+            Box::new(SelectBrowserTabInPane {
+                pane_id: pane_id.0,
+                tab_id: tab_id.0,
+            }),
+        );
+        if self.browser_surfaces.contains_key(&tab_id) {
+            menu = menu.menu(
+                "Sleep Tab",
+                Box::new(SleepBrowserTabInPane {
                     pane_id: pane_id.0,
                     tab_id: tab_id.0,
                 }),
-            )
-            .menu(
-                "Close Tab",
-                Box::new(CloseBrowserTabInPane {
-                    pane_id: pane_id.0,
-                    tab_id: tab_id.0,
-                }),
-            )
-            .show(position, window, cx);
+            );
+        }
+        menu.menu(
+            "Close Tab",
+            Box::new(CloseBrowserTabInPane {
+                pane_id: pane_id.0,
+                tab_id: tab_id.0,
+            }),
+        )
+        .show(position, window, cx);
     }
 
     pub(crate) fn show_command_tab_context_menu(

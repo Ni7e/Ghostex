@@ -26,7 +26,7 @@ import {
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import { createEmptyGpuiAppUserData, createGpuiSidebarSettings } from './helpers/bootstrap';
-import { gpuiBrowserSidebarSessionId, relayoutGpuiSidebarSessions } from './helpers/browser-tabs';
+import { relayoutGpuiSidebarSessions } from './helpers/browser-tabs';
 import { createGpuiSidebarHudState } from './helpers/command-pane';
 import {
   createGpuiGxserverUnavailableSidebarGroups,
@@ -138,7 +138,6 @@ export interface GpuiSidebarRuntimeSidebarGroupMethods {
   createRemoteSidebarGroups(): SidebarSessionGroup[];
   captureRemoteLastSeenPresentations(): void;
   expandRemoteSidebarGroup(group: SidebarSessionGroup): SidebarSessionGroup[];
-  withRemoteBrowserTabSessions(group: SidebarSessionGroup, scopedProjectId: string): SidebarSessionGroup;
   spliceRemoteWorkspaceSubgroups(group: SidebarSessionGroup, scopedProjectId: string): SidebarSessionGroup[];
   ensureActiveProject(
     presentation: GxserverPresentationSnapshot,
@@ -867,45 +866,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
         this.getDelayedSendProjection(createGxserverPresentationProjectSessionId(projectId, sessionId)),
       resolveSessionRoutingId: createGpuiSidebarSessionRoutingId,
       visibleSessionIds: this.visibleSessionIds,
-    }).map((group) => {
-      const projectId = group.projectContext?.editor.projectId;
-      if (!projectId) {
-        return group;
-      }
-      const browserSessions = this.browserTabs
-        .filter((tab) => tab.projectId === projectId)
-        .map((tab, index): SidebarSessionItem => ({
-          activity: 'idle',
-          agentIcon: 'browser',
-          alias: tab.title,
-          column: index % GRID_COLUMN_COUNT,
-          displayTitle: tab.title,
-          ...(tab.faviconUrl ? { faviconDataUrl: tab.faviconUrl } : {}),
-          isFocused: tab.isActive && this.activeProjectId === projectId,
-          isLive: !tab.isSleeping,
-          isRunning: !tab.isSleeping,
-          isSleeping: tab.isSleeping,
-          isVisible: tab.isVisible && this.activeProjectId === projectId,
-          kind: 'browser',
-          lifecycleState: tab.isSleeping ? 'sleeping' : 'running',
-          nativePaneState: tab.isSleeping ? 'unmounted' : 'mounted',
-          primaryTitle: tab.title,
-          row: Math.floor(index / GRID_COLUMN_COUNT),
-          sessionId: gpuiBrowserSidebarSessionId(tab),
-          sessionKind: 'browser',
-          shortcutLabel: '',
-        }));
-      if (browserSessions.length === 0) {
-        return group;
-      }
-      const sessions = [...browserSessions, ...group.sessions];
-      const visibleCount = visibleCountForGxserverPresentationSidebarSessions(sessions);
-      return {
-        ...group,
-        layoutVisibleCount: visibleCount,
-        sessions,
-        visibleCount,
-      };
     });
     const groups = this.spliceWorkspaceSubgroups(projectGroups, presentation, projectProjection);
 
@@ -918,8 +878,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
 
     const localGroups = groups.map((group) => {
       const isActiveGroup = group.groupId === this.activeGroupId;
-      const browserOwnsFocus =
-        isActiveGroup && group.sessions.some((session) => session.sessionKind === 'browser' && session.isFocused);
       return {
         ...group,
         isActive: isActiveGroup,
@@ -927,23 +885,18 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
           ...session,
           isFocused:
             isActiveGroup &&
-            (session.sessionKind === 'browser'
-              ? session.isFocused
-              : !browserOwnsFocus &&
-                this.focusedSessionId === parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId),
+            this.focusedSessionId === parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId,
           /*
           GPUI terminal visibility is owned by the native workspace callback.
           Do not preserve the shared projection's first-row fallback here:
           pinned sessions sort first and would otherwise look surfaced without
-          owning a pane. Browser rows keep their separate browser-pane state.
+          owning a pane.
           */
           isVisible:
             isActiveGroup &&
-            (session.sessionKind === 'browser'
-              ? session.isVisible
-              : this.visibleSessionIds.has(
-                  parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId ?? session.sessionId
-                )),
+            this.visibleSessionIds.has(
+              parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId ?? session.sessionId
+            ),
         })),
       };
     });
@@ -1340,9 +1293,10 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
   /*
   CDXC:RemoteMachines 2026-07-12:
   Remote project groups reuse the local sidebar overlays instead of a reduced
-  remote feature set: machine-scoped browser tabs splice in as browser session
-  rows, and the client-owned named session groups overlay applies to remote
-  projects through their machine-scoped project ids.
+  remote feature set: the client-owned named session groups overlay applies to
+  remote projects through their machine-scoped project ids. Machine-scoped
+  browser tabs used to splice in as browser rows here; they left the sidebar
+  with every other browser tab on 2026-09-20.
   */
   expandRemoteSidebarGroup(this: GpuiSidebarRuntime, group: SidebarSessionGroup): SidebarSessionGroup[] {
     const remoteGroup = parseGpuiRemotePresentationGroupId(group.groupId);
@@ -1350,51 +1304,7 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       return [group];
     }
     const scopedProjectId = createGpuiRemotePresentationProjectId(remoteGroup.machineId, remoteGroup.projectId);
-    return this.spliceRemoteWorkspaceSubgroups(
-      this.withRemoteBrowserTabSessions(group, scopedProjectId),
-      scopedProjectId
-    );
-  },
-
-  withRemoteBrowserTabSessions(
-    this: GpuiSidebarRuntime,
-    group: SidebarSessionGroup,
-    scopedProjectId: string
-  ): SidebarSessionGroup {
-    const browserSessions = this.browserTabs
-      .filter((tab) => tab.projectId === scopedProjectId)
-      .map((tab, index): SidebarSessionItem => ({
-        activity: 'idle',
-        agentIcon: 'browser',
-        alias: tab.title,
-        column: index % GRID_COLUMN_COUNT,
-        displayTitle: tab.title,
-        ...(tab.faviconUrl ? { faviconDataUrl: tab.faviconUrl } : {}),
-        isFocused: tab.isActive && this.activeGroupId === group.groupId,
-        isLive: !tab.isSleeping,
-        isRunning: !tab.isSleeping,
-        isSleeping: tab.isSleeping,
-        isVisible: tab.isVisible && this.activeGroupId === group.groupId,
-        kind: 'browser',
-        lifecycleState: tab.isSleeping ? 'sleeping' : 'running',
-        nativePaneState: tab.isSleeping ? 'unmounted' : 'mounted',
-        primaryTitle: tab.title,
-        row: Math.floor(index / GRID_COLUMN_COUNT),
-        sessionId: gpuiBrowserSidebarSessionId(tab),
-        sessionKind: 'browser',
-        shortcutLabel: '',
-      }));
-    if (browserSessions.length === 0) {
-      return group;
-    }
-    const sessions = [...browserSessions, ...group.sessions];
-    const visibleCount = visibleCountForGxserverPresentationSidebarSessions(sessions);
-    return {
-      ...group,
-      layoutVisibleCount: visibleCount,
-      sessions,
-      visibleCount,
-    };
+    return this.spliceRemoteWorkspaceSubgroups(group, scopedProjectId);
   },
 
   spliceRemoteWorkspaceSubgroups(

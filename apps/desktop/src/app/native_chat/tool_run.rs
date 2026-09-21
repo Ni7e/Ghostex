@@ -15,7 +15,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, div, px,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// The spacing between the rows of a run, kept the same inside an expansion as
 /// it is outside one so opening a group never re-flows the rows it reveals.
@@ -119,6 +119,20 @@ impl NativeChatView {
         let mut rows = self.tool_row_list(&id, &tools, &kept, p, cx);
         rows.push(self.tool_fold_toggle(run_key, label, false, p, cx));
         rows
+    }
+
+    /// Tell the host which tool rows are open, so it sends their arguments and result
+    /// (`toolDetails` in native-host.ts) and nothing for the rows that stay closed.
+    pub(super) fn sync_tool_details(&mut self, cx: &mut Context<Self>) {
+        let open: Vec<Value> = self
+            .expanded
+            .iter()
+            .filter_map(|key| {
+                let (row, index) = key.strip_prefix("tool:")?.rsplit_once(':')?;
+                Some(json!({"key":key,"messageId":row,"index":index.parse::<u64>().ok()?}))
+            })
+            .collect();
+        self.invoke(json!({"type":"toolDetails","open":open}), cx);
     }
 
     fn tool_row_list(
@@ -290,8 +304,8 @@ impl NativeChatView {
                 .into_any_element()
         });
         if expanded && has_detail {
-            let input = text(tool, "input");
-            let output = text(tool, "output");
+            let input = text(&self.tool_details[&key], "input");
+            let output = text(&self.tool_details[&key], "output");
             let has_call = tool["hasCall"] == true;
             let command = tool["glyph"] == "terminal";
             let mut detail: Vec<AnyElement> = Vec::new();
@@ -303,23 +317,11 @@ impl NativeChatView {
                 } else {
                     None
                 };
-                detail.push(Self::tool_body(
-                    &format!("input:{key}"),
-                    label,
-                    input,
-                    false,
-                    p,
-                ));
+                detail.push(self.tool_body(format!("input:{key}"), label, input, false, p));
             }
             if !output.is_empty() {
                 let label = has_call.then_some("Result");
-                detail.push(Self::tool_body(
-                    &format!("output:{key}"),
-                    label,
-                    output,
-                    failed,
-                    p,
-                ));
+                detail.push(self.tool_body(format!("output:{key}"), label, output, failed, p));
             }
             if !detail.is_empty() {
                 row = row.child(disclosure_body(
@@ -342,7 +344,8 @@ impl NativeChatView {
     /// box, never a Markdown code block: that would put a language header and a
     /// copy control on output the agent never wrote as code.
     fn tool_body(
-        key: &str,
+        &self,
+        key: String,
         label: Option<&str>,
         content: String,
         failed: bool,
@@ -363,21 +366,22 @@ impl NativeChatView {
                 )
             })
             .child(
-                div()
-                    .id(key.to_string())
-                    .min_w_0()
-                    // React caps the block at 16.25 of its own lines plus its padding.
-                    .max_h(px(220.75 * s))
-                    .overflow_y_scroll()
-                    .px(px(10.0 * s))
-                    .py(px(8.0 * s))
-                    .bg(p.input)
-                    .rounded(px(6.0 * s))
-                    .font_family(CHAT_MONO)
-                    .text_size(px(12.6 * s))
-                    .line_height(px(20.5 * s))
-                    .text_color(if failed { p.error() } else { p.muted })
-                    .child(content),
+                self.nested_scroll(
+                    key,
+                    div()
+                        .min_w_0()
+                        // React caps the block at 16.25 of its own lines plus its padding.
+                        .max_h(px(220.75 * s))
+                        .px(px(10.0 * s))
+                        .py(px(8.0 * s))
+                        .bg(p.input)
+                        .rounded(px(6.0 * s))
+                        .font_family(CHAT_MONO)
+                        .text_size(px(12.6 * s))
+                        .line_height(px(20.5 * s))
+                        .text_color(if failed { p.error() } else { p.muted })
+                        .child(content),
+                ),
             )
             .into_any_element()
     }

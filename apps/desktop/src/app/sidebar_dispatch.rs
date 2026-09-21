@@ -1588,42 +1588,6 @@ impl GhostexGpuiApp {
         true
     }
 
-    /*
-    CDXC:Browser 2026-08-18:
-    Record that a newly opened Browser tab should be revealed in the sidebar.
-    Only the tab identity is stored; the reveal itself is sent once the tab has
-    actually been published to the sidebar, so the sidebar never receives a
-    request for a row it cannot resolve. A second open replaces an unsent
-    request because only the newest tab is worth revealing.
-    */
-    pub(crate) fn request_sidebar_browser_tab_reveal(&mut self, tab_id: BrowserTabId) {
-        let Some(project_id) = self.browser_tabs_project_id.clone() else {
-            return;
-        };
-        self.pending_sidebar_browser_tab_reveal =
-            Some(PendingSidebarBrowserTabReveal { project_id, tab_id });
-    }
-
-    pub(crate) fn dispatch_pending_sidebar_browser_tab_reveal(
-        &mut self,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(pending) = self.pending_sidebar_browser_tab_reveal.take() else {
-            return;
-        };
-        self.sidebar_browser_tab_reveal_request_id =
-            self.sidebar_browser_tab_reveal_request_id.wrapping_add(1);
-        let request_id = self.sidebar_browser_tab_reveal_request_id;
-        let script = gpui_sidebar_reveal_browser_tab_script(&serde_json::json!({
-            "projectId": pending.project_id,
-            "requestId": request_id,
-            "tabId": pending.tab_id.0.to_string(),
-        }));
-        if let Some(sidebar) = self.sidebar.clone() {
-            sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
-        }
-    }
-
     pub(crate) fn refresh_gpui_sidebar_browser_tabs_if_changed(
         &mut self,
         cx: &mut gpui::Context<Self>,
@@ -1724,30 +1688,8 @@ impl GhostexGpuiApp {
                     })
             })
             .collect::<Vec<_>>();
-        /*
-        CDXC:Browser 2026-08-18:
-        A reveal may only be sent for a tab this snapshot actually carries;
-        otherwise the sidebar would be asked to expand and scroll to a row it
-        has never been told about. A pending reveal whose tab is missing from a
-        published snapshot is dropped, because the tab it named is gone.
-        */
-        let pending_reveal_is_published = self
-            .pending_sidebar_browser_tab_reveal
-            .as_ref()
-            .is_some_and(|pending| {
-                let pending_tab_id = pending.tab_id.0.to_string();
-                tabs.iter().any(|tab| {
-                    tab.get("projectId").and_then(serde_json::Value::as_str)
-                        == Some(pending.project_id.as_str())
-                        && tab.get("tabId").and_then(serde_json::Value::as_str)
-                            == Some(pending_tab_id.as_str())
-                })
-            });
         let snapshot = serde_json::Value::Array(tabs).to_string();
         if self.sidebar_browser_tabs_snapshot == snapshot {
-            if pending_reveal_is_published {
-                self.dispatch_pending_sidebar_browser_tab_reveal(cx);
-            }
             return false;
         }
         let Some(sidebar) = self.sidebar.clone() else {
@@ -1758,14 +1700,6 @@ impl GhostexGpuiApp {
             return false;
         }
         self.sidebar_browser_tabs_snapshot = snapshot;
-        // The browser rows of the store's sidebar list are built from this list, and it is the one
-        // input of that list this app owns outright (gx_store/sidebar_list_inputs.rs).
-        self.gx_store_sidebar_state_changed(cx);
-        if pending_reveal_is_published {
-            self.dispatch_pending_sidebar_browser_tab_reveal(cx);
-        } else {
-            self.pending_sidebar_browser_tab_reveal = None;
-        }
         true
     }
 

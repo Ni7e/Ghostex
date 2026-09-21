@@ -315,7 +315,7 @@ impl GhostexGpuiApp {
                 tab.runtime_favicon_image = site.favicon;
             }
             self.open_gpui_browser_action_url(site.url, window, cx);
-            self.request_sidebar_browser_tab_reveal(tab_id);
+            self.reveal_new_browser_tab(tab_id);
             self.persist_shell_layout_state();
             cx.notify();
         }
@@ -361,7 +361,7 @@ impl GhostexGpuiApp {
                 tab.runtime_favicon_image = site.favicon;
             }
             self.open_gpui_browser_action_url(site.url, window, cx);
-            self.request_sidebar_browser_tab_reveal(tab_id);
+            self.reveal_new_browser_tab(tab_id);
             self.persist_shell_layout_state();
             cx.notify();
         }

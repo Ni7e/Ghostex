@@ -1688,14 +1688,18 @@ export function SessionChatView({
                       ref={composerInset.hostRef}
                     >
                       {/*
-                CDXC:SessionFork 2026-08-28:
-                The chat has no title bar of its own (desktop draws the title
-                natively, the web app draws it in the workspace chrome), so the
-                branch switcher owns this thin strip above the transcript. It
-                renders nothing at all until the daemon reports a family of two
-                or more, which is why an unforked session shows no empty row.
+                CDXC:SessionFork 2026-09-21 DECISION:
+                User: a forked session shows a small button in the top right of
+                the chat view, not a bar of its own. The switcher floats in this
+                region's top-right corner, so it costs the transcript no row and
+                never pushes the conversation down; it sits inside the scroll
+                region rather than above it, which keeps it clear of the search
+                bar. It renders nothing at all until the daemon reports a family
+                of two or more, which is why an unforked session shows nothing.
+                This supersedes the 2026-08-28 thin strip above the transcript.
+                The GPUI half is apps/desktop/src/app/native_chat/fork_branches.rs.
                 */}
-                      <div className='mx-auto flex w-full max-w-3xl flex-none justify-end px-4 pt-1 empty:hidden'>
+                      <div className='absolute top-1.5 right-2.5 z-10 empty:hidden'>
                         <SessionChatForkBranchSwitcher
                           {...(loadForkBranches ? { loadBranches: loadForkBranches } : {})}
                           {...(onSelectForkBranch ? { onSelectBranch: onSelectForkBranch } : {})}

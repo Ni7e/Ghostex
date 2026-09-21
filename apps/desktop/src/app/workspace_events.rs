@@ -673,19 +673,7 @@ impl GhostexGpuiApp {
                 self.sleep_parked_browser_tab(&message.project_id, message.tab_id, cx);
                 return;
             }
-            if find_browser_leaf_id_for_tab(&self.browser_tabs.root, message.tab_id).is_none() {
-                return;
-            }
-            self.remove_browser_surface(message.tab_id, cx);
-            self.browser_find_states.remove(&message.tab_id);
-            self.browser_find_inputs.remove(&message.tab_id);
-            self.browser_find_input_subscriptions
-                .remove(&message.tab_id);
-            if self.pending_browser_find_focus == Some(message.tab_id) {
-                self.pending_browser_find_focus = None;
-            }
-            self.update_active_mode_cef_child_visibility(cx);
-            cx.notify();
+            self.sleep_browser_tab(message.tab_id, cx);
             return;
         }
         /*
@@ -810,7 +798,7 @@ impl GhostexGpuiApp {
         let Some(created_tab_id) = created_tab_id else {
             return;
         };
-        self.request_sidebar_browser_tab_reveal(created_tab_id);
+        self.reveal_new_browser_tab(created_tab_id);
         self.change_active_mode_with_pane_state(TitlebarMode::Browser, cx);
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
         self.focus_shell_target(

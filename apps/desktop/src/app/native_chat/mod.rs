@@ -34,6 +34,7 @@ mod images;
 mod inter_agent_message;
 mod menu_toggle;
 mod minimap;
+mod nested_scroll;
 mod new_session_welcome;
 mod note;
 mod notice;

@@ -114,7 +114,9 @@ export function SessionChatForkBranchSwitcher({
         render={
           <Button
             aria-label={tooltip}
-            className='h-6 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground'
+            // It floats over the transcript rather than sitting in a row of its own, so it carries
+            // the chat's own surface and a hairline to stay readable over the text beneath it.
+            className='h-6 gap-1 rounded-md border border-border bg-background px-1.5 text-[11px] font-normal text-muted-foreground'
             size='sm'
             title={tooltip}
             variant='ghost'

@@ -14,7 +14,10 @@ use gpui_component::{h_flex, v_flex};
 use super::appearance::SidebarAppearance;
 use crate::GhostexGpuiApp;
 use crate::app::helpers::*;
-use crate::app::titlebar::account_usage::{GpuiAccountUsageMeter, GpuiAccountUsageMeterHost};
+use crate::app::titlebar::account_usage::{
+    ACCOUNT_USAGE_BADGE_GAP, ACCOUNT_USAGE_BADGE_GLYPH_WIDTH, ACCOUNT_USAGE_BADGE_TEXT_SIZE,
+    GpuiAccountUsageMeter, GpuiAccountUsageMeterHost,
+};
 
 /// The narrowest a meter reads at: a provider glyph plus two monospace numbers.
 /// The strip fits as many of these per row as the current sidebar width allows.
@@ -29,6 +32,11 @@ const SIDEBAR_USAGE_GAP: f32 = 4.0;
 /// The strip's own inset. The cards fill the width left between these two edges,
 /// so this is also the gap the user sees before the first card and after the last.
 const SIDEBAR_USAGE_INSET: f32 = 8.0;
+
+/// One monospaced character cell as a fraction of the badge's text size. Only the clamp
+/// in `align_badge_columns` reads it, and it errs high on purpose: over-estimating a cell
+/// pads one character less, while under-estimating would let a card overflow its column.
+const SIDEBAR_USAGE_BADGE_ADVANCE: f32 = 0.65;
 
 /// An account this close to its limit lights the Commands row's toggle while the
 /// strip is hidden, so putting the strip away never puts the warning away.
@@ -52,7 +60,7 @@ impl GhostexGpuiApp {
         if !self.sidebar_usage_visible {
             return None;
         }
-        let meters = self.account_usage_meters();
+        let mut meters = self.account_usage_meters();
         if meters.is_empty() {
             return None;
         }
@@ -100,6 +108,8 @@ impl GhostexGpuiApp {
             tooltip_delay: appearance.tooltip_delay,
             scale,
         };
+
+        align_badge_columns(&mut meters, &host, columns, self.sidebar_width);
 
         let rows = meters
             .chunks(columns)
@@ -231,5 +241,60 @@ impl GhostexGpuiApp {
         self.sidebar_usage_visible = !self.sidebar_usage_visible;
         self.persist_shell_layout_state();
         cx.notify();
+    }
+}
+
+/// CDXC:Sidebar 2026-09-20 DECISION:
+/// User: a card in one row must line up with the card above it. A card centres its glyph and its
+/// number block as one group, so a short block ("5%" over "10%") pushed its glyph right of the wider
+/// one ("100%" over "0rs") in the row above. Every line is padded on the left to the width of the
+/// longest line in the strip, which the monospaced badge font makes exact, so every card's content
+/// is the same width, every glyph sits at the same place in its column, and the numbers right-align
+/// on their last character inside a card as well.
+///
+/// CDXC:Sidebar 2026-09-20 DECISION:
+/// User: the padding is clamped to the characters a column can actually show. A Codex line like
+/// "100/45%" is seven cells, and widening all eight cards to match it would have made every card
+/// clip on a narrow sidebar instead of only that one; a strip that cannot align without clipping
+/// stays unaligned instead.
+fn align_badge_columns(
+    meters: &mut [GpuiAccountUsageMeter],
+    host: &GpuiAccountUsageMeterHost,
+    columns: usize,
+    sidebar_width: f32,
+) {
+    let longest = meters
+        .iter()
+        .flat_map(|meter| meter.badge_lines.iter())
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    if longest == 0 {
+        return;
+    }
+    let scale = host.scale;
+    let gap = SIDEBAR_USAGE_GAP * scale;
+    let column_width = (sidebar_width
+        - 2.0 * SIDEBAR_USAGE_INSET * scale
+        - columns.saturating_sub(1) as f32 * gap)
+        / columns.max(1) as f32;
+    let room = column_width
+        - 2.0 * host.padding_x
+        - ACCOUNT_USAGE_BADGE_GLYPH_WIDTH * scale
+        - ACCOUNT_USAGE_BADGE_GAP * scale;
+    let cell = ACCOUNT_USAGE_BADGE_TEXT_SIZE * scale * SIDEBAR_USAGE_BADGE_ADVANCE;
+    let fits = if cell > 0.0 {
+        (room / cell).floor().max(1.0) as usize
+    } else {
+        longest
+    };
+    let width = longest.min(fits);
+    for line in meters
+        .iter_mut()
+        .flat_map(|meter| meter.badge_lines.iter_mut())
+    {
+        if line.chars().count() < width {
+            *line = format!("{line:>width$}");
+        }
     }
 }

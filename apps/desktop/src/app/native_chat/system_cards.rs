@@ -251,23 +251,24 @@ impl NativeChatView {
             )
             .when(expanded && !output.is_empty(), |row| {
                 row.child(
-                    div()
-                        .id(format!("command-output-body:{id}"))
-                        .min_w_0()
-                        .max_h(px(384.0 * s))
-                        .overflow_y_scroll()
-                        .px(px(12.0 * s))
-                        .py(px(8.0 * s))
-                        .border_t_1()
-                        .border_color(p.border)
-                        // React's `<pre>`: the captured output as it came, in the
-                        // transcript's monospace and nothing else. A fenced block
-                        // would give it a language header and a copy button the
-                        // card already is the frame for.
-                        .font_family(super::fonts::CHAT_MONO)
-                        .text_size(px(12.0 * s))
-                        .line_height(px(19.5 * s))
-                        .child(output.clone()),
+                    self.nested_scroll(
+                        format!("command-output-body:{id}"),
+                        div()
+                            .min_w_0()
+                            .max_h(px(384.0 * s))
+                            .px(px(12.0 * s))
+                            .py(px(8.0 * s))
+                            .border_t_1()
+                            .border_color(p.border)
+                            // React's `<pre>`: the captured output as it came, in the
+                            // transcript's monospace and nothing else. A fenced block
+                            // would give it a language header and a copy button the
+                            // card already is the frame for.
+                            .font_family(super::fonts::CHAT_MONO)
+                            .text_size(px(12.0 * s))
+                            .line_height(px(19.5 * s))
+                            .child(output.clone()),
+                    ),
                 )
             })
             .into_any_element()

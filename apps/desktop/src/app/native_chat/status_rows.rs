@@ -3,8 +3,8 @@ use super::{
 };
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, Context, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, StatefulInteractiveElement as _, Styled as _, div, px, rgb,
+    AnyElement, Context, FontWeight, Hsla, IntoElement, ParentElement as _, Styled as _, div, px,
+    rgb,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -232,23 +232,24 @@ impl NativeChatView {
             .child(self.disclosure(key, text(suppressed, "label"), expanded, None, p, cx))
             .when(expanded && !body.is_empty(), |row| {
                 row.child(
-                    div()
-                        .id(format!("suppressed-detail:{id}"))
-                        .min_w_0()
-                        .max_h(px(400.0 * s))
-                        .overflow_y_scroll()
-                        .p(px(10.0 * s))
-                        .rounded(px(8.0 * s))
-                        .border_1()
-                        .border_color(p.border)
-                        .bg(p.input)
-                        .child(self.markdown(
-                            format!("suppressed-body:{id}"),
-                            format!("```\n{body}\n```"),
-                            &Value::Null,
-                            p,
-                            cx,
-                        )),
+                    self.nested_scroll(
+                        format!("suppressed-detail:{id}"),
+                        div()
+                            .min_w_0()
+                            .max_h(px(400.0 * s))
+                            .p(px(10.0 * s))
+                            .rounded(px(8.0 * s))
+                            .border_1()
+                            .border_color(p.border)
+                            .bg(p.input)
+                            .child(self.markdown(
+                                format!("suppressed-body:{id}"),
+                                format!("```\n{body}\n```"),
+                                &Value::Null,
+                                p,
+                                cx,
+                            )),
+                    ),
                 )
             })
             .into_any_element()

@@ -26,12 +26,22 @@ import {
 } from '../session-chat-presentation/tool-rows';
 import type { SessionChatMessage } from '../session-chat';
 
+/** A tool's arguments and result as its open row shows them. */
+export function nativeChatToolDetail(pair: SessionChatToolPair) {
+  return {
+    input: clipSessionChatToolBody(pair.call ? formatSessionChatToolInput(pair.call.input) : ''),
+    output: clipSessionChatToolBody(pair.result?.output ?? ''),
+  };
+}
+
 export function nativeChatToolRows(pairs: readonly SessionChatToolPair[], agentPath = '/root') {
   return pairs.map((pair) => {
-    const input = clipSessionChatToolBody(pair.call ? formatSessionChatToolInput(pair.call.input) : '');
-    const output = clipSessionChatToolBody(pair.result?.output ?? '');
+    const { input, output } = nativeChatToolDetail(pair);
     const subagent = sessionChatToolSubagent(pair.call, pair.result, agentPath);
-    // Only the projected row crosses the bridge: the raw blocks would ship every tool argument and result twice.
+    /**
+     * CDXC:SessionChat 2026-09-21 DECISION:
+     * User chose to stop sending a collapsed tool's text: a row ships without its arguments and result, and the host sends them only for rows GPUI reports open (`toolDetails` in native-host.ts).
+     */
     return {
       hasCall: Boolean(pair.call),
       // An answered question is conversation, not work: a standalone run renders the pair as the
@@ -42,8 +52,6 @@ export function nativeChatToolRows(pairs: readonly SessionChatToolPair[], agentP
       name: pair.call?.name ?? 'Result',
       glyph: sessionChatToolGlyph(pair.call?.name ?? ''),
       preview: sessionChatToolPreview(pair),
-      input,
-      output,
       failed: pair.result?.isError === true,
       hasDetail: Boolean(input || output),
       // `self` is a selector pointing back at the conversation being read: React renders

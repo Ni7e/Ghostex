@@ -38,12 +38,7 @@ import {
   currentGpuiRuntimeSettings,
   hasSameGpuiRuntimeSettings,
 } from './helpers/bootstrap';
-import {
-  gpuiBrowserSidebarSessionId,
-  normalizeGpuiBrowserTabRevealRequest,
-  normalizeGpuiBrowserTabs,
-  normalizeGpuiDisplayedWorkspaceSessionIds,
-} from './helpers/browser-tabs';
+import { normalizeGpuiBrowserTabs, normalizeGpuiDisplayedWorkspaceSessionIds } from './helpers/browser-tabs';
 import { readStoredGpuiCloseAfterDoneSessionIds } from './helpers/close-after-done';
 import {
   createGpuiSidebarHudState,
@@ -666,17 +661,6 @@ export class GpuiSidebarRuntime {
     };
     gpuiBridge.onBrowserTabsChanged = applyBrowserTabs;
     applyBrowserTabs(gpuiBridge.browserTabs);
-    gpuiBridge.onRevealBrowserTab = (payload) => {
-      const request = normalizeGpuiBrowserTabRevealRequest(payload);
-      if (!request) {
-        return;
-      }
-      this.messageSource.postMessage({
-        requestId: request.requestId,
-        sessionId: gpuiBrowserSidebarSessionId(request),
-        type: 'revealSidebarSession',
-      });
-    };
     gpuiBridge.onWorkspaceTerminalLifecycleRequest = (payload) => {
       /*
       CDXC:Workarea 2026-06-26-07:25:

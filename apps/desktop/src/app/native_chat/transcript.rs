@@ -28,12 +28,16 @@ impl NativeChatView {
         expanded: bool,
         cx: &mut Context<Self>,
     ) {
+        let tool = id.starts_with("tool:");
         if expanded {
             self.expanded.remove(&id);
             self.collapsed.insert(id);
         } else {
             self.collapsed.remove(&id);
             self.expanded.insert(id);
+        }
+        if tool {
+            self.sync_tool_details(cx);
         }
         self.list.remeasure();
         cx.notify();
@@ -45,6 +49,9 @@ impl NativeChatView {
             self.expanded.remove(id);
         } else {
             self.expanded.insert(id.to_string());
+        }
+        if id.starts_with("tool:") {
+            self.sync_tool_details(cx);
         }
         self.list.remeasure();
         cx.notify();

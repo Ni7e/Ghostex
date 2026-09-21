@@ -140,15 +140,6 @@ pub struct GhostexGpuiApp {
     */
     pub(crate) sidebar_displayed_sessions_snapshot: String,
     /*
-    CDXC:Browser 2026-08-18:
-    A Browser tab the user just opened, waiting to be revealed in the sidebar.
-    The reveal is deferred to the tab-snapshot publish instead of being sent at
-    creation time because the sidebar can only expand and scroll to a row it
-    already knows about, and the row reaches it in that same snapshot.
-    */
-    pub(crate) pending_sidebar_browser_tab_reveal: Option<PendingSidebarBrowserTabReveal>,
-    pub(crate) sidebar_browser_tab_reveal_request_id: u64,
-    /*
     CDXC:TranscriptExport 2026-08-20:
     The path of the markdown file the open Export Transcript result dialog is
     describing, captured from the dialog's own open message. Reveal in Finder
@@ -805,6 +796,9 @@ pub struct GhostexGpuiApp {
     pub(crate) browser_tab_scroll_handles: HashMap<BrowserPaneId, ScrollHandle>,
     /// The view panel has exactly one tab strip, so it needs one handle rather than a map.
     pub(crate) view_tab_scroll_handle: ScrollHandle,
+    /// The browser tabs in that strip are one scroller across every browser pane, so they share
+    /// one handle too, beside the per-pane ones the panes' own strips use.
+    pub(crate) view_browser_tab_scroll_handle: ScrollHandle,
     pub(crate) command_tab_scroll_handles: HashMap<CommandPaneGroupId, ScrollHandle>,
     pub(crate) command_collapsed_tab_scroll_handle: ScrollHandle,
     pub(crate) workspace_split_layout_metrics: HashMap<WorkspaceSplitId, SplitResizeMetrics>,

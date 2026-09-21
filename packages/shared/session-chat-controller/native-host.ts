@@ -166,6 +166,10 @@ const suggestions = new NativeComposerSuggestions();
 const composerScrollGesture = createSessionChatComposerScrollGesture();
 let composerCollapsed = false;
 let detailRevision = 0;
+/** The tool rows GPUI has open; only these ship their arguments and result (native-transcript-rows.ts). */
+let openToolDetails: { key: string; messageId: string; index: number }[] = [];
+let toolDetails = '{}';
+let sentToolDetails: string | undefined;
 type NativeChatState = {
   workingStrip: ReturnType<typeof computeSessionChatWorkingStrip> & {
     presentation: ReturnType<typeof computeSessionChatActivity>;
@@ -405,6 +409,14 @@ function publish(state: NativeChatState): void {
   transcriptItems = projection.items;
   minimapMarkers = projection.minimap;
   subagentItems = subagentViewer.transcriptItems();
+  toolDetails = JSON.stringify(
+    Object.fromEntries(
+      openToolDetails.flatMap(({ key, messageId, index }) => {
+        const detail = presentation.toolDetail(messageId, index) ?? subagentViewer.toolDetail(messageId, index);
+        return detail ? [[key, detail]] : [];
+      })
+    )
+  );
   if (operationErrorCode !== 'composerNotReady') terminalTail.retire();
   const {
     messages: _messages,
@@ -760,6 +772,11 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
     return;
   }
   // Panel folds, transcript search, terminal-tail reads and the subagent viewer are pure view state: they never clear a send error.
+  if (command.type === 'toolDetails') {
+    openToolDetails = Array.isArray(command.open) ? command.open : [];
+    publish(chat);
+    return;
+  }
   if (
     panels.command(command) ||
     search.command(command) ||
@@ -1681,6 +1698,7 @@ Object.assign(globalThis, {
         itemsSplice: transcriptItemsSplice(),
         minimap: sentMinimapMarkers === minimapMarkers ? undefined : (sentMinimapMarkers = minimapMarkers),
         subagentSplice: subagentItemsSplice(),
+        toolDetails: sentToolDetails === toolDetails ? undefined : JSON.parse((sentToolDetails = toolDetails)),
         revision,
         snapshot: lastRevision === revision ? undefined : snapshot,
         requests: requests.splice(0),

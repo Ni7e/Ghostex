@@ -1032,6 +1032,13 @@ impl Render for GhostexGpuiApp {
                     );
                 }),
             )
+            .on_action(cx.listener(|this, action: &SleepBrowserTabInPane, _window, cx| {
+                this.sleep_browser_tab_from_action(
+                    BrowserPaneId(action.pane_id),
+                    BrowserTabId(action.tab_id),
+                    cx,
+                );
+            }))
             .on_action(cx.listener(|this, _: &RunBrowserFeedbackTool, window, cx| {
                 this.run_browser_feedback_tool_from_toolbar(
                     this.browser_tabs.focused_pane,
@@ -1200,9 +1207,12 @@ impl Render for GhostexGpuiApp {
                     // Collapsed, the body row starts with the reveal's own edge strip instead of
                     // the sidebar and its divider. It is a sibling frame like they were, so the
                     // workarea beside it keeps every pixel it owns and every click in them.
-                    .when(!sidebar_chrome_visible, |this| {
-                        this.child(self.render_floating_reveal_edge_strip(cx))
-                    })
+                    // Docked, the sidebar keeps the window's edge, so the strip follows its divider
+                    // and exists only while an expanded view has folded the sessions column away.
+                    .when(
+                        !sidebar_chrome_visible || self.floating_reveal_eligible(),
+                        |this| this.child(self.render_floating_reveal_edge_strip(cx)),
+                    )
                     .child(
                         /*
                         CDXC:Titlebar 2026-09-20 WHY:

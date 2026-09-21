@@ -80,22 +80,6 @@ export function relayoutGpuiSidebarSessions(sessions: readonly SidebarSessionIte
   }));
 }
 
-export function normalizeGpuiBrowserTabRevealRequest(
-  payload: unknown
-): { projectId: string; requestId: number; tabId: string } | undefined {
-  if (!payload || typeof payload !== 'object') {
-    return undefined;
-  }
-  const record = payload as Record<string, unknown>;
-  const projectId = typeof record.projectId === 'string' ? normalizeNonEmptyString(record.projectId) : undefined;
-  const tabId = typeof record.tabId === 'string' ? normalizeNonEmptyString(record.tabId) : undefined;
-  const requestId = typeof record.requestId === 'number' ? record.requestId : undefined;
-  if (!projectId || !tabId || requestId === undefined || !Number.isFinite(requestId)) {
-    return undefined;
-  }
-  return { projectId, requestId, tabId };
-}
-
 export function gpuiBrowserSidebarSessionId(tab: { projectId: string; tabId: string }): string {
   return `gpui-browser:${encodeURIComponent(tab.projectId)}:${tab.tabId}`;
 }

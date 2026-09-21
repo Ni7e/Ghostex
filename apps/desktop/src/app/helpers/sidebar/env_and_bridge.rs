@@ -104,12 +104,6 @@ pub(crate) fn gpui_percent_decoded_id_part(value: &str) -> Option<String> {
     .then_some(decoded)
 }
 
-pub(crate) fn gpui_sidebar_reveal_browser_tab_script(payload: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui;if(bridge&&typeof bridge.onRevealBrowserTab==='function'){{bridge.onRevealBrowserTab({payload});}}}})(); undefined;"
-    )
-}
-
 pub(crate) fn gpui_sidebar_host_message_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui;if(bridge&&typeof bridge.onSidebarHostMessage==='function'){{bridge.onSidebarHostMessage({message});}}}})(); undefined;"

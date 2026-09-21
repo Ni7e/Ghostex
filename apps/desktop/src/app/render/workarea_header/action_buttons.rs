@@ -456,7 +456,13 @@ impl GhostexGpuiApp {
                         ),
                     )
                 },
-            )
+            );
+        // The ⋯ menu and the two panel toggles never scroll out of reach: only the split buttons
+        // and pinned extensions before them can, so a narrow column loses the least-needed first.
+        let pinned = h_flex()
+            .flex_shrink_0()
+            .h(px(TITLEBAR_CONTROL_HEIGHT))
+            .items_center()
             // Everything occasional lives behind the trailing ⋯ menu.
             .when(self.titlebar_more_menu_visible(), |this| {
                 this.child(self.render_titlebar_more_button(cx))
@@ -489,7 +495,8 @@ impl GhostexGpuiApp {
                     .items_center()
                     .overflow_x_scroll()
                     .child(buttons),
-            );
+            )
+            .child(pinned);
         #[cfg(target_os = "windows")]
         let controls = controls
             .child(

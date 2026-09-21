@@ -483,9 +483,10 @@ impl SidebarViewModel {
                 .get(project_id)
                 .cloned()
                 .unwrap_or_default();
-            // The app's browser tabs carry the MACHINE-SCOPED project id for a remote project
-            // (`withRemoteBrowserTabSessions` matches on it), and the raw id for a local one,
-            // which is the same string.
+            // The app's browser tabs carry the MACHINE-SCOPED project id for a remote project and
+            // the raw id for a local one, which is the same string. The desktop host stopped
+            // feeding them on 2026-09-20, when browser tabs left the sidebar for the view panel's
+            // tab strip; this path is still here for a caller that supplies its own tabs.
             let tab_project_id = project_key.to_workspace_project_id();
             let mut rows: Vec<RowRef> = browser_rows_for_project(
                 &mut state,

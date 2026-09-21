@@ -539,7 +539,7 @@ impl GhostexGpuiApp {
             return;
         };
         if was_address_only_tab {
-            self.request_sidebar_browser_tab_reveal(committed_tab_id);
+            self.reveal_new_browser_tab(committed_tab_id);
         }
         self.browser_tabs.focus_pane(pane_id);
         self.focus_shell_target(ShellFocusTarget::BrowserPane(pane_id), cx);
@@ -1035,5 +1035,43 @@ impl GhostexGpuiApp {
             surface.update(cx, |surface, _| surface.reload());
         }
         cx.notify();
+    }
+
+    /// Explicit per-tab sleep for a tab of the mounted project: the page goes and the tab stays
+    /// behind as a restored placeholder that wakes when it is clicked.
+    /// `sleep_parked_browser_tab` is the same thing for a project whose pages are parked.
+    ///
+    /// CDXC:Browser 2026-09-20 WHY:
+    /// This was written inline in the sidebar's browser-row bridge, which was the only way to sleep
+    /// one tab. The rows are gone, so the behaviour lives here and the browser tab's own right-click
+    /// menu in the view strip is what reaches it.
+    pub(crate) fn sleep_browser_tab(&mut self, tab_id: BrowserTabId, cx: &mut gpui::Context<Self>) {
+        if find_browser_leaf_id_for_tab(&self.browser_tabs.root, tab_id).is_none() {
+            return;
+        }
+        self.remove_browser_surface(tab_id, cx);
+        self.browser_find_states.remove(&tab_id);
+        self.browser_find_inputs.remove(&tab_id);
+        self.browser_find_input_subscriptions.remove(&tab_id);
+        if self.pending_browser_find_focus == Some(tab_id) {
+            self.pending_browser_find_focus = None;
+        }
+        self.update_active_mode_cef_child_visibility(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn sleep_browser_tab_from_action(
+        &mut self,
+        pane_id: BrowserPaneId,
+        tab_id: BrowserTabId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self
+            .browser_tabs
+            .find_leaf(pane_id)
+            .is_some_and(|leaf| leaf.tab_group.has_tab(tab_id))
+        {
+            self.sleep_browser_tab(tab_id, cx);
+        }
     }
 }

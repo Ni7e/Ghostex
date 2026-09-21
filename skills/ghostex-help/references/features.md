@@ -33,6 +33,8 @@ with a tick beside the ones already open (clicking one of those focuses its
 tab), then **Hidden here**, which lists the views you hid in this project and
 brings one back in a click, then **Manage views…**. Drag a tab to reorder the
 strip, and close a tab with its **x**, with a middle click, or from its menu.
+After the **+**, the same row carries the Browser view's own tabs, one per open
+page, so a page you have open reads as a tab beside the views themselves.
 Only the view you are looking at, and the two you came from most recently, stay
 loaded; the rest keep their tab and wake when you click them.
 
@@ -84,7 +86,13 @@ focuses its name field.
   reuses the local VS Code configuration.
 - **Browser**: embedded Chromium tabs with profiles, splits, annotations,
   DevTools, and agent control through the `$ghostex-embedded-browser-use`
-  skill. A tab with no address yet shows the **start page**: the development
+  skill. Its tabs sit in the view panel's tab strip, after the view tabs and
+  the `+`, and stay there while you are in another view, so clicking one comes
+  back to Browser with that tab in front. Each tab shows its page icon and
+  title, closes with its own x or a middle click, and drags along the strip to
+  reorder. Right-click a tab for Select Tab, Sleep Tab (while it has a page)
+  and Close Tab. The `+` beside the address bar opens another tab.
+  A tab with no address yet shows the **start page**: the development
   servers running on this computer, and on each remote computer you have set up,
   with their page titles and whether they are responding. Click one to open it,
   or copy its address. Web links from terminals, chat, and detected dev servers
@@ -218,7 +226,9 @@ where they are while you open, change and close views.
   left edge floats the sidebar back over your work, and it slides away when you
   move off it. If you have also expanded a view to fill the window, the sessions
   column floats back with it, so you can glance at your agents without leaving the
-  view. This works on macOS, Windows and Linux.
+  view. With the sidebar open and a view expanded, hover the thin strip just right
+  of the sidebar to float the sessions column on its own. The floating sessions
+  column is always 520px wide. This works on macOS, Windows and Linux.
 - Pane width: agent panes have a minimum resize width of 388px, and so does the
   sessions column when a view is open beside it. In the desktop app, an open Code,
   Browser, Kanban, Automate, or Docs view has a minimum width of 455px.
@@ -257,21 +267,20 @@ where they are while you open, change and close views.
   off puts Close back as the menu's last row. Hover buttons also in context
   menu (on by default) controls the rest; turn it off and every enabled
   button leaves the menu (and its Advanced submenu).
-  Browser tabs ignore the strip and always show Sleep and Close. Both rows
-  live under General > Session Cards and need Show Advanced. Settings:
+  Both rows live under General > Session Cards and need Show Advanced. Settings:
   `sessionCardHoverButtons` (a list of `{ id, enabled }` with ids `rename`,
   `pin`, `note`, `snooze`, `closeAfterDone`, `tag`, `park`, `sleep`,
   `close`, `chevron`) and `showSessionCardHoverButtonsInContextMenu`.
 - Long projects: a project with more sessions than Compact Session Rows (13
   by default, up to 50) starts in Compact mode and shows only that many rows
-  plus a "Show all N sessions" row. Rows inside a collapsed Pinned, Browser,
-  Drafts, Parked, or Snoozed section do not count. Click that row, or the chevron on
+  plus a "Show all N sessions" row. Rows inside a collapsed Pinned, Drafts,
+  Parked, or Snoozed section do not count. Click that row, or the chevron on
   the project header, to switch the project to Full mode, which shows every
   row; the chevron switches it back to Compact. Each project remembers its
   mode. The sidebar is the only scroller, and a project's header stays pinned
   at the top while you scroll through its rows. Setting:
   `projectSessionListCollapsedCount`.
-- Sidebar section headings (Pinned, Sessions, Drafts, Browser, Parked, and
+- Sidebar section headings (Pinned, Sessions, Drafts, Parked, and
   Snoozed) show an orange dot when a session is working, a blue dot when
   a session is done, and a pink dot when an agent is waiting for an answer,
   including rows hidden by collapse or Compact mode. Pending questions use
@@ -372,7 +381,7 @@ the rename is saved only in Ghostex and ZCode's later automatic naming may
 replace it.
 Fork starts the new session as `Fork: <original name>` and saves that name
 through the agent's own rename command so it survives reopening the conversation.
-Once a conversation has forks, a small branch button above the chat transcript
+Once a conversation has forks, a small branch button in the chat's top right
 lists every session that shares the earlier history, including the thread you
 forked away from, and switches to the one you pick; a stopped branch is resumed
 when you open it.

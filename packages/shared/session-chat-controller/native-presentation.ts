@@ -22,6 +22,7 @@ import { splitSessionChatFileChanges } from '@/packages/core-ui/chat/session-cha
 import {
   nativeChatFileRows,
   nativeChatTerminalTool,
+  nativeChatToolDetail,
   nativeChatToolFold,
   nativeChatToolRows,
 } from './native-transcript-rows';
@@ -37,6 +38,11 @@ import type { SessionChatMinimapMarker } from '../session-chat-presentation/mini
 
 /** The session's directory, which shortens the paths on file-change cards. */
 let workingDirectory: string | undefined;
+
+/** The tool calls a message's run shows, in the order its rows are numbered. */
+function messageToolPairs(message: SessionChatMessage) {
+  return pairSessionChatToolBlocks(splitSessionChatFileChanges(splitSessionChatBlocks(message.blocks).tools).tools);
+}
 
 function projectMessage(message: SessionChatMessage, agentPath: string) {
   const { tools, prose } = splitSessionChatBlocks(message.blocks);
@@ -175,6 +181,13 @@ export class NativeChatPresentation {
     if (direct) return direct;
     const cached = this.modelsById.get(message.id);
     return cached && sameSessionChatMessage(cached.source, message) ? this.message(message) : undefined;
+  }
+
+  /** One tool row's arguments and result, read from the message the row was projected from. */
+  toolDetail(messageId: string, index: number) {
+    const source = this.modelsById.get(messageId)?.source;
+    const pair = source ? messageToolPairs(source)[index] : undefined;
+    return pair ? nativeChatToolDetail(pair) : undefined;
   }
 
   /** The full projection when it is cheap or the row is near the tail; otherwise a stable plain-text stand-in queued for backfill. */

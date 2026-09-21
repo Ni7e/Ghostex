@@ -91,12 +91,13 @@ impl GhostexGpuiApp {
             })
     }
 
-    /// True while the view panel is a column beside the Agents workspace, which is the only state in
-    /// which the band has two halves. Expanded, the panel owns the whole workarea and there is no
-    /// column boundary to line the strip up with, so the strip stays a row of its own under the
-    /// header (`render_maximized_view_panel`).
+    /// CDXC:Workarea 2026-09-21 DECISION:
+    /// User: the view panel's expand and minimize button stays in the same spot when clicked. So the
+    /// band keeps both halves at the same split while the panel is expanded, and the strip, its
+    /// pop-out and its expand control never drop to a row of their own. This supersedes the
+    /// 2026-09-20 rule that an expanded panel moved the strip under the header.
     pub(crate) fn workarea_header_hosts_view_tab_strip(&self) -> bool {
-        self.view_panel_open() && !self.view_panel_maximized()
+        self.view_panel_open()
     }
 
     /// CDXC:CommandPane 2026-09-20 WHY:

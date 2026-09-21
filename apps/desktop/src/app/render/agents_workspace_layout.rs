@@ -65,8 +65,15 @@ impl GhostexGpuiApp {
         header. The top edge is the header's own line there, so the pane draws no border against it,
         exactly as it draws none against a resize rail. The rule is in
         render/workarea_header/overlap.rs and the decision behind it on the header itself.
+
+        CDXC:Titlebar 2026-09-21 WHY:
+        Dropping the border is the wider of the two answers: a GPUI chat that starts below the row
+        because its own chrome sits above the transcript still meets the header on a band painted in
+        its own colour, so a hairline there would be the only thing drawing the header as a separate
+        bar. Whether the column also starts at the window's top edge stays the narrower answer.
         */
         let floating = layout == AgentsWorkspaceLayout::Floating;
+        let meets_header = !floating && self.agents_column_meets_gpui_chat();
         let flows_under_header = !floating && self.agents_column_flows_under_workarea_header(cx);
         let top_inset = if floating {
             0.0
@@ -82,7 +89,7 @@ impl GhostexGpuiApp {
             }
         } else {
             let outer_rail_edges = RailFacingEdges {
-                top: flows_under_header,
+                top: meets_header,
                 ..self.main_workspace_outer_rail_edges(window)
             };
             match layout {
@@ -122,9 +129,10 @@ impl GhostexGpuiApp {
                 self.render_workspace_node(&self.agents_workspace.root, rail_edges, window, cx)
             },
         )
-        .when(flows_under_header, |this| {
-            this.child(self.render_workarea_header_content_fade())
-        })
+        .when(
+            flows_under_header && self.workarea_header_content_fade_visible(cx),
+            |this| this.child(self.render_workarea_header_content_fade()),
+        )
         .into_any_element()
     }
 

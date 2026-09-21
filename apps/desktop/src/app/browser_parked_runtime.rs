@@ -230,10 +230,6 @@ impl GhostexGpuiApp {
         {
             tab.remote_machine_id = remote_machine_id;
         }
-        self.pending_sidebar_browser_tab_reveal = Some(PendingSidebarBrowserTabReveal {
-            project_id: project_id.to_string(),
-            tab_id: popup_tab_id,
-        });
         self.persist_shell_layout_state();
         cx.notify();
     }

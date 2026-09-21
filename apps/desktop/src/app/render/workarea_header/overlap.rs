@@ -23,23 +23,49 @@ impl GhostexGpuiApp {
     is hidden: the tab bar is chrome, and chrome under the header would be chrome the user cannot
     see or click. Every other column keeps its old top edge, one header height below the window.
     */
-    pub(crate) fn agents_column_flows_under_workarea_header(&self, cx: &gpui::App) -> bool {
+    fn agents_column_solo_gpui_chat(
+        &self,
+    ) -> Option<&gpui::Entity<crate::app::native_chat::state::NativeChatView>> {
         if self.agents_workspace_tab_bar_visible() {
-            return false;
+            return None;
         }
         let leaves = self.agents_workspace.rendered_leaf_order();
         let [pane_id] = leaves[..] else {
-            return false;
+            return None;
         };
-        let Some(session_id) = self.agents_workspace.active_session_in_pane(pane_id) else {
-            return false;
-        };
+        let session_id = self.agents_workspace.active_session_in_pane(pane_id)?;
         if !self.session_chat_use_gpui || !self.agents_chat_mode_sessions.contains(&session_id) {
-            return false;
+            return None;
         }
-        self.native_chat_views
-            .get(&session_id)
+        self.native_chat_views.get(&session_id)
+    }
+
+    pub(crate) fn agents_column_flows_under_workarea_header(&self, cx: &gpui::App) -> bool {
+        self.agents_column_solo_gpui_chat()
             .is_some_and(|chat| !chat.read(cx).renders_region_above_transcript())
+    }
+
+    /// CDXC:Titlebar 2026-09-21 DECISION:
+    /// User: "we should not show the mask when there's no more to scroll to". The fade only
+    /// exists to show content passing under the header, so at the transcript's top, where nothing
+    /// is under the header, the first message is drawn at full strength.
+    pub(crate) fn workarea_header_content_fade_visible(&self, cx: &gpui::App) -> bool {
+        self.agents_column_solo_gpui_chat().is_some_and(|chat| {
+            let chat = chat.read(cx);
+            !chat.renders_region_above_transcript() && !chat.transcript_scrolled_to_top()
+        })
+    }
+
+    /// CDXC:Titlebar 2026-09-21 DECISION:
+    /// User: a GPUI chat shows no background behind the header and no line under it in any of its
+    /// states. So the whole band takes the chat's own surface and the pane drops its top border
+    /// whenever the column is one GPUI chat, including the states that keep chrome above the
+    /// transcript (the error banner, the "load earlier turns" row, the search bar, the fork
+    /// button), which used to fall back to the workspace background and a hairline and read as a
+    /// separate bar. Whether the transcript also scrolls *under* the row is still
+    /// `agents_column_flows_under_workarea_header`; this only decides what the band looks like.
+    pub(crate) fn agents_column_meets_gpui_chat(&self) -> bool {
+        self.agents_column_solo_gpui_chat().is_some()
     }
 
     /*
@@ -58,12 +84,12 @@ impl GhostexGpuiApp {
             || self.view_tab_drag.is_some())
     }
 
-    /// The colour the header row paints, which is the colour of whatever is directly beneath it: the
-    /// chat's own background while the transcript passes under the row, the workspace background in
-    /// every other state, where the column below starts one header height down. The fade ramp reads
+    /// The colour the header row paints, which is the colour of whatever is directly beneath it:
+    /// the chat's own background over a GPUI chat column, whether its transcript passes under the
+    /// row or starts below it, and the workspace background everywhere else. The fade ramp reads
     /// the same answer, so it always ramps one surface out instead of crossfading two.
-    pub(crate) fn workarea_header_surface_color(&self, cx: &gpui::App) -> gpui::Hsla {
-        if self.agents_column_flows_under_workarea_header(cx) {
+    pub(crate) fn workarea_header_surface_color(&self) -> gpui::Hsla {
+        if self.agents_column_meets_gpui_chat() {
             gpui_session_chat_background_color()
         } else {
             workspace_background_color()

@@ -81,6 +81,11 @@ pub(crate) const WORKAREA_VIEW_TAB_MIN_WIDTH: f32 = 78.0;
 
 pub(crate) const WORKAREA_VIEW_TAB_MAX_WIDTH: f32 = 168.0;
 
+/// The floor the Browser view's tabs keep in the strip. Without it the view tabs' own width wins
+/// every time the row runs out of room and the browser group collapses to nothing; with it both
+/// groups scroll instead, which is what a strip that carries two kinds of tab has to do.
+pub(crate) const WORKAREA_VIEW_TAB_BROWSER_GROUP_MIN_WIDTH: f32 = 110.0;
+
 pub(crate) const PROJECT_EDITOR_AUTO_SLEEP_POLICY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 pub(crate) const GPUI_NATIVE_TITLEBAR_TIPS: &[GpuiNativeTitlebarTip] = &[

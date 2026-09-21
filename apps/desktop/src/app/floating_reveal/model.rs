@@ -3,7 +3,6 @@
 use std::time::Instant;
 
 use crate::app::consts::*;
-use crate::app::model::*;
 use crate::*;
 
 /// The width of the left-edge strip that arms the reveal, and the only width the workarea gives up
@@ -22,6 +21,12 @@ pub(crate) const FLOATING_REVEAL_EDGE_WIDTH: f32 = 10.0;
 /// chrome with no id and no listener, so it has no hitbox: the floating panel is not a place to
 /// resize the split.
 pub(crate) const FLOATING_REVEAL_RAIL_WIDTH: f32 = 2.0;
+
+/// CDXC:Sidebar 2026-09-21 DECISION:
+/// User: the floating sessions column always has a set width. It is this constant, clamped to the
+/// window, rather than the docked split's share of the window, which grew past 1000px on a wide
+/// display.
+pub(crate) const FLOATING_REVEAL_AGENTS_COLUMN_WIDTH: f32 = 520.0;
 
 /// How long a reveal asked for by name (Reveal Active Session) waits for the pointer.
 pub(crate) const FLOATING_REVEAL_REQUEST_GRACE_SECS: u64 = 5;
@@ -42,15 +47,16 @@ pub(crate) const SIDEBAR_HOVER_REVEAL_ACTIVE_POLL: std::time::Duration =
 
 /// Which panels the floating window carries this time.
 ///
-/// CDXC:Sidebar 2026-09-20 DECISION:
-/// User (screen 10): with the sidebar and the chat column both collapsed, hovering the window's
-/// left edge floats them both back over the view and they slide away when the pointer leaves. The
-/// sidebar is always in the panel; the sessions column joins it exactly when the workarea has
-/// folded it away, which today is the expanded view panel. This supersedes the 2026-09-09 rule that
-/// the bottom half of the edge revealed a floating companion: phase 3 deleted the companion, and
-/// one panel carrying both columns is what the screen draws in its place.
+/// CDXC:Sidebar 2026-09-21 DECISION:
+/// User (screen 10, extended 2026-09-21): hovering the left edge floats back whatever is folded
+/// away and it slides away when the pointer leaves. The collapsed sidebar is in the panel; the
+/// sessions column joins it exactly when the workarea has folded it away (the expanded view
+/// panel). With the sidebar docked the reveal still works for the folded sessions column: the edge
+/// strip sits just right of the sidebar and the panel carries the column alone. This supersedes the
+/// 2026-09-20 rule that the reveal existed only while the sidebar was collapsed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FloatingRevealContent {
+    pub(crate) sidebar: bool,
     pub(crate) agents_column: bool,
 }
 
@@ -114,10 +120,21 @@ pub(crate) struct FloatingRevealState {
 }
 
 impl GhostexGpuiApp {
-    /// The reveal exists only while the sidebar is collapsed; with it docked there is nothing the
-    /// edge could bring back.
+    /// The reveal exists while something is folded away: the collapsed sidebar, or the sessions
+    /// column an expanded view has taken the workarea from.
     pub(crate) fn floating_reveal_eligible(&self) -> bool {
-        self.sidebar_collapsed
+        let content = self.floating_reveal_content();
+        content.sidebar || content.agents_column
+    }
+
+    /// Where the panel starts: the window's left edge, or just past a docked sidebar and its
+    /// divider so the panel never covers the sidebar it would otherwise have to duplicate.
+    pub(crate) fn floating_reveal_left_inset(&self) -> f32 {
+        if self.sidebar_collapsed {
+            0.0
+        } else {
+            self.sidebar_width + SIDEBAR_DIVIDER_WIDTH
+        }
     }
 
     /// CDXC:Sidebar 2026-09-20 WHY:
@@ -129,29 +146,32 @@ impl GhostexGpuiApp {
     /// and `sessionChatUseGpui` is on.
     pub(crate) fn floating_reveal_content(&self) -> FloatingRevealContent {
         FloatingRevealContent {
+            sidebar: self.sidebar_collapsed,
             agents_column: self.view_panel_maximized()
                 && !self.workspace_node_shows_cef_chat(&self.agents_workspace.root),
         }
     }
 
-    /// The sessions column's width inside the panel: the share of the window the user gave it in
-    /// the docked split, never below the column's own minimum.
-    pub(crate) fn floating_reveal_agents_column_width(&self) -> f32 {
-        let span = self.main_window_bounds.size.width.as_f32();
-        let ratio = workarea_split_ratio(self.project_editor_shell.workarea_split_ratio);
-        (span * ratio).max(WORKAREA_AGENTS_COLUMN_MIN_WIDTH)
-    }
-
     pub(crate) fn floating_reveal_width_for(&self, content: FloatingRevealContent) -> f32 {
-        let span = self.main_window_bounds.size.width.as_f32().max(1.0);
-        let width = if content.agents_column {
+        let span = (self.main_window_bounds.size.width.as_f32()
+            - self.floating_reveal_left_inset())
+        .max(1.0);
+        let sidebar = if content.sidebar {
             self.sidebar_width
-                + FLOATING_REVEAL_RAIL_WIDTH
-                + self.floating_reveal_agents_column_width()
         } else {
-            self.sidebar_width
+            0.0
         };
-        width.clamp(1.0, span)
+        let rail = if content.sidebar && content.agents_column {
+            FLOATING_REVEAL_RAIL_WIDTH
+        } else {
+            0.0
+        };
+        let column = if content.agents_column {
+            FLOATING_REVEAL_AGENTS_COLUMN_WIDTH
+        } else {
+            0.0
+        };
+        (sidebar + rail + column).clamp(1.0, span)
     }
 
     /// True while the open panel is the only place the Agents workspace is rendered. Every terminal,

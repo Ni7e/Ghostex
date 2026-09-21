@@ -1889,7 +1889,7 @@ impl GhostexGpuiApp {
             cef::BrowserPopupPlacement::Selected,
         );
         if let Some(created_tab_id) = created_tab_id {
-            self.request_sidebar_browser_tab_reveal(created_tab_id);
+            self.reveal_new_browser_tab(created_tab_id);
         }
         self.browser_url = default_url;
         let pane_id = self.browser_tabs.focused_pane;
@@ -1962,7 +1962,7 @@ impl GhostexGpuiApp {
             self.browser_profiles.active_profile_id(),
             default_url.clone(),
         ) {
-            self.request_sidebar_browser_tab_reveal(created_tab_id);
+            self.reveal_new_browser_tab(created_tab_id);
             self.browser_url = default_url;
             self.change_active_mode_with_pane_state(TitlebarMode::Browser, cx);
             self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
@@ -2105,7 +2105,7 @@ impl GhostexGpuiApp {
         {
             tab.remote_machine_id = remote_machine_id;
         }
-        self.request_sidebar_browser_tab_reveal(popup_tab_id);
+        self.reveal_new_browser_tab(popup_tab_id);
         if matches!(placement, cef::BrowserPopupPlacement::Background) {
             /*
             CDXC:Browser 2026-08-18:

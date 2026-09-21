@@ -5,9 +5,9 @@
 //! User: the desktop app stops running product logic in QuickJS; one Rust state store owns it, and
 //! every interaction is a local state change plus one redraw. The list is derived here rather than
 //! projected in QuickJS and posted over a bridge. It is rebuilt only when the store, the sidebar's
-//! own state, the settings, the app's own browser tabs or the clock deadline of a row moved, never
-//! per frame, and an update with nothing changed does no work at all. Which list the renderer
-//! draws is the `sidebarListSource` setting, so the two can be compared in one running app.
+//! own state, the settings or the clock deadline of a row moved, never per frame, and an update
+//! with nothing changed does no work at all. Which list the renderer draws is the
+//! `sidebarListSource` setting, so the two can be compared in one running app.
 
 use std::time::{Duration, Instant};
 
@@ -411,7 +411,6 @@ impl GhostexGpuiApp {
             ui_generation,
             settings,
             published.as_deref(),
-            &self.sidebar_browser_tabs_snapshot,
             &store.sidebar_ui.stored_project_collections,
             unavailable,
             store.remote.tabs(),
@@ -492,7 +491,6 @@ impl GhostexGpuiApp {
                 ui_generation,
                 settings,
                 published.as_deref(),
-                &self.sidebar_browser_tabs_snapshot,
                 &store.sidebar_ui.stored_project_collections,
                 unavailable,
                 store.remote.tabs(),

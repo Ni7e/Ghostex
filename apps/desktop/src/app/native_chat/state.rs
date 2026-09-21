@@ -118,6 +118,10 @@ pub(crate) struct NativeChatView {
     pub(crate) pending_send: bool,
     pub(crate) composer_ready: bool,
     pub(crate) expanded: HashSet<String>,
+    /// Scroll offsets of the capped boxes inside transcript rows (nested_scroll.rs).
+    pub(super) nested_scrolls: super::nested_scroll::NestedScrolls,
+    /// The arguments and result of each open tool row, keyed like the row; the host sends them only for rows the reader opened.
+    pub(super) tool_details: Value,
     /// Armed Delayed Send / Close After Done labels drawn on the working row, set by the app (session_chat_armed_actions.rs).
     pub(crate) armed_actions: Value,
     pub(crate) collapsed: HashSet<String>,
@@ -176,14 +180,24 @@ impl NativeChatView {
         let subagent_list = gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(400.0));
         subagent_list.set_follow_mode(gpui::FollowMode::Tail);
         let chat = cx.weak_entity();
+        // The header's fade is painted by the app, so the app repaints when the list reaches or
+        // leaves its top (`transcript_scrolled_to_top`).
+        let at_top = std::rc::Rc::new(std::cell::Cell::new(true));
         list.set_scroll_handler(move |_, _, cx| {
             let chat = chat.clone();
+            let at_top = at_top.clone();
             cx.defer(move |cx| {
                 let _ = chat.update(cx, |chat, cx| {
                     if chat.list.is_following_tail() && chat.snapshot["composerCollapsed"] == true {
                         chat.invoke(json!({"type":"composerExpand"}), cx);
                     }
                     chat.load_earlier_if_near_top(cx);
+                    let now = chat.transcript_scrolled_to_top();
+                    if at_top.replace(now) != now
+                        && let Some(app) = chat.config.app.as_ref().and_then(|app| app.upgrade())
+                    {
+                        app.update(cx, |_, cx| cx.notify());
+                    }
                     cx.notify();
                 });
             });
@@ -261,6 +275,8 @@ impl NativeChatView {
             pending_send: false,
             composer_ready: false,
             expanded: HashSet::new(),
+            nested_scrolls: Default::default(),
+            tool_details: Value::Null,
             armed_actions: Value::Array(Vec::new()),
             collapsed: HashSet::new(),
             code_wrap: HashMap::new(),
@@ -547,6 +563,15 @@ impl NativeChatView {
             .filter(Value::is_object)
         {
             self.apply_subagent_splice(&mut splice);
+            self.notify_if_shown(cx);
+        }
+        if let Some(details) = output
+            .as_object_mut()
+            .and_then(|output| output.remove("toolDetails"))
+        {
+            self.tool_details = details;
+            self.list.remeasure();
+            self.subagent_list.remeasure();
             self.notify_if_shown(cx);
         }
         if let Some(mut snapshot) = output

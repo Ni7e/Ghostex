@@ -279,6 +279,13 @@ pub(crate) struct CloseBrowserTabInPane {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
 #[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct SleepBrowserTabInPane {
+    pub(crate) pane_id: u64,
+    pub(crate) tab_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
 pub(crate) struct RunBrowserFeedbackTool;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]

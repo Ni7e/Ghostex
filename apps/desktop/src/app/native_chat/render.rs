@@ -13,9 +13,10 @@ impl NativeChatView {
     The desktop shell lets this pane's transcript pass under the floating workarea header, and that
     is only safe while the transcript really is the first thing in the pane. Everything this render
     can put above it (the error banner, the "load earlier turns" button, the search bar, the fork
-    branch strip, and the maximized window's bare background) is chrome the header would hide, so
+    branch button, and the maximized window's bare background) is chrome the header would hide, so
     the shell asks here first and keeps its old top edge instead. A new region above the transcript
-    belongs in this list.
+    belongs in this list. The fork button is in it even though it costs the transcript no row: it is
+    still drawn in the pane's top-right corner, which is exactly where the header would cover it.
     */
     pub(crate) fn renders_region_above_transcript(&self) -> bool {
         if self.maximized_window.is_some() {
@@ -25,6 +26,13 @@ impl NativeChatView {
             || (self.snapshot["hasMore"] == true && self.list.item_count() == 0)
             || self.snapshot["transcriptSearch"]["open"] == true
             || self.snapshot["forkBranches"]["count"].as_u64().is_some()
+    }
+
+    /// True while the transcript shows its first row from its very top, so nothing sits above the
+    /// header to fade out.
+    pub(crate) fn transcript_scrolled_to_top(&self) -> bool {
+        let top = self.list.logical_scroll_top();
+        top.item_ix == 0 && top.offset_in_item <= px(0.0)
     }
 }
 
@@ -47,7 +55,7 @@ impl Render for NativeChatView {
         React's maximized composer is a fixed overlay across the whole chat pane, so nothing of the
         conversation is left around it. The native one is a pane-sized child window over a
         translucent scrim, which leaves this pane painting underneath it: the transcript's rails,
-        minimap and fork strip showed through the margins. While it is up, the pane behind renders
+        minimap and fork button showed through the margins. While it is up, the pane behind renders
         its background only.
         */
         let maximized = self.maximized_window.is_some();
@@ -56,10 +64,10 @@ impl Render for NativeChatView {
         } else {
             self.render_search_bar(&p, window, cx)
         };
-        let fork_branch_strip = if maximized {
+        let fork_branch_badge = if maximized {
             None
         } else {
-            self.render_fork_branch_strip(&p, cx)
+            self.render_fork_branch_badge(&p, cx)
         };
         let state = self.snapshot.clone();
         let error = self.error.clone();
@@ -71,6 +79,37 @@ impl Render for NativeChatView {
         .min_h_0()
         .w_full();
         let transcript = self.scrollable_transcript(transcript, cx);
+        let rows = self.list.item_count();
+        /*
+        CDXC:SessionFork 2026-09-21 WHY:
+        The fork button is placed against the conversation's own region, the transcript or the
+        empty-session welcome that replaces it, rather than against the pane: anchored to the pane
+        it would have covered the search bar and the "load earlier turns" row while those are up,
+        and anchored to the transcript alone a forked session with no rows yet would have lost its
+        switcher entirely.
+        */
+        let body = if maximized {
+            None
+        } else {
+            let content = if rows == 0 {
+                self.render_empty_transcript_region(&state, &p, cx)
+            } else {
+                transcript
+            };
+            Some(
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .w_full()
+                    .child(content)
+                    .children(fork_branch_badge)
+                    .into_any_element(),
+            )
+        };
         let composer = if self.maximized_window.is_none() {
             self.render_composer(&p, window, cx)
         } else {
@@ -82,7 +121,6 @@ impl Render for NativeChatView {
         let picker_chat = cx.weak_entity();
         let pane_windows_open = self.pane_windows_open();
         let suggestion_shadow = self.render_suggestion_shadow(&p);
-        let rows = self.list.item_count();
         let content_ready = self.error.is_none()
             && (rows > 0
                 || matches!(
@@ -164,14 +202,9 @@ impl Render for NativeChatView {
             )
             // The search bar is a sibling region above the list, never an overlay on it.
             .when_some(search_bar, |this, bar| this.child(bar))
-            // The fork branch switcher owns its own strip above the list, the same way.
-            .when_some(fork_branch_strip, |this, strip| this.child(strip))
-            .when(!maximized && self.list.item_count() == 0, |this| {
-                this.child(self.render_empty_transcript_region(&state, &p, cx))
-            })
-            .when(!maximized && self.list.item_count() > 0, |this| {
-                this.child(transcript)
-            })
+            // The transcript (or the welcome that stands in for an empty one), carrying the fork
+            // button in its own top-right corner.
+            .children(body)
             .child(composer)
             .children(suggestion_shadow)
             .child(

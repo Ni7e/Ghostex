@@ -169,7 +169,6 @@ export type GhostexGpuiSidebarBridge = {
    * sidebar rows are keyed by is derived here, in the same place that builds
    * those rows, so Rust never has to know the sidebar's id format.
    */
-  onRevealBrowserTab?: (payload: unknown) => void;
   gxserverBootstrap?: GpuiGxserverBootstrap;
   onCommandPaletteRunSidebarCommand?: (payload: unknown) => void;
   onCommandPaletteSessionFocus?: (payload: unknown) => void;

@@ -86,6 +86,9 @@ impl GhostexGpuiApp {
         (`render_workarea_header_content_fade`) carries no hitbox at all, so everything under the
         faded strip keeps every click, drag and scroll. Nothing here licenses another overlay. How
         the band is divided between this row and the view panel's tab strip is in band.rs.
+        The 2026-09-21 follow-up extends the colour and the missing edge to every state of a GPUI
+        chat, including the ones whose own chrome keeps the transcript below the row rather than
+        under it (`agents_column_meets_gpui_chat`).
 
         CDXC:Titlebar 2026-09-20 WHY:
         `occlude()` is what makes the float honest rather than a second input layer: without it the
@@ -95,13 +98,14 @@ impl GhostexGpuiApp {
         in flight (`workarea_header_blocks_mouse`).
 
         CDXC:Titlebar 2026-09-20 WHY:
-        The row paints the chat's own background, not the workspace's, whenever the transcript
-        passes under it: the fade below it ramps from this colour to transparent, so a colour the
-        content beneath does not use turns that ramp into a crossfade between two surfaces instead
-        of a fade-out of one. In every other state the column under the row starts below it and
-        carries the workspace background, so that is what the row paints there.
+        The row paints the chat's own background, not the workspace's, over a GPUI chat column: the
+        fade below it ramps from this colour to transparent, so a colour the content beneath does
+        not use turns that ramp into a crossfade between two surfaces instead of a fade-out of one,
+        and where the chat starts below the row instead the same colour is what leaves no visible
+        band. Over any other column the content below carries the workspace background, so that is
+        what the row paints there.
         */
-        let header_background = self.workarea_header_surface_color(cx);
+        let header_background = self.workarea_header_surface_color();
         let header = div()
             .id("ghostex-gpui-workarea-header")
             .flex()
@@ -181,11 +185,19 @@ impl GhostexGpuiApp {
                     .overflow_hidden()
                     .child(self.render_workarea_header_breadcrumb(compact, cx)),
             )
+            /*
+            CDXC:Titlebar 2026-09-21 DECISION:
+            User: the header's buttons must not disappear when the chat column is narrowed. The
+            trailing half sizes to its controls and the breadcrumb takes whatever is left, the way
+            a pane tab bar keeps its action cluster while its tabs scroll. This supersedes the even
+            split between the two halves, which clipped the panel toggles at the trailing edge
+            while the breadcrumb still held half the row.
+            */
             .child(
                 h_flex()
                     .id("ghostex-gpui-workarea-header-right")
                     .h_full()
-                    .flex_1()
+                    .flex_shrink(1.0)
                     .min_w_0()
                     .justify_end()
                     .child(self.render_workarea_header_actions(compact, window, cx)),

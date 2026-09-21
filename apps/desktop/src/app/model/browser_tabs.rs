@@ -1521,13 +1521,3 @@ pub(crate) fn browser_placeholder_safe_origin_url(sanitized_url: &str) -> Option
 
     Some(format!("{scheme}://{authority}"))
 }
-
-/*
-CDXC:Browser 2026-08-18:
-One pending sidebar reveal for a Browser tab the user just opened, held until
-that tab reaches the sidebar in a published tab snapshot.
-*/
-pub(crate) struct PendingSidebarBrowserTabReveal {
-    pub(crate) project_id: String,
-    pub(crate) tab_id: BrowserTabId,
-}

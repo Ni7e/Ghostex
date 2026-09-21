@@ -311,7 +311,8 @@ void GhostexGpuiSidebarRevealDispose(void *sidebarPtr) {
 // A GPUI companion owns a separate window because its header, split controls,
 // terminals, and chat pages all need their normal window-local layout and input.
 static bool GhostexGpuiNativeRevealUpdate(void *rootPtr, void *popupPtr, bool enabled,
-                                         double width, double titlebarHeight, bool requested, bool sticky) {
+                                         double width, double titlebarHeight, double leftInset,
+                                         bool requested, bool sticky) {
   NSView *root = (__bridge NSView *)rootPtr;
   NSView *popup = (__bridge NSView *)popupPtr;
   NSWindow *parent = root.window;
@@ -332,8 +333,11 @@ static bool GhostexGpuiNativeRevealUpdate(void *rootPtr, void *popupPtr, bool en
   body.size.height = MAX(0, body.size.height - titlebarHeight);
   if (root.flipped) body.origin.y += titlebarHeight;
   body = [parent convertRectToScreen:[root convertRect:body toView:nil]];
+  // A docked sidebar keeps the window's left edge, so the panel starts where the workarea does.
+  CGFloat inset = MIN(MAX(0, leftInset), body.size.width);
   NSRect frame = body;
-  frame.size.width = MIN(width, body.size.width);
+  frame.origin.x += inset;
+  frame.size.width = MIN(width, body.size.width - inset);
   if (!state) {
     state = [GhostexGpuiSidebarReveal new];
     state.companion = YES;
@@ -388,11 +392,11 @@ static bool GhostexGpuiNativeRevealUpdate(void *rootPtr, void *popupPtr, bool en
 }
 
 bool GhostexGpuiCompanionRevealUpdate(void *root, void *popup, bool enabled, double width, double titlebarHeight) {
-  return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, false, false);
+  return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, 0, false, false);
 }
 
-bool GhostexGpuiNativeSidebarRevealUpdate(void *root, void *popup, bool enabled, double width, double titlebarHeight, bool requested, bool sticky) {
-  return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, requested, sticky);
+bool GhostexGpuiNativeSidebarRevealUpdate(void *root, void *popup, bool enabled, double width, double titlebarHeight, double leftInset, bool requested, bool sticky) {
+  return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, leftInset, requested, sticky);
 }
 
 // CDXC:Sidebar 2026-09-20 DECISION:
@@ -405,7 +409,7 @@ bool GhostexGpuiNativeSidebarRevealUpdate(void *root, void *popup, bool enabled,
 // deleted the companion, and one panel carries both columns in its place.
 // The pointer is still read for the sticky case, where a layout change must not pull the sidebar
 // out from under it. This observes the pointer; each GPUI child window owns its normal input.
-int GhostexGpuiNativeSidebarRevealRequest(void *rootPtr, double width, double titlebarHeight, bool edgeHovered, bool requested, bool keepUnderPointer) {
+int GhostexGpuiNativeSidebarRevealRequest(void *rootPtr, double width, double titlebarHeight, double leftInset, bool edgeHovered, bool requested, bool keepUnderPointer) {
   NSView *root = (__bridge NSView *)rootPtr;
   NSWindow *parent = root.window;
   NSWindow *keyRoot = NSApp.keyWindow;
@@ -416,8 +420,10 @@ int GhostexGpuiNativeSidebarRevealRequest(void *rootPtr, double width, double ti
   if (root.flipped) body.origin.y += titlebarHeight;
   body = [parent convertRectToScreen:[root convertRect:body toView:nil]];
   NSPoint pointer = NSEvent.mouseLocation;
+  CGFloat inset = MIN(MAX(0, leftInset), body.size.width);
   NSRect slot = body;
-  slot.size.width = MIN(width, body.size.width);
+  slot.origin.x += inset;
+  slot.size.width = MIN(width, body.size.width - inset);
   if (requested || (keepUnderPointer && NSPointInRect(pointer, slot))) return 1;
   if (!edgeHovered || NSEvent.pressedMouseButtons != 0) return 0;
   return 1;

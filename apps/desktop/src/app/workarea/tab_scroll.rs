@@ -88,6 +88,21 @@ impl GhostexGpuiApp {
         self.scroll_browser_pane_active_tab(self.browser_tabs.focused_pane);
     }
 
+    /// CDXC:Browser 2026-09-20 WHY:
+    /// A newly opened browser tab used to ask the sidebar to expand and scroll to its row, which
+    /// meant holding the request until the row had been published. The rows are gone, so the same
+    /// call scrolls the view panel's strip to the tab instead: the strip is drawn from the model
+    /// the tab is already in, so there is nothing left to wait for.
+    pub(crate) fn reveal_new_browser_tab(&mut self, tab_id: BrowserTabId) {
+        let Some(pane_id) = find_browser_leaf_id_for_tab(&self.browser_tabs.root, tab_id) else {
+            return;
+        };
+        self.ensure_tab_scroll_handles_for_current_layout();
+        if let Some(position) = self.view_strip_browser_tab_position(pane_id, tab_id) {
+            self.view_browser_tab_scroll_handle.scroll_to_item(position);
+        }
+    }
+
     pub(crate) fn scroll_command_group_active_tab(&mut self, group_id: CommandPaneGroupId) {
         self.ensure_tab_scroll_handles_for_current_layout();
         self.scroll_command_group_active_tab_without_ensure(group_id);
@@ -129,15 +144,22 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn scroll_browser_pane_active_tab_without_ensure(&self, pane_id: BrowserPaneId) {
-        let Some(active_index) = self
-            .browser_tabs
-            .find_leaf(pane_id)
-            .and_then(|leaf| leaf.tab_group.active_tab_index())
-        else {
+        let Some(leaf) = self.browser_tabs.find_leaf(pane_id) else {
+            return;
+        };
+        let active_tab_id = leaf.tab_group.active_tab_id();
+        let Some(active_index) = leaf.tab_group.active_tab_index() else {
             return;
         };
         if let Some(handle) = self.browser_tab_scroll_handles.get(&pane_id) {
             handle.scroll_to_item(active_index);
+        }
+        // The view panel's strip is one scroller across every pane, so the same reveal reads the
+        // tab's place in that flat list rather than its place inside its own pane.
+        if let Some(position) =
+            active_tab_id.and_then(|tab_id| self.view_strip_browser_tab_position(pane_id, tab_id))
+        {
+            self.view_browser_tab_scroll_handle.scroll_to_item(position);
         }
     }
 

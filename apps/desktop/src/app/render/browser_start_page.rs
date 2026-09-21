@@ -86,7 +86,7 @@ impl GhostexGpuiApp {
             let created_tab_id = self
                 .browser_tabs
                 .add_address_placeholder_tab(self.browser_profiles.active_profile_id());
-            self.request_sidebar_browser_tab_reveal(created_tab_id);
+            self.reveal_new_browser_tab(created_tab_id);
             self.browser_url = String::new();
         }
         let pane_id = self.browser_tabs.focused_pane;

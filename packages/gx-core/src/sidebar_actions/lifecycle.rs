@@ -212,17 +212,13 @@ impl LifecycleFollowUp {
 
 /// The `setSessionSleeping` payload, or `None` when this file does not own it.
 ///
-/// Three shapes are deliberately refused and left to the old runtime, and each one is a whole
-/// subsystem rather than a branch: a browser row (`gpui-browser:`) is an app tab and not a daemon
-/// session, a remote row needs that machine's tunnel, and the bulk payloads
-/// (`setSessionsSleeping`, `setGroupSleeping`) carry the paced fan-out. The Quick Automations
+/// Two shapes are deliberately not answered here: a browser row (`gpui-browser:`) is an app tab
+/// and not a daemon session, and a REMOTE row is answered by `remote.rs`, whose leg is a call down
+/// that machine's tunnel with none of the local overlay, focus or declined handling. The bulk
+/// payloads (`setSessionsSleeping`, `setGroupSleeping`) are `bulk.rs`'s. The Quick Automations
 /// project is owned here, because what it does is nothing and a gate can compare that.
 pub fn plan_lifecycle_request(core: &Core, message: &Value) -> Option<LifecycleRequest> {
-    if text_field(message, "type")? != "setSessionSleeping" {
-        return None;
-    }
-    let sleeping = message.get("sleeping")?.as_bool()?;
-    let sidebar_session_id = text_field(message, "sessionId")?;
+    let (call, sidebar_session_id) = lifecycle_message(message)?;
     if sidebar_session_id.starts_with("gpui-browser:") {
         return None;
     }
@@ -230,10 +226,7 @@ pub fn plan_lifecycle_request(core: &Core, message: &Value) -> Option<LifecycleR
     if !session.machine.is_local() {
         return None;
     }
-    let call = match sleeping {
-        true => LifecycleCall::Sleep,
-        false => LifecycleCall::Wake,
-    };
+    let sleeping = call == LifecycleCall::Sleep;
     let focused_before = core.focus().focused_session.clone();
     // The Quick Automations row returns before the call on either side, so it is a request with
     // no RPC rather than a refusal: the gate then compares "nothing happens" instead of skipping.
@@ -245,11 +238,7 @@ pub fn plan_lifecycle_request(core: &Core, message: &Value) -> Option<LifecycleR
         },
         rpc_params: match quick {
             true => Value::Null,
-            false => json!({
-                "projectId": session.project_id,
-                "reason": "gpui-sidebar",
-                "sessionId": session.session_id,
-            }),
+            false => lifecycle_params(&session),
         },
         // Only a sleep moves the focus off the row, and only when that row holds it.
         replacement_focus: match quick || !sleeping {
@@ -260,6 +249,30 @@ pub fn plan_lifecycle_request(core: &Core, message: &Value) -> Option<LifecycleR
         focused_before,
         session,
         call,
+    })
+}
+
+/// `setSessionSleeping`'s own fields: which call, and the sidebar session id it names. One parse for
+/// both machines, so the local planner and the remote leg cannot read `sleeping` two ways.
+pub(super) fn lifecycle_message(message: &Value) -> Option<(LifecycleCall, &str)> {
+    if text_field(message, "type")? != "setSessionSleeping" {
+        return None;
+    }
+    let call = match message.get("sleeping")?.as_bool()? {
+        true => LifecycleCall::Sleep,
+        false => LifecycleCall::Wake,
+    };
+    Some((call, text_field(message, "sessionId")?))
+}
+
+/// The body of `/api/sleepSession` and `/api/wakeSession`, which is the same on either machine: the
+/// RAW ids that machine's daemon accepts and the reason. `sleepTrigger` is never set here, because
+/// only the automatic sleep sets it and no sidebar payload is one.
+pub(super) fn lifecycle_params(session: &SessionKey) -> Value {
+    json!({
+        "projectId": session.project_id,
+        "reason": "gpui-sidebar",
+        "sessionId": session.session_id,
     })
 }
 

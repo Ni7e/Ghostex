@@ -73,7 +73,12 @@ impl GhostexGpuiApp {
                     .child(self.render_view_tab_strip_end_drop_target(tabs.len(), cx)),
             )
             .child(self.render_view_tab_add_button(cx))
-            .child(div().flex_1().min_w(px(8.0)).h_full())
+            // The Browser view's own tabs take the free space when it has any; otherwise the row
+            // just leaves it empty before the trailing controls.
+            .map(|strip| match self.render_view_tab_strip_browser_tabs(cx) {
+                Some(browser_tabs) => strip.child(browser_tabs),
+                None => strip.child(div().flex_1().min_w(px(8.0)).h_full()),
+            })
             .child(self.render_view_tab_strip_pop_out_button(active_mode, cx))
             .child(self.render_view_tab_strip_expand_button(cx))
             .into_any_element()
@@ -350,7 +355,7 @@ impl GhostexGpuiApp {
             move |window, cx| {
                 titlebar_tooltip(
                     if enabled {
-                        "Pop out to its own window"
+                        "Open Externally"
                     } else {
                         "This view has no page to pop out yet"
                     },

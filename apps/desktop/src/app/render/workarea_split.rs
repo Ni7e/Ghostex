@@ -178,7 +178,6 @@ impl GhostexGpuiApp {
             .min_h_0()
             .overflow_hidden()
             .bg(project_editor_shell_background_color())
-            .child(self.render_view_tab_strip(mode, cx))
             .child(
                 div()
                     .on_children_prepainted(move |child_bounds, _window, cx| {

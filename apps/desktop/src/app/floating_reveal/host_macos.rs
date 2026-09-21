@@ -15,6 +15,7 @@ unsafe extern "C" {
         root: *mut c_void,
         width: f64,
         titlebar_height: f64,
+        left_inset: f64,
         edge_hovered: bool,
         requested: bool,
         keep_under_pointer: bool,
@@ -25,6 +26,7 @@ unsafe extern "C" {
         enabled: bool,
         width: f64,
         titlebar_height: f64,
+        left_inset: f64,
         requested: bool,
         sticky: bool,
     ) -> bool;
@@ -45,6 +47,7 @@ impl GhostexGpuiApp {
                     true,
                     panel.width as f64,
                     workarea_header_bottom_y() as f64,
+                    self.floating_reveal_left_inset() as f64,
                     requested,
                     false,
                 )
@@ -61,6 +64,7 @@ impl GhostexGpuiApp {
                 self.parent_ns_view,
                 width as f64,
                 workarea_header_bottom_y() as f64,
+                self.floating_reveal_left_inset() as f64,
                 self.floating_reveal.edge_hovered,
                 requested,
                 keep_under_pointer,
@@ -100,6 +104,7 @@ impl GhostexGpuiApp {
                 true,
                 width as f64,
                 workarea_header_bottom_y() as f64,
+                self.floating_reveal_left_inset() as f64,
                 requested,
                 sticky,
             )
@@ -117,6 +122,7 @@ impl GhostexGpuiApp {
                 std::ptr::null_mut(),
                 panel.native_view,
                 false,
+                0.0,
                 0.0,
                 0.0,
                 false,

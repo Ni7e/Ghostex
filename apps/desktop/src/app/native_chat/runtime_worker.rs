@@ -73,6 +73,7 @@ impl ChatRuntimeWorker {
                                 .map(|ms| Instant::now() + Duration::from_millis(ms.max(1)));
                             let carries_change = output["itemsSplice"].is_object()
                                 || output["snapshot"].is_object()
+                                || output["toolDetails"].is_object()
                                 || output["requests"]
                                     .as_array()
                                     .is_some_and(|requests| !requests.is_empty());

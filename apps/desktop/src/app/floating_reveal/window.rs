@@ -66,14 +66,16 @@ impl Render for FloatingRevealWindow {
                         .h_full()
                         .ml(px(offset))
                         .items_start()
-                        .child(
-                            div()
-                                .w(px(sidebar_width))
-                                .flex_shrink_0()
-                                .h_full()
-                                .child(app.render_native_sidebar(window, cx)),
-                        )
-                        .when(content.agents_column, |this| {
+                        .when(content.sidebar, |this| {
+                            this.child(
+                                div()
+                                    .w(px(sidebar_width))
+                                    .flex_shrink_0()
+                                    .h_full()
+                                    .child(app.render_native_sidebar(window, cx)),
+                            )
+                        })
+                        .when(content.sidebar && content.agents_column, |this| {
                             this.child(
                                 // Painted chrome only: no id and no listener, so GPUI gives it no
                                 // hitbox and the panel is not a place to resize the split.
@@ -83,7 +85,9 @@ impl Render for FloatingRevealWindow {
                                     .h_full()
                                     .bg(sidebar_divider_background_color()),
                             )
-                            .child(
+                        })
+                        .when(content.agents_column, |this| {
+                            this.child(
                                 div()
                                     .flex()
                                     .flex_col()
@@ -105,13 +109,14 @@ impl Render for FloatingRevealWindow {
 }
 
 impl GhostexGpuiApp {
-    /// Where the panel sits: down the window's left edge, from the header's bottom to the floor, so
-    /// the header keeps its window controls and its drag band while the panel is out.
+    /// Where the panel sits: down the window's left edge (or just past a docked sidebar), from the
+    /// header's bottom to the floor, so the header keeps its window controls and its drag band while
+    /// the panel is out.
     pub(crate) fn floating_reveal_frame(&self, width: f32) -> Bounds<Pixels> {
         let top = workarea_header_bottom_y();
         let height = (self.main_window_bounds.size.height.as_f32() - top).max(1.0);
         Bounds::new(
-            self.main_window_bounds.origin + point(px(0.0), px(top)),
+            self.main_window_bounds.origin + point(px(self.floating_reveal_left_inset()), px(top)),
             size(px(width.max(1.0)), px(height)),
         )
     }

@@ -26,5 +26,6 @@ pub(crate) mod terminal_content_layout;
 pub(crate) mod terminal_placeholders_and_editor_shell;
 pub(crate) mod view_picker;
 pub(crate) mod view_tab_strip;
+pub(crate) mod view_tab_strip_browser_tabs;
 pub(crate) mod workarea_header;
 pub(crate) mod workarea_split;
