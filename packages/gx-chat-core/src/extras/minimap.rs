@@ -4,18 +4,78 @@
 //! list. Both are also the two channels the desktop host can drop today
 //! (`docs/2026-09-21/rust-chat/SEAM.md` section 5, item 1): the Rust host must include them in its
 //! change gate.
+//!
+//! CDXC:SessionChat 2026-09-18 WHY:
+//! React reads the minimap's previews straight off the turns it already rendered, but the native
+//! rail gets them over the bridge, and a working session publishes a frame a second. The whole row
+//! list keeps its identity while nothing changed, so an unchanged rail ships no bytes.
+
+use serde_json::Value;
 
 use crate::document::{MinimapMarker, TranscriptItem};
+use crate::extras::minimap_rail::{geometry, minimap_preview, minimap_visible, MinimapMarkerRow};
 use crate::state::{ChatContext, ChatState};
 
 /// The minimap rail, shipped whole and only when it changed.
 pub fn markers(state: &ChatState, _context: &ChatContext) -> Vec<MinimapMarker> {
-    let _ = state;
-    Vec::new()
+    state
+        .extras
+        .minimap
+        .iter()
+        .map(|marker| serde_json::to_value(marker).unwrap_or(Value::Null))
+        .collect()
 }
 
 /// The open subagent's transcript, on its own channel.
+///
+/// The rows themselves are family b's projection of the page this viewer read; family f owns which
+/// page that is, the agent path it is read against, and the settle hold its list runs under.
 pub fn subagent_rows(state: &ChatState, _context: &ChatContext) -> Vec<TranscriptItem> {
-    let _ = state;
-    Vec::new()
+    state
+        .extras
+        .subagent
+        .page
+        .as_ref()
+        .map(|_| Vec::new())
+        .unwrap_or_default()
+}
+
+/// `NativeChatMinimap.project`: one row per genuine user prompt, pointing at the transcript row
+/// that renders it.
+///
+/// `turns` is `(user message, reply message or none)` in transcript order and `item_index` maps a
+/// user message id to the row that draws it; both come from family b's projection.
+pub fn project_minimap(
+    turns: &[(Value, Option<Value>)],
+    item_index: &[(String, usize)],
+) -> Vec<MinimapMarkerRow> {
+    let geometry = geometry();
+    if !minimap_visible(turns.len(), geometry.minimum_turns) {
+        return Vec::new();
+    }
+    turns
+        .iter()
+        .map(|(user, reply)| {
+            let id = user
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let prompt = minimap_preview(Some(user), geometry.preview_limit);
+            MinimapMarkerRow {
+                item: item_index
+                    .iter()
+                    .find(|(known, _)| *known == id)
+                    .map(|(_, index)| *index)
+                    .unwrap_or(0),
+                prompt: if prompt.is_empty() {
+                    "User message".to_string()
+                } else {
+                    prompt
+                },
+                reply: minimap_preview(reply.as_ref(), geometry.preview_limit),
+                id,
+            }
+        })
+        .collect()
 }

@@ -44,8 +44,13 @@ pub struct TerminalTailNotice {
     pub loading: bool,
     pub error: Option<String>,
     pub excerpt: String,
-    /// `null` until a read has answered; then whether the tail was blank.
-    pub empty: Option<bool>,
+    /// Why the sheet has nothing to show, or `null` when it has something.
+    ///
+    /// A sentence, not a flag: `apps/desktop/src/app/native_chat/composer_not_ready.rs` draws it
+    /// as text, and `emptyCopy` in
+    /// `packages/shared/session-chat-controller/native-terminal-tail.ts` tells an unreadable
+    /// screen apart from a blank one.
+    pub empty: Option<String>,
 }
 
 /// One turn's off-screen work read: in flight, or failed and offering a retry.

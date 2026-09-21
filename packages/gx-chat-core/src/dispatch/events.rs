@@ -16,6 +16,22 @@ use crate::state::{ChatContext, ChatState};
 /// family that asked owns the answer, and the request id is what says which family that is. Family
 /// a keeps that table in [`crate::ChatCore`], so those arms land there rather than here.
 pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
+    let mut effects = route(state, event, context);
+    // Family f carries state a pure `document` cannot derive (the stint word, the loading stage,
+    // the task fold, the search cursor, the tail sheet), so the mutating half of the TypeScript's
+    // `publish` runs here, once per event, before `crate::document::assemble`. Other families
+    // will want the same hook; see `docs/2026-09-21/rust-chat/PROGRESS.md`.
+    let mut next = state.extras.next_request_id;
+    effects.extend(crate::extras::settle(state, event, context, || {
+        next += 1;
+        next
+    }));
+    state.extras.next_request_id = next;
+    effects
+}
+
+/// The event's own owner, before any family settles.
+fn route(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
     match event {
         Event::Action(action) => actions::dispatch(state, action, context),
         Event::Start(_)

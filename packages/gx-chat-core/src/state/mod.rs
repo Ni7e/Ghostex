@@ -17,10 +17,12 @@ mod transcript_view;
 pub use crate::state::chat::{ChatState, CoreState};
 pub use crate::state::composer::ComposerState;
 pub use crate::state::context::ChatContext;
-pub use crate::state::extras::ExtrasState;
+pub use crate::state::extras::{ExtrasState, PanelsState, SaveMarkdownRequest, SaveMarkdownSheet, SaveMarkdownStage, SaveMarkdownState, SearchState, SubagentGap, SubagentRequest, SubagentState, SubagentTarget, TerminalTailState, WorkingWordState, LOADING_STAGE_BLANK, LOADING_STAGE_INDICATOR, LOADING_STAGE_RETRY};
 pub use crate::state::menus::MenusState;
 pub use crate::state::messages::{FramePosition, LoadEarlierRequest, MessagesState, ResyncState};
 pub use crate::state::pending::{CommandMarker, PendingSend, PendingState, TerminalStream};
-pub use crate::state::questions::QuestionsState;
+pub use crate::state::questions::{
+    AnswerRequest, AsyncQuestionsState, AsyncSubmit, QuestionsState,
+};
 pub use crate::state::session::{SessionIdentity, SessionState};
 pub use crate::state::transcript_view::TranscriptViewState;

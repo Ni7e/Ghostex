@@ -20,6 +20,15 @@ pub struct ChatContext {
     /// `packages/shared/session-chat-presentation/message-time.ts` groups rows by local midnight,
     /// which is the only timezone-dependent rule in the brain.
     pub utc_offset_minutes: i32,
+    /// The host's uniform random draws for this turn, in `[0, 1)`, consumed in order.
+    ///
+    /// The core generates no random values. The one rule that needs them is the working strip's
+    /// stint word (`pickSessionChatWorkingWord`), and it can draw twice in a single turn: the
+    /// `useState` initializer, then the `useEffect` that immediately replaces it when the first
+    /// computation already sees a working session. Two slots is therefore the whole supply, and a
+    /// replay feeds the recorded `Math.random()` queue straight into it
+    /// (`docs/2026-09-21/rust-chat/REPLAY.md`).
+    pub random_units: [f64; 2],
 }
 
 impl ChatContext {
@@ -28,6 +37,7 @@ impl ChatContext {
         Self {
             now_ms,
             utc_offset_minutes: 0,
+            random_units: [0.0; 2],
         }
     }
 

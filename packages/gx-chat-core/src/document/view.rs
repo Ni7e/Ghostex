@@ -30,7 +30,8 @@ pub struct EmptyState {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewSessionWelcome {
-    pub agent_name: String,
+    /// The agent's display name, or `null` when the session has no agent label yet.
+    pub agent_name: Option<String>,
     /// The agent mark, or `null` when the agent has none.
     pub icon: Option<String>,
     /// Dropped once a notice or question card takes the space below the mark.
