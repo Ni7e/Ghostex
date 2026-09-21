@@ -19,8 +19,8 @@
 //!
 //! **The active group is read the way the live host reads it.** `keepView` is planned from the OLD
 //! RUNTIME's `activeGroupId`, which the host tracks in a `RuntimeActiveGroup` from what it sent the
-//! runtime and what the runtime published; the core's own focus is seeded to a LOCAL project in
-//! every case, because the shadow mirror never follows a remote focus. Each group is reached by one
+//! runtime and what the runtime published; the core's own focus is seeded to a LOCAL project and
+//! then follows the history the way the host's focus does. Each group is reached by one
 //! or more HISTORIES, fed to the same tracker the host uses and replayed on the TypeScript side
 //! through the runtime's own focus methods, so the group the runtime holds is its code's answer:
 //! `published` (the runtime published the group), `sentPublishLagging` (a remote click in that
@@ -37,14 +37,26 @@
 //! live would have made, so the comparer's `answer-a-last-seen-machine` mutation is that exact port
 //! mistake rather than a guess at it.
 //!
+//! **The highlight the store draws** (remote focus part 2 step 2). Once the store's focus takes a
+//! click (the host's tab selection, `gx_store_select_remote_session`), every drawn machine's list
+//! is built from the core the way the host builds it, and the comparer draws the shipped
+//! TypeScript's over the focus its run left: each group's header mark, its sections' marks and
+//! each row's focused and visible marks (`drawn`). A second set of cases is a remote TAB selected
+//! in the workspace, which reaches the same host entry: every drawn machine's rows including the
+//! last-seen machine's, the row that sits in a user-made group, a chat row, and a local row after a
+//! remote focus, each after every history, so a focus move between machines and back to this
+//! computer is compared too (`tabSelections`). `drawnBefore` is the list before the move, for the
+//! mutation of a store whose focus does not follow.
+//!
 //!   cargo run --release --example sidebar_remote_focus_parity -- <out-dir>
 //!   bun tooling/gx-core/remote-focus-parity.ts compare <out-dir>
 
 use std::process::ExitCode;
 
 use ghostex_gx_core::{
-    plan_remote_focus, remote_focus_group, ActiveGroup, Core, FocusState, MachineId,
-    PreferredInterfaceSettings, ProjectKey, RemoteFocusPlan, RuntimeActiveGroup, SessionKey,
+    plan_remote_focus, remote_focus_group, ActiveGroup, Core, Event, FocusState, Intent, MachineId,
+    MachineTabInput, PreferredInterfaceSettings, ProjectKey, RemoteFocusPlan, RuntimeActiveGroup,
+    SessionKey, SidebarInputs, SidebarViewModel,
 };
 use serde_json::{json, Value};
 
@@ -68,11 +80,13 @@ fn main() -> ExitCode {
     }
     let mut entries = Vec::new();
     let mut owned = 0usize;
+    let mut drawn_cases = 0usize;
+    let mut unplaced = 0usize;
     for session_id in session_ids() {
         for message in messages(&session_id) {
             for active_group in active_groups() {
                 for history in histories(active_group.as_deref()) {
-                    for settings in interface_settings() {
+                    for (settings_index, settings) in interface_settings().into_iter().enumerate() {
                         let core = seeded_core(false);
                         let host_group = history.tracker.current(
                             history.told_stamp,
@@ -88,7 +102,11 @@ fn main() -> ExitCode {
                                 .as_ref()
                                 .map_or(Value::Null, RemoteFocusPlan::to_json)
                         };
-                        let core_group = core
+                        // The store's own focus once the history ran: since remote focus part 2
+                        // step 2 it follows every remote selection the host sends.
+                        let mut followed = seeded_core(false);
+                        replay_history(&mut followed, &history.steps);
+                        let core_group = followed
                             .focus()
                             .active_group
                             .as_ref()
@@ -112,6 +130,26 @@ fn main() -> ExitCode {
                                 history.tracker.sent_group().or(history.tracker.published()),
                             ),
                         });
+                        // The highlight the store draws once it took the click's focus, for
+                        // every machine it holds rows for. The Default Agent View cannot move it,
+                        // so one settings combination per case is enough.
+                        //
+                        // A row the machine does not list is refused by the core (the host then
+                        // marks the focus foreign and the runtime's publish decides), so it has no
+                        // highlight of the store's to compare. The store's list draws only rows the
+                        // store holds, so only a click racing the row's removal reaches this.
+                        if let (Some(plan), 0) = (plan.as_ref(), settings_index) {
+                            // What the list drew before the click, for the comparer's mutation of
+                            // a store whose focus does not follow it.
+                            entry["drawnBefore"] = drawn(&followed);
+                            focus_on(&mut followed, plan.session.clone(), None);
+                            if followed.focus().focused_session.as_ref() == Some(&plan.session) {
+                                entry["drawn"] = drawn(&followed);
+                                drawn_cases += 1;
+                            } else {
+                                unplaced += 1;
+                            }
+                        }
                         if session_id.starts_with(&format!("remote:{LAST_SEEN_MACHINE}:")) {
                             let live = seeded_core(true);
                             entry["lastSeenPlan"] =
@@ -125,7 +163,15 @@ fn main() -> ExitCode {
             }
         }
     }
-    let dump = json!({ "entries": entries });
+    let tab_selections = tab_selection_cases();
+    let dump = json!({
+        "entries": entries,
+        "tabSelections": tab_selections,
+        "drawnMachines": DRAWN_MACHINES,
+        "remoteMachines": remote_machines_json(),
+        "workspaceGroups": workspace_groups_json(),
+        "localPresentation": local_presentation_json(),
+    });
     let path = std::path::Path::new(&out_dir).join("rust-remote-focus.json");
     if let Err(error) = std::fs::write(&path, serde_json::to_string(&dump).expect("serialize")) {
         eprintln!("write {}: {error}", path.display());
@@ -136,9 +182,14 @@ fn main() -> ExitCode {
         path.display(),
         dump["entries"].as_array().map_or(0, Vec::len),
     );
+    println!(
+        "{drawn_cases} clicks and {} tab selections carry the highlight the store draws; \
+         {unplaced} clicks name a row the machine does not list",
+        tab_selections.len()
+    );
     // A run that planned nothing compares nothing, whatever the other half then reports.
-    if owned == 0 {
-        eprintln!("no remote click was planned: the gate would compare nothing");
+    if owned == 0 || drawn_cases == 0 {
+        eprintln!("no remote click was planned or drawn: the gate would compare nothing");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
@@ -323,8 +374,9 @@ fn settings_json(settings: &PreferredInterfaceSettings) -> Value {
 /// `last_seen_live` streams the third machine instead, which is the mutant's store.
 fn seeded_core(last_seen_live: bool) -> Core {
     let mut core = Core::new();
+    core.handle_raw_frame(MachineId::Local, &local_snapshot().to_string(), NOW_MS)
+        .expect("the local frame parses");
     for (machine, server_id) in [
-        (MachineId::Local, "local"),
         (MachineId::Remote(MACHINE.to_string()), "remote-a"),
         (MachineId::Remote(OTHER_MACHINE.to_string()), "remote-b"),
     ] {
@@ -442,4 +494,216 @@ fn session(project_id: &str, session_id: &str, agent_id: Option<&str>) -> Value 
         row["agentId"] = Value::String(agent_id.to_string());
     }
     row
+}
+
+/// The machines whose drawn lists are compared: both streaming ones and the last-seen one. The one
+/// the store holds no rows for draws nothing on either side.
+const DRAWN_MACHINES: [&str; 3] = [MACHINE, OTHER_MACHINE, LAST_SEEN_MACHINE];
+
+/// The saved machines the TypeScript lists groups for, in the settings shape it reads.
+fn remote_machines_json() -> Value {
+    json!([
+        { "id": MACHINE, "name": "Windows", "sshHost": "a.invalid" },
+        { "id": OTHER_MACHINE, "name": "Other", "sshHost": "b.invalid" },
+        { "id": LAST_SEEN_MACHINE, "name": "Last seen", "sshHost": "c.invalid" },
+        { "id": UNLOADED_MACHINE, "name": "Offline", "sshHost": "d.invalid" },
+    ])
+}
+
+/// THIS computer's workspace session groups document, which holds a remote project's user-made
+/// groups under its machine-scoped id: `RS2` of the first machine's `R1` sits in the group `g1`,
+/// so a click on it asks which header the highlight belongs to.
+fn workspace_groups_json() -> Value {
+    json!({
+        "projectOrder": [],
+        "projects": {
+            ProjectKey::remote(MACHINE, "R1").to_workspace_project_id(): {
+                "groups": [{ "groupId": "g1", "title": "Mine", "sessionIds": ["RS2"] }],
+                "nextGroupNumber": 2,
+            },
+        },
+    })
+}
+
+/// This computer's presentation: the local project a tell focuses, `P1` with `S1`.
+fn local_presentation_json() -> Value {
+    json!({
+        "projects": [project("P1", "/tmp/P1")],
+        "groups": [{
+            "groupId": "P1:active",
+            "projectId": "P1",
+            "title": "Active",
+            "sessionIds": ["S1"],
+            "sortKey": "1:P1:active",
+        }],
+        "sessions": [{
+            "sessionId": "S1",
+            "projectId": "P1",
+            "groupId": "P1:active",
+            "kind": "agent",
+            "surface": "workspace",
+            "zmxName": "S90-S1",
+            "sortKey": "000000000000:0:1:S1",
+            "visibleInSidebarByDefault": true,
+            "alias": "Session S1",
+            "activity": "idle",
+            "lifecycleState": "running",
+            "lastInteractionAt": "2026-09-15T01:18:43.055Z",
+            "createdAt": "2026-09-15T01:00:00.000Z",
+            "updatedAt": "2026-09-15T01:18:43.055Z",
+        }],
+    })
+}
+
+fn local_snapshot() -> Value {
+    let presentation = local_presentation_json();
+    json!({
+        "type": "presentationSnapshot",
+        "protocolVersion": ghostex_gx_core::protocol::GXSERVER_PROTOCOL_VERSION,
+        "serverId": "local",
+        "revision": 1,
+        "snapshot": {
+            "revision": 1,
+            "generatedAt": "2026-09-21T00:00:00.000Z",
+            "projects": presentation["projects"],
+            "groups": presentation["groups"],
+            "sessions": presentation["sessions"],
+            "workspaceGroups": workspace_groups_json(),
+        }
+    })
+}
+
+fn focus_on(core: &mut Core, session: SessionKey, visible: Option<Vec<SessionKey>>) {
+    core.handle(
+        Event::Intent(Intent::FocusSession { session, visible }),
+        NOW_MS,
+    );
+}
+
+/// What the store's focus does with a history's steps: the host's remote tab selection takes a
+/// remote row with no reported set (`gx_store_select_remote_session`), and a tell is a local
+/// selection with the rendered set the tell carries.
+fn replay_history(core: &mut Core, steps: &[Value]) {
+    for step in steps {
+        match step["step"].as_str() {
+            Some("remoteFocus") => {
+                let session = step["sessionId"]
+                    .as_str()
+                    .and_then(SessionKey::parse_remote_scoped_session_id)
+                    .expect("a remote row");
+                focus_on(core, session, None);
+            }
+            Some("localTell") => {
+                let session = SessionKey::local(
+                    step["projectId"].as_str().expect("a project"),
+                    step["sessionId"].as_str().expect("a session"),
+                );
+                focus_on(core, session.clone(), Some(vec![session]));
+            }
+            other => panic!("unknown history step {other:?}"),
+        }
+    }
+}
+
+/// The focus marks of every drawn machine's list, built the way the host builds the list it draws:
+/// per group its header mark, its sections' "holds the focused session" marks and each row's two
+/// marks. Ids are the renderer's, so the comparer matches them to the TypeScript by id.
+fn drawn(core: &Core) -> Value {
+    let mut out = serde_json::Map::new();
+    for machine in DRAWN_MACHINES {
+        let mut inputs = SidebarInputs::default();
+        inputs.ui.selected_machine_id = machine.to_string();
+        inputs.host.machines = DRAWN_MACHINES
+            .iter()
+            .map(|id| MachineTabInput {
+                machine_id: id.to_string(),
+                label: id.to_string(),
+                state: match *id == LAST_SEEN_MACHINE {
+                    true => "disconnected",
+                    false => "connected",
+                }
+                .to_string(),
+                message: None,
+                fed: true,
+            })
+            .collect();
+        let view = SidebarViewModel::build_from_scratch(core, &inputs, NOW_MS);
+        let groups: Vec<Value> = view
+            .groups
+            .iter()
+            .map(|group| {
+                json!({
+                    "groupId": group.core.group_id,
+                    "isActive": group.core.is_active,
+                    "sections": group.core.sections.iter().map(|section| json!({
+                        "id": section.id.as_str(),
+                        "containsActiveSession": section.contains_active_session,
+                    })).collect::<Vec<_>>(),
+                    "sessions": group.core.sessions.iter().map(|session| json!({
+                        "sessionId": session.row.sidebar_session_id,
+                        "isFocused": session.is_focused,
+                        "isVisible": session.is_visible,
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        out.insert(machine.to_string(), Value::Array(groups));
+    }
+    Value::Object(out)
+}
+
+/// A remote TAB selected in the workspace (or a remote attach landing), which reaches the same
+/// host entry as the store's own open: the core takes the row, and the runtime is sent the tab
+/// selection with the store's stamp. Every drawn machine's rows, the last-seen machine's included,
+/// the user-made group's row, a chat row, and a local row a tell selects after a remote focus
+/// (the focus moving back to this computer), each after every history.
+fn tab_selection_cases() -> Vec<Value> {
+    let targets = [
+        format!("remote:{MACHINE}:session:R1:RS1"),
+        format!("remote:{MACHINE}:session:R1:RS2"),
+        format!("remote:{MACHINE}:session:R-chat:CS1"),
+        format!("remote:{OTHER_MACHINE}:session:R1:RS1"),
+        format!("remote:{LAST_SEEN_MACHINE}:session:R1:RS1"),
+        format!("remote:{LAST_SEEN_MACHINE}:session:R-chat:CS1"),
+        "local:P1:S1".to_string(),
+    ];
+    let mut out = Vec::new();
+    for active_group in active_groups() {
+        for history in histories(active_group.as_deref()) {
+            for target in &targets {
+                let mut core = seeded_core(false);
+                replay_history(&mut core, &history.steps);
+                let drawn_before = drawn(&core);
+                let selection = match target.strip_prefix("local:") {
+                    Some(_) => {
+                        let session = SessionKey::local("P1", "S1");
+                        focus_on(&mut core, session.clone(), Some(vec![session]));
+                        json!({ "projectId": "P1", "sessionId": "S1" })
+                    }
+                    None => {
+                        let session = SessionKey::parse_remote_scoped_session_id(target)
+                            .expect("a remote row");
+                        focus_on(&mut core, session.clone(), None);
+                        json!({
+                            "projectId": session.project_key().to_workspace_project_id(),
+                            "sessionId": session.to_focus_state_session_id(),
+                        })
+                    }
+                };
+                let mut selection = selection;
+                selection["focusStamp"] = json!(core.focus().local_stamp);
+                out.push(json!({
+                    "history": history.kind,
+                    "historySteps": history.steps,
+                    "startGroupId": history.start_group,
+                    "activeGroupId": history.runtime_group,
+                    "target": target,
+                    "selection": selection,
+                    "drawn": drawn(&core),
+                    "drawnBefore": drawn_before,
+                }));
+            }
+        }
+    }
+    out
 }

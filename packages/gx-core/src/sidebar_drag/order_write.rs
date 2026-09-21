@@ -132,12 +132,13 @@ pub fn owns_order_write_message(message: &Value) -> bool {
 /// these. `syncSessionOrder` and `moveSessionToGroup` naming a remote row are posted only by
 /// `reorderNativeSidebar`, which returns for a remote group before it posts anything, so neither
 /// can arrive from the sidebar. `createGroupFromSession` on a remote row CAN arrive (Move to New
-/// Group), and its edit is portable, but it then makes the new group active WITHOUT making its
-/// project active. That activation is the part still missing: since 2026-09-21 the store opens a
-/// remote row's PANE itself (`sidebar_actions/remote_focus.rs`), but a remote row's focus MARKS are
-/// still carried from the old projection's publish (declared difference 16), so activating a
-/// subgroup on a machine whose focus the store does not own would move the core's active group
-/// somewhere nothing draws from.
+/// Group), and both its edit and its highlight are portable now that the store's focus owns remote
+/// rows (remote focus part 2 step 2). What is not is the RUNTIME's half: it makes the new group
+/// its `activeGroupId` WITHOUT making the project active, and that id is what its remote tab list
+/// for the workspace is read from and what `keepView` is planned from (`RuntimeActiveGroup`). No
+/// message the store sends the runtime can set its active group to a user-made group of a remote
+/// project (the tab selection always names the project's own group), so answering here would leave
+/// the workspace's tab list and the next click's `keepView` on the old group.
 pub fn plan_order_write(
     document: &WorkspaceGroupsDocument,
     message: &Value,

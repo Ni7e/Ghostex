@@ -38,6 +38,16 @@
  * holds must be the case's `activeGroupId`, the host's group must name the same remote project, and
  * the group the NEW run leaves must be the plan's `focusGroup`, which is what the host tracks next.
  *
+ * **The highlight** (remote focus part 2 step 2). The store's focus owns the remote row, so the list
+ * it draws is compared with what the shipped TypeScript draws over the focus the NEW run left: the
+ * runtime's own `createRemoteSidebarGroups` (user-made groups spliced in, the last-seen machine
+ * faded), then the page's `createNativeSidebarSnapshot` per machine tab, for every group's header
+ * mark, its sections' marks and every row's focused and visible marks. The same comparison runs
+ * for a remote TAB selected in the workspace (`tabSelections`: every drawn machine, the last-seen
+ * one included, a row in a user-made group, a chat row, and a local row after a remote focus),
+ * which also checks that the runtime's focus state echoes the store's stamp. One declared
+ * difference is applied by name (`withDeclaredSubgroupHeader`, difference 54).
+ *
  * A gate that cannot fail is worse than none, so `--inject` mutates the Rust dump with a plausible
  * port mistake and the run must then show a difference or collapse a counter.
  */
@@ -46,6 +56,10 @@ import { resetBrowserStorage } from './browser-shim';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GpuiSidebarRuntime } from '@/apps/desktop/sidebar/gxserver-runtime/core';
+import { createGpuiSidebarHudState } from '@/apps/desktop/sidebar/gxserver-runtime/helpers/command-pane';
+import { createNativeSidebarSnapshot } from '@/apps/desktop/sidebar/native-sidebar/model';
+import { NativeSidebarUiState } from '@/apps/desktop/sidebar/native-sidebar/ui-state';
+import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import {
   GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE,
   GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION,
@@ -202,7 +216,45 @@ const MUTATIONS: Record<string, (entry: Json) => Json> = {
   // The planner refuses every remote click, so the old runtime does it all: no payload difference
   // at all, and every counter that says the Rust side answered anything collapses.
   'refuse-every-remote-click': (entry) => ({ ...entry, owned: false, plan: null }),
+  // The store's focus does not follow the click: the list keeps drawing what it drew before, the
+  // state step 2 exists to end.
+  'highlight-does-not-follow': (entry) => (entry.drawn ? { ...entry, drawn: entry.drawnBefore ?? entry.drawn } : entry),
 };
+
+/**
+ * Port mistakes in the HIGHLIGHT the store draws, applied to the Rust half's drawn lists (clicks
+ * and tab selections alike). Each is what a plausible wrong port of the core's focus would draw.
+ */
+const DRAWN_MUTATIONS: Record<string, (drawn: Json) => Json> = {
+  // No remote row is ever focused: the carry deleted and nothing put in its place.
+  'no-remote-row-focus': (drawn) =>
+    mapRows(drawn, (row) => (String(row.sessionId).startsWith('remote:') ? { ...row, isFocused: false } : row)),
+  // The visible fill dropped from remote rows.
+  'no-remote-row-visible': (drawn) =>
+    mapRows(drawn, (row) => (String(row.sessionId).startsWith('remote:') ? { ...row, isVisible: false } : row)),
+  // No remote group header is ever active.
+  'no-remote-active-group': (drawn) => mapGroups(drawn, (group) => ({ ...group, isActive: false })),
+  // The section marks not following the focus.
+  'no-section-marks': (drawn) =>
+    mapGroups(drawn, (group) => ({
+      ...group,
+      sections: (group.sections as Json[]).map((section) => ({ ...section, containsActiveSession: false })),
+    })),
+  // Every row of the active group drawn visible, the first-row fallback the TypeScript removed.
+  'every-active-row-visible': (drawn) =>
+    mapGroups(drawn, (group) => ({
+      ...group,
+      sessions: (group.sessions as Json[]).map((row) => ({ ...row, isVisible: row.isVisible || group.isActive })),
+    })),
+};
+
+function mapGroups(drawn: Json, edit: (group: Json) => Json): Json {
+  return Object.fromEntries(Object.entries(drawn).map(([machine, groups]) => [machine, (groups as Json[]).map(edit)]));
+}
+
+function mapRows(drawn: Json, edit: (row: Json) => Json): Json {
+  return mapGroups(drawn, (group) => ({ ...group, sessions: (group.sessions as Json[]).map(edit) }));
+}
 
 function withPlan(entry: Json, edit: (plan: Json) => Json): Json {
   return entry.plan ? { ...entry, plan: edit(entry.plan) } : entry;
@@ -239,6 +291,8 @@ type Run = {
   afterTimers: Json;
   /** Whether the click changed the runtime's remote focus at all. */
   focusMarked: boolean;
+  /** The runtime the run left, for the drawn highlight. */
+  runtime?: Json;
 };
 
 const realSetRemoteFocus = GpuiSidebarRuntime.prototype.setRemotePresentationSessionFocus;
@@ -437,7 +491,170 @@ async function runNew(entry: Json, shape: (typeof ATTENTION_SHAPES)[number]): Pr
   }
   if (plan.acknowledgeAfterOpen) acknowledge();
   await finish(runtime, entry, run);
+  run.runtime = runtime;
   return run;
+}
+
+/** The sidebar store as the module created it, so no case inherits another's rows. */
+const pristineStore = sidebarStore.getState();
+
+/**
+ * The highlight the shipped TypeScript draws for every machine once the run is over: the runtime's
+ * own `createRemoteSidebarGroups` (its remote projection, the user-made groups it splices in and
+ * the last-seen machine it fades) over its focus, then the page's `createNativeSidebarSnapshot` for
+ * each machine tab, which is where the sections' marks come from.
+ */
+function drawnByTypeScript(runtime: Json, dump: Json, presentation: Json): Json {
+  const settings = { ...(runtime.runtimeSettings?.settings ?? {}), remoteMachines: dump.remoteMachines };
+  runtime.runtimeSettings = { settings };
+  runtime.workspaceGroups = structuredClone(dump.workspaceGroups);
+  runtime.remoteLastSeenPresentations = new Map([[String(dump.drawnMachines[2]), structuredClone(presentation)]]);
+  runtime.captureRemoteLastSeenPresentations = () => {};
+  runtime.getCloseAfterDoneProjection = () => undefined;
+  const groups = runtime.createRemoteSidebarGroups() as Json[];
+  const runtimeSettings = { debuggingMode: false, showBetaFeatures: false, settings };
+  const window = (globalThis as Json).window as Json;
+  window.ghostexGpui = { ...(window.ghostexGpui as Json), runtimeSettings };
+  const out: Json = {};
+  for (const machine of dump.drawnMachines as string[]) {
+    sidebarStore.setState(pristineStore, true);
+    sidebarStore.getState().applySidebarMessage({
+      type: 'hydrate',
+      revision: 7,
+      groups: structuredClone(groups) as never,
+      hud: createGpuiSidebarHudState({ runtimeSettings } as never) as never,
+      pinnedPrompts: [],
+      previousSessions: [],
+    } as never);
+    const ui = new NativeSidebarUiState();
+    ui.selectedMachineId = machine;
+    const snapshot = createNativeSidebarSnapshot(ui) as Json;
+    out[machine] = (snapshot.groups as Json[]).map((group) => ({
+      groupId: group.groupId,
+      isActive: group.isActive === true,
+      sections: (group.sections as Json[]).map((section) => ({
+        id: section.id,
+        containsActiveSession: section.containsActiveSession === true,
+      })),
+      sessions: (group.sessions as Json[]).map((session) => ({
+        sessionId: session.sessionId,
+        isFocused: session.isFocused === true,
+        isVisible: session.isVisible === true,
+      })),
+    }));
+  }
+  return out;
+}
+
+/** The two drawn lists in one order: groups and rows by id; sections keep their drawn order. */
+function drawnCanonical(drawn: Json): Json {
+  return Object.fromEntries(
+    Object.entries(drawn)
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([machine, groups]) => [
+        machine,
+        [...(groups as Json[])]
+          .map((group) => ({
+            ...group,
+            sessions: [...(group.sessions as Json[])].sort((a, b) => (a.sessionId < b.sessionId ? -1 : 1)),
+          }))
+          .sort((a, b) => (a.groupId < b.groupId ? -1 : 1)),
+      ])
+  );
+}
+
+/**
+ * Declared difference 54: a remote row inside a user-made group. The runtime's remote focus always
+ * names the project's own group (`setRemotePresentationSessionFocus`), so it draws the PROJECT
+ * header active and the user-made group inactive with the row focused inside it; the store's focus
+ * names the group the row is in (`group_of_session`), as it does for a local row, so it draws that
+ * group's header and its section active and the project's header not. Applied to the TypeScript's
+ * list only where the focused row sits in a user-made group, and only to those two headers and
+ * that group's section marks; every other value is still compared as drawn.
+ */
+function withDeclaredSubgroupHeader(drawn: Json): { drawn: Json; applied: boolean } {
+  let applied = false;
+  const out = Object.fromEntries(
+    Object.entries(drawn).map(([machine, groups]) => {
+      const list = groups as Json[];
+      const subgroup = list.find(
+        (group) =>
+          String(group.groupId).startsWith('gpui-wsg:') &&
+          !group.isActive &&
+          (group.sessions as Json[]).some((row) => row.isFocused)
+      );
+      if (!subgroup) return [machine, list];
+      const project = decodeURIComponent(String(subgroup.groupId).split(':')[1] ?? '').replace(':project:', ':group:');
+      applied = true;
+      return [
+        machine,
+        list.map((group) => {
+          if (group === subgroup)
+            return {
+              ...group,
+              isActive: true,
+              sections: (group.sections as Json[]).map((section) => ({ ...section, containsActiveSession: true })),
+            };
+          if (group.groupId === project) return { ...group, isActive: false };
+          return group;
+        }),
+      ];
+    })
+  );
+  return { drawn: out, applied };
+}
+
+/** Every difference between the two drawn lists, one line per group. */
+function drawnDifferences(label: string, theirs: Json, ours: Json): string[] {
+  const left = drawnCanonical(theirs);
+  const right = drawnCanonical(ours);
+  const lines: string[] = [];
+  for (const machine of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    const byId = (groups: Json[] | undefined) => new Map((groups ?? []).map((group) => [group.groupId, group]));
+    const a = byId(left[machine]);
+    const b = byId(right[machine]);
+    for (const groupId of new Set([...a.keys(), ...b.keys()])) {
+      const x = canonical(a.get(groupId) ?? null);
+      const y = canonical(b.get(groupId) ?? null);
+      if (x !== y) lines.push(`${label}: drawn ${machine} ${groupId}\n  ts   ${x}\n  rust ${y}`);
+    }
+  }
+  return lines;
+}
+
+/** What a drawn list shows, for the coverage counters. */
+function drawnShape(drawn: Json): { focusedRemote: number; activeRemote: number; sectionMarks: number } {
+  let focusedRemote = 0;
+  let activeRemote = 0;
+  let sectionMarks = 0;
+  for (const groups of Object.values(drawn) as Json[][]) {
+    for (const group of groups) {
+      if (group.isActive) activeRemote += 1;
+      sectionMarks += (group.sections as Json[]).filter((section) => section.containsActiveSession).length;
+      focusedRemote += (group.sessions as Json[]).filter((row) => row.isFocused).length;
+    }
+  }
+  return { focusedRemote, activeRemote, sectionMarks };
+}
+
+function countDrawn(
+  counters: Record<string, number>,
+  drawn: Json,
+  steps: Json[] | undefined,
+  target: string,
+  lastSeenMachineId: string
+): void {
+  const shape = drawnShape(drawn);
+  counters.drawnFocusedRows += shape.focusedRemote;
+  counters.drawnActiveGroups += shape.activeRemote;
+  counters.drawnSectionMarks += shape.sectionMarks;
+  if (target.startsWith(`remote:${lastSeenMachineId}:session:`)) counters.drawnLastSeen += 1;
+  if (target.endsWith(':R1:RS2')) counters.drawnSubgroupRow += 1;
+  if (target === 'local:P1:S1' && (steps ?? []).some((step) => step.step === 'remoteFocus'))
+    counters.drawnBackToLocal += 1;
+  const previous = (steps ?? []).filter((step) => step.step === 'remoteFocus').at(-1)?.sessionId as string | undefined;
+  if (previous && target.startsWith('remote:') && previous.split(':')[1] !== target.split(':')[1])
+    counters.drawnMachineMoves += 1;
 }
 
 async function compare([outDir, ...flags]: string[]) {
@@ -446,9 +663,17 @@ async function compare([outDir, ...flags]: string[]) {
   (globalThis as Json).Date.now = () => PINNED_NOW_MS;
   const injectAt = flags.indexOf('--inject');
   const mutationName = injectAt >= 0 ? flags[injectAt + 1] : undefined;
-  if (mutationName && !MUTATIONS[mutationName])
-    throw new Error(`unknown mutation ${mutationName}; known: ${Object.keys(MUTATIONS)}`);
-  const mutate = mutationName ? MUTATIONS[mutationName] : (entry: Json) => entry;
+  if (mutationName && !MUTATIONS[mutationName] && !DRAWN_MUTATIONS[mutationName])
+    throw new Error(
+      `unknown mutation ${mutationName}; known: ${[...Object.keys(MUTATIONS), ...Object.keys(DRAWN_MUTATIONS)]}`
+    );
+  const mutateEntry = mutationName && MUTATIONS[mutationName] ? MUTATIONS[mutationName] : (entry: Json) => entry;
+  const mutateDrawn =
+    mutationName && DRAWN_MUTATIONS[mutationName] ? DRAWN_MUTATIONS[mutationName] : (drawn: Json) => drawn;
+  const mutate = (entry: Json) => {
+    const edited = mutateEntry(entry);
+    return edited.drawn ? { ...edited, drawn: mutateDrawn(edited.drawn) } : edited;
+  };
 
   const dump = JSON.parse(readFileSync(join(outDir, 'rust-remote-focus.json'), 'utf8')) as Json;
   const differences: string[] = [];
@@ -475,6 +700,16 @@ async function compare([outDir, ...flags]: string[]) {
     historyTellAfterRemote: 0,
     historyTellPending: 0,
     blankAgentRows: 0,
+    drawnClicks: 0,
+    drawnTabSelections: 0,
+    drawnLastSeen: 0,
+    drawnSubgroupRow: 0,
+    drawnBackToLocal: 0,
+    drawnMachineMoves: 0,
+    drawnFocusedRows: 0,
+    drawnActiveGroups: 0,
+    drawnSectionMarks: 0,
+    declaredSubgroupHeader: 0,
   };
   let index = 0;
   for (const raw of dump.entries as Json[]) {
@@ -545,6 +780,64 @@ async function compare([outDir, ...flags]: string[]) {
     counters.machineCalls += (old.afterTimers.machineCalls as Json[]).length;
     if (old.focusMarked) counters.focusMarks += 1;
     counters.patchesCompared += (old.after.patches as Json[]).length;
+    if (entry.drawn) {
+      // The highlight: what the runtime's projection draws over the focus the NEW run left, against
+      // what the store draws from its own focus once it took the click.
+      const declared = withDeclaredSubgroupHeader(drawnByTypeScript(fresh.runtime, dump, entry.presentation));
+      if (declared.applied) counters.declaredSubgroupHeader += 1;
+      differences.push(...drawnDifferences(label, declared.drawn, entry.drawn));
+      counters.drawnClicks += 1;
+      countDrawn(counters, entry.drawn, entry.historySteps, String(entry.message.sessionId), dump.drawnMachines[2]);
+    }
+  }
+
+  // A remote tab selected in the workspace, and a local one after a remote focus: the same host
+  // entry as the store's own open, replayed through `handleGpuiWorkspaceTabSessionSelected` with the
+  // store's stamp.
+  const presentation = (dump.entries as Json[])[0].presentation as Json;
+  for (const raw of (dump.tabSelections ?? []) as Json[]) {
+    const entry =
+      mutationName === 'highlight-does-not-follow'
+        ? { ...raw, drawn: raw.drawnBefore }
+        : raw.drawn
+          ? { ...raw, drawn: mutateDrawn(raw.drawn) }
+          : raw;
+    const label = `tab ${entry.target} history=${entry.history} group=${entry.activeGroupId ?? '-'}`;
+    const run = emptyRun();
+    const runtime = freshRuntime(
+      {
+        message: { sessionId: String(entry.target).startsWith('remote:') ? entry.target : '' },
+        presentation,
+        liveMachineIds: (dump.entries as Json[])[0].liveMachineIds,
+        settings: { preferredAgentInterface: 'terminal', preferredAgentInterfaceOverrides: {} },
+        historySteps: entry.historySteps,
+        startGroupId: entry.startGroupId,
+      },
+      'idle',
+      run
+    );
+    if (runtime.activeGroupId !== (entry.activeGroupId ?? undefined))
+      differences.push(`${label}: the history left the runtime on ${runtime.activeGroupId ?? '-'}`);
+    runtime.handleGpuiWorkspaceTabSessionSelected({
+      ...entry.selection,
+      type: GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION,
+      visibleSessionIds: [entry.selection.sessionId],
+    });
+    // The runtime must echo the store's stamp in the focus state it publishes, or the store would
+    // judge it stale.
+    // A local selection posts through the local projection, which this harness does not load; its
+    // stamp is the tell's, gated by the local focus path.
+    const posted = run.focusStates.at(-1);
+    if (String(entry.target).startsWith('remote:') && (!posted || posted.focusStamp !== entry.selection.focusStamp))
+      differences.push(
+        `${label}: the runtime posted stamp ${posted?.focusStamp ?? '-'}, the store sent ${entry.selection.focusStamp}`
+      );
+    const declared = withDeclaredSubgroupHeader(drawnByTypeScript(runtime, dump, presentation));
+    if (declared.applied) counters.declaredSubgroupHeader += 1;
+    differences.push(...drawnDifferences(label, declared.drawn, entry.drawn));
+    counters.drawnTabSelections += 1;
+    countDrawn(counters, entry.drawn, entry.historySteps, String(entry.target), dump.drawnMachines[2]);
   }
 
   const zero = Object.entries(counters).filter(([, value]) => value === 0);
@@ -554,7 +847,7 @@ async function compare([outDir, ...flags]: string[]) {
       .map(([name, value]) => `  ${name} ${value}`)
       .join('\n')
   );
-  for (const difference of differences.slice(0, 20)) console.log(`  ${difference}`);
+  for (const difference of differences.slice(0, Number(process.env.SHOW ?? 20))) console.log(`  ${difference}`);
   if (differences.length > 20) console.log(`  ... and ${differences.length - 20} more`);
   if (zero.length) {
     console.error(`coverage counters at zero: ${zero.map(([name]) => name).join(', ')}`);

@@ -23,9 +23,9 @@ use ghostex_gx_core::protocol::{
 };
 use ghostex_gx_core::{
     collapse_into_storage, collapse_state_from_storage, reveal_plan, BrowserTabInput,
-    ChangeSummary, Core, Event, ExternalFocusUpdate, Intent, MachineId, SectionId, SessionKey,
-    SessionSortMode, SidebarCollapseDiff, SidebarInputs, SidebarUiIntent, SidebarUiStore,
-    SidebarView, SidebarViewModel, ToggleAllProjectsInput,
+    ChangeSummary, Core, Event, ExternalFocusUpdate, Intent, MachineId, MachineTabInput, SectionId,
+    SessionKey, SessionSortMode, SidebarCollapseDiff, SidebarInputs, SidebarUiIntent,
+    SidebarUiStore, SidebarView, SidebarViewModel, ToggleAllProjectsInput,
 };
 use serde_json::Value;
 
@@ -685,11 +685,21 @@ fn focus_without_frames(frames: &str, domain_projects: Option<Vec<Value>>) -> bo
         },
     );
     let live_fields = ["spaces", "isActive", "sections", "isFocused", "isVisible"];
+    let (remote_steps, remote_stale_steps, remote_host_differences) =
+        remote_focus_moves(&mut core, &mut model, &inputs, &row_a, now_ms, skip_update);
     let checks = [
         ("the list starts equal to a fresh build", baseline_same),
         (
             "every stale probe differs",
             stale_steps == steps && steps == 3,
+        ),
+        (
+            "every remote stale probe differs",
+            remote_stale_steps == remote_steps && remote_steps == 4,
+        ),
+        (
+            "both lists after a move across machines",
+            remote_host_differences == 0,
         ),
         (
             "the stale probes name the live fields",
@@ -707,6 +717,145 @@ fn focus_without_frames(frames: &str, domain_projects: Option<Vec<Value>>) -> bo
         passed &= ok;
     }
     passed
+}
+
+/// Remote focus part 2 step 2: the store's focus takes remote rows too, so a focus move ACROSS
+/// machines must reach both lists with no frame behind it: this computer's list loses its active
+/// group and its row marks, and the remote machine's list gains them, and back. A second machine
+/// is streamed in (the recording has one), with its own list built for its tab; each move is judged
+/// on BOTH lists, stale and after the host's empty-summary update. Returns the moves, the moves
+/// whose stale probe differed on at least one list, and the updates that left a list unequal to a
+/// fresh build.
+fn remote_focus_moves(
+    core: &mut Core,
+    local_model: &mut SidebarViewModel,
+    local_inputs: &SidebarInputs,
+    local_row: &SessionKey,
+    now_ms: u64,
+    skip_update: bool,
+) -> (usize, usize, usize) {
+    const MACHINE: &str = "remote-replay";
+    let machine = MachineId::Remote(MACHINE.to_string());
+    let row = |project: &str, session: &str| {
+        serde_json::json!({
+            "sessionId": session, "projectId": project, "groupId": format!("{project}:active"),
+            "kind": "agent", "surface": "workspace", "zmxName": format!("S90-{session}"),
+            "sortKey": format!("000000000000:0:1:{session}"), "visibleInSidebarByDefault": true,
+            "alias": session, "activity": "idle", "lifecycleState": "running",
+            "lastInteractionAt": "2026-09-15T01:18:43.055Z",
+            "createdAt": "2026-09-15T01:00:00.000Z", "updatedAt": "2026-09-15T01:18:43.055Z",
+        })
+    };
+    let project = |project: &str| {
+        serde_json::json!({
+            "projectId": project, "title": project, "path": format!("/tmp/{project}"),
+            "pathState": "available", "groupIds": [format!("{project}:active")],
+            "sortKey": format!("1:{project}"), "createdAt": "2026-06-29T13:10:42.091Z",
+            "updatedAt": "2026-09-15T01:18:43.055Z",
+        })
+    };
+    let group = |project: &str, sessions: &[&str]| {
+        serde_json::json!({
+            "groupId": format!("{project}:active"), "projectId": project, "title": "Active",
+            "sessionIds": sessions, "sortKey": format!("1:{project}:active"),
+        })
+    };
+    let snapshot = serde_json::json!({
+        "type": "presentationSnapshot", "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+        "serverId": "remote-replay", "revision": 1,
+        "snapshot": {
+            "revision": 1, "generatedAt": "2026-09-21T00:00:00.000Z",
+            "projects": [project("R1"), project("R2")],
+            "groups": [group("R1", &["RS1", "RS2"]), group("R2", &["R2S1"])],
+            "sessions": [row("R1", "RS1"), row("R1", "RS2"), row("R2", "R2S1")],
+        },
+    });
+    let changes = core
+        .handle_raw_frame(machine.clone(), &snapshot.to_string(), now_ms)
+        .expect("the remote frame parses")
+        .changes;
+    let mut remote_inputs = local_inputs.clone();
+    remote_inputs.ui.selected_machine_id = MACHINE.to_string();
+    remote_inputs.host.machines = vec![MachineTabInput {
+        machine_id: MACHINE.to_string(),
+        label: "Remote".to_string(),
+        state: "connected".to_string(),
+        message: None,
+        fed: true,
+    }];
+    let mut local_inputs = local_inputs.clone();
+    local_inputs.host.machines = remote_inputs.host.machines.clone();
+    let mut remote_model = SidebarViewModel::new();
+    remote_model.update(core, &remote_inputs, &changes, now_ms);
+    local_model.update(core, &local_inputs, &changes, now_ms);
+
+    let rs1 = SessionKey::remote(MACHINE, "R1", "RS1");
+    let r2s1 = SessionKey::remote(MACHINE, "R2", "R2S1");
+    let focus = |core: &mut Core, session: &SessionKey, visible: Option<Vec<SessionKey>>| {
+        core.handle(
+            Event::Intent(Intent::FocusSession {
+                session: session.clone(),
+                visible,
+            }),
+            now_ms,
+        );
+    };
+    let moves: [(&str, Box<dyn Fn(&mut Core)>); 4] = [
+        (
+            "a remote row, from this computer's",
+            Box::new(|core: &mut Core| focus(core, &rs1, None)),
+        ),
+        (
+            "a remote row of another project",
+            Box::new(|core: &mut Core| focus(core, &r2s1, None)),
+        ),
+        (
+            "back to this computer's row",
+            Box::new(|core: &mut Core| focus(core, local_row, Some(vec![local_row.clone()]))),
+        ),
+        (
+            "the old runtime's remote payload, mirrored",
+            Box::new(|core: &mut Core| {
+                let stamp = core.focus().local_stamp;
+                core.handle(
+                    Event::Intent(Intent::ExternalFocus(
+                        ExternalFocusUpdate::new(stamp)
+                            .with_active_project(rs1.project_key())
+                            .with_focused_session(rs1.clone())
+                            .with_visible_sessions(vec![rs1.clone()]),
+                    )),
+                    now_ms,
+                );
+            }),
+        ),
+    ];
+    let (mut steps, mut stale_steps, mut host_differences) = (0, 0, 0);
+    for (label, move_focus) in moves.iter() {
+        steps += 1;
+        move_focus(core);
+        let mut stale_any = false;
+        for (list, model, inputs) in [
+            ("this computer", &mut *local_model, &local_inputs),
+            ("remote", &mut remote_model, &remote_inputs),
+        ] {
+            let fresh = SidebarViewModel::build_from_scratch(core, inputs, now_ms);
+            let stale = differing_fields(model.view(), &fresh);
+            stale_any |= !stale.is_empty();
+            println!("{label:<40} {list:<13} stale list differs in {stale:?}");
+            if !skip_update {
+                model.update(core, inputs, &ChangeSummary::default(), now_ms);
+            }
+            let host = differing_fields(model.view(), &fresh);
+            if !host.is_empty() {
+                host_differences += 1;
+                println!("{label:<40} {list:<13} UPDATED list differs in {host:?}");
+            }
+        }
+        if stale_any {
+            stale_steps += 1;
+        }
+    }
+    (steps, stale_steps, host_differences)
 }
 
 /// The field names the host's scratch record uses, for the parts a focus move can reach, plus

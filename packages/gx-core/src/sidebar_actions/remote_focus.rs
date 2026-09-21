@@ -30,14 +30,7 @@
 //!
 //! **And the group id is the OLD RUNTIME's, handed in, never the core's focus.**
 //! CDXC:RemoteMachines 2026-09-21 WHY:
-//! The core's focus does not follow a remote focus (the shadow mirror keeps this computer's, see
-//! `CDXC:FocusRouting 2026-09-20` in shadow_diff.rs), so reading `core.focus()` answered "the
-//! project changes" for every remote click, and every second click inside the active remote project
-//! sent a `keepView` the runtime did not. The old runtime's `activeGroupId` is still the one
-//! definition of "the active project" (a group header's attach, a lifecycle replacement and its
-//! own restores move it, and none of those are the store's yet), so the group is what it holds at
-//! the moment of the click, which [`RuntimeActiveGroup`] tracks from what the host SENT the runtime
-//! and what the runtime last PUBLISHED; its comment has the proof.
+//! Since remote focus part 2 step 2 the core's focus DOES follow a remote focus (the host's tab selection takes it, and the shadow mirror follows the runtime's own), but it still cannot stand in for the runtime's group, for two reasons. The core names the user-made group a row sits in (`group_of_session`), where `setRemotePresentationSessionFocus` always names the project's own group or the machine's Chats, and the string rule above answers differently for the two. And the runtime's `activeGroupId` still moves on paths the store does not see in the moment (a group attach from navigation history or a Space restore, a lifecycle replacement and its restores); the store learns those from the runtime's publish, which lags the command. Planning from `core.focus()` before step 2 sent a `keepView` the runtime did not on every second click inside the active remote project. So the group is what the runtime holds at the moment of the click, which [`RuntimeActiveGroup`] tracks from what the host SENT the runtime and what the runtime last PUBLISHED; its comment has the proof.
 //!
 //! Refused, each with its reason: a LOCAL row (the store's own focus path owns it), a browser row
 //! (an app tab, not a session), an id that does not parse as a remote session, and a machine whose
