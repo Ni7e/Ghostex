@@ -1279,26 +1279,6 @@ export function SettingsModal({
                                 value={draft.customSidebarTitlebarBackgroundTintColor}
                               />
                             ) : null}
-                            {/*
-                  CDXC:Theming 2026-08-24:
-                  The accent color drives --ghostex-accent on every React
-                  surface, so it uses the same web color picker as Background
-                  Tint instead of a native input[type=color].
-
-                  CDXC:Theming 2026-08-30:
-                  Accent Color is an advanced Theming row. It also colors the
-                  up-arrow markers on advanced Settings rows.
-                */}
-                            {mainSettingVisible(settingsSearch.theming, 'accentColor') ? (
-                              <WebColorPickerField
-                                description='Highlight color for accent text, status highlights, and advanced-setting markers in dark mode.'
-                                label='Dark theme accent color'
-                                {...getSettingModificationProps('accentColor')}
-                                onChange={(value) => updateDraftDebounced('accentColor', value)}
-                                onCommit={(value) => updateDraft('accentColor', value)}
-                                value={draft.accentColor}
-                              />
-                            ) : null}
                             {mainSettingVisible(settingsSearch.theming, 'showActivePaneOutline') ? (
                               <ToggleField
                                 checked={draft.showActivePaneOutline}

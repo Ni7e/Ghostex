@@ -512,7 +512,7 @@ export const CustomColorPicker: Story = {
 
     await step('open the nested color picker dialog', async () => {
       await userEvent.click(await body.findByRole('button', { name: 'Appearance' }));
-      await userEvent.click(await body.findByRole('button', { name: 'Accent Color custom color picker' }));
+      await userEvent.click(await body.findByRole('button', { name: 'Dark theme background tint custom color picker' }));
       await body.findByRole('dialog', { name: 'Pick Color' });
     });
   },

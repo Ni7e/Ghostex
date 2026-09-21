@@ -42,8 +42,8 @@
   --app-tooltip-foreground: #f0f0f0;
   /*
    * CDXC:Theming 2026-08-24:
-   * Fallback accent so surfaces paint the shipped sky tone before the
-   * accentColor setting hydrates onto <body>.
+   * Accent of the default neutral tint, painted until the tint-derived accent
+   * hydrates onto <body> (getAccentColorForBackgroundTint in titlebar-color.ts).
    */
   --ghostex-accent: #86d3f8;
   --custom-sidebar-titlebar-foreground-color: #d8d8d8;

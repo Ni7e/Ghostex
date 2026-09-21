@@ -5056,7 +5056,7 @@ body.app-modal-host-body {
   /*
    * CDXC:Settings 2026-06-16-18:22:
    * Advanced setting arrows must stay visible without row hover so users can
-   * scan advanced rows immediately. Color them from the Accent Color setting
+   * scan advanced rows immediately. Color them from the tint-derived accent
    * (--ghostex-accent) so those markers track the same highlight as accent
    * text. Give the marker a little left-side air so it does not visually run
    * into the setting label.

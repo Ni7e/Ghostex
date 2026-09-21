@@ -340,7 +340,6 @@ export const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
     'terminalGhosttyTheme',
     'customSidebarTitlebarBackgroundDarknessPercent',
     'customSidebarTitlebarBackgroundTintColor',
-    'accentColor',
     'showActivePaneOutline',
     'workspaceActivePaneBorderColor',
   ],
@@ -532,7 +531,7 @@ export const DIAGNOSTIC_LOGGING_GROUPS: readonly ['macOS', 'GPUI', 'gxserver'] =
  *
  * CDXC:Theming 2026-09-14 DECISION:
  * User: make background contrast, background tint and accent color Advanced settings and prefix their labels with "Dark theme" so it is clear they do not affect light mode.
- * This supersedes keeping contrast and tint visible without Show Advanced; search still reveals all three.
+ * This supersedes keeping contrast and tint visible without Show Advanced; search still reveals them. The accent color row was removed on 2026-09-21 (the accent now derives from the tint; see getAccentColorForBackgroundTint).
  *
  * CDXC:Settings 2026-06-16-09:20:
  * Empty-sidebar double-click creation remains a low-frequency interaction preference and should hide behind Show Advanced. The menu-bar indicator is preset-owned and stays beside the sidebar preset controls.
@@ -581,7 +580,6 @@ export const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   'renameSessionOnDoubleClick',
   'customSidebarTitlebarBackgroundDarknessPercent',
   'customSidebarTitlebarBackgroundTintColor',
-  'accentColor',
   'showActivePaneOutline',
   'workspaceActivePaneBorderColor',
   'workspaceBackgroundColor',

@@ -1024,7 +1024,6 @@ describe('normalizeghostexSettings', () => {
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor).toBe('#808080');
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent).toBe(96);
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor).toBe('#0b0b0b');
-    expect(DEFAULT_ghostex_SETTINGS.accentColor).toBe('#86d3f8');
     expect(getSidebarTitlebarBackgroundForDarkness(95, '#884444')).toBe('#0d0005');
     expect(getSidebarTitlebarBackgroundForDarkness(95, '#336699')).toBe('#0c0e11');
     expect(getSidebarTitlebarBackgroundForDarkness(95, '#000000')).toBe('#000000');
@@ -1033,7 +1032,6 @@ describe('normalizeghostexSettings', () => {
       customSidebarTitlebarBackgroundTintColor: '#808080',
       customSidebarTitlebarBackgroundDarknessPercent: 96,
       customSidebarTitlebarBackgroundColor: '#0b0b0b',
-      accentColor: '#86d3f8',
     });
     /*
      * A legacy saved background only ever seeded the contrast slider, never the

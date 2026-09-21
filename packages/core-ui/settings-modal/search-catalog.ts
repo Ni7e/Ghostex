@@ -530,11 +530,6 @@ export function getSettingsSearchSectionDefinitions() {
           title: 'Dark theme background tint',
         },
         {
-          key: 'accentColor',
-          subtitle: 'Highlight color for accent text, status highlights, and advanced-setting markers in dark mode.',
-          title: 'Dark theme accent color',
-        },
-        {
           key: 'showActivePaneOutline',
           subtitle: 'Show an outline around the currently focused pane.',
           title: 'Show Active Pane Outline',

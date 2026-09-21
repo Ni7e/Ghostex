@@ -113,14 +113,6 @@ export type SessionTitleGenerationAgent = 'codex' | 'cursor' | 'claude' | 'grok'
 export type AppShotsHotkey = 'both-command' | 'both-shift' | 'both-option' | 'double-left-shift' | 'double-left-option';
 export type KeepAwakeDurationMinutes = 0 | 120 | 300;
 export type AutoSleepIdleMinutes = 0 | 5 | 10 | 15 | 30 | 60 | 120 | 300;
-/**
- * CDXC:Theming 2026-08-24:
- * The Codex-style redesign paints its accent text (Automate "Active", unread
- * counts, and upcoming modal accents) from a single user-configurable color.
- * The default is a lighter sky tone than the original hardcoded #38bdf8 so
- * accent text and Settings advanced-row arrows stay readable on dark chrome.
- */
-export const DEFAULT_ACCENT_COLOR = '#86d3f8';
 export const DEFAULT_TERMINAL_PANE_HORIZONTAL_PADDING_PX = 16;
 export const DEFAULT_TERMINAL_PANE_PADDING_PX = 0;
 export const MIN_TERMINAL_PANE_PADDING_PX = 0;
@@ -649,11 +641,6 @@ export type ghostexSettings = {
   customSidebarTitlebarBackgroundTintColor: string;
   customSidebarTitlebarBackgroundDarknessPercent: number;
   customSidebarTitlebarBackgroundColor: string;
-  /**
-   * CDXC:Theming 2026-08-24:
-   * Hex accent color published to every React surface as --ghostex-accent.
-   */
-  accentColor: string;
   terminalCursorStyle: TerminalCursorStyle;
   terminalCursorStyleBlink: boolean;
   /**

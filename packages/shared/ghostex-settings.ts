@@ -11,6 +11,7 @@ export {
   getSidebarTitlebarForegroundForBackground,
   type SidebarTitlebarGradientColors,
   getSidebarTitlebarGradientColors,
+  getAccentColorForBackgroundTint,
 } from './ghostex-settings/titlebar-color';
 export {
   type DiagnosticLoggingScenarioId,
@@ -72,7 +73,6 @@ export {
   type AppShotsHotkey,
   type KeepAwakeDurationMinutes,
   type AutoSleepIdleMinutes,
-  DEFAULT_ACCENT_COLOR,
   DEFAULT_TERMINAL_PANE_HORIZONTAL_PADDING_PX,
   DEFAULT_TERMINAL_PANE_PADDING_PX,
   MIN_TERMINAL_PANE_PADDING_PX,

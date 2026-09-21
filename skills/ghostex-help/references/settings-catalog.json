@@ -4051,21 +4051,6 @@
       "agentWritable": true
     },
     {
-      "key": "accentColor",
-      "title": "Dark theme accent color",
-      "subtitle": "Highlight color for accent text, status highlights, and advanced-setting markers in dark mode.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "appearance",
-      "groupTitle": "Theme",
-      "section": "theming",
-      "sectionTitle": "Theme",
-      "type": "string",
-      "default": "#86d3f8",
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
       "key": "showActivePaneOutline",
       "title": "Show Active Pane Outline",
       "subtitle": "Show an outline around the currently focused pane.",

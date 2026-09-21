@@ -18,7 +18,6 @@ import {
   getSidebarTitlebarBackgroundForDarkness,
 } from './titlebar-color';
 import {
-  DEFAULT_ACCENT_COLOR,
   DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   DEFAULT_PROJECT_SWITCH_KEEP_ALIVE_MINUTES,
   DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
@@ -452,7 +451,6 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * titlebar-color.ts owns the default matching the user's saved neutral #808080 tint at 96 contrast (#0b0b0b).
    *
    * Background Contrast and Background Tint are always-active Theming controls.
-   * Accent Color is advanced.
    */
   customSidebarTitlebarForegroundColor: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR,
   customSidebarTitlebarBackgroundTintColor: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
@@ -461,7 +459,6 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
     DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
     DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR
   ),
-  accentColor: DEFAULT_ACCENT_COLOR,
   /**
    * CDXC:Terminal 2026-05-22-12:29:
    * New Ghostex terminals should default to the requested GitHub Dark terminal

@@ -49,8 +49,8 @@ export const PROJECT_BOARD_STYLES = `
     /*
      * CDXC:Theming 2026-08-24:
      * The Kanban/Automate page is loaded outside the sidebar chrome effects and
-     * its bridge state carries no settings, so it can only paint the shipped
-     * default accent until live accentColor plumbing reaches this page.
+     * its bridge state carries no settings, so it can only paint the neutral
+     * tint's accent until the tint-derived accent is plumbed to this page.
      */
     --ghostex-accent: #86d3f8;
   }

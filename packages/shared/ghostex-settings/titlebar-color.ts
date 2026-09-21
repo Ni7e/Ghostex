@@ -215,6 +215,70 @@ export function getSidebarTitlebarBackgroundForDarkness(
 }
 
 /**
+ * CDXC:Theming 2026-09-21 DECISION:
+ * User: remove the accent color setting and make the accent color generate from the background tint color.
+ * This supersedes the 2026-08-24 user-configurable accentColor setting. The accent keeps the tint's hue at the shipped sky tone's lightness, with saturation held in a readable band, so the ice tint #88d7ff resolves to about the old #86d3f8 default.
+ *
+ * CDXC:Theming 2026-09-21 WHY:
+ * A neutral tint (white, gray, black) has no hue to follow and a gray accent stops reading as an accent next to the foreground text, so neutral tints paint the shipped sky tone.
+ * SEE-ALSO: the static --ghostex-accent in packages/core-ui/styles/theme.css and apps/desktop/views/project-board/styles.ts.
+ */
+export const NEUTRAL_TINT_ACCENT_COLOR = '#86d3f8';
+const ACCENT_LIGHTNESS = 0.75;
+const MIN_ACCENT_SATURATION = 0.55;
+const MAX_ACCENT_SATURATION = 0.9;
+
+export function getAccentColorForBackgroundTint(
+  tintColor = DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR
+): string {
+  const tint = parseSidebarTitlebarHexColor(
+    normalizeSidebarTitlebarHexColor(tintColor, DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR)
+  );
+  if (isNeutralSidebarTitlebarColor(tint)) {
+    return NEUTRAL_TINT_ACCENT_COLOR;
+  }
+
+  const red = tint.red / 255;
+  const green = tint.green / 255;
+  const blue = tint.blue / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const chroma = max - min;
+  const tintLightness = (max + min) / 2;
+  const tintSaturation = chroma / (1 - Math.abs(2 * tintLightness - 1));
+  let hueSextant: number;
+  if (max === red) {
+    hueSextant = ((((green - blue) / chroma) % 6) + 6) % 6;
+  } else if (max === green) {
+    hueSextant = (blue - red) / chroma + 2;
+  } else {
+    hueSextant = (red - green) / chroma + 4;
+  }
+
+  const saturation = Math.min(MAX_ACCENT_SATURATION, Math.max(MIN_ACCENT_SATURATION, tintSaturation));
+  const accentChroma = (1 - Math.abs(2 * ACCENT_LIGHTNESS - 1)) * saturation;
+  const secondary = accentChroma * (1 - Math.abs((hueSextant % 2) - 1));
+  const offset = ACCENT_LIGHTNESS - accentChroma / 2;
+  const [accentRed, accentGreen, accentBlue] =
+    hueSextant < 1
+      ? [accentChroma, secondary, 0]
+      : hueSextant < 2
+        ? [secondary, accentChroma, 0]
+        : hueSextant < 3
+          ? [0, accentChroma, secondary]
+          : hueSextant < 4
+            ? [0, secondary, accentChroma]
+            : hueSextant < 5
+              ? [secondary, 0, accentChroma]
+              : [accentChroma, 0, secondary];
+  return formatSidebarTitlebarHexColor({
+    red: (accentRed + offset) * 255,
+    green: (accentGreen + offset) * 255,
+    blue: (accentBlue + offset) * 255,
+  });
+}
+
+/**
  * CDXC:Theming 2026-06-15-13:22:
  * The foreground is no longer user-selectable. Ignore any legacy saved
  * foreground value and recompute it from the validated background color, using

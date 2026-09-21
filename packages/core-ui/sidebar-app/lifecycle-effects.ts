@@ -3,6 +3,7 @@ import type { ExtensionToSidebarMessage } from '../../shared/session-grid-contra
 import type { ghostexSettings } from '../../shared/ghostex-settings';
 import {
   getSidebarTitlebarForegroundForBackground,
+  getAccentColorForBackgroundTint,
   getSidebarTitlebarGradientColors,
 } from '../../shared/ghostex-settings';
 import { getWorkspaceThemeForeground, normalizeWorkspaceThemeColor } from '../../shared/workspace-project-appearance';
@@ -318,7 +319,10 @@ export function useSidebarDocumentChromeEffects({
      * The accent color is a plain always-on chrome token, so publish it next to
      * the theme variables instead of gating it behind the custom chrome toggle.
      */
-    document.body.style.setProperty('--ghostex-accent', effectiveSettings.accentColor);
+    document.body.style.setProperty(
+      '--ghostex-accent',
+      getAccentColorForBackgroundTint(effectiveSettings.customSidebarTitlebarBackgroundTintColor)
+    );
 
     document.body.dataset.customSidebarTitlebarColors = String(theme !== 'plain-light' && !theme.startsWith('light-'));
     document.body.style.setProperty('--custom-sidebar-titlebar-foreground-color', customSidebarTitlebarForegroundColor);
@@ -347,7 +351,12 @@ export function useSidebarDocumentChromeEffects({
       document.body.style.removeProperty('--custom-sidebar-titlebar-gradient-top-color');
       document.body.style.removeProperty('--custom-sidebar-titlebar-gradient-bottom-color');
     };
-  }, [customThemeColor, effectiveSettings.accentColor, effectiveSettings.customSidebarTitlebarBackgroundColor, theme]);
+  }, [
+    customThemeColor,
+    effectiveSettings.customSidebarTitlebarBackgroundColor,
+    effectiveSettings.customSidebarTitlebarBackgroundTintColor,
+    theme,
+  ]);
 
   useEffect(() => {
     document.body.style.setProperty('--ghostex-agent-manager-zoom', `${agentManagerZoomPercent}%`);
