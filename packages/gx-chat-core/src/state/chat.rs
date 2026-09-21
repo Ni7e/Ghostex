@@ -61,12 +61,39 @@ pub struct CoreState {
     /// The timer keys that came due during the dispatch running right now, cleared before the next
     /// one. A family reads its own keys out of this rather than being called back.
     pub fired_timers: Vec<String>,
+    /// Set for this dispatch when a family's TypeScript calls `publish(controller.current())`
+    /// unconditionally rather than through a state change.
+    ///
+    /// The core's own rule is "publish when the state changed", which is what the TypeScript's
+    /// reactive path does. Its imperative path does not: `action` ends with a publish whatever
+    /// happened, and several rpc continuations do the same. A family that ports one of those calls
+    /// [`CoreState::request_publish`] so the revision moves on exactly the same turns.
+    pub publish_requested: bool,
+    /// The id the next request carries, for every family.
+    ///
+    /// One counter for the whole core, because [`crate::Event::RpcSettled`] routes by id alone: two
+    /// families drawing from their own counters would both claim request 3 and each would settle
+    /// the other's answer.
+    pub next_request_id: u64,
 }
 
 impl CoreState {
     /// Whether one of this dispatch's due timers is `key`.
     pub fn timer_fired(&self, key: &str) -> bool {
         self.fired_timers.iter().any(|fired| fired == key)
+    }
+
+    /// Ships a snapshot this turn even when nothing the document can see changed, for the places
+    /// the TypeScript publishes unconditionally.
+    pub fn request_publish(&mut self) {
+        self.publish_requested = true;
+    }
+
+    /// The id for the next request any family asks for. Monotonic and never reused, so a late
+    /// answer to a retired request is dropped rather than misrouted.
+    pub fn allocate_request_id(&mut self) -> u64 {
+        self.next_request_id += 1;
+        self.next_request_id
     }
 
     /// Records a refusal, replacing whatever was shown before.

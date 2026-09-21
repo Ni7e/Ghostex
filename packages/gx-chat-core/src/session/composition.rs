@@ -14,6 +14,10 @@ use crate::session::markers::{
 use crate::session::pending::{pending_sends_as_messages, visible_pending_sends};
 use crate::session::startup_sends::pending_with_startup_sends;
 use crate::session::streaming::{derive_streaming_text, streaming_message};
+use crate::session::terminal::{
+    terminal_stream_is_tool, terminal_stream_retired, unreconciled_terminal_statuses,
+    visible_terminal_tool,
+};
 use crate::session::text::{collapse_whitespace, is_js_space, parse_command_envelope};
 use crate::state::ChatState;
 
@@ -158,15 +162,32 @@ pub fn compose(
     })
     .collect();
 
-    let mut tail: Vec<ChatMessage> = Vec::new();
-    // Terminal status rows and the pending tool row belong here, between the transcript and the
-    // markers (`unreconciledSessionChatTerminalStatuses`), and the app-command rows between them.
+    // Order, from `controller.ts`: the transient terminal statuses, then the app-command rows
+    // (family b's `sessionChatAppCommandsAsMessages`, not folded in yet), then the markers, then
+    // the streaming bubble, then the pending tool row, then the pending echoes.
+    let mut tail: Vec<ChatMessage> =
+        unreconciled_terminal_statuses(&state.pending.terminal_status_messages, &boundaried);
     tail.extend(marker_messages);
 
+    let visible_tool = visible_terminal_tool(state, working);
+    // The terminal's live message wins over the hook preview: it is the same bubble, read from the
+    // screen the agent is painting instead of a status line.
+    let terminal_stream_text = state.pending.terminal_stream.as_ref().filter(|stream| {
+        (stream.live || working)
+            && !visible_tool.is_some_and(|tool| terminal_stream_is_tool(stream, tool))
+            && !terminal_stream_retired(stream, &boundaried)
+    });
     let mut with_pending = boundaried.clone();
     with_pending.extend(pending_messages.iter().cloned());
-    if let Some(text) = derive_streaming_text(&with_pending, preview_text, working) {
+    let streaming_text = match terminal_stream_text {
+        Some(stream) => Some(stream.text.clone()),
+        None => derive_streaming_text(&with_pending, preview_text, working),
+    };
+    if let Some(text) = streaming_text {
         tail.push(streaming_message(&text));
+    }
+    if let Some(tool) = visible_tool {
+        tail.push(tool.clone());
     }
     tail.extend(pending_messages);
 

@@ -6,7 +6,10 @@
 //! time (`docs/2026-09-21/rust-chat/PLAN.md` step 3) without this file changing.
 
 use crate::dispatch::events;
-use crate::document::{assemble, frame_parts, Document, Frame, FrameParts};
+use crate::document::{
+    assemble, frame_parts, Document, Frame, FrameParts, ItemsSplice, MinimapMarker, RowDetails,
+    TranscriptItem,
+};
 use crate::effect::Effect;
 use crate::event::Event;
 use crate::state::{ChatContext, ChatState};
@@ -28,17 +31,43 @@ pub struct ChatCore {
     next_request_id: u64,
     /// The clock and locale the host last passed in. The core never reads either itself.
     context: ChatContext,
+    /// The context the published document was assembled at.
+    ///
+    /// The change test runs at THIS clock rather than the current one, which is what keeps the
+    /// publish decision the TypeScript's: its document is a function of state and `Date.now()`, but
+    /// it republishes only when the STATE changed, so a label that merely counts seconds never
+    /// ships a new snapshot on its own.
+    published_context: ChatContext,
     /// The wake the host was last told to arm, so a [`Effect::SetTimer`] is emitted only when the
     /// earliest deadline actually moved.
     armed_wake_ms: Option<u64>,
+    /// What the host was last sent, so a frame carries only the changed window.
+    sent: SentFrame,
+}
+
+/// The parts the host already has, which is what turns a whole list into a splice.
+///
+/// `native-host.ts` keeps one `sent…` variable per channel and compares by array identity; unchanged
+/// items keep their identity there (`native-presentation.ts` caches its projection), so comparing by
+/// value here is the same test.
+#[derive(Clone, Debug, Default)]
+struct SentFrame {
+    items: Option<Vec<TranscriptItem>>,
+    subagent_items: Option<Vec<TranscriptItem>>,
+    minimap: Option<Vec<MinimapMarker>>,
+    row_details: Option<RowDetails>,
 }
 
 impl ChatCore {
     /// A core with nothing loaded yet: the document says "loading" and draws the skeleton.
+    ///
+    /// Assembled rather than hand-built, so an event that changes nothing the document can see
+    /// leaves the revision at zero and the host's first drain ships no snapshot, which is where the
+    /// TypeScript starts too (`start` pushes its boot read and publishes nothing).
     pub fn new() -> Self {
         let mut core = Self::default();
-        core.document.view.kind = "loading".to_string();
-        core.document.status = "loading".to_string();
+        core.document = assemble(&core.state, &core.context);
+        core.parts = frame_parts(&core.state, &core.context);
         core
     }
 
@@ -100,16 +129,39 @@ impl ChatCore {
     ///
     /// The document is left out when the host is already current, which is what keeps a
     /// once-a-second status frame from shipping the whole transcript.
-    pub fn frame(&self, last_revision: u64) -> Frame {
+    pub fn frame(&mut self, last_revision: u64) -> Frame {
+        let items_splice = splice(self.sent.items.as_deref(), &self.parts.items);
+        self.sent.items = Some(self.parts.items.clone());
+        let subagent_splice = splice(
+            self.sent.subagent_items.as_deref(),
+            &self.parts.subagent_items,
+        );
+        self.sent.subagent_items = Some(self.parts.subagent_items.clone());
+        let minimap = if self.sent.minimap.as_deref() == Some(self.parts.minimap.as_slice()) {
+            None
+        } else {
+            self.sent.minimap = Some(self.parts.minimap.clone());
+            Some(self.parts.minimap.clone())
+        };
+        let row_details = if self.sent.row_details.as_ref() == Some(&self.parts.row_details) {
+            None
+        } else {
+            self.sent.row_details = Some(self.parts.row_details.clone());
+            Some(self.parts.row_details.clone())
+        };
         Frame {
+            items_splice,
+            minimap,
+            subagent_splice,
+            row_details,
             revision: self.revision,
             snapshot: if last_revision == self.revision {
                 None
             } else {
                 Some(Box::new(self.document.clone()))
             },
+            requests: Vec::new(),
             next_wake_ms: self.next_wake_ms(),
-            ..Frame::default()
         }
     }
 
@@ -125,6 +177,10 @@ impl ChatCore {
     /// with identical content would ship the whole document once a second for nothing.
     pub fn republish(&mut self) {
         crate::session::working::stamp_working_started(&mut self.state, self.context.now_ms);
+        // The two `useEffect`s the TypeScript runs before the composition reads their state: the
+        // pending echoes pruned against the authoritative list, and the pending tool row dropped
+        // once the transcript retired it.
+        crate::session::settle(&mut self.state, &self.context);
         self.state.messages.composed = crate::session::composition::compose(
             &self.state,
             &crate::session::constants::DEFAULT_COMMAND_CATALOG
@@ -134,19 +190,62 @@ impl ChatCore {
             None,
             crate::session::working::is_working(&self.state),
         );
-        let document = assemble(&self.state, &self.context);
-        let parts = frame_parts(&self.state, &self.context);
-        if document == self.document && parts == self.parts {
+        // The test is "did the STATE change", asked in the only terms the core has: assemble the
+        // new state at the clock the published document was assembled at. Equal means nothing but
+        // the clock moved, and the TypeScript would not have published either, so the host keeps
+        // the snapshot it has (its `snapshot` variable is not refreshed without a publish).
+        let requested = std::mem::take(&mut self.state.core.publish_requested);
+        let probe = assemble(&self.state, &self.published_context);
+        let probe_parts = frame_parts(&self.state, &self.published_context);
+        if !requested && probe == self.document && probe_parts == self.parts {
             return;
         }
-        self.document = document;
-        self.parts = parts;
+        self.document = assemble(&self.state, &self.context);
+        self.parts = frame_parts(&self.state, &self.context);
+        self.published_context = self.context;
         self.revision += 1;
     }
 
     /// Replaces the document and bumps the revision, for a host seeding a cached frame.
     pub fn publish(&mut self, document: Document) {
         self.document = document;
+        self.published_context = self.context;
         self.revision += 1;
     }
+}
+
+/// `itemsSplice(previous, next)`: replace `deleteCount` items at `start` with `items`.
+///
+/// CDXC:SessionChat 2026-09-18 WHY:
+/// A live status row changes once a second, and shipping the whole transcript for it cost about 1MB
+/// of JSON per frame on a 139-message session. Only the changed window crosses the bridge; GPUI
+/// splices its item list and list state the same way.
+/// SEE-ALSO: apps/desktop/src/app/native_chat/state.rs (pump).
+fn splice(previous: Option<&[TranscriptItem]>, next: &[TranscriptItem]) -> Option<ItemsSplice> {
+    let Some(previous) = previous else {
+        return Some(ItemsSplice {
+            start: 0,
+            delete_count: 0,
+            items: next.to_vec(),
+            length: next.len(),
+        });
+    };
+    if previous == next {
+        return None;
+    }
+    let limit = previous.len().min(next.len());
+    let mut start = 0;
+    while start < limit && previous[start] == next[start] {
+        start += 1;
+    }
+    let mut end = 0;
+    while end < limit - start && previous[previous.len() - 1 - end] == next[next.len() - 1 - end] {
+        end += 1;
+    }
+    Some(ItemsSplice {
+        start,
+        delete_count: previous.len() - start - end,
+        items: next[start..next.len() - end].to_vec(),
+        length: next.len(),
+    })
 }

@@ -16,7 +16,10 @@ use crate::state::ChatState;
 pub struct AgentIdentity {
     pub agent: Option<String>,
     pub agent_session_id: Option<String>,
-    pub session_agent_id: Option<String>,
+    /// Three-state, unlike the two above: a read spells the draft's own agent as
+    /// `result.sessionAgentId ?? null`, so an omission on a read is the promotion signal and CLEARS
+    /// it, while a frame carries no field at all and must leave it alone.
+    pub session_agent_id: Tri<String>,
 }
 
 /// CDXC:AgentProviders 2026-09-14 WHY:
@@ -27,7 +30,10 @@ pub struct AgentIdentity {
 pub fn apply_agent_identity(state: &mut ChatState, patch: &AgentIdentity) {
     let session = &mut state.session;
     let account_changed = differs(&session.agent, &patch.agent)
-        || differs(&session.session_agent_id, &patch.session_agent_id);
+        || differs(
+            &session.session_agent_id,
+            &patch.session_agent_id.value().cloned(),
+        );
     let changed = account_changed || differs(&session.agent_session_id, &patch.agent_session_id);
     if changed {
         session.selected_options = None;
@@ -41,8 +47,8 @@ pub fn apply_agent_identity(state: &mut ChatState, patch: &AgentIdentity) {
     if patch.agent_session_id.is_some() {
         session.agent_session_id = patch.agent_session_id.clone();
     }
-    if patch.session_agent_id.is_some() {
-        session.session_agent_id = patch.session_agent_id.clone();
+    if !patch.session_agent_id.is_absent() {
+        session.session_agent_id = patch.session_agent_id.value().cloned();
     }
 }
 
@@ -120,7 +126,10 @@ pub fn apply_draft_agent_carriage(state: &mut ChatState, result: &ReadSessionCha
         &AgentIdentity {
             agent: result.agent.clone(),
             agent_session_id: result.state.agent_session_id.clone(),
-            session_agent_id: Some(result.session_agent_id.clone().unwrap_or_default()),
+            session_agent_id: match result.session_agent_id.clone() {
+                Some(id) => Tri::Value(id),
+                None => Tri::Null,
+            },
         },
     );
     state.session.available_agents = result.available_agents.clone();
@@ -139,6 +148,7 @@ pub fn apply_authoritative(
     state: &mut ChatState,
     result: &ReadSessionChatResult,
     restore_presentation: bool,
+    context: &crate::state::ChatContext,
 ) {
     // A detail-mode history prefix survives a re-read of the same epoch when the window still
     // overlaps it; otherwise the prefix is dropped and the cursor restarts.
@@ -206,7 +216,7 @@ pub fn apply_authoritative(
             &AgentIdentity {
                 agent: result.agent.clone(),
                 agent_session_id: result.state.agent_session_id.clone(),
-                session_agent_id: None,
+                session_agent_id: Tri::Absent,
             },
         );
         apply_selected_options(state, result.state.selected_options.as_ref());
@@ -220,10 +230,13 @@ pub fn apply_authoritative(
         state.session.retired_async_question_ids = ids;
     }
     state.session.terminal_notice = result.state.terminal_notice.clone();
-    // The terminal status machine (`applyTerminalActivity`) decides whether this becomes the
-    // working strip's activity, a transient status row, the streaming bubble or the pending tool
-    // row. Until that port lands the activity is carried as the wire delivered it.
-    state.session.terminal_activity = result.state.terminal_activity.clone();
+    // The status machine decides whether this becomes the working strip's activity, a transient
+    // status row, the streaming bubble or the pending tool row.
+    crate::session::terminal::apply_terminal_activity(
+        state,
+        result.state.terminal_activity.as_ref(),
+        context,
+    );
     state.session.agent_fleet = result.state.agent_fleet.clone();
     state.session.agent_tasks = result.state.agent_tasks.clone();
     if let Some(commands) = result.state.app_commands.clone() {

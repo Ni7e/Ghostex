@@ -73,12 +73,22 @@ pub struct CommandMarker {
 }
 
 /// The line the agent is painting right now.
+///
+/// CDXC:AgentScreenDetection 2026-09-11 DECISION:
+/// User: while the agent streams a long reply, show the text as it comes in from the terminal
+/// (chunks every second are enough) and switch to the transcript's message the moment it is saved
+/// to the JSONL.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TerminalStream {
+    /// `detectedAt` of the run: stable for one message across probes.
+    pub id: String,
+    /// Epoch ms of `id`.
+    pub started_at_ms: i64,
+    /// The message as painted so far.
     pub text: String,
+    /// Normalized first paragraph, the transcript match key.
+    pub key: String,
     /// Still the newest thing on screen. Once false, the stream is held for the transcript to
     /// retire rather than dropped outright.
     pub live: bool,
-    /// The tool name when the painted line is a tool call rather than prose.
-    pub tool_name: Option<String>,
 }

@@ -58,8 +58,14 @@ pub enum Event {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartConfig {
+    /// All three default, because the host does not always know them at boot: the desktop host
+    /// learns the client id from its own storage read, and the Chat Lab has a preview backend
+    /// instead of a session. A recording of that boot must still deserialize.
+    #[serde(default)]
     pub client_id: String,
+    #[serde(default)]
     pub project_id: String,
+    #[serde(default)]
     pub session_id: String,
     /// The transcript the host had cached, so the first paint is not blank.
     #[serde(default, skip_serializing_if = "Option::is_none")]

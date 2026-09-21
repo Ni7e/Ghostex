@@ -60,9 +60,12 @@ fn route(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Eff
         | Event::Frame(_)
         | Event::Connection(_)
         | Event::RpcSettled { .. }
+        // The clock is family a's: it owns the timer table's own keys (the seed and resync
+        // backoffs, the stall watchdog, the read deadline, the tool-row hold). Every other family
+        // reads `state.core.fired_timers` from its own settle hook.
+        | Event::Tick
         | Event::SettingsChanged(_) => crate::session::handle_event(state, event, context),
-        Event::Tick
-        | Event::StorageLoaded { .. }
+        Event::StorageLoaded { .. }
         | Event::StorageWritten { .. }
         | Event::ContextPreferencesChanged { .. }
         | Event::ModelCatalogChanged { .. }

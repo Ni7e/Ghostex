@@ -96,6 +96,16 @@ pub const TERMINAL_TOOL_ID_PREFIX: &str = "terminal-tool:";
 /// terminal's repaint gaps. `packages/core-ui/chat/session-chat-terminal-status.ts`.
 pub const TERMINAL_TOOL_HOLD_MS: f64 = 5_000.0;
 
+/// Family a's timer keys. One per `setTimeout` or `setInterval` the controller keeps, named with
+/// the family prefix `docs/2026-09-21/rust-chat/FAMILIES.md` asks for so two families cannot
+/// collide in `state.core.timers`.
+pub const TIMER_SEED_RETRY: &str = "a:seed-retry";
+pub const TIMER_RESYNC_RETRY: &str = "a:resync-retry";
+pub const TIMER_RESYNC_FOLLOW_UP: &str = "a:resync-follow-up";
+pub const TIMER_STALL: &str = "a:stall";
+pub const TIMER_READ_DEADLINE: &str = "a:read-deadline";
+pub const TIMER_TERMINAL_TOOL_HOLD: &str = "a:terminal-tool-hold";
+
 /// The `notFound` retry delay for `attempt`, zero-based.
 pub fn not_found_retry_delay_ms(attempt: u32) -> u64 {
     NOT_FOUND_RETRY_DELAYS_MS

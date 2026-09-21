@@ -38,7 +38,10 @@ pub struct Frame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<Box<Document>>,
     /// Effects the host performs, in order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ///
+    /// Always on the wire, even empty: `take` writes `requests.splice(0)`, which is an array on
+    /// every drain, and the host reads it unconditionally.
+    #[serde(default)]
     pub requests: Vec<HostRequest>,
     /// Milliseconds until the next timer is due, or `null` when no timer is armed.
     ///

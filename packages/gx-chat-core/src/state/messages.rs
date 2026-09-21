@@ -46,6 +46,11 @@ pub struct MessagesState {
     pub boundary_attempt: Option<u64>,
     /// The page read in flight, if any.
     pub load_earlier_request: Option<LoadEarlierRequest>,
+    /// The reads family a has asked for and not seen answered, oldest first.
+    ///
+    /// The TypeScript keeps each read's identity in the closure that awaits it; the core has no
+    /// closures, so the same facts ride here and the settled request id picks the row back out.
+    pub reads: Vec<OutstandingRead>,
     /// Bumped every time the subscription is rebuilt. A read in flight across the swap belongs to
     /// the previous conversation and must not apply.
     pub generation: u64,
@@ -99,6 +104,37 @@ pub struct ResyncState {
     /// Reads that never landed, retried on their own backoff. A shared counter would let one
     /// budget exhaust the other.
     pub failures: u32,
+}
+
+/// Why a read was issued, which decides what its answer is allowed to do.
+///
+/// The three lanes are separate in the TypeScript too (`seedRead`, `requestResync`, `loadEarlier`),
+/// and they must not settle each other: a failed page leaves the live tail valid, while a failed
+/// seed read inside the patience window retries and outside it becomes the view's error state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReadKind {
+    /// The first window, and its retries while the session is still starting.
+    #[default]
+    Seed,
+    /// A gap, a stall, or the user's Refresh.
+    Resync,
+    /// One "Load earlier" page.
+    Page,
+}
+
+/// One read family a is waiting on.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct OutstandingRead {
+    /// The id that rode out with [`crate::Effect::SendRpc`].
+    pub request_id: u64,
+    pub kind: ReadKind,
+    /// The subscription generation that issued it. An answer from an older one belongs to the
+    /// previous conversation and must not apply.
+    pub generation: u64,
+    /// The `beforeOffset` a page read asked for, which its `hasMore` verdict is measured against.
+    pub before_offset: Option<u64>,
+    /// When it went out, for the read deadline that settles the state machine.
+    pub started_at_ms: f64,
 }
 
 /// The page read the user asked for, identified so a cancelled answer cannot complete a newer
