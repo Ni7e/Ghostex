@@ -418,10 +418,17 @@ fn suggestion_command(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
 fn edit_draft(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
     let text = text_param(action);
     track_draft_attachments(state, text);
-    if action.param("history") != Some(&Value::Bool(true)) {
+    let from_history = action.param("history") == Some(&Value::Bool(true));
+    let history_changed = !from_history && state.composer.history.index.is_some();
+    if !from_history {
         state.composer.history.reset_index();
     }
     state.composer.text = text.to_string();
+    // `if (!clearedError && !historyChanged) return;`: every keystroke writes the draft, and the
+    // write answering is not on its own a reason to ship a snapshot.
+    if !state.core.cleared_error && !history_changed {
+        state.core.skip_closing_publish = true;
+    }
     vec![Effect::WriteStorage {
         key: draft_key(state),
         value: Some(text.to_string()),

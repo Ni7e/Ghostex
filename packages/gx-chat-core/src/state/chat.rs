@@ -95,6 +95,24 @@ pub struct CoreState {
     /// `.then(...)`. Nothing the core does before that can ship a document, which is why `start`
     /// leaves the host's first drain empty.
     pub controller_started: bool,
+    /// This dispatch answered one step of an action's chain and the arm asked for another.
+    ///
+    /// Read and cleared by `ChatCore::republish`, which then ships nothing: the TypeScript arm is
+    /// still suspended and has not reached its `publish(controller.current())`.
+    pub chain_continued: bool,
+    /// The refusal the composer was showing when this action started, before it was cleared.
+    ///
+    /// `native-host.ts` reads `const clearedError = operationError !== undefined` just above the
+    /// clear, and two arms publish only when it was true. Recorded here so the handler that needs
+    /// it does not have to be handed a second argument.
+    pub cleared_error: bool,
+    /// This action's arm returned before the closing `publish(controller.current())`.
+    ///
+    /// Three arms of the switch do: `editDraft` when neither the refusal nor the history index
+    /// moved, `receiveHandoff` for a handoff already being received, and the wheel gestures, which
+    /// the dispatcher knows about on its own. Set by the handler, read and cleared by
+    /// `crate::dispatch::actions::dispatch`.
+    pub skip_closing_publish: bool,
     /// The id the next request carries, for every family.
     ///
     /// One counter for the whole core, because [`crate::Event::RpcSettled`] routes by id alone: two
@@ -161,8 +179,15 @@ impl CoreState {
     /// `action` is `async` and its closing `publish(controller.current())` runs after the LAST
     /// `await` in the arm, so a chain that continued into a new request publishes nothing yet.
     pub fn finish_publish_awaits(&mut self) {
-        if std::mem::take(&mut self.await_settled) && self.publish_awaits.is_empty() {
-            self.request_publish();
+        if std::mem::take(&mut self.await_settled) {
+            if self.publish_awaits.is_empty() {
+                self.request_publish();
+            } else {
+                // The arm asked for its next step instead of ending. Its `publish` has not run, so
+                // nothing it changed on the way ships yet: the state the answer moved is the
+                // controller's own, not React's, and only the closing publish carries it.
+                self.chain_continued = true;
+            }
         }
     }
 

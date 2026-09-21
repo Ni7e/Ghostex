@@ -68,6 +68,10 @@ fn main() -> ExitCode {
     // recorded refusals are replayed in order: these scenarios raise no other failing request, and
     // a recording that does would need the request table family a is building.
     let mut world = World::default();
+    // `questions::sync` is the top of `publish`, and `publish` only ever runs as
+    // `if (controller) publish(...)`. This harness drives the family directly, so it stands where
+    // the live brain does once the composer boot read has answered.
+    world.state.core.controller_started = true;
     for line in recording.lines().filter(|line| !line.trim().is_empty()) {
         let Ok(record) = serde_json::from_str::<Value>(line) else {
             continue;

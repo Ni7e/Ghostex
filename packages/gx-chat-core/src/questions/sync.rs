@@ -22,6 +22,15 @@ use crate::state::{ChatContext, ChatState};
 /// when the wire changes.
 pub fn sync(state: &mut ChatState) -> Vec<Effect> {
     let mut effects = Vec::new();
+    // This is the top of `publish`, and `publish` is only ever called as
+    // `if (controller) publish(controller.current())`. Before the composer boot read answers there
+    // is no controller, so neither the card's saved-answers read nor `asyncQuestions.load()` has
+    // been issued yet: issuing them at `Event::Start` put both storage round trips ahead of the
+    // TypeScript's and the async strip stayed `loading` for two more drains.
+    if !state.core.controller_started {
+        refresh_gates(state);
+        return effects;
+    }
     let prompt = InteractivePrompt::parse(state.session.prompt.as_ref());
     let notice = TerminalNotice::parse(state.session.terminal_notice.as_ref());
 

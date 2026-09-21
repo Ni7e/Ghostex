@@ -118,7 +118,7 @@ fn async_settled(state: &mut ChatState, outcome: &RpcOutcome) -> Vec<Effect> {
     let Some(submit) = state.questions.async_questions.submit.take() else {
         return Vec::new();
     };
-    match outcome {
+    let effects = match outcome {
         RpcOutcome::Ok { .. } => async_controller::submit_succeeded(
             &mut state.questions.async_questions,
             &submit.key,
@@ -132,7 +132,8 @@ fn async_settled(state: &mut ChatState, outcome: &RpcOutcome) -> Vec<Effect> {
             );
             Vec::new()
         }
-    }
+    };
+    effects
 }
 
 /// Adopts a stored record family c asked for, or answers `false` when the key is not its own.

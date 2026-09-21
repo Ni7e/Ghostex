@@ -175,6 +175,10 @@ pub fn owner(kind: &ActionKind) -> Option<Family> {
 /// the closing publish; only the first of them is conditional, and its condition is a state change
 /// the core's own republish rule already catches.
 pub fn dispatch(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
+    // `const clearedError = operationError !== undefined`, read just above the clear because two
+    // arms publish only when it was true.
+    state.core.cleared_error = state.core.operation_error.is_some();
+    state.core.skip_closing_publish = false;
     if clears_error(&action.kind) {
         state.core.clear_error();
     }
@@ -187,6 +191,15 @@ pub fn dispatch(state: &mut ChatState, action: &UserAction, context: &ChatContex
         Some(Family::Extras) => extras::handle(state, action, context),
         None => return Vec::new(),
     };
+    if std::mem::take(&mut state.core.skip_closing_publish) {
+        return effects;
+    }
+    // The four sub-controllers and the open-row list publish ON THE SPOT and return
+    // (native-host.ts:786, :795); they never await, so their publish is not the closing one.
+    if publishes_at_once(&action.kind) {
+        state.core.request_publish();
+        return effects;
+    }
     if publishes_on_return(&action.kind) && !state.core.publish_after(&effects) {
         state.core.request_publish();
     }
@@ -227,6 +240,34 @@ fn clears_error(kind: &ActionKind) -> bool {
             | ActionKind::SubagentRetry
             | ActionKind::SubagentLoadEarlier
             | ActionKind::Other(_)
+    )
+}
+
+/// Whether this kind publishes immediately and returns, rather than at the end of an async arm.
+///
+/// `rowDetails` and the four sub-controller commands (panels, transcript search, the terminal tail
+/// and the subagent viewer) are handled before the switch and end in `publish(chat); return;`
+/// (native-host.ts:783-796). An effect one of them asks for is answered later and publishes again
+/// through its own `changed()` callback, not by ending this arm.
+fn publishes_at_once(kind: &ActionKind) -> bool {
+    matches!(
+        kind,
+        ActionKind::RowDetails
+            | ActionKind::ToggleAgentFleet
+            | ActionKind::ToggleAgentTasks
+            | ActionKind::ToggleAgentTasksCompleted
+            | ActionKind::SearchOpen
+            | ActionKind::SearchClose
+            | ActionKind::SearchQuery
+            | ActionKind::SearchNext
+            | ActionKind::SearchPrevious
+            | ActionKind::TerminalTailHover
+            | ActionKind::TerminalTailToggle
+            | ActionKind::OpenSubagent
+            | ActionKind::SubagentBack
+            | ActionKind::SubagentClose
+            | ActionKind::SubagentRetry
+            | ActionKind::SubagentLoadEarlier
     )
 }
 

@@ -240,9 +240,13 @@ impl ChatCore {
         // the clock moved, and the TypeScript would not have published either, so the host keeps
         // the snapshot it has (its `snapshot` variable is not refreshed without a publish).
         let requested = std::mem::take(&mut self.state.core.publish_requested);
+        let chain_continued = std::mem::take(&mut self.state.core.chain_continued);
         // `if (controller) publish(...)`: before the boot read answers there is no controller, so
         // nothing the core has done can ship yet and the host's first drain is empty.
         if !self.state.core.controller_started {
+            return;
+        }
+        if chain_continued && !requested {
             return;
         }
         let probe = assemble(&self.state, &self.published_context);
