@@ -22,7 +22,29 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
         Event::RpcSettled {
             request_id,
             outcome,
-        } => settle_catalog(state, *request_id, outcome.as_ref()),
+        } => {
+            // The send path walks its phases one answer at a time; each entry point matches on the
+            // id or the key it recorded and answers `None` for anything that is not its own.
+            let claimed =
+                crate::composer::send::settle_request(state, context, *request_id, outcome)
+                    .or_else(|| {
+                        crate::composer::send::settle_key_send(state, context, *request_id, outcome)
+                    })
+                    .or_else(|| {
+                        crate::composer::send::settle_handoff_acknowledgement(state, *request_id)
+                    });
+            match claimed {
+                Some(round) => effects.extend(round),
+                None => settle_catalog(state, *request_id, outcome.as_ref()),
+            }
+        }
+        Event::StorageWritten { key, error } => {
+            if let Some(round) =
+                crate::composer::send::settle_storage(state, context, key, error.as_deref())
+            {
+                effects.extend(round);
+            }
+        }
         _ => {}
     }
     effects.extend(request_catalogs(state));

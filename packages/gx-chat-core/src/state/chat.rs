@@ -76,7 +76,18 @@ pub struct CoreState {
     /// record that ANSWERS the call rather than on the record that made it. The core's handlers
     /// return instead of awaiting, so the same turn is named here: the dispatcher records what the
     /// action asked for, and family a's settle publishes when that answer lands.
+    ///
+    /// A chain, not a single answer: an arm that awaits three things in a row (the submission's
+    /// draft write, its flush and its delivery) publishes once, after the LAST of them. The family
+    /// that continues the chain records the next answer with [`CoreState::publish_after`] from its
+    /// own settle, and the publish is asked for at the end of the dispatch that empties the list.
     pub publish_awaits: Vec<PublishAwait>,
+    /// An answer an in-flight action was waiting on arrived during the dispatch running right now.
+    ///
+    /// The decision is deferred to the end of the dispatch because the family that owns the chain
+    /// settles AFTER family a, which is where the answer is matched: publishing on the spot would
+    /// end an arm that has just asked for its next step.
+    pub await_settled: bool,
     /// The controller exists, which is only true once the composer boot read has answered.
     ///
     /// Every publish in `native-host.ts` is written `if (controller) publish(controller.current())`
@@ -115,6 +126,10 @@ impl CoreState {
                 Effect::ReadStorage { key } | Effect::WriteStorage { key, .. } => {
                     PublishAwait::Storage(key.clone())
                 }
+                Effect::FlushStorage { store } => PublishAwait::Storage(crate::event::StorageKey {
+                    store: store.clone(),
+                    suffix: String::new(),
+                }),
                 _ => continue,
             };
             awaited = true;
@@ -125,7 +140,11 @@ impl CoreState {
         awaited
     }
 
-    /// Publishes if this answer is the one an action was waiting on.
+    /// Takes this answer off the chain an action is waiting on.
+    ///
+    /// It does not publish: the family that owns the chain has not run yet this dispatch and may
+    /// ask for the next step. [`CoreState::finish_publish_awaits`] makes the decision once every
+    /// family has settled.
     pub fn settle_publish_await(&mut self, await_on: &PublishAwait) {
         if let Some(at) = self
             .publish_awaits
@@ -133,6 +152,16 @@ impl CoreState {
             .position(|pending| pending == await_on)
         {
             self.publish_awaits.remove(at);
+            self.await_settled = true;
+        }
+    }
+
+    /// Ends the dispatch: the arm publishes when the chain it was waiting on has run out.
+    ///
+    /// `action` is `async` and its closing `publish(controller.current())` runs after the LAST
+    /// `await` in the arm, so a chain that continued into a new request publishes nothing yet.
+    pub fn finish_publish_awaits(&mut self) {
+        if std::mem::take(&mut self.await_settled) && self.publish_awaits.is_empty() {
             self.request_publish();
         }
     }

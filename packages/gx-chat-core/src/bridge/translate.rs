@@ -185,6 +185,15 @@ impl BridgeTranslator {
                         error: None,
                     });
                 }
+                Effect::FlushStorage { store } => {
+                    self.storage_answers.push_back(Event::StorageWritten {
+                        key: StorageKey {
+                            store: store.clone(),
+                            suffix: String::new(),
+                        },
+                        error: None,
+                    });
+                }
                 _ => {}
             }
         }

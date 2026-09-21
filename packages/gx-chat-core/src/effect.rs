@@ -47,6 +47,15 @@ pub enum Effect {
         /// Flush to disk before reporting, for records that must survive a crash.
         durable: bool,
     },
+    /// Push a store's pending writes to disk and say when they are there; answered by
+    /// [`crate::Event::StorageWritten`] with the same `store` and an empty suffix.
+    ///
+    /// This is `composer('flush')` on the bridge, which is `flushDraftSaves(sessionKey)`: the
+    /// durable save outbox and its retry worker stay with the host
+    /// (`docs/2026-09-21/rust-chat/HOST-TODO.md` section 3), and a submission must not deliver
+    /// before the submitted revision is on disk. It is its own effect rather than a
+    /// [`Effect::WriteStorage`] with no value, which would DELETE the record.
+    FlushStorage { store: String },
     /// Wake the core with [`crate::Event::Tick`] in `delay_ms`, or cancel the pending wake when
     /// `delay_ms` is `None`.
     SetTimer { delay_ms: Option<u64> },

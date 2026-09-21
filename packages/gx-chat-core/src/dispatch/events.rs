@@ -35,6 +35,9 @@ pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> 
     for settle in SETTLE {
         effects.extend(settle(state, event, context));
     }
+    // Every family has had its chance to continue an action's chain, so the closing publish of an
+    // arm whose last `await` just answered is asked for here rather than in family a's settle.
+    state.core.finish_publish_awaits();
     effects
 }
 

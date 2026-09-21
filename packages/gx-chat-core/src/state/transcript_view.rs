@@ -108,6 +108,11 @@ pub struct ProjectionInputs {
     pub summary: bool,
     pub detail_revision: u64,
     pub backfill_revision: u64,
+    /// The prompt queue, which is a dependency of the composition memo
+    /// (`controller.ts`, the `messages` `useMemo`) even on the turns where no row moves: a queue
+    /// answer hands `setQueuePrompts` a new array, the memo re-runs, and `update` therefore ships
+    /// the degenerate splice the host compares by identity.
+    pub queue: Option<Vec<serde_json::Value>>,
 }
 
 impl Default for TranscriptViewState {

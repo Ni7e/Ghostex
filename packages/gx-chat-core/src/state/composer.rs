@@ -65,6 +65,15 @@ pub struct ComposerState {
     pub platform: KeyPlatform,
     /// A send is in flight and the composer is holding its text.
     pub submitting: Option<Submission>,
+    /// The keystroke `sendKey` is waiting on: the request id, the key, and the marker to record
+    /// only once the write is accepted.
+    pub key_send: Option<(u64, String, String)>,
+    /// Draft transfers being received right now, so a repeated `receiveHandoff` is a no-op.
+    pub receiving_handoffs: Vec<String>,
+    /// Draft transfers this composer has already taken, kept for the same reason across retries.
+    pub received_handoffs: Vec<String>,
+    /// The acknowledgement call for a transfer, by request id.
+    pub handoff_acknowledgement: Option<(u64, String)>,
     /// The boot read has answered, so the two catalog reads may go out.
     pub boot_read: bool,
     /// `sendBlockedReason(state)`, recomputed once per event by family d's settle.
@@ -117,6 +126,9 @@ impl Default for ComposerActionAvailability {
 }
 
 /// A submission the composer is holding text for.
+///
+/// The TypeScript arm awaits five or six things in a row; the core cannot await, so the same
+/// order is a list of phases walked one answer at a time (`crate::composer::send`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Submission {
     pub text: String,
@@ -125,6 +137,22 @@ pub struct Submission {
     /// Set by an interrupt that arrived before the send left, so the recovered draft is not
     /// delivered after it.
     pub cancelled: bool,
+    /// The pictures riding with the draft.
+    pub image_paths: Vec<String>,
+    /// The phases still to run, head first; the head is the one in flight.
+    pub phases: Vec<crate::composer::send::SendPhase>,
+    /// The gxserver call the head phase is waiting for.
+    pub request: Option<u64>,
+    /// The stored record or flush the head phase is waiting for.
+    pub storage: Option<crate::event::StorageKey>,
+    /// Family a's optimistic echo, so a failed call can drop it.
+    pub pending_id: Option<String>,
+    /// The "Ran /x" marker's command and stamp, so a failed call can drop it.
+    pub marker: Option<(String, i64)>,
+    /// `chat.availableAgents !== null` when the send left: a draft session resyncs afterwards.
+    pub refresh_after_send: bool,
+    /// This is a `handoff`: the draft is parked for the terminal rather than delivered.
+    pub handoff: bool,
 }
 
 impl ComposerState {

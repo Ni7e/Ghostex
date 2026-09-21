@@ -32,6 +32,20 @@ pub const DRAFTS_STORE: &str = "drafts";
 pub const SUMMARY_STORE: &str = "summary";
 /// The per-session verbose override.
 pub const VERBOSE_STORE: &str = "verbose";
+/// `composer('submitted', {text, version})`: clear the stored draft when it still holds the
+/// submitted revision, record the send in the host's sent history, and flush.
+///
+/// A store rather than a plain write on `drafts` because the clear is CONDITIONAL on what is on
+/// disk and because the sent history is a store the host owns alone
+/// (`docs/2026-09-21/rust-chat/HOST-TODO.md` section 3). The value carries `{text, version}`.
+pub const DRAFT_SUBMITTED_STORE: &str = "draftSubmitted";
+/// `composer('park', {text, version})`: the draft was handed to the terminal, so it is kept under
+/// its revision and marked parked. The value carries `{text, version}`.
+pub const DRAFT_PARK_STORE: &str = "draftPark";
+/// `composer('receive', {text, version, current})`: a draft arrived from another client. The host
+/// writes the recovery checkpoint and flushes the save outbox; the DISPOSITION is decided in the
+/// core, because `classifyDraftHandoff` is a pure rule over state the core already holds.
+pub const DRAFT_RECEIVE_STORE: &str = "draftReceive";
 
 /// One stored composer draft.
 ///

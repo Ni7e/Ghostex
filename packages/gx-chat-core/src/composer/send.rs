@@ -1,0 +1,768 @@
+//! The send path: `send`, `queue`, `compact`, `handoff`, `receiveHandoff`, `interrupt`, `sendKey`.
+//!
+//! Port of the `send`/`queue`/`compact`, `handoff`, `receiveHandoff`, `interrupt` and `sendKey`
+//! arms of `packages/shared/session-chat-controller/native-host.ts`, of
+//! `deliverChatSubmission` (`submission.ts`), `sendSessionChatOptionAware` (`option-command.ts`)
+//! and of the `send`, `sendKey`, `queuePrompt`, `pushDraft` and `interrupt` callbacks in
+//! `controller.ts`.
+//!
+//! **The shape.** The TypeScript arm awaits five or six things in a row and its closing
+//! `publish(controller.current())` runs after the last of them. The core cannot await, so the
+//! same order is a list of [`SendPhase`]s on [`Submission`], one answer at a time: the head phase
+//! is in flight, its answer runs the next one, and the arm's publish lands when the list empties
+//! (`CoreState::publish_awaits`).
+//!
+//! **What stays with family a.** The optimistic echo, the "Ran /x" marker, the keystroke marker
+//! and the Stop suppression are the pending matcher's rules, so this file calls
+//! `crate::session::sends` for every one of them and never writes `state.pending` itself.
+//!
+//! **What stays with the host.** `draftSubmitted`, `submissionFailed` and `draftReceived` are the
+//! composer field's own bookkeeping (`docs/2026-09-21/rust-chat/HOST-TODO.md` section 2), and the
+//! handoff id is a `crypto.randomUUID()` the core has no source for. All three ride out as
+//! [`Effect::HostAction`].
+
+use serde_json::{json, Value};
+
+use crate::composer::storage::{
+    encode_stored_draft, StoredDraftRecord, DRAFTS_STORE, DRAFT_PARK_STORE, DRAFT_RECEIVE_STORE,
+    DRAFT_SUBMITTED_STORE,
+};
+use crate::composer::submission::{
+    classify_draft_handoff, submission_steps, HandoffDisposition, StoredDraft, SubmissionMode,
+    SubmissionStep,
+};
+use crate::effect::Effect;
+use crate::event::StorageKey;
+use crate::session::sends;
+use crate::session::streaming::{classify_send, SendClassification};
+use crate::state::Submission;
+use crate::state::{ChatContext, ChatState};
+use crate::wire::ChatRpcMethod;
+
+/// One step of a submission, in the order the TypeScript runs it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SendPhase {
+    /// `composer('write', {text, version, submitted: true})`: the submitted revision is durable
+    /// before anything is delivered.
+    WriteDraft,
+    /// `composer('flush')`: the save outbox is on disk.
+    FlushDraft,
+    /// `chat.draft.push(text, version)`, which is `setSessionChatDraft`.
+    PushDraft,
+    /// `send('/compact')`, the first half of a compact.
+    SendCompact,
+    /// `send(text, version)` through `sendSessionChatOptionAware`.
+    SendText,
+    /// `queue(text, version)`, which is `queueSessionChatPrompt`.
+    QueueText,
+    /// `composer('submitted', {text, version})`: clear the stored draft, record the send, flush.
+    MarkSubmitted,
+    /// `composer('park', {text, version})`: the draft is the terminal's now.
+    ParkDraft,
+}
+
+/// `send`, `queue` and `compact`, which are one arm in the TypeScript.
+pub fn begin(
+    state: &mut ChatState,
+    context: &ChatContext,
+    mode: SubmissionMode,
+    text: &str,
+    version: Option<crate::composer::queue::DraftVersion>,
+    image_paths: Vec<String>,
+) -> Vec<Effect> {
+    if let Some(blocked) = crate::composer::document::send_blocked(state, context) {
+        state.core.fail(blocked.clone(), None);
+        return vec![submission_failed(mode, text)];
+    }
+    let capabilities = crate::composer::document::queue(state).capabilities;
+    let steps = match submission_steps(
+        text,
+        version.as_ref(),
+        mode,
+        capabilities.can_sync_draft,
+        capabilities.can_queue,
+    ) {
+        Ok(steps) => steps,
+        Err(message) => {
+            state.core.fail(message, None);
+            return vec![submission_failed(mode, text)];
+        }
+    };
+    // The draft leaves with its pictures; a refusal re-inserts the text and counts them again.
+    state.composer.draft_attachment_count = 0;
+    let mut phases = vec![SendPhase::WriteDraft, SendPhase::FlushDraft];
+    for step in &steps {
+        phases.push(match step {
+            SubmissionStep::PushDraft { .. } => SendPhase::PushDraft,
+            SubmissionStep::Send { text: sent, .. } if sent == "/compact" && phases.len() > 2 => {
+                SendPhase::SendCompact
+            }
+            SubmissionStep::Send { .. } if mode == SubmissionMode::Compact => {
+                SendPhase::SendCompact
+            }
+            SubmissionStep::Send { .. } => SendPhase::SendText,
+            SubmissionStep::Queue { .. } => SendPhase::QueueText,
+        });
+    }
+    phases.push(SendPhase::MarkSubmitted);
+    state.composer.submitting = Some(Submission {
+        text: text.to_string(),
+        version,
+        mode,
+        cancelled: false,
+        image_paths,
+        phases,
+        request: None,
+        storage: None,
+        pending_id: None,
+        marker: None,
+        refresh_after_send: state.session.available_agents.is_some(),
+        handoff: false,
+    });
+    run_head(state, context)
+}
+
+/// Runs the head phase, or finishes the submission when the list has run out.
+fn run_head(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
+    let Some(submission) = state.composer.submitting.as_ref() else {
+        return Vec::new();
+    };
+    let Some(phase) = submission.phases.first().copied() else {
+        return finish(state);
+    };
+    // CDXC:SessionChat 2026-09-17 WHY:
+    // Escape can arrive while a draft save is pending, before the daemon has a send to cancel.
+    // Both renderers must cancel here as well so the recovered draft is not delivered after the
+    // interrupt.
+    if submission.cancelled && matches!(phase, SendPhase::SendCompact | SendPhase::SendText) {
+        return fail(state, "The session chat send was cancelled.");
+    }
+    let text = submission.text.clone();
+    let version = submission.version.clone();
+    let queued_text = match submission.mode {
+        SubmissionMode::Queue => text.trim().to_string(),
+        _ => text.clone(),
+    };
+    match phase {
+        SendPhase::WriteDraft => {
+            let key = draft_key(state);
+            let record = StoredDraftRecord {
+                text: text.clone(),
+                updated_at: Some(context.now_millis()),
+                version: version.clone(),
+                submitted: true,
+                parked: false,
+            };
+            state.composer.stored_draft = Some(record.clone());
+            wait_storage(state, key.clone());
+            vec![Effect::WriteStorage {
+                key,
+                value: Some(encode_stored_draft(&record)),
+                durable: false,
+            }]
+        }
+        SendPhase::FlushDraft => {
+            wait_storage(state, flush_key());
+            vec![Effect::FlushStorage {
+                store: DRAFTS_STORE.to_string(),
+            }]
+        }
+        SendPhase::PushDraft => {
+            let request_id = state.core.allocate_request_id();
+            wait_request(state, request_id);
+            vec![Effect::SendRpc {
+                request_id,
+                method: ChatRpcMethod::SetSessionChatDraft,
+                params: Box::new(json!({
+                    "clientId": state.identity.client_id,
+                    "content": text,
+                    "draftVersion": version,
+                })),
+            }]
+        }
+        SendPhase::SendCompact => send_to_agent(state, context, "/compact", None, &[]),
+        SendPhase::SendText => {
+            let images = submission.image_paths.clone();
+            send_to_agent(state, context, &text, version, &images)
+        }
+        SendPhase::QueueText => {
+            let request_id = state.core.allocate_request_id();
+            wait_request(state, request_id);
+            vec![Effect::SendRpc {
+                request_id,
+                method: ChatRpcMethod::QueueSessionChatPrompt,
+                params: Box::new(json!({ "text": queued_text, "draftVersion": version })),
+            }]
+        }
+        SendPhase::MarkSubmitted => {
+            let key = operation_key(state, DRAFT_SUBMITTED_STORE);
+            wait_storage(state, key.clone());
+            vec![Effect::WriteStorage {
+                key,
+                value: Some(json!({ "text": text, "version": version }).to_string()),
+                durable: true,
+            }]
+        }
+        SendPhase::ParkDraft => {
+            let key = operation_key(state, DRAFT_PARK_STORE);
+            if let Some(record) = state.composer.stored_draft.as_mut() {
+                record.parked = true;
+            }
+            wait_storage(state, key.clone());
+            vec![Effect::WriteStorage {
+                key,
+                value: Some(json!({ "text": text, "version": version }).to_string()),
+                durable: true,
+            }]
+        }
+    }
+}
+
+/// `sendSessionChatOptionAware` plus `chat.send`: the pills move, the echo or the marker is
+/// recorded, and the call goes out.
+///
+/// The echo and the marker are recorded BEFORE the call and undone when it fails, which is what
+/// makes a send read as a new row the instant the user presses Enter.
+fn send_to_agent(
+    state: &mut ChatState,
+    context: &ChatContext,
+    text: &str,
+    version: Option<crate::composer::queue::DraftVersion>,
+    image_paths: &[String],
+) -> Vec<Effect> {
+    let catalog = crate::menus::option_catalog::session_option_catalog(
+        &state.menus.model_catalog,
+        state.session.agent.as_deref(),
+    );
+    state
+        .menus
+        .options
+        .reconcile_typed_command(catalog.as_ref(), text, context.now_millis());
+    // `classifySessionChatSend(text, commandCatalog)`: the controller passes no skill prefix, so a
+    // `$token` is prose here even under Codex.
+    let classification = classify_send(text, &command_catalog(), None);
+    let mut pending_id = None;
+    let mut marker = None;
+    match classification {
+        SendClassification::Chat if !text.trim().is_empty() || !image_paths.is_empty() => {
+            pending_id = Some(sends::begin_send(state, context, text, image_paths));
+        }
+        SendClassification::Command => {
+            let sent_at = sends::begin_command_marker(state, context, text);
+            marker = Some((
+                text.trim_matches(crate::session::text::is_js_space)
+                    .to_string(),
+                sent_at,
+            ));
+        }
+        _ => {}
+    }
+    let request_id = state.core.allocate_request_id();
+    if let Some(submission) = state.composer.submitting.as_mut() {
+        submission.request = Some(request_id);
+        submission.storage = None;
+        submission.pending_id = pending_id;
+        submission.marker = marker;
+    }
+    vec![Effect::SendRpc {
+        request_id,
+        method: ChatRpcMethod::SendSessionChatMessage,
+        params: Box::new(json!({
+            "text": text,
+            "imagePaths": if image_paths.is_empty() { Value::Null } else { json!(image_paths) },
+            "draftVersion": version,
+        })),
+    }]
+}
+
+/// The answer to the head phase arrived.
+///
+/// Answers `None` when the id or the key is not the submission's, so the caller can offer it to
+/// whatever else is in flight.
+pub fn settle_request(
+    state: &mut ChatState,
+    context: &ChatContext,
+    request_id: u64,
+    outcome: &crate::wire::RpcOutcome,
+) -> Option<Vec<Effect>> {
+    if state.composer.submitting.as_ref()?.request != Some(request_id) {
+        return None;
+    }
+    let mut effects = Vec::new();
+    match outcome {
+        crate::wire::RpcOutcome::Ok { result } => {
+            // A receipt that names a queue row makes the echo that row's optimistic twin.
+            if let (Some(pending_id), Some(queued)) = (
+                state
+                    .composer
+                    .submitting
+                    .as_ref()
+                    .and_then(|submission| submission.pending_id.clone()),
+                result
+                    .get("queuedPromptId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            ) {
+                sends::adopt_queued_prompt_id(state, &pending_id, &queued);
+            }
+            // Every queue mutation answers with the whole authoritative queue, so an optimistic
+            // step that lost a race self-corrects on the next line instead of rolling back.
+            if let Some(queue) = result.get("queue").and_then(Value::as_array) {
+                state.session.queue_prompts = Some(queue.clone());
+            }
+            // `setSyncedDraft((current) => mergeSessionChatDraftState(current, result.draft))`:
+            // the receipts union, and a newer local revision wins over the answer's body.
+            if let Some(draft) = result.get("draft") {
+                state.session.synced_draft = Some(crate::session::fold::merge_draft_state(
+                    state.session.synced_draft.as_ref(),
+                    draft,
+                ));
+            }
+            if let Some(submission) = state.composer.submitting.as_mut() {
+                let sent = submission.phases.first().copied();
+                submission.request = None;
+                submission.pending_id = None;
+                submission.marker = None;
+                if !submission.phases.is_empty() {
+                    submission.phases.remove(0);
+                }
+                // `if (chat.availableAgents) chat.refresh()`: a draft session's identity only
+                // settles once the daemon has seen the first send.
+                if sent == Some(SendPhase::SendText) && submission.refresh_after_send {
+                    effects.extend(crate::session::reads::request_resync(state, context));
+                }
+            }
+            effects.extend(run_head(state, context));
+        }
+        crate::wire::RpcOutcome::Err { message, .. } => {
+            undo_optimistic(state);
+            effects.extend(fail(state, message));
+        }
+    }
+    state.core.publish_after(&effects);
+    Some(effects)
+}
+
+/// The stored write or flush the head phase was waiting for answered.
+pub fn settle_storage(
+    state: &mut ChatState,
+    context: &ChatContext,
+    key: &StorageKey,
+    error: Option<&str>,
+) -> Option<Vec<Effect>> {
+    if state.composer.submitting.as_ref()?.storage.as_ref() != Some(key) {
+        return None;
+    }
+    let mut effects = Vec::new();
+    match error {
+        None => {
+            if let Some(submission) = state.composer.submitting.as_mut() {
+                submission.storage = None;
+                if !submission.phases.is_empty() {
+                    submission.phases.remove(0);
+                }
+            }
+            effects.extend(run_head(state, context));
+        }
+        Some(message) => {
+            undo_optimistic(state);
+            effects.extend(fail(state, message));
+        }
+    }
+    state.core.publish_after(&effects);
+    Some(effects)
+}
+
+/// The last phase answered: the host adopts the new revision and clears the field.
+///
+/// A handoff also tells the app shell the transfer is ready; the handoff id itself is the host's,
+/// because `composer('park')` mints it with `crypto.randomUUID()` and the core has no random
+/// source (`docs/2026-09-21/rust-chat/SEAM.md` section 7.3).
+fn finish(state: &mut ChatState) -> Vec<Effect> {
+    let Some(submission) = state.composer.submitting.take() else {
+        return Vec::new();
+    };
+    let method = if submission.handoff {
+        "handoff"
+    } else {
+        mode_name(submission.mode)
+    };
+    let mut effects = vec![Effect::HostAction {
+        action: "draftSubmitted".to_string(),
+        params: Box::new(json!({
+            "method": method,
+            "text": submission.text,
+            "version": submission.version,
+        })),
+    }];
+    if submission.handoff {
+        effects.push(Effect::HostAction {
+            action: "draftHandoffToTerminalComplete".to_string(),
+            params: Box::new(json!({
+                "content": submission.text,
+                "draftVersion": submission.version,
+            })),
+        });
+    }
+    effects
+}
+
+/// A phase refused: the text goes back to the composer and the submission is over.
+fn fail(state: &mut ChatState, message: &str) -> Vec<Effect> {
+    let Some(submission) = state.composer.submitting.take() else {
+        return Vec::new();
+    };
+    state.core.fail(message.to_string(), None);
+    vec![submission_failed(submission.mode, &submission.text)]
+}
+
+/// The echo and the marker go with a call that never reached the agent.
+fn undo_optimistic(state: &mut ChatState) {
+    let (pending_id, marker) = match state.composer.submitting.as_ref() {
+        Some(submission) => (submission.pending_id.clone(), submission.marker.clone()),
+        None => return,
+    };
+    if let Some(pending_id) = pending_id {
+        sends::drop_send(state, &pending_id);
+    }
+    if let Some((command, sent_at)) = marker {
+        sends::drop_command_marker(state, &command, sent_at);
+    }
+}
+
+/// `handoff`: the draft is parked here and handed to the terminal.
+pub fn handoff(
+    state: &mut ChatState,
+    context: &ChatContext,
+    text: &str,
+    version: Option<crate::composer::queue::DraftVersion>,
+) -> Vec<Effect> {
+    let record = StoredDraftRecord {
+        text: text.to_string(),
+        updated_at: Some(context.now_millis()),
+        version: version.clone(),
+        submitted: false,
+        parked: false,
+    };
+    state.composer.stored_draft = Some(record.clone());
+    state.composer.submitting = Some(Submission {
+        text: text.to_string(),
+        version: version.clone(),
+        mode: SubmissionMode::Send,
+        cancelled: false,
+        image_paths: Vec::new(),
+        phases: vec![
+            SendPhase::WriteDraft,
+            SendPhase::PushDraft,
+            SendPhase::ParkDraft,
+        ],
+        request: None,
+        storage: None,
+        pending_id: None,
+        marker: None,
+        refresh_after_send: false,
+        handoff: true,
+    });
+    let key = draft_key(state);
+    wait_storage(state, key.clone());
+    vec![Effect::WriteStorage {
+        key,
+        value: Some(encode_stored_draft(&record)),
+        durable: false,
+    }]
+}
+
+/// `receiveHandoff`: a draft arrives from the terminal or from another client.
+///
+/// The disposition is decided here rather than by the host: `classifyDraftHandoff` is a pure rule
+/// and the core already holds the stored entry and the composer's current text, so the host's job
+/// is only the durable write and the recovery checkpoint it keeps anyway.
+pub fn receive_handoff(
+    state: &mut ChatState,
+    context: &ChatContext,
+    handoff_id: &str,
+    content: &str,
+    current: &str,
+    version: Option<crate::composer::queue::DraftVersion>,
+) -> Vec<Effect> {
+    if state
+        .composer
+        .receiving_handoffs
+        .iter()
+        .any(|id| id == handoff_id)
+    {
+        return Vec::new();
+    }
+    let consumed = version.as_ref().is_some_and(|version| {
+        state
+            .session
+            .synced_draft
+            .as_ref()
+            .and_then(|draft| draft.get("consumedDrafts"))
+            .and_then(Value::as_array)
+            .is_some_and(|receipts| {
+                receipts.iter().any(|receipt| {
+                    receipt.get("draftId").and_then(Value::as_str) == Some(&version.draft_id)
+                        && receipt
+                            .get("revision")
+                            .and_then(Value::as_i64)
+                            .is_some_and(|revision| revision >= version.revision)
+                })
+            })
+    });
+    state
+        .composer
+        .receiving_handoffs
+        .push(handoff_id.to_string());
+    let mut effects = Vec::new();
+    if !state
+        .composer
+        .received_handoffs
+        .iter()
+        .any(|id| id == handoff_id)
+        && !consumed
+    {
+        let stored = state
+            .composer
+            .stored_draft
+            .as_ref()
+            .map(|record| StoredDraft {
+                text: record.text.clone(),
+                version: record.version.clone(),
+                parked: record.parked,
+            });
+        let parked = state
+            .composer
+            .stored_draft
+            .as_ref()
+            .is_some_and(|record| record.parked);
+        let disposition =
+            classify_draft_handoff(content, version.as_ref(), current, stored.as_ref(), parked);
+        match disposition {
+            HandoffDisposition::Conflict => {
+                state.composer.incoming_draft = Some(crate::document::IncomingDraft {
+                    content: content.to_string(),
+                    version: match serde_json::to_value(&version) {
+                        Ok(Value::Null) | Err(_) => ghostex_gx_protocol::Tri::Absent,
+                        Ok(value) => ghostex_gx_protocol::Tri::Value(value),
+                    },
+                    extra: Default::default(),
+                });
+            }
+            HandoffDisposition::Accept => {
+                let record = StoredDraftRecord {
+                    text: content.to_string(),
+                    updated_at: Some(context.now_millis()),
+                    version: version.clone(),
+                    submitted: false,
+                    parked: false,
+                };
+                state.composer.stored_draft = Some(record);
+                effects.push(Effect::HostAction {
+                    action: "draftReceived".to_string(),
+                    params: Box::new(json!({
+                        "content": content,
+                        "version": version,
+                        "previous": current,
+                    })),
+                });
+            }
+            HandoffDisposition::Current => {}
+        }
+        state
+            .composer
+            .received_handoffs
+            .push(handoff_id.to_string());
+    }
+    // One host round trip whatever the disposition: `composer('receive')` always writes the
+    // recovery checkpoint and flushes the save outbox before it answers.
+    effects.insert(
+        0,
+        Effect::WriteStorage {
+            key: operation_key(state, DRAFT_RECEIVE_STORE),
+            value: Some(
+                json!({ "text": content, "version": version, "current": current }).to_string(),
+            ),
+            durable: true,
+        },
+    );
+    let request_id = state.core.allocate_request_id();
+    state.composer.handoff_acknowledgement = Some((request_id, handoff_id.to_string()));
+    effects.push(Effect::SendRpc {
+        request_id,
+        method: ChatRpcMethod::AcknowledgeSessionChatDraftHandoff,
+        params: Box::new(json!({ "handoffId": handoff_id })),
+    });
+    effects
+}
+
+/// The acknowledgement answered: the transfer is over on both sides.
+pub fn settle_handoff_acknowledgement(
+    state: &mut ChatState,
+    request_id: u64,
+) -> Option<Vec<Effect>> {
+    let (pending, handoff_id) = state.composer.handoff_acknowledgement.clone()?;
+    if pending != request_id {
+        return None;
+    }
+    state.composer.handoff_acknowledgement = None;
+    state
+        .composer
+        .receiving_handoffs
+        .retain(|id| id != &handoff_id);
+    Some(vec![Effect::HostAction {
+        action: "draftHandoffToChatComplete".to_string(),
+        params: Box::new(json!({ "handoffId": handoff_id })),
+    }])
+}
+
+/// Escape: cancel a send that has not left, then ask the agent to stop.
+pub fn interrupt(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
+    if let Some(submission) = state.composer.submitting.as_mut() {
+        submission.cancelled = true;
+    }
+    // CDXC:SessionChat 2026-09-08 DECISION:
+    // User: Escape closing /usage or a similar dialog must not report "Interrupted the agent" when
+    // no turn was interrupted. The dialog's cancel lane verifies the live screen and avoids the
+    // stop lane's queue cancellation and activity reset.
+    if let Some(dialog) = cancellable_dialog(state) {
+        let request_id = state.core.allocate_request_id();
+        return vec![Effect::SendRpc {
+            request_id,
+            method: ChatRpcMethod::AnswerSessionChatPrompt,
+            params: Box::new(json!({
+                "kind": "terminalDialog",
+                "dialogId": dialog,
+                "dialogAction": "cancel",
+            })),
+        }];
+    }
+    sends::begin_interrupt(state, context);
+    let request_id = state.core.allocate_request_id();
+    vec![Effect::SendRpc {
+        request_id,
+        method: ChatRpcMethod::InterruptSessionChat,
+        params: Box::new(json!({})),
+    }]
+}
+
+/// The open terminal dialog's id, when it offers a cancel action.
+fn cancellable_dialog(state: &ChatState) -> Option<String> {
+    let dialog = state.session.terminal_notice.as_ref()?.get("dialog")?;
+    let offers_cancel = dialog
+        .get("actions")
+        .and_then(Value::as_array)
+        .is_some_and(|actions| {
+            actions
+                .iter()
+                .any(|action| action.as_str() == Some("cancel"))
+        });
+    offers_cancel
+        .then(|| dialog.get("id").and_then(Value::as_str))
+        .flatten()
+        .map(str::to_string)
+}
+
+/// `sendKey`: a raw keystroke, with its marker recorded only after the write is accepted.
+pub fn send_key(state: &mut ChatState, key: &str, marker: &str) -> Vec<Effect> {
+    if !state.menus.can_send_key {
+        return Vec::new();
+    }
+    let request_id = state.core.allocate_request_id();
+    state.composer.key_send = Some((request_id, key.to_string(), marker.to_string()));
+    vec![Effect::SendRpc {
+        request_id,
+        method: ChatRpcMethod::SendSessionChatMessage,
+        params: Box::new(json!({ "key": key })),
+    }]
+}
+
+/// The keystroke was accepted: a non-empty marker becomes a chat row.
+///
+/// Multi-key setting adjustments pass an empty marker so their implementation keystrokes do not.
+pub fn settle_key_send(
+    state: &mut ChatState,
+    context: &ChatContext,
+    request_id: u64,
+    outcome: &crate::wire::RpcOutcome,
+) -> Option<Vec<Effect>> {
+    let (pending, key, marker) = state.composer.key_send.clone()?;
+    if pending != request_id {
+        return None;
+    }
+    state.composer.key_send = None;
+    match outcome {
+        crate::wire::RpcOutcome::Ok { .. } => {
+            sends::record_key_marker(state, context, &key, &marker);
+        }
+        crate::wire::RpcOutcome::Err { message, code, .. } => {
+            state.core.fail(message.clone(), code.clone());
+        }
+    }
+    Some(Vec::new())
+}
+
+/// The composer's text goes back when a submission did not leave.
+fn submission_failed(mode: SubmissionMode, text: &str) -> Effect {
+    Effect::HostAction {
+        action: "submissionFailed".to_string(),
+        params: Box::new(json!({ "method": mode_name(mode), "text": text })),
+    }
+}
+
+fn mode_name(mode: SubmissionMode) -> &'static str {
+    match mode {
+        SubmissionMode::Send => "send",
+        SubmissionMode::Queue => "queue",
+        SubmissionMode::Compact => "compact",
+    }
+}
+
+fn wait_storage(state: &mut ChatState, key: StorageKey) {
+    if let Some(submission) = state.composer.submitting.as_mut() {
+        submission.storage = Some(key);
+        submission.request = None;
+    }
+}
+
+fn wait_request(state: &mut ChatState, request_id: u64) {
+    if let Some(submission) = state.composer.submitting.as_mut() {
+        submission.request = Some(request_id);
+        submission.storage = None;
+    }
+}
+
+/// `SESSION_CHAT_DEFAULT_COMMAND_CATALOG`, which is what the controller is constructed with.
+fn command_catalog() -> Vec<String> {
+    crate::session::constants::DEFAULT_COMMAND_CATALOG
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect()
+}
+
+fn draft_key(state: &ChatState) -> StorageKey {
+    StorageKey {
+        store: DRAFTS_STORE.to_string(),
+        suffix: format!(
+            "{}:{}",
+            state.identity.project_id, state.identity.session_id
+        ),
+    }
+}
+
+/// The flush's own answer key: a store with no suffix, which is what [`Effect::FlushStorage`]
+/// answers on.
+fn flush_key() -> StorageKey {
+    StorageKey {
+        store: DRAFTS_STORE.to_string(),
+        suffix: String::new(),
+    }
+}
+
+/// One of the host's own draft operations, keyed by the session it belongs to.
+fn operation_key(state: &ChatState, store: &str) -> StorageKey {
+    StorageKey {
+        store: store.to_string(),
+        suffix: state.identity.session_key.clone(),
+    }
+}

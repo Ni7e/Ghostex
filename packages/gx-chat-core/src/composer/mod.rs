@@ -29,6 +29,7 @@ pub mod transcript_menu;
 pub mod trigger;
 pub mod view;
 
+pub mod send;
 pub mod settle;
 
 pub use crate::composer::actions::handle;

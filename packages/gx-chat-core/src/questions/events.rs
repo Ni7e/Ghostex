@@ -108,6 +108,9 @@ fn answer_settled(state: &mut ChatState, outcome: &RpcOutcome) -> Vec<Effect> {
         state.questions.answering = false;
     }
     refresh_gates(state);
+    // The arm is not over: `await composer('questionClear', …)` follows the answer, and the
+    // action's closing publish runs after IT, not after the answer.
+    state.core.publish_after(&effects);
     effects
 }
 

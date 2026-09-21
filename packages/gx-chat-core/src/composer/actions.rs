@@ -15,7 +15,7 @@ use crate::composer::links::{classify_link_href, file_position_from_href, LinkTa
 use crate::composer::queue::{is_queue_row_busy, move_queue_row};
 use crate::composer::reference_pills::{composer_references, ReferenceKind};
 use crate::composer::references::{insert_reference, native_path_reference, remove_reference};
-use crate::composer::submission::restore_undelivered_text;
+use crate::composer::submission::{restore_undelivered_text, SubmissionMode};
 use crate::composer::suggestions::{
     complete_composer_mention, composer_native_command, suggestion_popup, suggestion_replacement,
     SuggestionKind,
@@ -148,25 +148,60 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             save_note(state)
         }
         ActionKind::SaveNote => save_note(state),
-        ActionKind::SendKey => vec![Effect::HostAction {
-            action: "sendKey".to_string(),
-            params: Box::new(json!({
-                "key": string_param(action, "key"),
-                "marker": action
-                    .param("marker")
-                    .and_then(Value::as_str)
-                    .unwrap_or(""),
-            })),
-        }],
-        ActionKind::Interrupt => interrupt(state),
-        // Not ported yet; see `docs/2026-09-21/rust-chat/PROGRESS.md`.
-        ActionKind::Send
-        | ActionKind::Queue
-        | ActionKind::Compact
-        | ActionKind::Handoff
-        | ActionKind::ReceiveHandoff => Vec::new(),
+        ActionKind::SendKey => crate::composer::send::send_key(
+            state,
+            string_param(action, "key"),
+            action
+                .param("marker")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        ),
+        ActionKind::Interrupt => crate::composer::send::interrupt(state, context),
+        ActionKind::Send | ActionKind::Queue | ActionKind::Compact => crate::composer::send::begin(
+            state,
+            context,
+            match action.kind {
+                ActionKind::Queue => SubmissionMode::Queue,
+                ActionKind::Compact => SubmissionMode::Compact,
+                _ => SubmissionMode::Send,
+            },
+            text_param(action),
+            draft_version(action),
+            action
+                .param("imagePaths")
+                .and_then(Value::as_array)
+                .map(|paths| {
+                    paths
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        ),
+        ActionKind::Handoff => crate::composer::send::handoff(
+            state,
+            context,
+            text_param(action),
+            draft_version(action),
+        ),
+        ActionKind::ReceiveHandoff => crate::composer::send::receive_handoff(
+            state,
+            context,
+            string_param(action, "handoffId"),
+            string_param(action, "content"),
+            string_param(action, "current"),
+            draft_version(action),
+        ),
         _ => Vec::new(),
     }
+}
+
+/// The revision the composer's field is on, which every send and transfer carries.
+fn draft_version(action: &UserAction) -> Option<crate::composer::queue::DraftVersion> {
+    action
+        .param("draftVersion")
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
 }
 
 /// The wheel and the editor's own expand, which are the only two actions handled before the error
@@ -643,22 +678,6 @@ fn save_note(state: &mut ChatState) -> Vec<Effect> {
         }],
         None => Vec::new(),
     }
-}
-
-/// Escape: cancel a send that has not left, then ask the agent to stop.
-///
-/// **To fold into family a.** The Stop suppression and the "Interrupted the agent" marker live in
-/// `state.pending`, which family a owns; this arm only cancels the composer's own attempt and asks
-/// for the call.
-fn interrupt(state: &mut ChatState) -> Vec<Effect> {
-    if let Some(submission) = state.composer.submitting.as_mut() {
-        submission.cancelled = true;
-    }
-    vec![Effect::SendRpc {
-        request_id: 0,
-        method: ChatRpcMethod::InterruptSessionChat,
-        params: Box::new(json!({})),
-    }]
 }
 
 /// The draft leaves with its pictures, and a refusal counts them again.

@@ -57,6 +57,7 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
         summary: state.transcript_view.summary_mode,
         detail_revision: state.transcript_view.detail_revision,
         backfill_revision: state.transcript_view.backfill_revision,
+        queue: state.session.queue_prompts.clone(),
     };
     if state.transcript_view.projection_inputs.as_ref() == Some(&inputs) {
         return;
