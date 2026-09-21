@@ -41,7 +41,7 @@ import type { SessionChatModelSelectionScope } from '@/packages/shared/session-c
  * Keep the concept's rounded tiles, individual model artwork, connecting axes, arrow cues and animated glow, using OpenAI #0069cb and Claude #e85c35.
  * Option+P opens even during a turn and pressing the opening hotkey again cancels; arrows or H/J/K/L preview model and effort, Enter saves, and Escape cancels.
  * Model navigation stops at both ends; axis words are omitted, Sol is a sun, Luna uses the supplied crescent-and-stars artwork, and Sonnet's old quill artwork is replaced.
- * User: hide the effort below the model on wide panes; at 700px or less, show it there and hide the horizontal effort cards.
+ * User: hide the effort below the model on wide panes; at 920px or less (raised from 700px on 2026-09-21 because the two-axis layout shrank too small in narrow session columns), show it there and hide the horizontal effort cards.
  * Narrow panes retain clickable effort arrows beside the selected model; trackpad gestures navigate both axes.
  * User: when height is limited, hide the models above and below the selection, just as narrow panes hide the effort rail.
  * The selected model stays centered with clickable up/down arrows; controls stay at the bottom, and idle cards and background stay subtly animated.

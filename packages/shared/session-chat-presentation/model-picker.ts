@@ -48,7 +48,7 @@ export function modelPickerLayout(
   controlsHeight: number,
   pointerRailStart: number | null
 ) {
-  const narrow = paneSize.width <= 700;
+  const narrow = paneSize.width <= 920;
   const viewportHeight = Math.max(1, paneSize.height - controlsHeight - 24);
   const stageWidth = Math.max(1180, Math.ceil(request.efforts.length / 2) * 284 + 328);
   const widthScale = Math.max(0.01, Math.min(1, (paneSize.width - 28) / (narrow ? 240 : stageWidth - 120)));
