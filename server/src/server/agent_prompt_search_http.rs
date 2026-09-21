@@ -49,8 +49,10 @@ pub(crate) fn handle_search_agent_prompts_http(
     request_id: String,
     body: &Value,
 ) -> RoutedResponse {
-    let outcome = agent_prompt_search_params(body)
-        .and_then(|params| crate::agent_prompt_search::search_agent_prompts(&state.paths, &params));
+    let outcome = agent_prompt_search_params(body).and_then(|params| {
+        let sessions = read_sessions_for_prompt_launch(state, false)?;
+        crate::agent_prompt_search::search_agent_prompts(&state.paths, &params, &sessions)
+    });
     agent_prompt_search_response(endpoint_path, request_id, outcome)
 }
 
@@ -85,7 +87,7 @@ pub(crate) fn handle_resolve_agent_prompt_launch_http(
     body: &Value,
 ) -> RoutedResponse {
     let outcome = agent_prompt_search_params(body).and_then(|params| {
-        let sessions = read_all_sessions_for_prompt_launch(state)?;
+        let sessions = read_sessions_for_prompt_launch(state, true)?;
         let accept_all_default = read_agent_accept_all_enabled_for_prompt_launch(state);
         crate::agent_prompt_search::resolve_agent_prompt_launch(
             &state.paths,
@@ -114,11 +116,15 @@ pub(crate) fn read_agent_accept_all_enabled_for_prompt_launch(state: &AppState) 
         .unwrap_or(false)
 }
 
-/// Every stored session row, each paired with the agent family its launch
-/// configuration resumes with, so the launch resolver can decide whether a live
-/// Ghostex session already owns the selected agent conversation.
-pub(crate) fn read_all_sessions_for_prompt_launch(
+/// Stored session rows, each paired with the agent family its launch
+/// configuration resumes with, so the resolver can decide whether an open
+/// Ghostex session already owns an agent conversation. Opening a result reads
+/// every row, because a stopped row whose provider still exists owns its
+/// conversation too; a search runs per keystroke and only names rows, so it
+/// skips the stopped history.
+pub(crate) fn read_sessions_for_prompt_launch(
     state: &AppState,
+    include_stopped: bool,
 ) -> Result<Vec<PromptLaunchSession>, crate::agent_prompt_search::PromptSearchError> {
     let db = open_gxserver_database(&state.paths).map_err(|error| {
         crate::agent_prompt_search::PromptSearchError {
@@ -143,7 +149,12 @@ pub(crate) fn read_all_sessions_for_prompt_launch(
             Some((project_id, project))
         })
         .collect::<HashMap<String, Value>>();
-    let sessions = repository.list_sessions(None).map_err(domain_error)?;
+    let sessions = if include_stopped {
+        repository.list_sessions(None)
+    } else {
+        repository.list_sessions_excluding_stopped(None)
+    }
+    .map_err(domain_error)?;
     Ok(sessions
         .into_iter()
         .map(|session| {
@@ -154,10 +165,24 @@ pub(crate) fn read_all_sessions_for_prompt_launch(
                 .cloned()
                 .unwrap_or(Value::Null);
             let agent_family_id = crate::agents::session_agent_family_id(&project, &session);
+            let named_title = prompt_launch_session_named_title(&project, &session);
             PromptLaunchSession {
                 session,
                 agent_family_id,
+                named_title,
             }
         })
         .collect())
+}
+
+/// The session's own title, or `None` while it is still the agent's placeholder
+/// ("Claude Session"), which says less than the title in the agent transcript.
+fn prompt_launch_session_named_title(project: &Value, session: &Value) -> Option<String> {
+    let title = session.get("title").and_then(Value::as_str)?.trim();
+    let placeholder = crate::agents::project_agent_session_default_title(project, session);
+    let bare = |text: &str| text.trim_start_matches('∗').trim().to_lowercase();
+    if title.is_empty() || bare(title) == bare(&placeholder) {
+        return None;
+    }
+    Some(title.to_string())
 }

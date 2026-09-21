@@ -367,7 +367,7 @@ export function FindPromptsView({ acceptAll, hostActions, onReady, transport }: 
           autoFocus
           className='h-8 min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground'
           onChange={(event) => find.setQuery(event.target.value)}
-          placeholder='Search every prompt you have sent to an agent'
+          placeholder='Search every prompt you have sent'
           ref={inputRef}
           spellCheck={false}
           type='text'

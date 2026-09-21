@@ -226,6 +226,7 @@ fn prompt_row_excerpt(text: &str, highlights: &[u16], limit: usize) -> (String, 
 pub fn search_agent_prompts(
     paths: &crate::paths::GxserverPaths,
     params: &Map<String, Value>,
+    open_sessions: &[PromptLaunchSession],
 ) -> Result<Value, PromptSearchError> {
     let query = params
         .get("query")
@@ -280,7 +281,8 @@ pub fn search_agent_prompts(
                     "text": text,
                     "textLength": rec.text.len(),
                     "truncated": truncated,
-                    "title": rec.display_title(),
+                    "title": open_session_title(open_sessions, rec)
+                        .unwrap_or_else(|| rec.display_title()),
                     "project": rec.project,
                     "projectName": rec.project_display_name(),
                     "sessionId": rec.session,
@@ -419,15 +421,62 @@ pub enum PromptLaunchPlan {
 /// A stored session row paired with the CLI family its launch agent resumes
 /// with (`claude` for a `custom-…` Claude configuration). The caller resolves
 /// the family because only it holds the project row that declares it.
+/// `named_title` is the session's Ghostex title once it has a real name, and
+/// `None` while it still shows the agent's placeholder title.
 #[derive(Debug, Clone)]
 pub struct PromptLaunchSession {
     pub session: Value,
     pub agent_family_id: Option<String>,
+    pub named_title: Option<String>,
 }
 
-/// True when a session row is a live owner of `agent_session_id`.
-/// Mirrors `isLive` in the CLI session projection: a running lifecycle or a
-/// provider that still exists.
+/// CDXC:PromptSearch 2026-09-21 WHY:
+/// A result whose conversation is open in the sidebar shows that session's Ghostex name, so the row reads the same as the sidebar row Enter focuses. Every other result keeps the title recorded in the agent's own transcript.
+fn open_session_title<'a>(
+    open_sessions: &'a [PromptLaunchSession],
+    rec: &ghostex_find::scan::Record,
+) -> Option<&'a str> {
+    if rec.session.is_empty() {
+        return None;
+    }
+    open_session_owner(open_sessions, &rec.session, rec.agent)?
+        .named_title
+        .as_deref()
+}
+
+/// The open session that owns a conversation, a running one ahead of a sleeping one.
+fn open_session_owner<'a>(
+    sessions: &'a [PromptLaunchSession],
+    agent_session_id: &str,
+    agent: Agent,
+) -> Option<&'a PromptLaunchSession> {
+    let mut owners = sessions
+        .iter()
+        .filter(|candidate| session_owns_agent_conversation(candidate, agent_session_id, agent));
+    let first = owners.next()?;
+    if session_lifecycle(first) == "running" {
+        return Some(first);
+    }
+    Some(
+        owners
+            .find(|candidate| session_lifecycle(candidate) == "running")
+            .unwrap_or(first),
+    )
+}
+
+fn session_lifecycle(candidate: &PromptLaunchSession) -> &str {
+    candidate
+        .session
+        .get("lifecycleState")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+/// True when a session row is an open owner of `agent_session_id`: a running
+/// or sleeping lifecycle, or a provider that still exists.
+///
+/// CDXC:PromptSearch 2026-09-21 WHY:
+/// A sleeping session is still a row in the sidebar, and focusing it wakes it. Counting only running sessions made Find start a second `--resume` session next to the sleeping one that already owned the conversation.
 ///
 /// CDXC:PromptSearch 2026-09-19 WHY:
 /// A session launched from a custom agent configuration stores that configuration's `custom-…` id as its agent, never the family the transcript belongs to, so the family resolved the way resume planning resolves it must count as a match too. Comparing the raw id alone made Find open a second `claude --resume` writer onto a conversation a running custom Claude session already owned.
@@ -455,7 +504,7 @@ fn session_owns_agent_conversation(
         .and_then(|state| state.get("lifecycleState"))
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if lifecycle != "running" && provider_state != "exists" {
+    if !matches!(lifecycle, "running" | "sleeping") && provider_state != "exists" {
         return false;
     }
     let session_agent = session
@@ -515,11 +564,7 @@ pub fn resolve_agent_prompt_launch(
                         rec.agent.label()
                     )));
                 }
-                let owner = live_sessions
-                    .iter()
-                    .find(|candidate| {
-                        session_owns_agent_conversation(candidate, &rec.session, rec.agent)
-                    })
+                let owner = open_session_owner(live_sessions, &rec.session, rec.agent)
                     .map(|candidate| &candidate.session);
                 match owner {
                     Some(session) => PromptLaunchPlan::Focus {
@@ -666,6 +711,7 @@ mod tests {
         PromptLaunchSession {
             session: session_row(agent_session_id, lifecycle, agent),
             agent_family_id: None,
+            named_title: None,
         }
     }
 

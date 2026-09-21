@@ -224,7 +224,13 @@ fn resolve_live_agent_session_owner(
         .filter(|session| {
             session.get("agentSessionId").and_then(Value::as_str) == Some(normalized_id)
         })
-        .filter(|session| session.get("isLive").and_then(Value::as_bool) == Some(true))
+        // CDXC:PromptSearch 2026-09-21 WHY:
+        // A sleeping session is still a sidebar row and focusing it wakes it, so it owns its conversation the same way a running one does; resuming next to it made a duplicate session.
+        .filter(|session| {
+            ["isLive", "isSleeping"]
+                .iter()
+                .any(|key| session.get(*key).and_then(Value::as_bool) == Some(true))
+        })
         .filter(|session| {
             let Some(expected_agent) = normalized_agent.as_deref() else {
                 return true;
