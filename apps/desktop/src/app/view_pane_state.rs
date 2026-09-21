@@ -20,15 +20,6 @@ impl GhostexGpuiApp {
                 layouts.get_mut(kind).sidebar_collapsed = self.sidebar_collapsed;
             }
         }
-        let panes = layouts.get_mut(kind);
-        // Project selection swaps Agents and Commands independently. Read Commands
-        // only while its model belongs to the active project.
-        if self.command_pane_project_id == self.agents_workspace_project_id {
-            panes.command_mode = self.command_pane.mode;
-            if self.command_pane.last_expanded_mode != CommandPaneMode::Collapsed {
-                panes.command_last_expanded_mode = self.command_pane.last_expanded_mode;
-            }
-        }
         layouts
     }
 
@@ -41,7 +32,7 @@ impl GhostexGpuiApp {
     /// CDXC:Workarea 2026-09-20 WHY:
     /// Nothing here touches the Agents workspace, its sessions, or its surfaces, and that is the
     /// reason opening, changing or closing a view cannot unmount a terminal or a chat: the only
-    /// things a view switch moves are the sidebar, the Commands pane, and which view the panel shows.
+    /// things a view switch moves are the sidebar and which view the panel shows.
     pub(crate) fn change_active_mode_with_pane_state(
         &mut self,
         mode: TitlebarMode,
@@ -89,21 +80,6 @@ impl GhostexGpuiApp {
         */
         let keep_under_pointer = was_docked && self.sidebar_collapsed;
         self.update_sidebar_reveal(false, keep_under_pointer, cx);
-        self.apply_command_view_pane_state();
-    }
-
-    pub(crate) fn apply_command_view_pane_state(&mut self) {
-        // Project selection swaps Agents and Commands independently. Restore Commands
-        // only after its model belongs to the incoming project.
-        if self.command_pane_project_id != self.agents_workspace_project_id {
-            return;
-        }
-        let panes = self.saved_view_pane_state(self.active_mode);
-        self.command_pane_auto_minimize.idle_since = None;
-        self.command_pane.mode = panes.command_mode;
-        self.command_pane.last_expanded_mode = panes.command_last_expanded_mode;
-        self.command_pane.resize_drag = None;
-        self.clear_command_resize_hover_state();
     }
 
     /// Switching the memory model folds the live sidebar state into the model being

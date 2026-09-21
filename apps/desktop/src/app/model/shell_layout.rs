@@ -445,9 +445,7 @@ impl GpuiShellLayoutState {
         let view_pane_layouts = object
             .get("viewPaneLayouts")
             .and_then(GpuiViewPaneLayouts::from_shell_state)
-            .unwrap_or_else(|| {
-                GpuiViewPaneLayouts::seeded_from_restored_shell(active_mode, &command_pane)
-            });
+            .unwrap_or_else(GpuiViewPaneLayouts::shell_default);
 
         Some(Self {
             active_mode,

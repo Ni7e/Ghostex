@@ -69,9 +69,6 @@ impl GhostexGpuiApp {
         shell_layout_state
             .project_editor_shell
             .sleep_all_modes_for_launch(shell_layout_state.active_mode);
-        shell_layout_state.command_pane.mode = restored_panes.command_mode;
-        shell_layout_state.command_pane.last_expanded_mode =
-            restored_panes.command_last_expanded_mode;
         let restored_sidebar_collapsed = match sidebar_visibility_memory {
             GpuiSidebarVisibilityMemory::Shared => {
                 shell_layout_state
