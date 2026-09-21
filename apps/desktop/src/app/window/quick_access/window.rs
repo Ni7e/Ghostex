@@ -53,6 +53,8 @@ pub(crate) struct GpuiQuickAccessWindow {
     query: String,
     applied_query_revision: u64,
     hovered: Option<String>,
+    /// Counts the `select` commands this window sent, so a snapshot built before the newest one is recognisable.
+    selection_seq: u64,
     scroll: ScrollHandle,
     pending_scroll: Option<usize>,
     project_menu: QuickAccessMenuState,
@@ -102,6 +104,7 @@ impl GpuiQuickAccessWindow {
             query: String::new(),
             applied_query_revision: 0,
             hovered: None,
+            selection_seq: 0,
             scroll: ScrollHandle::new(),
             pending_scroll: None,
             project_menu: QuickAccessMenuState::default(),
@@ -245,6 +248,8 @@ impl GpuiQuickAccessWindow {
             }
             _ => {}
         }
+        let mut snapshot = snapshot;
+        self.keep_newer_local_selection(&mut snapshot);
         let selection_changed = self
             .snapshot
             .as_ref()
@@ -303,7 +308,7 @@ impl GpuiQuickAccessWindow {
                 }
                 this.hovered = Some(key.clone());
                 this.suppress_scroll = true;
-                this.post(json!({ "type": "select", "key": key }), cx);
+                this.post_selection(&key, cx);
                 cx.notify();
             }),
             on_secondary: Rc::new(|this: &mut Self, key, position, _window, cx| {
@@ -368,8 +373,30 @@ impl GpuiQuickAccessWindow {
             snapshot.selected_key = key.clone();
         }
         self.pending_scroll = self.selected_flat_index();
-        self.post(json!({ "type": "select", "key": key }), cx);
+        self.post_selection(&key, cx);
         true
+    }
+
+    fn post_selection(&mut self, key: &str, cx: &mut App) {
+        self.selection_seq += 1;
+        self.post(
+            json!({ "type": "select", "key": key, "seq": self.selection_seq }),
+            cx,
+        );
+    }
+
+    /// CDXC:AppModal 2026-09-21 WHY:
+    /// The runtime publishes a snapshot a frame after it hears a command, so while Down is held a snapshot carrying an older selection arrives after the window has already moved on. Applying it moved the highlight back and the next key press continued from there, which made the list jump. A snapshot older than the window's newest selection keeps the window's row, as long as that row is still listed.
+    fn keep_newer_local_selection(&self, snapshot: &mut QuickAccessSnapshot) {
+        if snapshot.selection_seq >= self.selection_seq {
+            return;
+        }
+        let Some(local) = self.snapshot.as_ref().map(|current| &current.selected_key) else {
+            return;
+        };
+        if snapshot.rows().any(|row| row.key() == local) {
+            snapshot.selected_key = local.clone();
+        }
     }
 
     /// The open picker owns Up/Down/Enter/Escape and, when it is searchable,
@@ -754,6 +781,22 @@ impl Render for GpuiQuickAccessWindow {
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 this.handle_key(event, window, cx);
             }))
+            /* CDXC:AppModal 2026-09-21 DECISION:
+            User: while Quick Access is showing, the hotkeys that open its tabs (Saved Prompts, Commands, Sessions) must switch to those tabs. App hotkeys are answered by the main window's root, which this window is not under, so they are answered here as the same tab switch the rail and Cmd+1..4 make. Re-running the app route instead would leave Saved Prompts unreachable whenever no agent session has focus. */
+            .on_action(cx.listener(
+                |this, action: &crate::app::hotkeys::RunConfiguredGhostexHotkey, _window, cx| {
+                    let tab = match action.action_id.as_str() {
+                        "openCommandPalette" => QuickAccessTabId::Commands,
+                        "openSessionSearchPalette" => QuickAccessTabId::RecentSessions,
+                        "stashedPrompts" => QuickAccessTabId::SavedPrompts,
+                        _ => {
+                            cx.propagate();
+                            return;
+                        }
+                    };
+                    this.post(json!({ "type": "tab", "tab": tab.wire_name() }), cx);
+                },
+            ))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, _window, cx| {
@@ -980,7 +1023,7 @@ impl GpuiQuickAccessWindow {
                             "quick-access-prompt-view",
                             views,
                             view,
-                            Some(210.0),
+                            Some(264.0),
                             |this: &mut Self, value, _window, cx| {
                                 this.post(json!({ "type": "view", "value": value }), cx);
                             },

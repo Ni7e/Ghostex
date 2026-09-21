@@ -129,6 +129,7 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
   let query = '';
   let queryRevision = 0;
   let selectedKey = '';
+  let selectionSeq = 0;
   let machineId: string | undefined;
   let projects: RecentProjectsData | undefined;
   let sessions: SessionsTabState = createSessionsTabState();
@@ -249,6 +250,7 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
       empty: emptyCopy(),
       groups,
       selectedKey,
+      selectionSeq,
       toolbar: toolbar(),
       footer: tab === 'recentSessions' ? { label: 'Search by Prompt', hotkey: findPromptsHotkey() } : null,
       hint: tab === 'savedPrompts' && !prompts.editing ? STASH_PROMPT_HINT : '',
@@ -673,6 +675,7 @@ export function connectNativeQuickAccess(runtime: ReturnType<typeof createGpuiSi
       }
       case 'select':
         selectedKey = command.key;
+        selectionSeq = command.seq;
         break;
       case 'activate':
         activateRow(command.key);

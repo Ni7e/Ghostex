@@ -177,6 +177,8 @@ export type QuickAccessSnapshot = {
   empty: string;
   groups: QuickAccessGroup[];
   selectedKey: string;
+  /** The newest `select` command this snapshot already reflects. */
+  selectionSeq: number;
   toolbar: QuickAccessToolbar;
   /** The Sessions tab's floating Search by Prompt button. */
   footer: { label: string; hotkey: string } | null;
@@ -229,7 +231,7 @@ export type QuickAccessCommand =
   | { type: 'closed' }
   | { type: 'tab'; tab: QuickAccessTabId }
   | { type: 'query'; query: string }
-  | { type: 'select'; key: string }
+  | { type: 'select'; key: string; seq: number }
   | { type: 'activate'; key: string }
   | { type: 'secondary'; key: string; x: number; y: number }
   | { type: 'menuItem'; id: string }

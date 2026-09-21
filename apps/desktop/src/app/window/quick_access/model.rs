@@ -69,6 +69,7 @@ pub(crate) enum QuickAccessIcon {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum QuickAccessRow {
+    #[serde(rename_all = "camelCase")]
     Command {
         key: String,
         title: String,
@@ -77,6 +78,7 @@ pub(crate) enum QuickAccessRow {
         #[serde(default)]
         hotkey: String,
     },
+    #[serde(rename_all = "camelCase")]
     Project {
         key: String,
         title: String,
@@ -91,6 +93,7 @@ pub(crate) enum QuickAccessRow {
         #[serde(default)]
         is_hidden: bool,
     },
+    #[serde(rename_all = "camelCase")]
     Session {
         key: String,
         title: String,
@@ -113,6 +116,7 @@ pub(crate) enum QuickAccessRow {
         #[serde(default)]
         can_delete: bool,
     },
+    #[serde(rename_all = "camelCase")]
     Prompt {
         key: String,
         title: String,
@@ -303,6 +307,8 @@ pub(crate) struct QuickAccessSnapshot {
     pub(crate) groups: Vec<QuickAccessGroup>,
     #[serde(default)]
     pub(crate) selected_key: String,
+    #[serde(default)]
+    pub(crate) selection_seq: u64,
     #[serde(default)]
     pub(crate) toolbar: QuickAccessToolbar,
     #[serde(default)]

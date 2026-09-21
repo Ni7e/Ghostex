@@ -283,6 +283,7 @@ pub(crate) fn quick_access_segmented<V: 'static>(
             .h_full()
             .items_center()
             .justify_center()
+            .overflow_hidden()
             .px(px(10.0))
             .rounded(px(5.0))
             .text_size(px(QUICK_ACCESS_ITEM_FONT_SIZE))
