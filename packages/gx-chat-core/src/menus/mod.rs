@@ -10,10 +10,29 @@
 //! favorites, fork branches) and `context/` (context meter, editor and details). `document.rs` and
 //! `actions.rs` here call into both, so neither half edits the other's files.
 
+pub mod account_switch;
+pub mod accounts_data;
+pub mod accounts_presentation;
 pub mod actions;
+pub mod catalog;
 pub mod context;
+pub mod context_usage;
+pub mod controls;
 pub mod document;
+pub mod lifecycle;
+pub mod native_accounts;
+pub mod option_catalog;
+pub mod option_dispatch;
+pub mod option_menu;
+pub mod option_menus;
+pub mod option_pills;
+pub mod option_store;
+pub mod option_values;
+pub mod options;
 pub mod picker;
+pub mod status_line;
+pub mod time;
 
 pub use crate::menus::actions::handle;
 pub use crate::menus::document::document;
+pub use crate::menus::lifecycle::observe;
