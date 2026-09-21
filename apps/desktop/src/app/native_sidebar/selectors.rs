@@ -155,9 +155,9 @@ impl GhostexGpuiApp {
             .hover(|row| row.bg(appearance.hover))
             .child(icon)
             .children(drop_position.map(|position| super::space_drag::insertion_line(position, scale)))
-            // CDXC:Spaces 2026-09-21 DECISION: User: the working and attention counts sit in an orange or blue circle (the colour the number itself used to have) with the number in white.
+            // CDXC:Spaces 2026-09-21 DECISION: User: the working and attention counts sit in an orange or blue circle (the colour the number itself used to have) with the number in white. 2026-09-21: the orange is 20% darker than that old number colour so the white digit stays readable.
             .when(space.working_count > 0 || space.attention_count > 0, |row| row.child(h_flex().absolute().top(px(20.5 * scale)).left_0().w_full().justify_center().h(px(11.0 * scale)).font_family("JetBrainsMono Nerd Font").text_size(px(8.0 * scale)).font_weight(FontWeight::BOLD).text_color(rgb(0xffffff))
-                .when(space.working_count > 0, |row| row.child(space_status_badge(space.working_count, rgb(0xf8ad07), scale)))
+                .when(space.working_count > 0, |row| row.child(space_status_badge(space.working_count, rgb(super::status::WORKING_COLOR), scale)))
                 .when(space.attention_count > 0, |row| row.child(space_status_badge(space.attention_count, rgb(0x95d7f6), scale)))))
             .when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.managed_discrete_tooltip_with_placement(tooltip_span.placement(), appearance.tooltip_delay, move |window, cx| super::tooltips::sidebar_free_width_tooltip(name.to_string(), tooltip_span, scale, window, cx)))
             .when(id != "other", |row| row.sidebar_drag_source(dragged, cx))

@@ -36,7 +36,7 @@ impl GhostexGpuiApp {
                     .child(div().id(format!("native-machine-connect-{id}")).flex_shrink_0().child(glyph)
                         .when(id != "local" && machine.state != "connected" && !busy, |icon| icon.on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_command(json!({"type": "reconnectRemoteMachine", "remoteMachineId": reconnect}), cx); }))))
                     .child(div().min_w_0().text_ellipsis().child(machine.label.clone()))
-                    .when(machine.working_count > 0, |row| row.child(div().text_color(rgb(0xf8ad07)).child(machine.working_count.to_string())))
+                    .when(machine.working_count > 0, |row| row.child(div().text_color(rgb(super::status::WORKING_COLOR)).child(machine.working_count.to_string())))
                     .when(machine.attention_count > 0, |row| row.child(div().text_color(rgb(0x95d7f6)).child(machine.attention_count.to_string())))
                     .when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.tooltip_show_delay(appearance.tooltip_delay).tooltip(move |window, cx| titlebar_tooltip(tooltip.clone(), window, cx)))
                     .on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_ui(json!({"type": "selectMachine", "machineId": id}), cx); }))

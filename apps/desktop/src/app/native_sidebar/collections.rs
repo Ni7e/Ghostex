@@ -94,7 +94,7 @@ impl GhostexGpuiApp {
                 .when_some(drop_position, |row, position| row.child(super::drag::drop_line(position, scale)))
                 .when(drop_inside, |row| row.bg(color.opacity(0.28)))
                 .child(name)
-                .when(collection.collapsed && collection.working_count > 0, |row| row.child(div().text_size(px(10.0 * scale)).text_color(rgb(0xd99a62)).child(collection.working_count.to_string())))
+                .when(collection.collapsed && collection.working_count > 0, |row| row.child(div().text_size(px(10.0 * scale)).text_color(rgb(super::status::WORKING_COLOR)).child(collection.working_count.to_string())))
                 .when(collection.collapsed && collection.attention_count > 0, |row| row.child(div().text_size(px(10.0 * scale)).text_color(rgb(0x95d7f6)).child(collection.attention_count.to_string())))
                 .when(collection.collapsed && collection.working_count == 0 && collection.attention_count == 0 && collection.awake_count > 0, |row| row.child(div().text_size(px(10.0 * scale)).child(collection.awake_count.to_string())))
                 .when(!collection.collapsed && hovered, |row| row.child(div().id(format!("native-collection-bulk-{id}")).size(px(22.0 * scale)).flex().items_center().justify_center().child(titlebar_svg_icon("titlebar/arrows-diagonal.svg", 14.0 * scale, appearance.muted))

@@ -33,7 +33,7 @@ impl GhostexGpuiApp {
         let indicator = h_flex()
             .gap(px(4.0 * scale))
             .when(summarize && section.working_count > 0, |row| {
-                row.child(div().size(px(8.0 * scale)).rounded_full().bg(rgb(0xffb454)))
+                row.child(div().size(px(8.0 * scale)).rounded_full().bg(rgb(super::status::WORKING_COLOR)))
             })
             .when(summarize && section.attention_count > 0, |row| {
                 row.child(div().size(px(8.0 * scale)).rounded_full().bg(rgb(0x95d7f6)))
