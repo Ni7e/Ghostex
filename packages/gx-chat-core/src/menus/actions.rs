@@ -65,7 +65,9 @@ fn accounts(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
     state.menus.accounts_generation += 1;
     state.menus.accounts_busy = true;
     state.menus.account_error = None;
-    state.menus.accounts_polled_at_ms = None;
+    // The panel's own request is NOT a poll: `setInterval` keeps its own 30 second schedule and
+    // only skips a tick while one read is pending. Clearing the stamp here made the poll due the
+    // moment this read answered, so the panel went straight back to busy and stayed there.
     let request_id = state.core.allocate_request_id();
     state.menus.accounts_request = Some(request_id);
     vec![Effect::SendRpc {

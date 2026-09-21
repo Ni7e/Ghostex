@@ -440,8 +440,12 @@ fn edit_draft(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
 fn save_draft(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
     let content = string_param(action, "content");
     track_draft_attachments(state, content);
+    // `pushDraft` folds `result.draft` back onto the synced draft, so the write needs an id of its
+    // own to be settled by.
+    let request_id = state.core.allocate_request_id();
+    state.composer.draft_pushes.push(request_id);
     vec![Effect::SendRpc {
-        request_id: 0,
+        request_id,
         method: ChatRpcMethod::SetSessionChatDraft,
         params: Box::new(json!({
             "clientId": state.identity.client_id,

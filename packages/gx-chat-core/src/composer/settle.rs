@@ -35,6 +35,33 @@ fn settle_note_read(
     Some(Vec::new())
 }
 
+/// `pushDraft`'s own continuation, shared by `saveDraft` and the send chain's push phase.
+///
+/// `if (result?.draft …) setSyncedDraft((current) => mergeSessionChatDraftState(current,
+/// result.draft))`. Without it a blur save left `draft.synced` holding whatever the last frame
+/// carried, so the composer's own revision and the delivery receipts were one write behind.
+fn settle_draft_push(
+    state: &mut ChatState,
+    request_id: u64,
+    outcome: &RpcOutcome,
+) -> Option<Vec<Effect>> {
+    let at = state
+        .composer
+        .draft_pushes
+        .iter()
+        .position(|pending| *pending == request_id)?;
+    state.composer.draft_pushes.remove(at);
+    if let RpcOutcome::Ok { result } = outcome {
+        if let Some(draft) = result.get("draft") {
+            state.session.synced_draft = Some(crate::session::fold::merge_draft_state(
+                state.session.synced_draft.as_ref(),
+                draft,
+            ));
+        }
+    }
+    Some(Vec::new())
+}
+
 /// `attachPaths`'s `try`/`finally`: the imported references go to the composer, and the read is
 /// counted back down whether it succeeded or refused.
 ///
@@ -116,7 +143,8 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
                     });
             let claimed = claimed
                 .or_else(|| settle_note_read(state, *request_id, outcome))
-                .or_else(|| settle_attachment_import(state, *request_id, outcome));
+                .or_else(|| settle_attachment_import(state, *request_id, outcome))
+                .or_else(|| settle_draft_push(state, *request_id, outcome));
             match claimed {
                 Some(round) => effects.extend(round),
                 None => settle_catalog(state, *request_id, outcome.as_ref()),
