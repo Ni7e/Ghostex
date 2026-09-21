@@ -203,3 +203,27 @@ pub struct Document {
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
+
+/// The document's keys whose value can change without a publish.
+///
+/// `native-host.ts` publishes for two reasons, and only two. The REACTIVE one is the chat
+/// computation re-running: `new ChatComputation(..., publish)` calls `publish` whenever the state
+/// it holds changed, and that state is everything `...viewState` spreads into the snapshot. The
+/// IMPERATIVE one is an explicit `publish(controller.current())`, which the arms of `action` and a
+/// handful of sub-controller callbacks make by hand.
+///
+/// The keys below are built inside `publish` from module variables rather than from the
+/// computation's state, so moving one is not itself a reason to ship a document: it rides on the
+/// next publish somebody asks for. The core's own change test therefore ignores them, and the
+/// family that owns one asks for a publish where the TypeScript calls `changed()`.
+///
+/// Adding a key here without wiring its owner's publish LOSES a document. Measure with
+/// `tooling/gx-chat-core/run-gates.sh` either way.
+impl Document {
+    /// This document with the imperative keys blanked, which is what the change test compares.
+    pub fn reactive(&self) -> Self {
+        let mut copy = self.clone();
+        copy.async_questions = Default::default();
+        copy
+    }
+}

@@ -95,6 +95,13 @@ pub struct CoreState {
     /// `.then(...)`. Nothing the core does before that can ship a document, which is why `start`
     /// leaves the host's first drain empty.
     pub controller_started: bool,
+    /// The effects this arm raised are fire and forget: the arm did not await them.
+    ///
+    /// `AsyncQuestions.save` is the case it exists for: it calls `changed()` at once and then
+    /// chains its write onto `this.writes` WITHOUT awaiting it, so the arm publishes on the
+    /// action's own turn and the write's answer publishes again later. Set by the handler, read
+    /// and cleared by `crate::dispatch::actions::dispatch`.
+    pub effects_not_awaited: bool,
     /// This dispatch answered one step of an action's chain and the arm asked for another.
     ///
     /// Read and cleared by `ChatCore::republish`, which then ships nothing: the TypeScript arm is

@@ -88,6 +88,8 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
                     key,
                     text,
                 ));
+                // `save()` publishes at once and chains its write without awaiting it.
+                state.core.effects_not_awaited = true;
             }
         }
         ActionKind::AsyncQuestionOption => {
@@ -107,11 +109,19 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
                     key,
                     index,
                 ));
+                state.core.effects_not_awaited = true;
             }
         }
         ActionKind::AsyncQuestionSend | ActionKind::AsyncQuestionSkip => {
             let skip = action.kind == ActionKind::AsyncQuestionSkip;
+            let before = effects.len();
             effects.extend(async_submit(state, prompt.as_ref(), notice.as_ref(), skip));
+            // `submit()` sets `submitting` and calls `changed()` BEFORE it awaits the delivery, so
+            // the controls lock on the gesture's own turn and the arm publishes again when the
+            // retire write lands.
+            if effects.len() > before {
+                state.core.request_publish();
+            }
         }
         _ => {}
     }
@@ -228,6 +238,9 @@ fn question_text(state: &mut ChatState, text: &str) -> Vec<Effect> {
     }
     let index = questions.question_index;
     questions.question_drafts[index].other = text.to_string();
+    // `publish(chat)` before the write: the card is module state, so the typed character shows on
+    // this turn and the arm publishes again when the write answers.
+    state.core.request_publish();
     write_card_drafts(state, false)
 }
 
@@ -275,6 +288,8 @@ fn question_step(
             option_index as u32,
         );
         state.questions.question_transition = true;
+        // `questionTransition = true; publish(chat)` before the write locks the card at once.
+        state.core.request_publish();
         // A multi-select question stays put: the write lands and the card waits for more picks.
         return write_card_drafts(state, !question.multi_select);
     }
@@ -310,6 +325,8 @@ pub(crate) fn advance(state: &mut ChatState, prompt: &InteractivePrompt) -> Vec<
         })
         .collect();
     state.questions.answering = true;
+    // `answering = true; publish(chat)` before the answer goes out.
+    state.core.request_publish();
     let request_id = allocate(state);
     state.questions.answer_request = Some(AnswerRequest {
         request_id,

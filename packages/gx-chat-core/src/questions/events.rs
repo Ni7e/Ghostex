@@ -145,6 +145,9 @@ pub fn storage_loaded(state: &mut ChatState, key: &StorageKey, value: Option<&st
         RETIRED_STORE => {
             state.questions.async_questions.retired = value.map(decode_retired).unwrap_or_default();
             async_controller::read_answered(&mut state.questions.async_questions);
+            // `load().finally(() => { this.loading = false; this.changed(); })`: the strip is a
+            // controller, not React state, so its own publish is this one.
+            state.core.request_publish();
             true
         }
         NOTICES_STORE => {
@@ -155,6 +158,7 @@ pub fn storage_loaded(state: &mut ChatState, key: &StorageKey, value: Option<&st
         DRAFTS_STORE if key.suffix == ASYNC_SUFFIX => {
             state.questions.async_questions.drafts = value.map(decode_drafts).unwrap_or_default();
             async_controller::read_answered(&mut state.questions.async_questions);
+            state.core.request_publish();
             true
         }
         DRAFTS_STORE if state.questions.question_content_key.as_deref() == Some(&key.suffix) => {
@@ -185,6 +189,9 @@ pub fn storage_written(
     match key.store.as_str() {
         DRAFTS_STORE if key.suffix == ASYNC_SUFFIX => {
             async_controller::write_settled(&mut state.questions.async_questions, error);
+            // `save()`'s own `changed()` on the write settling, which is what clears or raises the
+            // "could not be saved on this computer" line.
+            state.core.request_publish();
             Some(Vec::new())
         }
         DRAFTS_STORE => {

@@ -259,7 +259,7 @@ impl ChatCore {
         }
         let probe = assemble(&self.state, &self.published_context);
         let probe_parts = frame_parts(&self.state, &self.published_context);
-        if !requested && probe == self.document && probe_parts == self.parts {
+        if !requested && probe.reactive() == self.document.reactive() && probe_parts == self.parts {
             return;
         }
         self.document = assemble(&self.state, &self.context);

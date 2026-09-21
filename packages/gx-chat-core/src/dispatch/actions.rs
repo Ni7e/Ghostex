@@ -179,6 +179,7 @@ pub fn dispatch(state: &mut ChatState, action: &UserAction, context: &ChatContex
     // arms publish only when it was true.
     state.core.cleared_error = state.core.operation_error.is_some();
     state.core.skip_closing_publish = false;
+    state.core.effects_not_awaited = false;
     if clears_error(&action.kind) {
         state.core.clear_error();
     }
@@ -200,7 +201,11 @@ pub fn dispatch(state: &mut ChatState, action: &UserAction, context: &ChatContex
         state.core.request_publish();
         return effects;
     }
-    if publishes_on_return(&action.kind) && !state.core.publish_after(&effects) {
+    // An arm that did not await what it raised publishes on its own turn; the answer publishes
+    // again when it lands, through the owner's own `changed()`.
+    let awaited =
+        !std::mem::take(&mut state.core.effects_not_awaited) && state.core.publish_after(&effects);
+    if publishes_on_return(&action.kind) && !awaited {
         state.core.request_publish();
     }
     effects
