@@ -193,6 +193,23 @@ impl PresentationStore {
         self.machines.get(machine)?.loaded()
     }
 
+    /// The loaded state of a machine THIS RUN's stream delivered; `None` for one not loaded and
+    /// for one whose rows are the stored last-seen copy.
+    ///
+    /// CDXC:RemoteMachines 2026-09-21 WHY:
+    /// The difference exists for the planners that resolve a SET of rows and act on it. Drawing a
+    /// last-seen machine is the point of keeping the copy, and `is_stale` fades what it draws; but
+    /// the old runtime resolves those sets from `this.remotePresentations`, which holds only what a
+    /// stream delivered, NOT from `remoteLastSeenPresentations`, which is the map it draws from. So
+    /// a project's Sleep on an offline remote machine has always done nothing at all over there,
+    /// and a port that answered it from the last-seen rows would send one doomed request per row
+    /// down a tunnel that does not exist, each one a warning toast. (The `not loaded` refusal in
+    /// `sidebar_actions/bulk.rs` used to give the right answer here by accident, because the store
+    /// held nothing for such a machine until the copy was read back.)
+    pub fn loaded_live(&self, machine: &MachineId) -> Option<&LoadedPresentation> {
+        self.loaded(machine).filter(|loaded| !loaded.last_seen)
+    }
+
     pub(super) fn machine_mut(&mut self, machine: &MachineId) -> &mut MachinePresentation {
         self.machines.entry(machine.clone()).or_default()
     }

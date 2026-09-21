@@ -50,11 +50,27 @@ fn main() -> ExitCode {
         )
         .expect("the remote frame parses");
     let empty = Core::new();
+    // The third store: this computer streamed, and the remote machine's rows are the stored
+    // LAST-SEEN copy. `fullReloadProjectZmxSessions` resolves its rows from
+    // `this.remotePresentations`, which such a machine is absent from, so the old runtime reloads
+    // nothing there and `loaded_live` is what keeps the store doing the same.
+    let mut last_seen = Core::new();
+    last_seen
+        .handle_raw_frame(MachineId::Local, &frame(&local).to_string(), NOW_MS)
+        .expect("the local frame parses");
+    last_seen.seed_last_seen_presentation(
+        &MachineId::Remote(REMOTE.to_string()),
+        serde_json::from_value(remote.clone()).expect("the remote snapshot parses"),
+    );
 
     let mut entries = Vec::new();
     let mut owned = 0usize;
     let mut traces = 0usize;
-    for (presentation, core) in [("loaded", &loaded), ("none", &empty)] {
+    for (presentation, core) in [
+        ("loaded", &loaded),
+        ("none", &empty),
+        ("lastSeen", &last_seen),
+    ] {
         for payload in payloads() {
             let plan = plan_reload_set(core, &document, &payload);
             let entry_traces: Vec<Value> = plan

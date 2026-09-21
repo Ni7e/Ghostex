@@ -572,12 +572,25 @@ export async function runTypeScriptBulk(scenario: Json, rustActions: Json): Prom
     // opposite of and which no recording can produce.
     runtime.presentation = entry.presentation === 'none' ? undefined : orderedPresentation(scenario.snapshot as Json);
     runtime.browserTabs = (entry.browserTabs ?? []) as Json[];
-    // The remote arm. Every machine the entry names gets this scenario's rows, INCLUDING the one
-    // the Rust store never loaded: that is the old runtime's last-seen copy of a machine that has
-    // disconnected, and it is what makes the store's not-loaded refusal mean something. Without it
-    // a port that answered an unloaded machine with an empty set would look identical.
+    // The remote arm, and the two maps are deliberately different maps.
+    //
+    // CORRECTED 2026-09-21: this used to give `remotePresentations` to every machine the entry
+    // named, including the one the store has no LIVE rows for, on the argument that the old runtime
+    // answers a disconnected machine from its last-seen copy. It does not. All four project
+    // payloads and `fullReloadProjectZmxSessions` read `this.remotePresentations`, which only a
+    // machine that has streamed in this run is in; the copy the sidebar DRAWS an offline machine
+    // from is `remoteLastSeenPresentations`, which no action reads. Modelling it the old way made
+    // the TypeScript half act where the app does nothing, so the hand-off it asserted was a
+    // fiction. A last-seen machine goes in the map it really goes in, and the early return is then
+    // the thing that runs.
     runtime.remotePresentations = new Map(
       ((entry.remoteMachines ?? []) as string[]).map((machineId) => [
+        machineId,
+        orderedPresentation(scenario.snapshot as Json),
+      ])
+    );
+    runtime.remoteLastSeenPresentations = new Map(
+      ((entry.lastSeenMachines ?? []) as string[]).map((machineId) => [
         machineId,
         orderedPresentation(scenario.snapshot as Json),
       ])

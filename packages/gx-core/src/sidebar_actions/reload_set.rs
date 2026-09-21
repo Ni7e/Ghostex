@@ -97,7 +97,10 @@ pub fn plan_reload_set(
         }
     }
     let project = ProjectKey::parse_sidebar_group_id(group_id)?;
-    core.presentation().loaded(&project.machine)?;
+    // `loaded_live`, not `loaded`: `fullReloadProjectZmxSessions` resolves its rows from
+    // `this.remotePresentations`, which an offline remote machine is absent from, so it reloads
+    // nothing there. The same rule and the same reason as the project-scoped bulk sets.
+    core.presentation().loaded_live(&project.machine)?;
     // `sessionPersistenceProvider === 'zmx' && isGpuiInactiveProjectPresentationSession(session)`,
     // in the daemon's own array order, through the one function the bulk sets use for it.
     let rows = project_rows(core, &project, |row| {

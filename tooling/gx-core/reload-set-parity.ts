@@ -27,7 +27,7 @@ import { orderedPresentation } from './lifecycle-parity-typescript';
 type Json = Record<string, any>;
 
 /** Plausible port mistakes, applied to the Rust traces. */
-const MUTATIONS: Record<string, (entry: Json) => Json> = {
+const MUTATIONS: Record<string, (entry: Json, dump: Json) => Json> = {
   // The set reloaded in reverse, which is what reading a list the wrong way round looks like.
   'reverse-the-set': (entry) =>
     mapTraces(entry, (trace) => ({ ...trace, reloaded: [...(trace.reloaded as string[])].reverse() })),
@@ -63,6 +63,21 @@ const MUTATIONS: Record<string, (entry: Json) => Json> = {
   // The store refuses every set, so the old runtime does it all: no difference, and the counters
   // that say the Rust side answered anything collapse.
   'refuse-every-set': (entry) => ({ ...entry, owned: false, plan: null, traces: [] }),
+  // `loaded` in place of `loaded_live`: a machine whose rows are the stored last-seen copy reads as
+  // loaded, so its project reloads resolve the drawn rows and every one of them goes down a tunnel
+  // that does not exist. The plan is the one the same payload gets on the streamed machine.
+  'answer-a-last-seen-machine': (entry, dump) => {
+    if (String(entry.presentation) !== 'lastSeen' || entry.owned === true) return entry;
+    const groupId = String((entry.payload as Json)?.groupId ?? '');
+    if (!groupId.startsWith(`remote:${String(dump.remoteMachine)}:`)) return entry;
+    const twin = ((dump.entries ?? []) as Json[]).find(
+      (other) =>
+        String(other.presentation) === 'loaded' &&
+        String((other.payload as Json)?.groupId ?? '') === groupId &&
+        String((other.payload as Json)?.type) === String((entry.payload as Json)?.type)
+    );
+    return twin ? { ...entry, owned: twin.owned, plan: twin.plan, traces: twin.traces } : entry;
+  },
 };
 
 function mapTraces(entry: Json, map: (trace: Json) => Json): Json {
@@ -74,9 +89,16 @@ async function runPayload(rust: Json, presentation: string, payload: Json, scrip
   const answers = [...script];
   const reloaded: string[] = [];
   const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
-  runtime.presentation = presentation === 'loaded' ? orderedPresentation(rust.localSnapshot as Json) : undefined;
+  // `lastSeen` is this computer streamed with the remote machine held only as the stored copy the
+  // sidebar draws, faded. `remoteLastSeenPresentations` is a different map from
+  // `remotePresentations` and no action reads it, so the remote branch here resolves nothing, which
+  // is the answer `loaded_live` keeps the store to.
+  runtime.presentation = presentation === 'none' ? undefined : orderedPresentation(rust.localSnapshot as Json);
   runtime.remotePresentations = new Map(
     presentation === 'loaded' ? [[String(rust.remoteMachine), orderedPresentation(rust.remoteSnapshot as Json)]] : []
+  );
+  runtime.remoteLastSeenPresentations = new Map(
+    presentation === 'lastSeen' ? [[String(rust.remoteMachine), orderedPresentation(rust.remoteSnapshot as Json)]] : []
   );
   runtime.workspaceGroups = rust.document;
   runtime.client = { rpc: () => Promise.resolve({}) };
@@ -107,15 +129,25 @@ async function compare([outDir, ...flags]: string[]) {
   let remoteRows = 0;
   let handOffsWork = 0;
   let handOffsNothing = 0;
+  let lastSeenRefusals = 0;
   for (const [index, original] of ((rust.entries ?? []) as Json[]).entries()) {
-    const entry = mutate ? mutate(original) : original;
+    const entry = mutate ? mutate(original, rust) : original;
     const payload = entry.payload as Json;
     const presentation = String(entry.presentation);
     const where = `#${index} [${presentation}] ${payload.type} ${payload.groupId}`;
+    // The LAST-SEEN probe: the remote machine's rows are the stored copy, so neither side may act.
+    // Counted separately from the other refusals, because this is the one the store could not
+    // reach until the copy was read back and the one a `loaded` in place of `loaded_live` would
+    // silently answer.
+    const lastSeenRemote =
+      presentation === 'lastSeen' && String(payload.groupId ?? '').startsWith(`remote:${String(rust.remoteMachine)}:`);
+    if (lastSeenRemote && entry.owned === true)
+      differences.push(`${where}: answered a machine whose rows are the stored last-seen copy`);
     if (entry.owned !== true) {
       const reloaded = await runPayload(rust, presentation, payload, []);
       if (reloaded.length) handOffsWork += 1;
       else handOffsNothing += 1;
+      if (lastSeenRemote && !reloaded.length) lastSeenRefusals += 1;
       continue;
     }
     setsOwned += 1;
@@ -135,7 +167,7 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `payloads ${(rust.entries ?? []).length} setsOwned ${setsOwned} setTraces ${setTraces} rowsReloaded ${rowsReloaded} stops ${stops} emptySets ${emptySets} remoteRows ${remoteRows} handOffsWork ${handOffsWork} handOffsNothing ${handOffsNothing} differences ${differences.length}${
+    `payloads ${(rust.entries ?? []).length} setsOwned ${setsOwned} setTraces ${setTraces} rowsReloaded ${rowsReloaded} stops ${stops} emptySets ${emptySets} remoteRows ${remoteRows} handOffsWork ${handOffsWork} handOffsNothing ${handOffsNothing} lastSeenRefusals ${lastSeenRefusals} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
@@ -152,6 +184,7 @@ async function compare([outDir, ...flags]: string[]) {
     ['emptySets', emptySets],
     ['remoteRows', remoteRows],
     ['handOffsNothing', handOffsNothing],
+    ['lastSeenRefusals', lastSeenRefusals],
   ];
   const collapsed = measured.filter(([, count]) => count === 0);
   if (mutationName) {

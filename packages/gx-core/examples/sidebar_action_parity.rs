@@ -1517,41 +1517,28 @@ fn bulk_entries(core: &Core, scenario: &Value) -> Vec<Value> {
             Vec::new(),
         ));
     }
-    // The remote arm, against a store that has loaded ONE remote machine with this scenario's own
-    // rows. The second machine id is never loaded here and is the old runtime's last-seen copy.
+    // The remote arm, against a store that has STREAMED one remote machine and holds the stored
+    // LAST-SEEN copy of a second, with this scenario's own rows on both.
     let remote_core = core_with_remote_machine(scenario);
-    let mut remote_payloads: Vec<(Value, Option<Value>)> = Vec::new();
+    let mut remote_payloads: Vec<(Value, bool)> = Vec::new();
     for project_id in project_ids.iter().take(BULK_REMOTE_PROJECTS_PER_SCENARIO) {
         let loaded_group = format!("remote:{BULK_REMOTE_MACHINE}:group:{project_id}");
         let last_seen_group = format!("remote:{BULK_REMOTE_LAST_SEEN}:group:{project_id}");
         for payload in project_payloads(&loaded_group) {
-            remote_payloads.push((payload, None));
+            remote_payloads.push((payload, false));
         }
-        // The same five payloads against the machine the store never loaded. Each carries the set
-        // the LOADED machine resolves for the same payload, with the machine id swapped: both
-        // machines hold the same rows, so that is exactly what the old runtime must produce from
-        // its last-seen copy. Comparing against it rather than against "did anything at all" is
-        // what keeps a project with no eligible row from reading as a refusal that hands over
-        // nothing.
+        // The same five payloads against the machine whose rows are the stored copy.
+        //
+        // CORRECTED 2026-09-21, and the correction is the point of this probe. It used to hand the
+        // TypeScript half the set the LOADED machine resolves, on the argument that the old runtime
+        // answers an offline machine from its last-seen copy. It does not: all four project
+        // payloads and `fullReloadProjectZmxSessions` read `this.remotePresentations`, which a
+        // machine that has not streamed in this run is absent from, while the copy the sidebar
+        // DRAWS is the separate `remoteLastSeenPresentations`. So the right answer on both sides is
+        // NOTHING, the store's refusal is what produces it, and the TypeScript half is handed the
+        // machine as last-seen rather than as live so its own early return is the thing that runs.
         for payload in project_payloads(&last_seen_group) {
-            let on_loaded = payload
-                .as_object()
-                .map(|fields| {
-                    let mut swapped = fields.clone();
-                    swapped.insert("groupId".to_string(), Value::String(loaded_group.clone()));
-                    Value::Object(swapped)
-                })
-                .unwrap_or_else(|| payload.clone());
-            let hand_off = plan_bulk_request(&remote_core, &on_loaded).map(|request| {
-                Value::Array(
-                    request
-                        .messages
-                        .iter()
-                        .map(|message| rescope_message(message, BULK_REMOTE_LAST_SEEN))
-                        .collect(),
-                )
-            });
-            remote_payloads.push((payload, hand_off));
+            remote_payloads.push((payload, true));
         }
     }
     // A project the loaded remote machine does not have: answered, with nothing in the set, which
@@ -1559,7 +1546,7 @@ fn bulk_entries(core: &Core, scenario: &Value) -> Vec<Value> {
     for payload in project_payloads(&format!(
         "remote:{BULK_REMOTE_MACHINE}:group:does-not-exist"
     )) {
-        remote_payloads.push((payload, None));
+        remote_payloads.push((payload, false));
     }
 
     payloads
@@ -1573,7 +1560,7 @@ fn bulk_entries(core: &Core, scenario: &Value) -> Vec<Value> {
                 true,
             )
         }))
-        .chain(remote_payloads.into_iter().map(|(payload, hand_off)| {
+        .chain(remote_payloads.into_iter().map(|(payload, last_seen)| {
             let mut entry = bulk_entry(
                 plan_bulk_request(&remote_core, &payload),
                 payload,
@@ -1581,40 +1568,24 @@ fn bulk_entries(core: &Core, scenario: &Value) -> Vec<Value> {
                 false,
             );
             let object = entry.as_object_mut().expect("object");
-            // Both machines are handed to the TypeScript half with this scenario's rows; only the
-            // first is loaded on the Rust side.
+            // The streamed machine is handed to the TypeScript half as a live presentation; the
+            // seeded one is handed to it as the last-seen map it draws from and never acts on, so
+            // the early return the store's refusal matches is the one that really runs there.
+            object.insert("remoteMachines".to_string(), json!([BULK_REMOTE_MACHINE]));
             object.insert(
-                "remoteMachines".to_string(),
-                json!([BULK_REMOTE_MACHINE, BULK_REMOTE_LAST_SEEN]),
+                "lastSeenMachines".to_string(),
+                json!([BULK_REMOTE_LAST_SEEN]),
             );
-            if let Some(hand_off) = hand_off {
-                object.insert("handOffCalls".to_string(), hand_off);
+            if last_seen {
+                object.insert("lastSeen".to_string(), json!(true));
             }
             entry
         }))
         .collect()
 }
 
-/// One fan-out message with its machine id replaced, which is how the set the LOADED machine
-/// resolves becomes the set the old runtime must resolve from its last-seen copy of another.
-fn rescope_message(message: &Value, machine_id: &str) -> Value {
-    let Some(session_id) = message.get("sessionId").and_then(Value::as_str) else {
-        return message.clone();
-    };
-    let Some(key) = SessionKey::parse_remote_scoped_session_id(session_id) else {
-        return message.clone();
-    };
-    let rescoped = SessionKey::remote(machine_id, key.project_id, key.session_id);
-    let mut fields = message.as_object().cloned().unwrap_or_default();
-    fields.insert(
-        "sessionId".to_string(),
-        Value::String(rescoped.to_sidebar_session_id()),
-    );
-    Value::Object(fields)
-}
-
-/// This scenario's rows loaded twice: once as this computer's daemon and once as
-/// `BULK_REMOTE_MACHINE`. `BULK_REMOTE_LAST_SEEN` is deliberately never loaded.
+/// This scenario's rows loaded three ways: as this computer's daemon, as a STREAMED remote
+/// machine, and as `BULK_REMOTE_LAST_SEEN`, whose rows are seeded from the stored copy.
 fn core_with_remote_machine(scenario: &Value) -> Core {
     let mut core = Core::new();
     let snapshot = scenario.get("snapshot").cloned().unwrap_or(json!({}));
@@ -1638,6 +1609,17 @@ fn core_with_remote_machine(scenario: &Value) -> Core {
         core.handle_raw_frame(machine, &frame, 0)
             .expect("the parity frame parses");
     }
+    // The second machine holds the SAME rows, seeded from its stored last-seen copy rather than
+    // streamed. That is the case the store could not reach until the copy was read back
+    // (2026-09-21), and it is the one the project-scoped planners have to tell apart: the rows are
+    // there and drawn, faded, and there is no tunnel behind them.
+    let snapshot: ghostex_gx_core::protocol::PresentationSnapshot =
+        serde_json::from_value(scenario.get("snapshot").cloned().unwrap_or(json!({})))
+            .expect("the parity snapshot parses");
+    core.seed_last_seen_presentation(
+        &MachineId::Remote(BULK_REMOTE_LAST_SEEN.to_string()),
+        snapshot,
+    );
     core
 }
 

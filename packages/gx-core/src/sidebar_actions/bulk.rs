@@ -252,11 +252,17 @@ pub fn plan_bulk_request(core: &Core, message: &Value) -> Option<BulkRequest> {
             // return does anyway, but `wakeProjectSleepingSessions` moves the active project FIRST
             // and the early return happens before it: answering here would jump the user to a
             // project whose rows nobody has yet. This is the store's not-loaded state, not an empty
-            // one, and it is the refusal PLAN.md asks for rather than a guess at zero rows. On a
-            // REMOTE machine the same test refuses for the other reason above: the old runtime can
-            // still resolve the set from its last-seen copy, so not answering hands it work rather
-            // than dropping it.
-            core.presentation().loaded(&project.machine)?;
+            // one, and it is the refusal PLAN.md asks for rather than a guess at zero rows.
+            //
+            // CORRECTED 2026-09-21: the reason written here for the REMOTE side was wrong, and it
+            // mattered the moment the store started holding last-seen rows. It said the old runtime
+            // can resolve the set from its last-seen copy, so a refusal hands it work. It cannot:
+            // all four payloads read `this.remotePresentations`, which a machine that has not
+            // streamed in this run is absent from, while the copy it DRAWS is the separate
+            // `remoteLastSeenPresentations`. So a project action on an offline remote machine does
+            // nothing over there, and `loaded_live` keeps it doing nothing here rather than firing
+            // one doomed request per row down a tunnel that does not exist.
+            core.presentation().loaded_live(&project.machine)?;
             let (action, rows) = match kind {
                 "setGroupSleeping" => {
                     let sleeping = message.get("sleeping")?.as_bool()?;
@@ -378,7 +384,9 @@ pub(super) fn project_rows(
     project: &ProjectKey,
     keep: impl Fn(&ghostex_gx_protocol::PresentationSession) -> bool,
 ) -> Vec<String> {
-    let Some(loaded) = core.presentation().loaded(&project.machine) else {
+    // `loaded_live`: every caller is behind the same refusal, and a second reader of the same
+    // rule that used the looser test is how the two drift.
+    let Some(loaded) = core.presentation().loaded_live(&project.machine) else {
         return Vec::new();
     };
     let mut rows: Vec<(&str, &str)> = loaded
