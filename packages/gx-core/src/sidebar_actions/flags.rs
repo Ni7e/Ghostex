@@ -50,8 +50,9 @@ pub struct SessionFlags {
 }
 
 impl SessionFlags {
-    /// The call's body, in the order the TypeScript spreads it: the flags, then the ids.
-    fn to_params(&self, session: &SessionKey) -> Value {
+    /// The call's body, in the order the TypeScript spreads it: the flags, then the ids. The same
+    /// body on either machine: a remote leg spreads the same flags over that machine's raw ids.
+    pub(super) fn to_params(&self, session: &SessionKey) -> Value {
         let mut params = Map::new();
         if let Some(is_favorite) = self.is_favorite {
             params.insert("isFavorite".to_string(), Value::Bool(is_favorite));
@@ -159,15 +160,14 @@ impl FlagsFollowUp {
 /// `sleep_session_when_parking` is the setting the host reads; it only matters for a park.
 ///
 /// Refused, with the reason at each refusal: a browser row is an app tab with no daemon session
-/// behind it, a remote row needs that machine's tunnel, and the Quick Automations row has no
-/// daemon session either. A row the store does not hold is NOT refused, because the TypeScript
-/// does not check: it parses the id and calls, and a port that checked would silently do nothing
-/// where the shipped code still asks.
+/// behind it, and the Quick Automations row has no daemon session either. A REMOTE row is answered
+/// by `remote.rs` from the same flags (`session_flags_of`). A row the store does not hold is NOT
+/// refused, because the TypeScript does not check: it parses the id and calls, and a port that
+/// checked would silently do nothing where the shipped code still asks.
 pub fn plan_flags_request(
     message: &Value,
     sleep_session_when_parking: bool,
 ) -> Option<FlagsRequest> {
-    let kind = text_field(message, "type")?;
     let sidebar_session_id = text_field(message, "sessionId")?;
     if sidebar_session_id.starts_with("gpui-browser:") {
         return None;
@@ -176,8 +176,24 @@ pub fn plan_flags_request(
     if !session.machine.is_local() || session.project_id == QUICK_AUTOMATIONS_PROJECT_ID {
         return None;
     }
+    let (flags, then_sleep) = session_flags_of(message, sleep_session_when_parking)?;
+    Some(FlagsRequest {
+        rpc_path: "/api/updateSession",
+        rpc_params: flags.to_params(&session),
+        flags,
+        then_sleep,
+        session,
+    })
+}
+
+/// The flags one of the four payloads names, and whether a park also sleeps. One parse for both
+/// machines, so a remote pin and a local pin cannot read `pinned` two ways.
+pub(super) fn session_flags_of(
+    message: &Value,
+    sleep_session_when_parking: bool,
+) -> Option<(SessionFlags, bool)> {
     let mut then_sleep = false;
-    let flags = match kind {
+    let flags = match text_field(message, "type")? {
         "setSessionPinned" => SessionFlags {
             is_pinned: Some(message.get("pinned")?.as_bool()?),
             ..SessionFlags::default()
@@ -214,13 +230,7 @@ pub fn plan_flags_request(
         }
         _ => return None,
     };
-    Some(FlagsRequest {
-        rpc_path: "/api/updateSession",
-        rpc_params: flags.to_params(&session),
-        flags,
-        then_sleep,
-        session,
-    })
+    Some((flags, then_sleep))
 }
 
 /// What to do with the answer. A call that did not come back changes nothing at all, which is what

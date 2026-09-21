@@ -47,8 +47,8 @@ const MORNING_WAKE_HOUR_MS: i64 = 9 * HOUR_MS;
 /// `SESSION_SNOOZE_PRESETS`, in the order the submenu offers them.
 pub const SESSION_SNOOZE_PRESETS: [&str; 4] = ["oneHour", "threeHours", "tomorrow", "nextWeek"];
 
-/// The description every lifecycle-command failure toast carries.
-const LIFECYCLE_FAILURE_DESCRIPTION: &str =
+/// The description every lifecycle-command failure toast carries, on either machine.
+pub(super) const LIFECYCLE_FAILURE_DESCRIPTION: &str =
     "gxserver refused the change. The session may be working or waiting on you.";
 
 /// The clock facts the wake-time rule needs, read by the host because this crate reads no clock
@@ -295,14 +295,21 @@ impl SnoozeFollowUp {
 /// The `snoozeSession` and `unsnoozeSession` payloads, or `None` when this file does not own one.
 ///
 /// Refused, with the reason at each refusal: a browser row (`gpui-browser:`) is an app tab with no
-/// daemon session behind it, and a remote row needs that machine's tunnel, which is every machine
-/// the user has disabled. The Quick Automations row is deliberately NOT refused: unlike
+/// daemon session behind it. A REMOTE row is answered by `remote.rs`, from the same request this
+/// builds (`snooze_request`), because `runSessionLifecycleCommand` sends the same body down that
+/// machine's tunnel. The Quick Automations row is deliberately NOT refused: unlike
 /// `setSessionSleeping`, `runSessionLifecycleCommand` has no early return for it and really does
 /// call the daemon, and the sleep that follows an accepted snooze is the one that returns early.
 /// A row the store does not hold is not refused either, for the same reason as the flags path: the
 /// TypeScript parses the id and calls, and a port that checked would silently do nothing where the
 /// shipped code still asks.
 pub fn plan_snooze_request(message: &Value) -> Option<SnoozeRequest> {
+    snooze_request(message).filter(|request| request.session.machine.is_local())
+}
+
+/// The call for either machine: `runSessionLifecycleCommand` builds one body and only the route
+/// differs, so the body is built once.
+pub(super) fn snooze_request(message: &Value) -> Option<SnoozeRequest> {
     let call = match text_field(message, "type")? {
         "snoozeSession" => SnoozeCall::Snooze,
         "unsnoozeSession" => SnoozeCall::Unsnooze,
@@ -313,9 +320,6 @@ pub fn plan_snooze_request(message: &Value) -> Option<SnoozeRequest> {
         return None;
     }
     let session = SessionKey::parse_sidebar_session_id(sidebar_session_id)?;
-    if !session.machine.is_local() {
-        return None;
-    }
     let mut params = Map::new();
     if call == SnoozeCall::Snooze {
         // Absent, not null. The TypeScript spreads `{ snoozedUntil }` and `JSON.stringify` drops an
