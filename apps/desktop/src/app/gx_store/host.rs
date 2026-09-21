@@ -505,6 +505,7 @@ impl GhostexGpuiApp {
                 if this.gx_store.refresh_row_focus_cache() {
                     cx.notify();
                 }
+                this.gx_store_sidebar_focus_moved(cx);
             });
         })
         .detach();

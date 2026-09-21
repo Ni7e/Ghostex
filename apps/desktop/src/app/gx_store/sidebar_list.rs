@@ -366,6 +366,21 @@ impl GhostexGpuiApp {
         self.gx_store_update_sidebar_list(cx);
     }
 
+    /// The store's focus moved outside a pump: a local selection, the old runtime's focus payload
+    /// mirrored in, or a shadow judgement that mirrored it again. The list is brought up to date at
+    /// once; the update compares the focus by value and returns at once when it did not move.
+    ///
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// The list used to follow focus only at the next pump or publish, because a focus move is in
+    /// no change summary. The row highlight hid it (it reads the store's focus directly), but the
+    /// project's active mark, the section's and the Space row's "holds the focused session" marks
+    /// kept the previous focus until then, and the live scratch check caught it five times in one
+    /// day as `spaces`, `isActive`, `sections`, `isFocused`, `isVisible` on an update with no store
+    /// change. Gate: the "focus moves without a frame" section of gx-core `sidebar_replay`.
+    pub(crate) fn gx_store_sidebar_focus_moved(&mut self, cx: &mut gpui::Context<Self>) {
+        self.gx_store_update_sidebar_list(cx);
+    }
+
     /// Rebuilds the list if anything it reads moved, installs it when the renderer is on it, and
     /// books the next clock deadline. Cheap to call: an update with nothing changed returns at
     /// once.

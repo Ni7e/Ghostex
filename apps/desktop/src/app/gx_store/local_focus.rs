@@ -419,6 +419,7 @@ impl GhostexGpuiApp {
             local_runtime_missing: runtime_missing,
         });
         self.gx_store_note_local_selection(outcome.moved, cx);
+        self.gx_store_sidebar_focus_moved(cx);
         if local_runtime_missing && !self.gx_store_selection_is_settling() {
             self.gx_store_attach_surfaced_terminals(cx);
         }
@@ -694,6 +695,7 @@ impl GhostexGpuiApp {
             // The highlight follows the store even when the payload changes nothing else.
             cx.notify();
         }
+        self.gx_store_sidebar_focus_moved(cx);
         if observed_stamp >= local_stamp {
             let local_focus = &mut self.gx_store.local_focus;
             local_focus.confirmed_stamp = observed_stamp;

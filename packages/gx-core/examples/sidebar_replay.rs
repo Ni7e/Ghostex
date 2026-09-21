@@ -14,6 +14,7 @@
 //! Recordings contain private data: keep them outside the repository. This is tooling, not a test
 //! suite: it reports what the view model makes of real traffic.
 
+use std::collections::BTreeSet;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
@@ -21,9 +22,10 @@ use ghostex_gx_core::protocol::{
     CustomSessionTag, CustomSessionTagsState, ServerEvent, GXSERVER_PROTOCOL_VERSION,
 };
 use ghostex_gx_core::{
-    collapse_into_storage, collapse_state_from_storage, reveal_plan, BrowserTabInput, Core, Event,
-    Intent, MachineId, SectionId, SessionSortMode, SidebarCollapseDiff, SidebarInputs,
-    SidebarUiIntent, SidebarUiStore, SidebarView, SidebarViewModel, ToggleAllProjectsInput,
+    collapse_into_storage, collapse_state_from_storage, reveal_plan, BrowserTabInput,
+    ChangeSummary, Core, Event, ExternalFocusUpdate, Intent, MachineId, SectionId, SessionKey,
+    SessionSortMode, SidebarCollapseDiff, SidebarInputs, SidebarUiIntent, SidebarUiStore,
+    SidebarView, SidebarViewModel, ToggleAllProjectsInput,
 };
 use serde_json::Value;
 
@@ -51,10 +53,11 @@ fn main() -> ExitCode {
     }
 
     let churned = run_pass("churned inputs", &text, domain_projects.clone(), true);
-    let steady = run_pass("steady inputs", &text, domain_projects, false);
+    let steady = run_pass("steady inputs", &text, domain_projects.clone(), false);
     let last_seen = last_seen_transition(&text, &path);
+    let focus_moves = focus_without_frames(&text, domain_projects);
 
-    if churned.mismatches == 0 && steady.mismatches == 0 && last_seen {
+    if churned.mismatches == 0 && steady.mismatches == 0 && last_seen && focus_moves {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
@@ -464,6 +467,294 @@ fn last_seen_transition(frames: &str, frames_path: &str) -> bool {
         passed &= ok;
     }
     passed
+}
+
+/// Focus that moves with no frame behind it: a tab click, a held key, the old runtime's focus
+/// payload mirrored into the store. The live app's five `scratchMismatch` records of 2026-09-21
+/// were this, and nothing else in this tool moves focus without a frame.
+///
+/// Each step moves focus and then asks two questions. The STALE probe compares the list as it stood
+/// before the move with a fresh build, which is what the desktop host's scratch check saw: the host
+/// brought the list up to date only after a pump or a publish, so a selection or a mirrored payload
+/// landing between a publish and the check left the list built for the previous focus. The probe
+/// must differ on every step (a probe that cannot fail proves nothing) and together the steps must
+/// name exactly the fields the live records named. The HOST probe then does what the host does
+/// since the fix (`gx_store_select_local_session`, `gx_store_admit_old_runtime_focus_state` and
+/// the delayed shadow settle all call `gx_store_update_sidebar_list`): an update with an EMPTY
+/// change summary, because a focus move is not in any summary the host collects, and the list must
+/// then equal a fresh build. That half also shows the view model itself compares focus by value.
+///
+/// `SIDEBAR_REPLAY_MUTATION=no-update-after-focus` runs the host probe in the old order and must
+/// fail.
+fn focus_without_frames(frames: &str, domain_projects: Option<Vec<Value>>) -> bool {
+    println!("\n== focus moves without a frame ==");
+    let skip_update = std::env::var("SIDEBAR_REPLAY_MUTATION")
+        .is_ok_and(|mutation| mutation == "no-update-after-focus");
+    let machine = MachineId::Local;
+    let mut core = Core::new();
+    if let Some(projects) = domain_projects {
+        core.handle(
+            Event::DomainProjectsRead {
+                machine: machine.clone(),
+                projects,
+            },
+            START_MS,
+        );
+    }
+    let mut now_ms = START_MS;
+    for (index, line) in frames.lines().enumerate() {
+        let Ok(frame) = ServerEvent::parse(line) else {
+            continue;
+        };
+        now_ms = START_MS + index as u64 * CLOCK_STEP_MS;
+        core.handle(
+            Event::Frame {
+                machine: machine.clone(),
+                frame: Box::new(frame),
+            },
+            now_ms,
+        );
+    }
+    let mut inputs = SidebarInputs::default();
+    inputs.settings.sort_mode = SessionSortMode::LastActivity;
+    let mut model = SidebarViewModel::new();
+    model.update(&core, &inputs, &ChangeSummary::default(), now_ms);
+
+    // Two projects that are not worktrees: the first drawn one with two session rows, and one with
+    // a row outside the first one's collection. A Space claims a project through its collection
+    // when it has one, so the claim below names whichever of the two the first project goes by.
+    type ProjectRows = (String, Option<String>, Vec<SessionKey>);
+    let project_rows = |view: &SidebarView| -> Vec<ProjectRows> {
+        view.groups
+            .iter()
+            .filter_map(|group| {
+                let context = group.core.project_context.as_ref()?;
+                if context.worktree.is_some() {
+                    return None;
+                }
+                let keys: Vec<SessionKey> = group
+                    .core
+                    .sessions
+                    .iter()
+                    .filter(|session| !session.row.is_browser)
+                    .filter_map(|session| session.row.key.clone())
+                    .collect();
+                Some((
+                    context.project_id.clone(),
+                    group.collection_id.clone(),
+                    keys,
+                ))
+            })
+            .collect()
+    };
+    let projects = project_rows(model.view());
+    let Some((first_project, first_collection, first_rows)) =
+        projects.iter().find(|(_, _, rows)| rows.len() >= 2)
+    else {
+        println!("no project with two session rows, nothing measured");
+        return false;
+    };
+    let Some((_, _, other_rows)) = projects.iter().find(|(project_id, collection, rows)| {
+        project_id != first_project
+            && (collection.is_none() || collection != first_collection)
+            && !rows.is_empty()
+    }) else {
+        println!("no second project with a session row, nothing measured");
+        return false;
+    };
+    let (row_a, row_b, row_c) = (
+        first_rows[0].clone(),
+        first_rows[1].clone(),
+        other_rows[0].clone(),
+    );
+
+    // A Space that claims the first project, so the second one lands in Other and a move between
+    // them moves the Space row that holds the focused session. The section shows that Space.
+    let spaces = serde_json::json!({
+        "type": "sidebarSpacesChanged",
+        "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+        "sidebarSpaces": {
+            "order": ["replay-focus"],
+            "spaces": { "replay-focus": {
+                "spaceId": "replay-focus", "name": "Replay", "color": "#7c6df2", "icon": "stack",
+                "memberCollectionIds": first_collection.iter().collect::<Vec<_>>(),
+                "memberProjectIds": if first_collection.is_some() { vec![] } else { vec![first_project] },
+            } },
+        },
+    });
+    let Ok(frame) = ServerEvent::parse(&spaces.to_string()) else {
+        println!("the Spaces frame does not parse");
+        return false;
+    };
+    let output = core.handle(
+        Event::Frame {
+            machine: machine.clone(),
+            frame: Box::new(frame),
+        },
+        now_ms,
+    );
+    inputs.settings.sidebar_spaces_enabled = true;
+    let focus_on = |core: &mut Core, session: &SessionKey| -> ChangeSummary {
+        core.handle(
+            Event::Intent(Intent::FocusSession {
+                session: session.clone(),
+                visible: Some(vec![session.clone()]),
+            }),
+            now_ms,
+        )
+        .changes
+    };
+    let mut changes = output.changes;
+    changes.merge(focus_on(&mut core, &row_a));
+    model.update(&core, &inputs, &changes, now_ms);
+    let baseline_same =
+        SidebarViewModel::build_from_scratch(&core, &inputs, now_ms) == *model.view();
+
+    let mut stale_fields: BTreeSet<String> = BTreeSet::new();
+    let mut stale_steps = 0usize;
+    let mut host_differences = 0usize;
+    let mut steps = 0usize;
+    let mut step = |core: &mut Core,
+                    model: &mut SidebarViewModel,
+                    inputs: &SidebarInputs,
+                    label: &str,
+                    move_focus: &dyn Fn(&mut Core)| {
+        steps += 1;
+        move_focus(core);
+        let fresh = SidebarViewModel::build_from_scratch(core, inputs, now_ms);
+        let stale = differing_fields(model.view(), &fresh);
+        if !stale.is_empty() {
+            stale_steps += 1;
+        }
+        println!("{label:<40} stale list differs in {stale:?}");
+        stale_fields.extend(stale);
+        if !skip_update {
+            model.update(core, inputs, &ChangeSummary::default(), now_ms);
+        }
+        let host = differing_fields(model.view(), &fresh);
+        if !host.is_empty() {
+            host_differences += 1;
+            println!("{label:<40} UPDATED list differs in {host:?}");
+        }
+    };
+    step(
+        &mut core,
+        &mut model,
+        &inputs,
+        "another row of the same project",
+        &|core| {
+            focus_on(core, &row_b);
+        },
+    );
+    // What the live record's update was: nothing from the store, and the sidebar's own state and
+    // the settings both moved (a modal opened and closed). The list must stay what a fresh build
+    // gives, and it is the update BEFORE the next move, as it was live.
+    inputs.settings.show_last_active_time = !inputs.settings.show_last_active_time;
+    inputs
+        .ui
+        .collapse
+        .expanded_hover_actions
+        .insert("replay-focus-unrelated".to_string());
+    model.update(&core, &inputs, &ChangeSummary::default(), now_ms);
+    let quiet_same = SidebarViewModel::build_from_scratch(&core, &inputs, now_ms) == *model.view();
+    step(
+        &mut core,
+        &mut model,
+        &inputs,
+        "a row of a project in another Space",
+        &|core| {
+            focus_on(core, &row_c);
+        },
+    );
+    step(
+        &mut core,
+        &mut model,
+        &inputs,
+        "the old runtime's payload, mirrored",
+        &|core| {
+            let stamp = core.focus().local_stamp;
+            core.handle(
+                Event::Intent(Intent::ExternalFocus(
+                    ExternalFocusUpdate::new(stamp)
+                        .with_active_project(row_a.project_key())
+                        .with_focused_session(row_a.clone())
+                        .with_visible_sessions(vec![row_a.clone()]),
+                )),
+                now_ms,
+            );
+        },
+    );
+    let live_fields = ["spaces", "isActive", "sections", "isFocused", "isVisible"];
+    let checks = [
+        ("the list starts equal to a fresh build", baseline_same),
+        (
+            "every stale probe differs",
+            stale_steps == steps && steps == 3,
+        ),
+        (
+            "the stale probes name the live fields",
+            live_fields
+                .iter()
+                .all(|field| stale_fields.contains(*field)),
+        ),
+        ("a store-quiet update stays equal", quiet_same),
+        ("the host's update after a move", host_differences == 0),
+    ];
+    println!("stale fields over {steps} moves: {stale_fields:?}");
+    let mut passed = true;
+    for (label, ok) in checks {
+        println!("{label:<40} {}", if ok { "ok" } else { "FAILED" });
+        passed &= ok;
+    }
+    passed
+}
+
+/// The field names the host's scratch record uses, for the parts a focus move can reach, plus
+/// `other` for anything else.
+fn differing_fields(incremental: &SidebarView, scratch: &SidebarView) -> BTreeSet<String> {
+    let mut fields: BTreeSet<String> = BTreeSet::new();
+    let mut note = |name: &str, same: bool| {
+        if !same {
+            fields.insert(name.to_string());
+        }
+    };
+    note("spaces", incremental.spaces == scratch.spaces);
+    note("order", incremental.order == scratch.order);
+    note(
+        "collections",
+        incremental.collections == scratch.collections,
+    );
+    note(
+        "groupIds",
+        incremental
+            .groups
+            .iter()
+            .map(|group| &group.core.group_id)
+            .eq(scratch.groups.iter().map(|group| &group.core.group_id)),
+    );
+    for group in &incremental.groups {
+        let Some(fresh) = scratch.group(&group.core.group_id) else {
+            continue;
+        };
+        note("isActive", group.core.is_active == fresh.core.is_active);
+        note("sections", group.core.sections == fresh.core.sections);
+        for session in &group.core.sessions {
+            let Some(other) = fresh
+                .core
+                .sessions
+                .iter()
+                .find(|other| other.row.sidebar_session_id == session.row.sidebar_session_id)
+            else {
+                continue;
+            };
+            note("isFocused", session.is_focused == other.is_focused);
+            note("isVisible", session.is_visible == other.is_visible);
+        }
+    }
+    if fields.is_empty() && incremental != scratch {
+        fields.insert("other".to_string());
+    }
+    fields
 }
 
 /// Whether what the store would store for this machine is what `JSON.stringify` makes of the same
