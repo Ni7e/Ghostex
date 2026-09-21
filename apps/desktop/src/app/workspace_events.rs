@@ -492,11 +492,6 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::NativeAppShotPrompt(payload) => {
                 self.receive_sidebar_native_app_shot_prompt_payload(&payload, cx);
             }
-            cef::SidebarBridgeEvent::NativeSidebarSnapshot(payload) => {
-                // An accepted payload also brings the store's own list up to date and compares the
-                // two, from inside the receiver (gx_store/sidebar_shadow.rs).
-                self.receive_native_sidebar_snapshot(&payload, cx);
-            }
             cef::SidebarBridgeEvent::NativeQuickAccessSnapshot(payload) => {
                 self.receive_native_quick_access_update(&payload, cx);
             }

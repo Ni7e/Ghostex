@@ -18,8 +18,6 @@ use ghostex_gx_core::{
 };
 use serde_json::Value;
 
-use crate::app::native_sidebar::model::NativeSidebarSession;
-
 use super::runtime_facts::SidebarRuntimeFacts;
 
 /// The one sort mode any desktop HUD can have.
@@ -164,20 +162,4 @@ fn refresh_row_facts(host: &mut SidebarHostInputs, facts: &SidebarRuntimeFacts) 
         .iter()
         .map(|(session_id, delayed)| (session_id.clone(), delayed.clone()))
         .collect();
-}
-
-pub(super) fn detail_bool(session: &NativeSidebarSession, key: &str) -> bool {
-    session.details.get(key).and_then(Value::as_bool) == Some(true)
-}
-
-pub(super) fn detail_str<'a>(session: &'a NativeSidebarSession, key: &str) -> Option<&'a str> {
-    session.details.get(key).and_then(Value::as_str)
-}
-
-pub(super) fn detail_u64(session: &NativeSidebarSession, key: &str) -> u64 {
-    session
-        .details
-        .get(key)
-        .and_then(Value::as_u64)
-        .unwrap_or(0)
 }

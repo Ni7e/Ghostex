@@ -1,7 +1,7 @@
 use gpui::ScrollHandle;
 use std::sync::Arc;
 
-use super::model::{NativeSidebarSnapshot, NativeSidebarUpdate};
+use super::model::NativeSidebarSnapshot;
 use crate::GhostexGpuiApp;
 use crate::app::project_views::PROJECT_VIEW_SCOPE_OPTION_HUD_KEYS;
 
@@ -22,10 +22,6 @@ pub(crate) struct NativeSidebarState {
     /// A frame profile found snapshot and session deep copies dominating the UI thread during redraws.
     /// Share immutable snapshots with row callbacks; incoming patches and clock updates use copy-on-write mutation.
     pub(crate) snapshot: Option<Arc<NativeSidebarSnapshot>>,
-    /// The newest list the TypeScript projection published. Nothing the renderer draws reads it
-    /// since M4d part 2 step 6, and it is never installed: it is kept so the shadow can keep
-    /// comparing the two lists until the page's publisher is deleted (gx_store/sidebar_shadow.rs).
-    pub(crate) projection: Option<Arc<NativeSidebarSnapshot>>,
     /// The docked sidebar's cached view, created on its first draw (native_sidebar/host.rs).
     pub(crate) host: Option<gpui::Entity<super::host::NativeSidebarHost>>,
     pub(crate) scroll: ScrollHandle,
@@ -63,139 +59,9 @@ impl NativeSidebarState {
 }
 
 impl GhostexGpuiApp {
-    pub(crate) fn receive_native_sidebar_snapshot(
-        &mut self,
-        payload: &str,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let update = match serde_json::from_str::<NativeSidebarUpdate>(payload) {
-            Ok(update) => update,
-            Err(error) => {
-                crate::support_logs::append_repro(
-                    crate::support_logs::GpuiSupportLog::SidebarRefresh,
-                    "gpui.sidebar.native.invalidSnapshot",
-                    serde_json::json!({"error": error.to_string()}),
-                );
-                return;
-            }
-        };
-        let update = match update {
-            NativeSidebarUpdate::Patch(patch) if patch.version == 1 => {
-                let Some(previous) = self.native_sidebar.projection.as_ref() else {
-                    return;
-                };
-                match patch.apply(previous) {
-                    Ok(snapshot) => NativeSidebarUpdate::Snapshot(snapshot),
-                    Err(error) => {
-                        crate::support_logs::append(
-                            crate::support_logs::GpuiSupportLog::SidebarRefresh,
-                            "gpui.sidebar.native.invalidPatch",
-                            serde_json::json!({"error": error.to_string()}),
-                        );
-                        return;
-                    }
-                }
-            }
-            update => update,
-        };
-        match update {
-            NativeSidebarUpdate::Snapshot(snapshot) if snapshot.version == 1 => {
-                self.native_sidebar.projection = Some(Arc::new(snapshot));
-                // A reveal is a command the sidebar's own state answers, and the request reaches
-                // this app on the publish that carries it (gx_store/sidebar_ui_commands.rs).
-                if let Some(request) = self
-                    .native_sidebar
-                    .projection
-                    .as_ref()
-                    .and_then(|snapshot| snapshot.reveal_request.clone())
-                {
-                    self.gx_store_note_sidebar_reveal(&request.session_id, request.request_id, cx);
-                }
-                // The values the store's list still borrows moved with this publish, and the
-                // comparison reads it; both run whichever list is drawn.
-                self.gx_store_sidebar_projection_published(cx);
-                // Since M4d part 2 step 3 a publish carries NOTHING the store's list reads: its
-                // rows, menus and machine tabs are the view model's, and the HUD, the two requests
-                // and the two hotkey labels have Rust owners (`gx_store_sidebar_carry_key`). Since
-                // step 6 it is not INSTALLED either, in any state: while the store's list is not
-                // ready the renderer draws the loading skeleton
-                // (`gx_store_install_loading_sidebar_list`), not this. The count is what says the
-                // old page is still projecting at all.
-                self.gx_store_note_sidebar_publish_seen();
-            }
-            NativeSidebarUpdate::Flash {
-                version: 1,
-                session_id,
-            } => {
-                self.native_sidebar
-                    .completion_flashes
-                    .retain(|_, started| started.elapsed().as_secs_f32() < 3.0);
-                self.native_sidebar
-                    .completion_flashes
-                    .insert(session_id, std::time::Instant::now());
-            }
-            NativeSidebarUpdate::Menu {
-                version: 1,
-                owner_id,
-                items,
-                close,
-            } => {
-                // One body with the store's own account pages (gx_store/sidebar_accounts.rs).
-                if !self.apply_native_sidebar_menu_page(&owner_id, items, close, cx) {
-                    return;
-                }
-            }
-            NativeSidebarUpdate::Clock { version: 1, rows } => {
-                // The armed-timer labels the chat's working row draws are the store's own since
-                // M4d part 2 step 3: `gx_store_refresh_armed_actions` derives them from the runtime
-                // facts channel and the presentation on the sidebar's own tick
-                // (gx_store/sidebar_clock.rs), so `row.armed_actions` is no longer read.
-                //
-                // The clock rows' own labels are the old projection's. They are applied to this
-                // app's copy of that projection so the shadow keeps comparing the list the page
-                // really holds; they reach no screen, because the store's list formats its own
-                // against the host clock and books its own wake, and nothing installs the
-                // projection any more.
-                let Some(snapshot) = self.native_sidebar.projection.as_mut() else {
-                    return;
-                };
-                let snapshot = Arc::make_mut(snapshot);
-                let rows: std::collections::HashMap<_, _> = rows
-                    .into_iter()
-                    .map(|row| (row.session_id.clone(), row))
-                    .collect();
-                for session in snapshot
-                    .groups
-                    .iter_mut()
-                    .flat_map(|group| group.sessions.iter_mut())
-                {
-                    if let Some(row) = rows.get(&session.session_id) {
-                        let session = Arc::make_mut(session);
-                        session.details.insert(
-                            "timerLabel".into(),
-                            row.timer_label
-                                .clone()
-                                .map(serde_json::Value::String)
-                                .unwrap_or_default(),
-                        );
-                        session.details.insert(
-                            "lastInteractionLabel".into(),
-                            row.last_interaction_label
-                                .clone()
-                                .map(serde_json::Value::String)
-                                .unwrap_or_default(),
-                        );
-                    }
-                }
-            }
-            _ => return,
-        }
-        cx.notify();
-    }
-
-    /// Installs the list the renderer draws, whichever side built it: the scroll scope it belongs
-    /// to, the reveal it carries, the disclosure animations, the open menu, the project view scope
-    /// options, and the browser focus the row highlight reads.
+    /// Installs the list the renderer draws: the scroll scope it belongs to, the reveal it carries,
+    /// the disclosure animations, the open menu, the project view scope options, and the browser
+    /// focus the row highlight reads.
     pub(crate) fn install_native_sidebar_snapshot(
         &mut self,
         snapshot: Arc<NativeSidebarSnapshot>,

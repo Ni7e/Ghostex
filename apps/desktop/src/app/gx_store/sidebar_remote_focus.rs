@@ -41,7 +41,7 @@
 //! apps/desktop/src/app/native_sidebar/actions.rs, apps/desktop/src/app/remote_conn/native_action.rs
 //! (`handle_gpui_remote_session_native_action`, which ends in `begin_gpui_remote_attach_terminal_open`),
 //! apps/desktop/sidebar/gxserver-runtime/attention-tracking.ts
-//! (`handleGpuiWorkspaceSessionAttentionAcknowledge`), tooling/gx-core/remote-focus-parity.ts (the gate).
+//! (`handleGpuiWorkspaceSessionAttentionAcknowledge`).
 
 use ghostex_gx_core::{
     PreferredInterfaceSettings, ProjectKey, RemoteFocusPlan, RuntimeActiveGroup, SessionKey,
@@ -80,8 +80,6 @@ pub(crate) struct SidebarRemoteFocusCounters {
     /// An answered click whose open sent no tab selection: the open was refused (no tunnel, no SSH
     /// settings, a toast said so) or no runtime runs, and the marks did not move.
     pub(crate) marks_missed: u64,
-    /// The multi-selection a click cleared, mirrored to the old page.
-    pub(crate) page_told: u64,
     /// A remote row's click the store did not answer because the renderer is not drawing its list.
     /// Local rows are not counted: they were never this path's.
     pub(crate) declined_source: u64,
@@ -181,18 +179,9 @@ impl GhostexGpuiApp {
         plan: &RemoteFocusPlan,
         cx: &mut gpui::Context<Self>,
     ) {
-        // `selectNativeSidebarSession` cleared the page's multi-selection and closed an open app
-        // modal before it posted the click. The store's own selection intent already follows the
-        // command; the page's copy is told the resulting value, unless a caller (the slot hotkeys)
-        // is already collecting the changes to tell it once.
-        let collect = self.gx_store.sidebar_ui.mirror.is_none();
-        if collect {
-            self.gx_store.sidebar_ui.mirror = Some(Vec::new());
-        }
+        // `selectNativeSidebarSession` cleared the multi-selection and closed an open app modal
+        // before it posted the click. The store's own selection intent already follows the command.
         self.gx_store_note_sidebar_command(command, cx);
-        if collect && self.gx_store_mirror_sidebar_ui_to_page(cx) {
-            self.gx_store.sidebar_remote_focus.counters.page_told += 1;
-        }
         if !plan.split_right {
             // Closed BEFORE the open, so a keep-view open that leaves the keyboard where it is
             // cannot have it taken back by the modal's return focus a moment later.
@@ -358,7 +347,6 @@ pub(super) fn remote_focus_counters_json(counters: &SidebarRemoteFocusCounters) 
         "acknowledgements": counters.acknowledgements,
         "tabSelections": counters.tab_selections,
         "marksMissed": counters.marks_missed,
-        "pageTold": counters.page_told,
         "declinedSource": counters.declined_source,
         "handedBack": counters.handed_back,
         "coreFocus": counters.core_focus,

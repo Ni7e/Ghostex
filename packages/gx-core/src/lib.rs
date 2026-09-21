@@ -130,7 +130,7 @@ pub use crate::sidebar_menu::{
 };
 pub use crate::sidebar_ui::{
     collapse_into_storage, collapse_state_from_storage, hidden_items_from_storage,
-    hidden_items_into_storage, machine_tab_from_storage, sidebar_ui_mirror_changes,
+    hidden_items_into_storage, machine_tab_from_storage,
     sidebar_window_storage_key, SidebarCollapseDiff, SidebarPersistSet, SidebarUiIntent,
     SidebarUiOutcome, SidebarUiStore, ToggleAllProjectsInput, COLLAPSE_STORAGE_KEY, COLLAPSE_STORAGE_VERSION,
     HIDDEN_ITEMS_STORAGE_KEY, MACHINE_TAB_STORAGE_KEY, PROJECT_COLLECTIONS_STORAGE_KEY,

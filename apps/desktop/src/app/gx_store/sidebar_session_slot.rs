@@ -11,25 +11,21 @@
 //! **Where each effect ends, read rather than assumed.** The press is a row click plus a reveal,
 //! exactly as `runNativeSidebarHotkey` made it (`selectNativeSidebarSession`, then
 //! `requestReveal`), so it goes through the slot jump's `gx_store_focus_and_reveal_slot_row`: the
-//! row click's `selectSession` (for a LOCAL row the runtime's `focusSession` through the page, for
-//! a REMOTE row the store's remote click in `sidebar_remote_focus.rs`, which is all a click on that
-//! row does), the click's in-process reaction
-//! (`react_to_native_sidebar_session_click`, ending in `gx_store_select_local_session`), then
-//! `gx_store_apply_sidebar_reveal` and the walk's scroll. The page's copy of the sidebar state is
-//! handed the changes as a `sidebarUiMirror`, as the slot jump does, never a reveal request.
+//! row click's `selectSession` (for a LOCAL row the runtime's `focusSession`, for a REMOTE row the
+//! store's remote click in `sidebar_remote_focus.rs`, which is all a click on that row does), the
+//! click's in-process reaction (`react_to_native_sidebar_session_click`, ending in
+//! `gx_store_select_local_session`), then `gx_store_apply_sidebar_reveal` and the walk's scroll.
 //!
 //! Key repeats never reach here: the keyboard router repeats only the tab cycle and the session
 //! walk, so a held cmd+N is one press.
 //!
 //! **Counters** ride `gxStore.sidebarActions.summary` as `sessionSlot`, whose first line is written
 //! at zero: `presses`, `nothing`, `inProcess`, `staged`, `remote`, `handedToRuntime`, `reveals`,
-//! `revealChanges`, `pageTold`, `declinedSource`, `planMaxUs`. A cmd+N with the store's list drawn
-//! and `presses` still zero means the key never reached this file; `declinedSource` moving means
-//! the old page drew the list and resolved the slot.
+//! `revealChanges`, `declinedSource`, `planMaxUs`. A cmd+N with `presses` still zero means the key
+//! never reached this file; `declinedSource` moving means the list was not ready yet.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_view/session_slot.rs,
-//! apps/desktop/sidebar/native-sidebar/hotkeys.ts (`runNativeSidebarHotkey`),
-//! apps/desktop/src/app/gx_store/sidebar_slot_jump.rs, tooling/gx-core/session-slot-parity.ts.
+//! apps/desktop/src/app/gx_store/sidebar_slot_jump.rs.
 
 use std::time::Instant;
 
@@ -55,7 +51,6 @@ pub(crate) struct SessionSlotCounters {
     pub(crate) handed_to_runtime: u64,
     pub(crate) reveals: u64,
     pub(crate) reveal_changes: u64,
-    pub(crate) page_told: u64,
     pub(crate) declined_source: u64,
     pub(crate) plan_max_us: u64,
 }
@@ -96,7 +91,6 @@ impl GhostexGpuiApp {
             self.gx_store_session_slot_ran("nothing", plan_us, 0);
             return true;
         };
-        self.gx_store.sidebar_ui.mirror = Some(Vec::new());
         self.gx_store_apply_sidebar_ui_intents(plan.intents(), cx);
         let target = plan.target_session_id;
         let (reaction, reveal) = self.gx_store_focus_and_reveal_slot_row(&target, true, cx);
@@ -125,9 +119,6 @@ impl GhostexGpuiApp {
             reveal_us = us;
             counters.reveals += 1;
             counters.reveal_changes += changes as u64;
-        }
-        if self.gx_store_mirror_sidebar_ui_to_page(cx) {
-            self.gx_store.session_slot.counters.page_told += 1;
         }
         cx.notify();
         self.gx_store_session_slot_ran(route, plan_us, reveal_us);
@@ -165,7 +156,6 @@ pub(super) fn session_slot_counters_json(counters: &SessionSlotCounters) -> Valu
         "handedToRuntime": counters.handed_to_runtime,
         "reveals": counters.reveals,
         "revealChanges": counters.reveal_changes,
-        "pageTold": counters.page_told,
         "declinedSource": counters.declined_source,
         "planMaxUs": counters.plan_max_us,
     })

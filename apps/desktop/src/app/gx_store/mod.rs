@@ -9,9 +9,10 @@
 //! through `records_storage.rs`, the door to the `records` table an indexeddb-catalogued store
 //! lives in rather than the `preferences` one every other door here uses;
 //! `layout_persist.rs` writes the shell layout on a timer; `shadow_diff.rs` mirrors the old
-//! runtime's focus into the core and compares its tab list; `sidebar_shadow.rs` builds the
-//! sidebar list from the store beside the old projection's and compares them (`_inputs` mirrors
-//! what it reads, `_compare` names the differences, `_storage` reads the hidden projects);
+//! runtime's focus into the core and compares its tab list; `sidebar_list.rs` builds the sidebar
+//! list (`_inputs` mirrors what it reads from outside the store, `sidebar_ui_storage.rs` reads the
+//! hidden projects) and `sidebar_self_check.rs` rebuilds it from scratch every so often to catch a
+//! cache that failed to invalidate, and writes the store's periodic counters;
 //! `sidebar_menus.rs` builds the menus, hover buttons and header buttons the drawn list carries;
 //! `sidebar_actions.rs` performs what a menu row, hover button or header button does, and
 //! `sidebar_lifecycle.rs` the ones with a daemon round trip in the middle (sleep, wake, close
@@ -92,12 +93,12 @@ mod sidebar_remote;
 mod sidebar_remote_focus;
 mod sidebar_runtime_route;
 mod sidebar_scratch_compare;
+mod sidebar_self_check;
 mod sidebar_session_slot;
-mod sidebar_shadow;
-mod sidebar_shadow_compare;
 mod sidebar_snapshot;
 mod sidebar_slot_jump;
 mod sidebar_snooze;
+mod sidebar_space_follow;
 mod sidebar_state_actions;
 mod sidebar_ui;
 mod sidebar_ui_commands;

@@ -18,30 +18,24 @@
 //! (`gx_store_reveal_walk_row`). A slot never names a remote project (gx-core
 //! `sidebar_view/slot_hotkey.rs`), so the remote focus path is never reached from here.
 //!
-//! **The old page's copy of the sidebar state** is not drawn any more, but it is still
-//! read: the page resolves cmd+1..9 (`focusSessionSlot`) against the list it builds from it. So
-//! every intent the jump and its reveal applied is handed to it as a `sidebarUiMirror` message,
-//! the value each touched key now holds (gx-core `sidebar_ui_mirror_changes`), which the page sets
-//! without revealing, scrolling or focusing.
-//!
 //! CDXC:Sidebar 2026-09-21 WHY:
-//! The first port told the page a `revealSidebarSession` instead, under a request id it marked
-//! handled on both Rust readers. That missed the jump's own two deletions (an empty collapsed
-//! project, the show-less list flag), and it overwrote the handled id: the page never clears its
-//! reveal request, so the PREVIOUS request stayed in every projection, no longer matched the handled
-//! id, and ran again (scroll, Space and machine tab, a group the user had collapsed since). The slot
-//! path must never write a handled-reveal id and never ask the page to reveal.
+//! While the TypeScript page still resolved cmd+1..9 against its own copy of the sidebar state, the
+//! first port told it a `revealSidebarSession` after each jump, under a request id it marked handled
+//! on both Rust readers. That missed the jump's own two deletions (an empty collapsed project, the
+//! show-less list flag), and it overwrote the handled id: the page never cleared its reveal request,
+//! so the PREVIOUS request stayed in every projection, no longer matched the handled id, and ran
+//! again (scroll, Space and machine tab, a group the user had collapsed since). The page is deleted
+//! and so is the mirror that replaced that reveal, but the rule it left behind still holds: the slot
+//! path writes no handled-reveal id and asks nobody else to reveal.
 //!
 //! **Counters** ride `gxStore.sidebarActions.summary` as `slotJump`, whose first line is written at
 //! zero: `presses`, `nothing`, `emptyProjects`, `focuses`, `inProcess`, `staged`, `handedToRuntime`,
-//! `reveals`, `revealChanges`, `pageTold`, `declinedSource`, `planMaxUs`. `pageTold` counts mirror
-//! messages, one per press that changed the sidebar's state. A run in
-//! which the user pressed cmd+ctrl+1 with the store's list drawn and `presses` is zero means the key never
-//! reached this file; `declinedSource` moving means the old page drew the list and did the jump.
+//! `reveals`, `revealChanges`, `declinedSource`, `planMaxUs`. A run in which the user pressed
+//! cmd+ctrl+1 and `presses` is zero means the key never reached this file; `declinedSource` moving
+//! means the list was not ready yet.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_view/slot_hotkey.rs,
-//! apps/desktop/sidebar/native-sidebar/hotkeys.ts (`runNativeProjectSlotHotkey`),
-//! apps/desktop/src/app/gx_store/sidebar_ui_paths.rs, tooling/gx-core/slot-jump-parity.ts.
+//! apps/desktop/src/app/gx_store/sidebar_ui_paths.rs.
 
 use std::time::Instant;
 
@@ -68,7 +62,6 @@ pub(crate) struct SlotJumpCounters {
     pub(crate) reveals: u64,
     /// Changes the reveals made to the sidebar's own state.
     pub(crate) reveal_changes: u64,
-    pub(crate) page_told: u64,
     pub(crate) declined_source: u64,
     pub(crate) plan_max_us: u64,
 }
@@ -89,11 +82,8 @@ impl GhostexGpuiApp {
     ) -> bool {
         let started = Instant::now();
         let draws_store_list = self.gx_store_sidebar_list_ready();
-        // Nothing is mirrored while the list is not ready: the jump is not performed either.
-        if draws_store_list {
-            self.gx_store.sidebar_ui.mirror = Some(Vec::new());
-        }
-        // The state half runs even then: this app is the only writer of the collapse key, so a
+        // The state half runs even when the list is not ready: this app is the only writer of the
+        // collapse key, so a
         // jump whose focus and reveal are dropped must still store what it moved.
         let plan = self.gx_store_note_project_slot_hotkey(slot_number, cx);
         let plan_us = started.elapsed().as_micros() as u64;
@@ -105,7 +95,6 @@ impl GhostexGpuiApp {
         let counters = &mut self.gx_store.slot_jump.counters;
         counters.presses += 1;
         counters.plan_max_us = counters.plan_max_us.max(plan_us);
-        self.gx_store_mirror_slot_jump_to_page(cx);
         cx.notify();
         self.gx_store_slot_jump_ran(route, plan_us, reveal_us);
         true
@@ -181,28 +170,6 @@ impl GhostexGpuiApp {
         (reaction, Some((changes, reveal_us)))
     }
 
-    /// Hands the old page what the jump and its reveal changed (see the module note), and stops
-    /// collecting. Sends nothing when nothing changed.
-    fn gx_store_mirror_slot_jump_to_page(&mut self, cx: &mut gpui::Context<Self>) {
-        if self.gx_store_mirror_sidebar_ui_to_page(cx) {
-            self.gx_store.slot_jump.counters.page_told += 1;
-        }
-    }
-
-    /// Sends the old page the collected mirror changes and stops collecting. Returns whether a
-    /// message went out; nothing is sent when nothing changed.
-    pub(super) fn gx_store_mirror_sidebar_ui_to_page(
-        &mut self,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        let changes = self.gx_store.sidebar_ui.mirror.take().unwrap_or_default();
-        !changes.is_empty()
-            && self.dispatch_gpui_sidebar_host_message(
-                json!({"type": "sidebarUiMirror", "changes": changes}),
-                cx,
-            )
-    }
-
     /// One line per answered press, while the budget lasts: the route and the two timings, never
     /// a row or project id.
     fn gx_store_slot_jump_ran(&mut self, route: &'static str, plan_us: u64, reveal_us: u64) {
@@ -235,7 +202,6 @@ pub(super) fn slot_jump_counters_json(counters: &SlotJumpCounters) -> Value {
         "handedToRuntime": counters.handed_to_runtime,
         "reveals": counters.reveals,
         "revealChanges": counters.reveal_changes,
-        "pageTold": counters.page_told,
         "declinedSource": counters.declined_source,
         "planMaxUs": counters.plan_max_us,
     })

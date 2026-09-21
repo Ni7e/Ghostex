@@ -35,7 +35,6 @@ pub(crate) enum SidebarBridgeEventKind {
     BrowserTabFocus,
     ProjectBoardConversationResponse,
     ResourcesSnapshotRequest,
-    NativeSidebarSnapshot,
     NativeQuickAccessSnapshot,
     SidebarRuntimeFacts,
 }
@@ -87,7 +86,6 @@ impl SidebarBridgeEventKind {
                 Self::ProjectBoardConversationResponse
             }
             SidebarBridgeFunctionId::ResourcesSnapshotRequest => Self::ResourcesSnapshotRequest,
-            SidebarBridgeFunctionId::NativeSidebarSnapshot => Self::NativeSidebarSnapshot,
             SidebarBridgeFunctionId::NativeQuickAccessSnapshot => Self::NativeQuickAccessSnapshot,
             SidebarBridgeFunctionId::SidebarRuntimeFacts => Self::SidebarRuntimeFacts,
         })
@@ -238,10 +236,9 @@ pub enum SidebarBridgeEvent {
     BrowserTabFocus(String),
     ProjectBoardConversationResponse(String),
     ResourcesSnapshotRequest(String),
-    NativeSidebarSnapshot(String),
     NativeQuickAccessSnapshot(String),
-    /// The runtime's one-way channel of the facts the Rust sidebar still borrows from the page's
-    /// projection: the HUD, a project's git numbers, the two armed timers, and a reveal request.
+    /// The runtime's one-way channel of the facts the Rust sidebar still takes from outside the
+    /// store: the HUD, a project's git numbers, the two armed timers, and a reveal request.
     SidebarRuntimeFacts(String),
     /// A first-party page tried to navigate its own main frame somewhere else; the payload is the refused URL.
     RefusedPageNavigation(String),
@@ -322,7 +319,6 @@ impl SidebarBridgeEventKind {
                 SidebarBridgeEvent::ProjectBoardConversationResponse(payload)
             }
             Self::ResourcesSnapshotRequest => SidebarBridgeEvent::ResourcesSnapshotRequest(payload),
-            Self::NativeSidebarSnapshot => SidebarBridgeEvent::NativeSidebarSnapshot(payload),
             Self::NativeQuickAccessSnapshot => {
                 SidebarBridgeEvent::NativeQuickAccessSnapshot(payload)
             }

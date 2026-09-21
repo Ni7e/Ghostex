@@ -9,16 +9,12 @@ use super::host::GxStoreCounters;
 use super::shadow_diff::{ShadowCounters, ShadowDiff, ShadowMismatch};
 use super::sidebar_list::{LastUpdate, SidebarListCounters};
 use super::sidebar_scratch_compare::ScratchDifference;
-use super::sidebar_shadow::SidebarShadowCounters;
-use super::sidebar_shadow_compare::{FieldDiff, MAX_IDS_PER_RECORD, SidebarMismatch};
+use super::sidebar_self_check::SidebarSelfCheckCounters;
 use super::sidebar_ui::SidebarUiCounters;
 use crate::{shared_settings, support_logs};
 
 /// Distinct mismatch records one app run may write; later ones are only counted.
 const MAX_DISTINCT_MISMATCH_RECORDS: usize = 200;
-/// Records of a difference that never settled. A few are enough to name the fields; the counter
-/// carries the rate.
-const MAX_NEVER_SETTLED_RECORDS: u32 = 4;
 /// Records of the kept list disagreeing with a fresh one. Each one is a bug, so a handful is
 /// plenty to name it and the counter carries the rate.
 const MAX_SCRATCH_RECORDS: u32 = 4;
@@ -39,7 +35,7 @@ const SANITIZER_MAX_DEPTH: usize = 4;
 /// Unconditional warning lines one app run may write. A daemon that keeps producing a bad row
 /// must not be able to fill the disk through this path.
 const MAX_WARNING_LINES: u32 = 40;
-pub(super) const SHADOW_SUMMARY_INTERVAL: Duration = Duration::from_secs(60);
+pub(super) const PERIODIC_SUMMARY_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Log lines of the store, all in the `native.sidebar.refresh` support log.
 ///
@@ -56,9 +52,8 @@ pub(crate) struct GxStoreDiagnostics {
     /// most once per interval, and the totals it last wrote.
     shadow_summary_considered_at: Option<Instant>,
     shadow_summary_written: ShadowCounters,
-    logged_sidebar_mismatches: HashSet<u64>,
     sidebar_summary_considered_at: Option<Instant>,
-    sidebar_summary_written: SidebarShadowCounters,
+    sidebar_summary_written: SidebarSelfCheckCounters,
     sidebar_ui_summary_considered_at: Option<Instant>,
     sidebar_ui_summary_written: SidebarUiCounters,
     /// The runtime facts channel's periodic line (`diagnostics_runtime_facts.rs`).
@@ -103,7 +98,6 @@ pub(crate) struct GxStoreDiagnostics {
     /// `client_document_records` so a busy launch cannot silence the proof that a Project Group
     /// menu item, a Space editor result or a Space switch ran at all.
     pub(super) project_doc_edit_records: u32,
-    sidebar_never_settled_records: u32,
     sidebar_scratch_records: u32,
     sidebar_slow_update_records: u32,
     sidebar_storage_warnings: u32,
@@ -111,15 +105,6 @@ pub(crate) struct GxStoreDiagnostics {
     pub(super) sidebar_lifecycle_records: u32,
     sidebar_drag_records: u32,
     pub(super) remote_last_seen_records: u64,
-}
-
-/// A count as a whole percent of a total, which is what tells a skip that fires now and then apart
-/// from one that is eating the gate.
-fn percent(count: u64, total: u64) -> u64 {
-    if total == 0 {
-        return 0;
-    }
-    count.saturating_mul(100) / total
 }
 
 /// What one view-model update was handed, in the shape both records that carry it use.
@@ -385,7 +370,7 @@ impl GxStoreDiagnostics {
         if counters == self.shadow_summary_written
             || self
                 .shadow_summary_considered_at
-                .is_some_and(|at| at.elapsed() < SHADOW_SUMMARY_INTERVAL)
+                .is_some_and(|at| at.elapsed() < PERIODIC_SUMMARY_INTERVAL)
         {
             return;
         }
@@ -420,91 +405,15 @@ impl GxStoreDiagnostics {
 }
 
 impl GxStoreDiagnostics {
-    /// One bounded record per distinct sidebar difference: ids, counts, and field names only.
-    pub(super) fn sidebar_mismatch(&mut self, mismatch: &SidebarMismatch, snapshot_revision: u64) {
-        let signature = mismatch.signature();
-        if self.logged_sidebar_mismatches.contains(&signature)
-            || self.logged_sidebar_mismatches.len() >= MAX_DISTINCT_MISMATCH_RECORDS
-            || !routine_logging_enabled()
-        {
-            return;
-        }
-        self.logged_sidebar_mismatches.insert(signature);
-        // CDXC:Sidebar 2026-09-20 WHY:
-        // Every value in this record sits at depth 4 or less, because the log's sanitizer replaces
-        // anything deeper with the string "[depth-capped]" (support_logs.rs:463). `details` itself
-        // is depth 0, so an array under it is 1, an object in that array is 2, that object's array
-        // is 3 and its strings are 4. The first shape of this record put each differing field in
-        // an object inside that array, which put the field NAME at depth 5, and every record
-        // printed three capped strings and told nobody anything. A field is one short string here,
-        // and `fields` repeats the whole record's names at depth 2 so the answer survives even if
-        // this record is ever nested one level deeper.
-        let entries = |fields: &[FieldDiff]| -> Vec<serde_json::Value> {
-            fields
-                .iter()
-                .map(|field| serde_json::Value::String(log_text(encode_field(field))))
-                .collect()
-        };
-        let named = |fields: &[(String, Vec<FieldDiff>)]| -> Vec<serde_json::Value> {
-            fields
-                .iter()
-                .map(|(id, names)| json!({ "id": log_text(id.as_str()), "fields": entries(names) }))
-                .collect()
-        };
-        // Every differing field of the whole record, once, at a depth nothing can cap.
-        let distinct = distinct_fields(mismatch);
-        record(
-            "gxStore.sidebarShadow.mismatch",
-            json!({
-                "snapshotRevision": snapshot_revision,
-                "oldGroupCount": mismatch.old_group_count,
-                "storeGroupCount": mismatch.store_group_count,
-                "onlyOldGroups": log_texts(&mismatch.only_old_groups),
-                "onlyStoreGroups": log_texts(&mismatch.only_store_groups),
-                "groupOrderDiffers": mismatch.group_order_differs,
-                "fields": log_texts(&distinct),
-                "topLevel": entries(&mismatch.top_level),
-                "groups": named(&mismatch.groups),
-                "sessions": named(&mismatch.sessions),
-                "onlyOldSessions": log_texts(&mismatch.only_old_sessions),
-                "onlyStoreSessions": log_texts(&mismatch.only_store_sessions),
-                "questionCountOnly": mismatch.question_count_only,
-                "tooltipOnly": mismatch.tooltip_only,
-                "onlyFrozenFields": mismatch.only_frozen_fields,
-                "onlyTimingFields": mismatch.only_timing_fields,
-                "onlyStaleFields": mismatch.only_stale_fields,
-                "onlyExplainedFields": mismatch.only_explained_fields,
-                // One object per group whose order differs. Separate short values rather than one
-                // sentence: the sentence was long enough to be redacted and carried a slash, which
-                // redacts on its own. Each value here sits at depth 3.
-                "orderDivergence": mismatch
-                    .order_divergence
-                    .iter()
-                    .map(|divergence| {
-                        json!({
-                            "group": log_text(divergence.group_id.as_str()),
-                            "index": divergence.index,
-                            "old": divergence.old_id.as_deref().map(log_text),
-                            "store": divergence.store_id.as_deref().map(log_text),
-                            "oldLen": divergence.old_len,
-                            "storeLen": divergence.store_len,
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            }),
-        );
-    }
-
-    /// The running totals of the sidebar list and its comparison, at most once a minute and only
+    /// The running totals of the sidebar list and its self check, at most once a minute and only
     /// when they moved.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn sidebar_summary(
         &mut self,
-        counters: &SidebarShadowCounters,
+        counters: &SidebarSelfCheckCounters,
         list: &SidebarListCounters,
         ready: bool,
         deadline_kind: &'static str,
-        pending: bool,
         groups: usize,
         rows: usize,
         phases: super::sidebar_snapshot::InstallPhases,
@@ -514,7 +423,7 @@ impl GxStoreDiagnostics {
         if *counters == self.sidebar_summary_written
             || self
                 .sidebar_summary_considered_at
-                .is_some_and(|at| at.elapsed() < SHADOW_SUMMARY_INTERVAL)
+                .is_some_and(|at| at.elapsed() < PERIODIC_SUMMARY_INTERVAL)
         {
             return;
         }
@@ -524,55 +433,16 @@ impl GxStoreDiagnostics {
         }
         self.sidebar_summary_written = *counters;
         record(
-            "gxStore.sidebarShadow.summary",
+            "gxStore.sidebarList.summary",
             json!({
-                // The list is the only one there is since step 6; this says whether it is the REAL
-                // one or the loading skeleton the launch window draws.
+                // The list is the only one there is; this says whether it is the REAL one or the
+                // loading skeleton the launch window draws.
                 "ready": ready,
-                "publishes": counters.publishes,
-                "comparisons": counters.comparisons,
-                // What was compared ON a remote machine's tab. `skipped.remote` at zero is not the
-                // gate on its own: every other skip below can hold this at zero beside it.
-                "comparisonsRemote": counters.comparisons_remote,
-                "rejudged": counters.rejudged,
-                "matches": counters.matches,
-                "mismatches": counters.mismatches,
-                "unexplained": counters.mismatches.saturating_sub(counters.explained_only),
-                "distinctMismatches": counters.distinct_mismatches,
-                "transient": counters.transient,
-                "neverSettled": counters.never_settled,
-                "pending": pending,
                 "storeGroups": groups,
                 "storeRows": rows,
                 "deadlineKind": deadline_kind,
                 // Grouped rather than flat: the sanitizer keeps the first 32 keys of an object and
                 // drops the rest without saying so, and this record passed 32 as it grew.
-                "skipped": {
-                    "remote": counters.skipped_remote,
-                    "machineMismatch": counters.skipped_machine_mismatch,
-                    "foreignFocus": counters.skipped_foreign_focus,
-                    "notLoaded": counters.skipped_not_loaded,
-                    "notLive": counters.skipped_not_live,
-                    "notRestored": counters.skipped_not_restored,
-                    // As a share of the publishes that reached the comparison, so a skip that is
-                    // quietly eating most of them reads as a number rather than as a total nobody
-                    // divides. Whole percent; zero publishes reads as zero.
-                    "foreignFocusPct": percent(counters.skipped_foreign_focus, counters.publishes),
-                    "machineMismatchPct": percent(
-                        counters.skipped_machine_mismatch,
-                        counters.publishes,
-                    ),
-                    "remotePct": percent(counters.skipped_remote, counters.publishes),
-                },
-                "explained": {
-                    "explainedOnly": counters.explained_only,
-                    "questionCountOnly": counters.question_count_only,
-                    "tooltipOnly": counters.tooltip_only,
-                    "frozenFieldsOnly": counters.frozen_fields_only,
-                    "timingFieldsOnly": counters.timing_fields_only,
-                    "staleFieldsOnly": counters.stale_fields_only,
-                    "subgroupHeaderOnly": counters.subgroup_header_only,
-                },
                 "scratch": {
                     "checks": counters.scratch_checks,
                     "mismatches": counters.scratch_mismatches,
@@ -595,9 +465,6 @@ impl GxStoreDiagnostics {
                     "viewChanges": list.view_changes,
                     "installs": list.installs,
                     "installsSkipped": list.installs_skipped,
-                    // Publishes the old page still makes, which the list no longer reads anything
-                    // from: the count is what says that page is alive at all.
-                    "publishesSeen": list.publishes_seen,
                     "installsFromCarry": list.installs_from_carry,
                     "loadingInstalls": list.loading_installs,
                     "deadlineWakes": list.deadline_wakes,
@@ -609,15 +476,13 @@ impl GxStoreDiagnostics {
                     "updateMaxUs": list.update_max_us,
                     "installUs": list.last_install_us,
                     "installMaxUs": list.install_max_us,
-                    "compareUs": counters.last_compare_us,
-                    "compareMaxUs": counters.compare_max_us,
                     "relabelUs": list.last_relabel_us,
                     "relabelMaxUs": list.relabel_max_us,
                 },
                 // Where the newest install's time went, and what the caches saved it. A rise in
                 // installUs says which part of the build it came from rather than inviting a
                 // guess: the shared key, the rows, the group menus, the collection menus, the more
-                // menu, or the tail that copies what a publish still owns.
+                // menu, or the tail that copies what the view model does not own.
                 "install": {
                     "hostUs": phases.host_us,
                     "keyUs": phases.key_us,
@@ -727,65 +592,12 @@ impl GxStoreDiagnostics {
         );
     }
 
-    /// One record for a difference that was replaced before it could settle, a few per run.
-    ///
-    /// CDXC:Sidebar 2026-09-20 WHY:
-    /// A difference that takes a new shape on every judgement never settles, so it never reaches
-    /// the mismatch record, and `neverSettled` counted them without ever saying what they were.
-    /// A list that genuinely churns and a field that flaps look identical from the counter; the
-    /// field names are what tells them apart.
-    pub(super) fn sidebar_never_settled(
-        &mut self,
-        previous_fields: &[String],
-        mismatch: &SidebarMismatch,
-    ) {
-        if self.sidebar_never_settled_records >= MAX_NEVER_SETTLED_RECORDS
-            || !routine_logging_enabled()
-        {
-            return;
-        }
-        self.sidebar_never_settled_records += 1;
-        let next_fields = distinct_fields(mismatch);
-        record(
-            "gxStore.sidebarShadow.neverSettled",
-            json!({
-                // What MOVED between the two judgements, which is the thing a shape that never
-                // settles is only ever visible through. The constant fields are in neither list.
-                "gained": log_texts(
-                    next_fields
-                        .iter()
-                        .filter(|field| !previous_fields.contains(field))
-                        .collect::<Vec<_>>(),
-                ),
-                "lost": log_texts(
-                    previous_fields
-                        .iter()
-                        .filter(|field| !next_fields.contains(field))
-                        .collect::<Vec<_>>(),
-                ),
-                "fields": log_texts(&next_fields),
-                "sessions": mismatch
-                    .sessions
-                    .iter()
-                    .map(|(id, _)| serde_json::Value::String(log_text(id.as_str())))
-                    .take(MAX_IDS_PER_RECORD)
-                    .collect::<Vec<_>>(),
-                "groups": mismatch
-                    .groups
-                    .iter()
-                    .map(|(id, _)| serde_json::Value::String(log_text(id.as_str())))
-                    .take(MAX_IDS_PER_RECORD)
-                    .collect::<Vec<_>>(),
-            }),
-        );
-    }
-
     /// The running totals of the sidebar's own state and its writes, on the same schedule.
     pub(super) fn sidebar_ui_summary(&mut self, counters: &SidebarUiCounters) {
         if *counters == self.sidebar_ui_summary_written
             || self
                 .sidebar_ui_summary_considered_at
-                .is_some_and(|at| at.elapsed() < SHADOW_SUMMARY_INTERVAL)
+                .is_some_and(|at| at.elapsed() < PERIODIC_SUMMARY_INTERVAL)
         {
             return;
         }
@@ -1036,7 +848,7 @@ impl GxStoreDiagnostics {
             .is_some_and(|written| written == (collections, spaces, moves))
             || self
                 .client_document_summary_at
-                .is_some_and(|at| at.elapsed() < SHADOW_SUMMARY_INTERVAL)
+                .is_some_and(|at| at.elapsed() < PERIODIC_SUMMARY_INTERVAL)
         {
             return;
         }
@@ -1308,7 +1120,7 @@ impl GxStoreDiagnostics {
             .is_some_and(|written| written == (counters, side_state_held))
             || self
                 .workspace_groups_summary_at
-                .is_some_and(|at| at.elapsed() < SHADOW_SUMMARY_INTERVAL)
+                .is_some_and(|at| at.elapsed() < PERIODIC_SUMMARY_INTERVAL)
         {
             return;
         }
@@ -1808,37 +1620,6 @@ fn log_texts<'a>(values: impl IntoIterator<Item = &'a String>) -> Vec<serde_json
         .into_iter()
         .map(|value| serde_json::Value::String(log_text(value.as_str())))
         .collect()
-}
-
-/// One short string per differing field: the name alone when both sides carry a value, and
-/// `name=old` or `name=store` when only one of them does.
-fn encode_field(field: &FieldDiff) -> String {
-    if let Some((old, store)) = &field.values {
-        return format!("{}: old={old} store={store}", field.name);
-    }
-    match (field.old_has_value, field.store_has_value) {
-        (true, false) => format!("{}=old", field.name),
-        (false, true) => format!("{}=store", field.name),
-        _ => field.name.to_string(),
-    }
-}
-
-/// Every differing field of a whole record, once.
-fn distinct_fields(mismatch: &SidebarMismatch) -> Vec<String> {
-    let mut distinct: Vec<String> = Vec::new();
-    for field in mismatch
-        .top_level
-        .iter()
-        .chain(mismatch.groups.iter().flat_map(|(_, fields)| fields))
-        .chain(mismatch.sessions.iter().flat_map(|(_, fields)| fields))
-    {
-        let encoded = encode_field(field);
-        if !distinct.contains(&encoded) {
-            distinct.push(encoded);
-        }
-    }
-    distinct.truncate(MAX_IDS_PER_RECORD);
-    distinct
 }
 
 fn store_revision(core: &Core) -> Option<i64> {

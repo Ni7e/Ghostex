@@ -56,6 +56,11 @@ impl GhostexGpuiApp {
         // The one cadence that notices a Keep Awake armed from the titlebar or an agent launched
         // from another surface (gx_store/sidebar_menus.rs).
         self.gx_store_poll_menu_host(cx);
+        // Every periodic counter the store owns. It rode the old projection's comparison until
+        // M4d part 2 step 7, which is what a publish drove; this is the cadence that survives the
+        // page (gx_store/sidebar_self_check.rs). The records rate-limit themselves to once a
+        // minute and write nothing while routine logging is off.
+        self.gx_store_sidebar_summaries();
     }
 
     /// Rebuilds the armed-timer labels of every session and hands the changed ones to the open

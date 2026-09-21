@@ -12,7 +12,7 @@ use super::layout_persist::LayoutPersist;
 use super::local_focus::{DrawnFocus, LocalFocus};
 use super::shadow_diff::{ObservedFocus, ShadowDiff};
 use super::sidebar_list::SidebarList;
-use super::sidebar_shadow::SidebarShadow;
+use super::sidebar_self_check::SidebarSelfCheck;
 use super::sidebar_ui::SidebarUiHost;
 use crate::GhostexGpuiApp;
 use crate::app::helpers::GpuiGxserverPresentationFocusEcho;
@@ -97,7 +97,7 @@ pub(crate) struct GxStoreHost {
     pub(super) shadow: ShadowDiff,
     pub(crate) sidebar_ui: SidebarUiHost,
     pub(crate) sidebar_list: SidebarList,
-    pub(super) sidebar_shadow: SidebarShadow,
+    pub(super) sidebar_self_check: SidebarSelfCheck,
     pub(super) diagnostics: GxStoreDiagnostics,
     pub(crate) local_focus: LocalFocus,
     pub(crate) layout_persist: LayoutPersist,

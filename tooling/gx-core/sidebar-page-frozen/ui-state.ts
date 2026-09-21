@@ -4,6 +4,11 @@
  * compare the Rust store against: a clean run proves Rust still matches THAT, not that it matches
  * the app. Never edit this file to make a gate pass; change the Rust and re-record, or delete the
  * gate.
+ *
+ * One method is NOT here: `mirror`, which applied the changes the app made to this state by itself
+ * (the project slot hotkey's jump and its reveal). Its only callers were the slot-jump and
+ * session-slot gates, which were deleted with the page, and the `sidebarUiMirror` contract it read
+ * went with them.
  */
 import { readSidebarHiddenItems } from '@/packages/core-ui/sidebar-hidden-items';
 import type { SidebarSessionTagFilter } from '@/packages/shared/session-tags';
@@ -12,7 +17,6 @@ import { readSidebarSelectedMachineTabId } from '@/packages/core-ui/sidebar-app/
 import { DEFAULT_PROJECT_SESSION_SECTION_COLLAPSE_STATE } from '@/packages/core-ui/sidebar-app/project-session-section-model';
 import { NativeSidebarMetadata } from './metadata';
 import type { NativeSidebarCommand } from '@/packages/shared/native-sidebar';
-import type { SidebarUiMirrorChange } from '@/packages/shared/session-grid-contract';
 
 /*
 CDXC:Sidebar 2026-09-21 WHY:
@@ -86,72 +90,6 @@ export class NativeSidebarUiState {
     }
   }
 
-  /**
-   * CDXC:Sidebar 2026-09-21 WHY:
-   * The changes the app made to this state by itself (the project slot hotkey's jump and its
-   * reveal), as the value each touched key now holds there. Only this copy moves: no reveal is
-   * requested, nothing scrolls, nothing is focused, and `revealRequest` is left alone, because a new
-   * request id here would be published and overwrite the id the app uses to skip a reveal it has
-   * already handled. Supersedes sending this page a `revealSidebarSession` for the jump.
-   * SEE-ALSO: packages/gx-core/src/sidebar_ui/mirror.rs, apps/desktop/src/app/gx_store/sidebar_slot_jump.rs.
-   */
-  mirror(changes: readonly SidebarUiMirrorChange[]): void {
-    const collapse = this.collapse;
-    for (const change of changes) {
-      switch (change.kind) {
-        case 'collapsedGroup':
-          setRecordEntry(collapse.collapsedGroupsById, change.id, change.on);
-          break;
-        case 'expandedList':
-          setRecordEntry(collapse.expandedProjectSessionListsById, change.id, change.on);
-          break;
-        case 'hoverActions':
-          setRecordEntry(collapse.expandedSessionCardHoverActionsById, change.id, change.on);
-          break;
-        case 'collapsedCollection':
-          setRecordEntry(collapse.collapsedProjectCollectionsByKey, change.id, change.on);
-          break;
-        case 'hiddenGroup':
-          this.hiddenItems = {
-            ...this.hiddenItems,
-            groupIds: setListEntry(this.hiddenItems.groupIds, change.id, change.on),
-          };
-          break;
-        case 'hiddenCollection':
-          this.hiddenItems = {
-            ...this.hiddenItems,
-            collectionKeys: setListEntry(this.hiddenItems.collectionKeys, change.id, change.on),
-          };
-          break;
-        case 'section':
-          collapse.collapsedProjectSessionSectionsById[change.id] = { ...change.state };
-          break;
-        case 'selectedSpace':
-          if (change.spaceId === null) delete collapse.selectedSpaceIdBySectionKey[change.sectionKey];
-          else collapse.selectedSpaceIdBySectionKey[change.sectionKey] = change.spaceId;
-          break;
-        case 'recentSessions': {
-          const bySpace = { ...collapse.recentSessionIdsBySpace[change.sectionKey] };
-          if (change.sessionIds?.length) bySpace[change.spaceId] = [...change.sessionIds];
-          else delete bySpace[change.spaceId];
-          collapse.recentSessionIdsBySpace = { ...collapse.recentSessionIdsBySpace, [change.sectionKey]: bySpace };
-          break;
-        }
-        case 'selectedMachine':
-          this.selectedMachineId = change.machineId;
-          break;
-        case 'tagFilters':
-          this.selectedTagFilters = [...change.tags];
-          break;
-        case 'showHidden':
-          this.showHidden = change.on;
-          break;
-        case 'selectedSessions':
-          this.selectedSessionIds = [...change.sessionIds];
-          break;
-      }
-    }
-  }
 }
 
 function setRecordEntry(record: Record<string, true>, key: string, on: boolean): void {

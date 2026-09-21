@@ -27,12 +27,11 @@
 //! sets them a moment later exactly as it always did.
 //!
 //! **Counters** ride `gxStore.sidebarActions.summary` as `localFocus`: `focuses`, `browserRows`,
-//! `modalsClosed`, `pageTold`, `declinedSource`. A run in which the user clicked a row and
+//! `modalsClosed`, `declinedSource`. A run in which the user clicked a row and
 //! `focuses` is zero means the click never reached here; `declinedSource` moving means a click
 //! arrived before the list was ready, which is the launch window and nothing else.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/native-sidebar/selection.ts (`selectNativeSidebarSession`),
-//! apps/desktop/sidebar/gxserver-runtime/core.ts (`onSidebarCommand`),
+//! SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/core.ts (`onSidebarCommand`),
 //! apps/desktop/src/app/gx_store/sidebar_remote_focus.rs.
 
 use ghostex_gx_core::SessionKey;
@@ -50,10 +49,7 @@ pub(crate) struct LocalFocusRouteCounters {
     pub(crate) browser_rows: u64,
     /// Of those, the ones that closed an open app modal (the click's `closeAppModal`).
     pub(crate) modals_closed: u64,
-    /// The multi-selection a click cleared, mirrored to the old page.
-    pub(crate) page_told: u64,
-    /// Clicks the store did not route because the renderer is not drawing its list: the old page
-    /// owns the whole click then.
+    /// Clicks the store dropped because the list was not ready yet (the launch window).
     pub(crate) declined_source: u64,
 }
 
@@ -74,17 +70,9 @@ impl GhostexGpuiApp {
             self.gx_store.local_focus_route.declined_source += 1;
             return false;
         }
-        // `selectNativeSidebarSession` cleared the page's multi-selection before it posted. The
-        // store's own selection intent is that clear; the page's copy is told the resulting value,
-        // unless a caller (the slot hotkeys) is already collecting the changes to tell it once.
-        let collect = self.gx_store.sidebar_ui.mirror.is_none();
-        if collect {
-            self.gx_store.sidebar_ui.mirror = Some(Vec::new());
-        }
+        // `selectNativeSidebarSession` cleared the multi-selection before it posted; the store's
+        // own selection intent is that clear.
         self.gx_store_note_sidebar_command(command, cx);
-        if collect && self.gx_store_mirror_sidebar_ui_to_page(cx) {
-            self.gx_store.local_focus_route.page_told += 1;
-        }
         // `closeAppModal('SettingsDismissal:focusSession')`, through the same function the bridge's
         // own `close` arm reaches. Before the focus, as the TypeScript had it.
         let had_modal = self.app_modal_window.is_some() || self.native_app_modal.is_some();
@@ -147,13 +135,12 @@ fn local_focus_session_id(command: &Value) -> Option<String> {
     Some(session_id.to_string())
 }
 
-/// The counters as the summary carries them: 5 keys at depth 2.
+/// The counters as the summary carries them: 4 keys at depth 2.
 pub(super) fn local_focus_route_counters_json(counters: &LocalFocusRouteCounters) -> Value {
     json!({
         "focuses": counters.focuses,
         "browserRows": counters.browser_rows,
         "modalsClosed": counters.modals_closed,
-        "pageTold": counters.page_told,
         "declinedSource": counters.declined_source,
     })
 }

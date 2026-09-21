@@ -87,9 +87,6 @@ pub(crate) struct SidebarListCounters {
     pub(crate) installs: u64,
     /// Wakes that found no drawn time had moved, so the list was left as it was.
     pub(crate) installs_skipped: u64,
-    /// Publishes accepted while the store's list was drawn. Since step 3 a publish carries nothing
-    /// the list reads, so this only says the old page is still projecting.
-    pub(crate) publishes_seen: u64,
     /// Installs made because a value the list carries from outside the view model moved (the HUD,
     /// the two requests, the two hotkey labels), rather than because the list itself did.
     pub(crate) installs_from_carry: u64,
@@ -322,11 +319,6 @@ impl SidebarList {
 }
 
 impl GhostexGpuiApp {
-    /// A publish arrived while the store's list was drawn.
-    pub(crate) fn gx_store_note_sidebar_publish_seen(&mut self) {
-        self.gx_store.sidebar_list.counters.publishes_seen += 1;
-    }
-
     /// What the installed list carries from outside the view model right now.
     ///
     /// CDXC:Sidebar 2026-09-20 WHY:
@@ -543,6 +535,10 @@ impl GhostexGpuiApp {
         // this update's list. Nothing happens unless the focused row really changed
         // (`take_followed_session`), so every other path through here pays one comparison.
         self.gx_store_follow_active_session_space(cx);
+        // Every so often the same inputs are also built from scratch and the two lists compared:
+        // this port's own cache invalidation, which has no second list to lean on since the page
+        // was deleted (gx_store/sidebar_self_check.rs).
+        self.gx_store_sidebar_scratch_check();
         // The list itself moved, or a value it carries from outside the view model did (the HUD
         // the runtime posts, the rename or reveal request, the two hotkey labels). Before step 3
         // the second half was a publish's job; now every one of those arrives on a path that ends
@@ -584,12 +580,9 @@ impl GhostexGpuiApp {
         self.gx_store.sidebar_list.loading_installed = true;
         let view = self.gx_store.sidebar_list.view();
         let snapshot = crate::app::native_sidebar::model::NativeSidebarSnapshot {
-            version: 1,
-            revision: 0,
             scroll_scope: view.scroll_scope.clone(),
             rename_request: None,
             reveal_request: None,
-            ready: false,
             empty_state: serde_json::json!({
                 "loading": true,
                 "error": false,

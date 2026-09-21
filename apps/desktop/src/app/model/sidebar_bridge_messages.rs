@@ -127,8 +127,7 @@ pub(crate) fn gpui_sidebar_bridge_event_must_follow_pending_project_switch(
 ) -> bool {
     !matches!(
         event,
-        cef::SidebarBridgeEvent::NativeSidebarSnapshot(_)
-            | cef::SidebarBridgeEvent::ActiveProjectContext(_)
+        cef::SidebarBridgeEvent::ActiveProjectContext(_)
             | cef::SidebarBridgeEvent::GxserverPresentationFocusState(_)
             | cef::SidebarBridgeEvent::WorkspaceTerminalFocus(_)
             | cef::SidebarBridgeEvent::SessionCompletionSound(_)

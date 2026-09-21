@@ -5,12 +5,9 @@ use std::sync::Arc;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NativeSidebarSnapshot {
-    pub(crate) version: u32,
-    pub(crate) revision: u64,
     pub(crate) scroll_scope: String,
     pub(crate) rename_request: Option<NativeSidebarRenameRequest>,
     pub(crate) reveal_request: Option<NativeSidebarRevealRequest>,
-    pub(crate) ready: bool,
     pub(crate) empty_state: Value,
     pub(crate) hud: Value,
     pub(crate) groups: Vec<NativeSidebarGroup>,
@@ -28,7 +25,6 @@ pub(crate) struct NativeSidebarSnapshot {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NativeSidebarGroup {
-    pub(crate) collection_color: Option<String>,
     pub(crate) title_tooltip: Option<String>,
     pub(crate) group_id: String,
     pub(crate) storage_id: String,
@@ -47,8 +43,6 @@ pub(crate) struct NativeSidebarGroup {
     pub(crate) sections: Vec<NativeSidebarSection>,
     pub(crate) title: String,
     pub(crate) is_active: bool,
-    #[serde(default)]
-    pub(crate) is_chat_collection: bool,
     #[serde(default)]
     pub(crate) is_stale: bool,
     pub(crate) project_context: Option<Value>,
@@ -84,8 +78,6 @@ pub(crate) struct NativeSidebarSession {
     pub(crate) is_visible: bool,
     #[serde(default)]
     pub(crate) is_pinned: bool,
-    #[serde(default)]
-    pub(crate) is_parked: bool,
     #[serde(default)]
     pub(crate) is_draft: bool,
     pub(crate) last_interaction_at: Option<String>,
@@ -145,7 +137,6 @@ pub(crate) struct NativeSidebarOrderItem {
 pub(crate) struct NativeSidebarCollection {
     pub(crate) awake_count: u64,
     pub(crate) collection_id: String,
-    pub(crate) storage_id: String,
     pub(crate) title: String,
     pub(crate) color: String,
     pub(crate) group_ids: Vec<String>,
@@ -154,40 +145,6 @@ pub(crate) struct NativeSidebarCollection {
     pub(crate) working_count: usize,
     pub(crate) attention_count: usize,
     pub(crate) menu: Arc<Value>,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub(crate) enum NativeSidebarUpdate {
-    Snapshot(NativeSidebarSnapshot),
-    Patch(super::updates::NativeSidebarPatch),
-    Flash {
-        version: u32,
-        #[serde(rename = "sessionId")]
-        session_id: String,
-    },
-    Menu {
-        version: u32,
-        #[serde(rename = "ownerId")]
-        owner_id: String,
-        items: Vec<Value>,
-        close: bool,
-    },
-    Clock {
-        version: u32,
-        rows: Vec<NativeSidebarClockRow>,
-    },
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSidebarClockRow {
-    pub(crate) session_id: String,
-    pub(crate) timer_label: Option<String>,
-    pub(crate) last_interaction_label: Option<String>,
-    // The page still sends `armedActions`; serde drops it. The store derives the chat's armed
-    // labels itself since M4d part 2 step 3 (gx_store/sidebar_clock.rs), so reading the page's
-    // copy would be a second writer of one map.
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]

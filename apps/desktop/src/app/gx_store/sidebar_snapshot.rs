@@ -350,15 +350,9 @@ pub(super) fn snapshot_from_view(
     let phase = std::time::Instant::now();
 
     let snapshot = NativeSidebarSnapshot {
-        version: 1,
-        // The daemon document revision the old projection published. Nothing the renderer draws
-        // reads it (the settings patches quote the zustand store's own revision,
-        // controller.ts:138), so the store's list does not invent one.
-        revision: 0,
         scroll_scope: view.scroll_scope.clone(),
         rename_request: input.rename_request.clone(),
         reveal_request: input.reveal_request.clone(),
-        ready: view.ready,
         empty_state: json!({
             "loading": view.empty_state.loading,
             "error": view.empty_state.error,
@@ -469,7 +463,6 @@ fn native_group(
     let core = &group.core;
     let (menu, header_actions) = group_menus(group, menus, cache);
     NativeSidebarGroup {
-        collection_color: group.collection_color.clone(),
         title_tooltip: core.title_tooltip.clone(),
         group_id: core.group_id.clone(),
         storage_id: core.storage_id.clone(),
@@ -501,7 +494,6 @@ fn native_group(
             .collect(),
         title: core.title.clone(),
         is_active: core.is_active,
-        is_chat_collection: core.group_id == ghostex_gx_core::CHATS_GROUP_ID,
         is_stale: core.is_stale,
         project_context: project_context(group),
         remote_machine_context: core.remote_machine.as_ref().map(|remote| {
@@ -615,7 +607,6 @@ fn native_collection(
     NativeSidebarCollection {
         awake_count: collection.awake_count as u64,
         collection_id: collection.collection_id.clone(),
-        storage_id: collection.storage_id.clone(),
         title: collection.title.clone(),
         color: collection.color.clone(),
         group_ids: collection.group_ids.clone(),
@@ -860,7 +851,6 @@ fn build_session(
         is_focused,
         is_visible,
         is_pinned: row.is_pinned,
-        is_parked: row.is_parked,
         is_draft: row.is_draft,
         last_interaction_at: row.last_interaction_at.clone(),
         lifecycle_state: Some(row.lifecycle_state.clone()),
