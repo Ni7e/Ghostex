@@ -281,6 +281,7 @@ impl GhostexGpuiApp {
         self.new_thread_picker_window = cx
             .open_window(options, move |window, cx| {
                 window.set_window_title("");
+                crate::app::window::popup_frame::strip_gpui_popup_window_frame(window);
                 if visible {
                     window.activate_window();
                 }

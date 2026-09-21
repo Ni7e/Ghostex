@@ -170,6 +170,9 @@ impl NativeChatView {
                         {
                             let chat = chat.clone();
                             move |window, cx| {
+                                crate::app::window::popup_frame::strip_gpui_popup_window_frame(
+                                    window,
+                                );
                                 crate::app::window::attach_gpui_app_modal_window_to_main_window(
                                     window, parent,
                                 );

@@ -67,10 +67,12 @@ impl NativeChatView {
                 window_bounds:Some(WindowBounds::Windowed(bounds)),display_id,
                 app_id:crate::gpui_platform_window_app_id(),icon:crate::gpui_platform_window_icon(),
                 focus:true,show:true,is_resizable:false,is_minimizable:false,is_movable:false,titlebar:None,
+                window_background:gpui::WindowBackgroundAppearance::Transparent,
                 ..Default::default()
             }, {
                 let chat=chat.clone();
                 move |window,cx| {
+                    crate::app::window::popup_frame::strip_gpui_popup_window_frame(window);
                     crate::app::window::attach_gpui_app_modal_window_to_main_window(window,parent);
                     let view=cx.new(|cx| {
                         let subscription=cx.observe(&chat,|_,_,cx|cx.notify());
@@ -85,7 +87,7 @@ impl NativeChatView {
                         filter.focus_handle(cx).focus(window,cx);
                         ContextEditorWindow {chat,filter,scroll:Default::default(),_subscription:subscription,_input_subscription:input_subscription}
                     });
-                    cx.new(|cx|Root::new(view,window,cx).bg(appearance.background))
+                    cx.new(|cx|Root::new(view,window,cx).bg(gpui::transparent_black()))
                 }
             }));
             chat.update(cx,|chat,cx| {

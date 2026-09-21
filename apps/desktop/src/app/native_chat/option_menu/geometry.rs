@@ -36,7 +36,7 @@ impl MenuMetrics {
     };
 
     /**
-    CDXC:SessionChat 2026-09-21 DECISION: "The context menu that we show in the gpui chat view" must look like the context menu in the GPUI sidebar (`native_sidebar/menus.rs`). Menus opened at the pointer use that menu's box: 13px text, 34px rows, 16px icons, 8px corners, a width fitted to the longest row from the same 178px floor, and no window shadow or system frame (`platform.rs`).
+    CDXC:SessionChat 2026-09-21 DECISION: "The context menu that we show in the gpui chat view" must look like the context menu in the GPUI sidebar (`native_sidebar/menus.rs`). Menus opened at the pointer use that menu's box: 13px text, 34px rows, 16px icons, 8px corners, a width fitted to the longest row from the same 178px floor, and no window shadow or system frame (`app/window/popup_frame.rs`).
     */
     pub(super) const CONTEXT: Self = Self {
         icon: 16.0,

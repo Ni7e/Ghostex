@@ -265,7 +265,6 @@ impl ChatOptionMenu {
         let menu = cx.entity();
         let parent = self.parent;
         let accounts_customize = rows.first().is_some_and(|row| row["customize"] == true);
-        let compact = self.compact;
         self.opening = true;
         cx.defer(move |cx| {
             let result = cx.open_window(
@@ -285,9 +284,7 @@ impl ChatOptionMenu {
                 {
                     let menu = menu.clone();
                     move |window, cx| {
-                        if compact {
-                            super::platform::prepare_context_menu(window);
-                        }
+                        crate::app::window::popup_frame::strip_gpui_popup_window_frame(window);
                         crate::app::window::attach_gpui_app_modal_window_to_main_window(
                             window, parent,
                         );

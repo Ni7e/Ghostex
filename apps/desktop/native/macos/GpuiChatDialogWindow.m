@@ -18,11 +18,12 @@ void GhostexGpuiPrepareChatDialogWindow(void *nativeView) {
   CGSSetWindowBackgroundBlurRadius(CGSMainConnectionID(), window.windowNumber, 24);
 }
 
-// CDXC:SessionChat 2026-09-21 WHY:
-// A chat right-click menu is a child window, and a titled window brings the system's large rounded
-// frame and heavy drop shadow, which the sidebar's in-window context menu does not have. Borderless
-// and shadowless leaves only the panel GPUI draws, so the two menus look the same.
-void GhostexGpuiPrepareChatContextMenuWindow(void *nativeView) {
+// CDXC:AppModal 2026-09-21 DECISION:
+// User, on popups that open as their own window: "I don't like this at all", about the large
+// rounded system frame, white ring and heavy drop shadow a titled macOS window brings, which the
+// sidebar's in-window context menu does not have. Every chat popup and the New Thread picker goes
+// borderless and shadowless so only the panel GPUI draws is visible.
+void GhostexGpuiStripPopupWindowFrame(void *nativeView) {
   NSView *view = (__bridge NSView *)nativeView;
   NSWindow *window = view.window;
   if (!window) return;
