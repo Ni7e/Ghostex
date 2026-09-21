@@ -43,6 +43,9 @@ pub struct SessionState {
     pub switchable_agents: Option<Value>,
     /// Model and effort read off the agent's screen. Absent means unchanged; merged by evidence.
     pub selected_options: Option<Value>,
+    /// How many times `setSelectedOptions` was handed a NEW object, which is the identity family
+    /// e1's detection effect depends on. Equal values with different identities still count.
+    pub selected_options_generation: u64,
     /// The blocking or failed terminal state. Cleared on omission.
     pub terminal_notice: Option<Value>,
     /// Live on-screen progress such as compaction. Cleared on omission.
@@ -98,6 +101,7 @@ impl Default for SessionState {
             available_agents: None,
             switchable_agents: None,
             selected_options: None,
+            selected_options_generation: 0,
             terminal_notice: None,
             terminal_activity: None,
             agent_fleet: None,

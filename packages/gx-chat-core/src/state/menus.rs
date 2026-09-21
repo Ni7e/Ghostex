@@ -24,6 +24,12 @@ pub struct MenusState {
     /// The agent model catalog in effect, pushed in by the host. Empty until the first push, which
     /// is what leaves a session with no pills rather than pills naming models it cannot run.
     pub model_catalog: AgentModelCatalog,
+    /// How many times a catalog was ADOPTED, whatever its contents.
+    ///
+    /// `adoptAgentModelCatalog` parses into a fresh object and `replaceCatalog` swaps it in
+    /// unconditionally, so every push gives `useMemo(..., [agent, agentModelCatalog])` a new
+    /// identity and rebuilds the option store even when the document is byte identical.
+    pub model_catalog_generation: u64,
     /// The key the option values are stored under, `None` for a session with no key yet.
     ///
     /// CDXC:Drafts 2026-08-28 WHY:
@@ -41,9 +47,16 @@ pub struct MenusState {
     pub options: OptionStore,
     /// The agent the option store was built for, so an agent change rebuilds it.
     pub options_agent: Option<String>,
-    /// The `updatedAt` of the catalog the option store was built for.
-    pub options_catalog_version: String,
-    /// The stored option state the host handed over at boot, replayed when the store is rebuilt.
+    /// The catalog generation the option store was built for.
+    pub options_catalog_generation: u64,
+    /// How many times the option store was rebuilt, which is `applyDetected`'s own identity.
+    pub options_store_generation: u64,
+    /// The `(selected options, option store)` generations the detection effect last ran for, or
+    /// `None` when it has not run at all. That pair is
+    /// `[sessionOptions.applyDetected, chat.selectedOptions]`.
+    pub applied_detection: Option<(u64, u64)>,
+    /// `seed.optionStates`: the per-key stored option state, as the boot read handed it over and
+    /// as every write since has updated it. Keyed by the SCOPED option key, not the session key.
     pub stored_options: Value,
     /// `true` once the boot read has answered, so a rebuild does not seed from nothing.
     pub options_seeded: bool,
@@ -85,11 +98,14 @@ impl Default for MenusState {
     fn default() -> Self {
         Self {
             model_catalog: AgentModelCatalog::default(),
+            model_catalog_generation: 0,
             session_key: None,
             latched_draft_agent: None,
             options: OptionStore::default(),
             options_agent: None,
-            options_catalog_version: String::new(),
+            options_catalog_generation: 0,
+            options_store_generation: 0,
+            applied_detection: None,
             stored_options: Value::Null,
             options_seeded: false,
             accounts: None,

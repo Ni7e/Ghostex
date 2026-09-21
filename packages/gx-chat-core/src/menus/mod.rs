@@ -27,6 +27,7 @@ pub mod option_dispatch;
 pub mod option_menu;
 pub mod option_menus;
 pub mod option_pills;
+pub mod option_storage;
 pub mod option_store;
 pub mod option_values;
 pub mod options;

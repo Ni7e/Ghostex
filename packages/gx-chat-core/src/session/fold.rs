@@ -232,32 +232,52 @@ pub fn fold_append(previous: &FoldedSnapshot, event: &ChatAppendedFrame) -> Fold
 /// Terminal option captures, Claude statusline payloads and Codex transcript stats arrive
 /// independently, so an options-only reply must not clear reported usage.
 pub fn merge_options(current: Option<&Value>, incoming: Option<&Value>) -> Option<Value> {
+    merge_options_detail(current, incoming).0
+}
+
+/// [`merge_options`], plus whether `setSelectedOptions` would have been handed a NEW object.
+///
+/// React bails out of a state update when `Object.is(next, current)`, so the identity of
+/// `applySelectedOptions`'s result is what decides whether the controller re-renders and therefore
+/// whether `native-options.ts`'s `useLayoutEffect(applyDetected, [.., chat.selectedOptions])` fires
+/// again. The TypeScript returns `current` itself only when the older capture won AND none of the
+/// three status payloads had to be folded in; every other path builds a fresh object, equal value
+/// or not. Callers that need that distinction (family e1's detection dep, and through it the
+/// `optionWrite` round trip) take the flag; the rest use [`merge_options`].
+pub fn merge_options_detail(
+    current: Option<&Value>,
+    incoming: Option<&Value>,
+) -> (Option<Value>, bool) {
     let Some(incoming) = incoming else {
-        return current.cloned();
+        return (current.cloned(), false);
     };
     let stronger = ["model", "effort", "mode"].iter().any(|field| {
         evidence_priority(choice_source(incoming, field))
             > evidence_priority(current.and_then(|current| choice_source(current, field)))
     });
+    let mut kept_current = false;
     let chosen = match current {
         Some(current)
             if !stronger
                 && parse_date(detected_at(current)) > parse_date(detected_at(incoming)) =>
         {
+            kept_current = true;
             current
         }
         _ => incoming,
     };
     let mut merged = chosen.clone();
+    let mut spread = false;
     for key in ["codexStatus", "claudeStatus", "contextUsage"] {
         let value = present(chosen.get(key))
             .or_else(|| present(incoming.get(key)))
             .or_else(|| current.and_then(|current| present(current.get(key))));
         if let (Some(value), Some(object)) = (value, merged.as_object_mut()) {
             object.insert(key.to_string(), value.clone());
+            spread = true;
         }
     }
-    Some(merged)
+    (Some(merged), !kept_current || spread)
 }
 
 fn present(value: Option<&Value>) -> Option<&Value> {

@@ -58,6 +58,10 @@ pub fn settle(
             if let Some(parsed) = parse_agent_model_catalog(catalog) {
                 let current = std::mem::take(&mut state.menus.model_catalog);
                 state.menus.model_catalog = current.newer(parsed);
+                // `adoptAgentModelCatalog` parses into a fresh object and `replaceCatalog` swaps
+                // it in unconditionally, so the option store rebuilds even on an identical push.
+                state.menus.model_catalog_generation =
+                    state.menus.model_catalog_generation.wrapping_add(1);
             }
         }
         Event::ContextPreferencesChanged {

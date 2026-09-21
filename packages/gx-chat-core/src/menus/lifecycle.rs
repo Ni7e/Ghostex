@@ -14,8 +14,11 @@ use crate::menus::controls::{
     accounts_poll_key, session_accounts_request, switch_progress, switch_ready, ACCOUNTS_POLL_MS,
 };
 use crate::menus::option_catalog::session_option_catalog;
+use crate::menus::option_storage::{
+    option_state_to_value, remember_option_state, session_options_key, stored_option_state,
+};
 use crate::menus::option_store::OptionStore;
-use crate::menus::option_values::{option_state_from_value, DetectedOptions};
+use crate::menus::option_values::DetectedOptions;
 use crate::menus::options::option_storage_key;
 use crate::state::{ChatContext, ChatState};
 use crate::wire::ChatRpcMethod;
@@ -30,6 +33,9 @@ pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
     rebuild_option_store(state, now_ms);
     apply_detection(state);
     state.menus.options.expire(now_ms);
+    // `persistence.write` runs inside the store's own `publish`, which the layout effect above
+    // reaches before any passive effect, so the write goes out ahead of the accounts poll.
+    effects.extend(persist_options(state));
     effects.extend(poll_accounts(state, now_ms));
     let progress = switch_progress(state);
     let ready = switch_ready(state);
@@ -84,22 +90,37 @@ fn rebuild_option_store(state: &mut ChatState, now_ms: i64) {
         draft_agent_id.as_deref(),
     );
     state.menus.latched_draft_agent = latched;
-    let catalog_version = state.menus.model_catalog.updated_at.clone();
+    let catalog_generation = state.menus.model_catalog_generation;
     let unchanged = state.menus.options_agent == agent
-        && state.menus.options_catalog_version == catalog_version
+        && state.menus.options_catalog_generation == catalog_generation
         && state.menus.options.storage_key == storage_key;
     if unchanged {
         return;
     }
     let catalog = session_option_catalog(&state.menus.model_catalog, agent.as_deref());
-    let stored = option_state_from_value(&state.menus.stored_options);
+    let stored = stored_option_state(&state.menus.stored_options, storage_key.as_deref());
     state.menus.options = OptionStore::seeded(catalog.as_ref(), storage_key, &stored, now_ms);
     state.menus.options_agent = agent;
-    state.menus.options_catalog_version = catalog_version;
+    state.menus.options_catalog_generation = catalog_generation;
+    state.menus.options_store_generation = state.menus.options_store_generation.wrapping_add(1);
 }
 
 /// The `useLayoutEffect` on `[sessionOptions.applyDetected, chat.selectedOptions]`.
+///
+/// Both deps are IDENTITIES in the TypeScript: `applyDetected` is new whenever the store was
+/// rebuilt, and `chat.selectedOptions` is new whenever `applySelectedOptions` built a fresh
+/// object. Running the fold on every event instead would be harmless for the pill values, which
+/// settle, but not for the `optionWrite` it makes: the store's `publish` compares object identity
+/// rather than contents, so every run persists.
 fn apply_detection(state: &mut ChatState) {
+    let deps = (
+        state.session.selected_options_generation,
+        state.menus.options_store_generation,
+    );
+    if state.menus.applied_detection == Some(deps) {
+        return;
+    }
+    state.menus.applied_detection = Some(deps);
     let Some(selected) = state.session.selected_options.clone() else {
         return;
     };
@@ -112,6 +133,23 @@ fn apply_detection(state: &mut ChatState) {
         .menus
         .options
         .apply_detected(catalog.as_ref(), Some(&detected));
+}
+
+/// `persistence.write(key, state)`: one `composer('optionWrite', …)` per publish of the store.
+fn persist_options(state: &mut ChatState) -> Vec<Effect> {
+    let Some(next) = state.menus.options.take_dirty() else {
+        return Vec::new();
+    };
+    // `write: (key, state) => { if (!key) return; … }`.
+    let Some(option_key) = state.menus.options.storage_key.clone() else {
+        return Vec::new();
+    };
+    remember_option_state(&mut state.menus.stored_options, &option_key, &next);
+    vec![Effect::WriteStorage {
+        key: session_options_key(&option_key),
+        value: Some(option_state_to_value(&next).to_string()),
+        durable: true,
+    }]
 }
 
 /// The `useEffect` that reads the session's accounts on mount and every 30 seconds.
@@ -162,6 +200,7 @@ pub fn boot_read(state: &mut ChatState, read: &crate::event::ComposerBootRead) -
     if let Some(parsed) = crate::menus::catalog::parse_agent_model_catalog(&read.model_catalog) {
         let current = std::mem::take(&mut state.menus.model_catalog);
         state.menus.model_catalog = current.newer(parsed);
+        state.menus.model_catalog_generation = state.menus.model_catalog_generation.wrapping_add(1);
     }
     state.menus.session_key = Some(read.session_key.clone());
     state.menus.stored_options = read.option_states.clone();

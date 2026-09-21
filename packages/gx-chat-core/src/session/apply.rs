@@ -6,7 +6,7 @@
 use ghostex_gx_protocol::{ChatStatus, ReadSessionChatResult, Tri};
 use serde_json::Value;
 
-use crate::session::fold::{merge_draft_state, merge_options};
+use crate::session::fold::{merge_draft_state, merge_options_detail};
 use crate::session::pagination::{page_has_more, PageBoundary};
 use crate::session::text::normalize_pending_text;
 use crate::state::ChatState;
@@ -36,6 +36,12 @@ pub fn apply_agent_identity(state: &mut ChatState, patch: &AgentIdentity) {
         );
     let changed = account_changed || differs(&session.agent_session_id, &patch.agent_session_id);
     if changed {
+        // `setSelectedOptions(null)` bails out when it was already null, so only a real clear is
+        // a new identity for family e1's detection dep.
+        if session.selected_options.is_some() {
+            session.selected_options_generation =
+                session.selected_options_generation.wrapping_add(1);
+        }
         session.selected_options = None;
         session.screen_probed = false;
         session.async_questions_since = None;
@@ -66,8 +72,16 @@ pub fn apply_selected_options(state: &mut ChatState, detected: Option<&Value>) {
     if detected.is_none() {
         return;
     }
-    state.session.selected_options =
-        merge_options(state.session.selected_options.as_ref(), detected);
+    let (merged, fresh_identity) =
+        merge_options_detail(state.session.selected_options.as_ref(), detected);
+    state.session.selected_options = merged;
+    // `setSelectedOptions(next)` re-renders only on a new object, and that render is what re-fires
+    // family e1's detection effect. The counter is that identity, carried where a Rust `Option`
+    // cannot.
+    if fresh_identity {
+        state.session.selected_options_generation =
+            state.session.selected_options_generation.wrapping_add(1);
+    }
 }
 
 /// CDXC:SessionChat 2026-09-04 DECISION:

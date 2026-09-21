@@ -129,10 +129,14 @@ impl OptionStore {
             .min()
     }
 
+    /// `publish(next)`.
+    ///
+    /// The TypeScript's guard is `if (state === next) return`, an IDENTITY test: every caller but
+    /// one builds a fresh object, so an unchanged value still notifies its listeners and still
+    /// persists. Comparing contents here instead lost the `optionWrite` round trips the replay
+    /// pairs its storage answers against, so the guard is the caller's (`begin_dispatch` is the
+    /// one that can hand back `state` itself, when it was asked for no values at all).
     fn publish(&mut self, next: OptionState) {
-        if next == self.state {
-            return;
-        }
         self.state = next;
         self.dirty = true;
     }
@@ -197,7 +201,11 @@ impl OptionStore {
             }
         }
         self.pending.push(change);
-        self.publish(next);
+        // `let next = state; for (…) next = {...next, …}`: with no values there is no spread and
+        // `next` is still `state` itself, which is the one publish the TypeScript skips.
+        if !values.is_empty() {
+            self.publish(next);
+        }
         DispatchReceipt(self.next_change_id)
     }
 
