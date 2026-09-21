@@ -53,6 +53,7 @@ impl GhostexGpuiApp {
         let system_is_light = refresh_gpui_system_appearance(cx);
         if self.system_color_scheme_is_light != system_is_light {
             self.system_color_scheme_is_light = system_is_light;
+            self.notify_native_chat_views(cx);
             if settings
                 .object()
                 .get("sidebarTheme")
@@ -77,6 +78,9 @@ impl GhostexGpuiApp {
             }
         }
         let changed = self.refresh_sidebar_runtime_settings_from_shared_settings(&settings, cx);
+        if changed {
+            self.notify_native_chat_views(cx);
+        }
         let appearance_settings_changed = changed && {
             let previous_settings =
                 serde_json::from_str::<serde_json::Value>(&previous_settings_json).ok();
