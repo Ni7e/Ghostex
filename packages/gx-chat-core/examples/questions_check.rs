@@ -64,7 +64,29 @@ fn main() -> ExitCode {
         expected.insert(n, row);
     }
 
+    // A refusal is part of the recording. The harness answers family c's own calls itself, so the
+    // recorded refusals are replayed in order: these scenarios raise no other failing request, and
+    // a recording that does would need the request table family a is building.
     let mut world = World::default();
+    for line in recording.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if record.get("m").and_then(Value::as_str) != Some("resolve") {
+            continue;
+        }
+        let Some(error) = record.pointer("/a/2").and_then(Value::as_object) else {
+            continue;
+        };
+        world.refusals.push((
+            record.get("n").and_then(Value::as_u64).unwrap_or(0),
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        ));
+    }
     let mut compared = 0usize;
     let mut matched = 0usize;
     let mut differences: BTreeMap<String, usize> = BTreeMap::new();
@@ -87,19 +109,24 @@ fn main() -> ExitCode {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        world.record = n;
         world.context = ChatContext::at(now_ms);
         ghostex_gx_chat_core::session::working::stamp_working_started(&mut world.state, now_ms);
         match (kind, method) {
             ("in", "start") => {
                 let effects = questions::sync(&mut world.state);
-                world.boot.extend(effects);
+                world
+                    .boot
+                    .extend(effects.into_iter().map(|effect| (n, effect)));
             }
             ("in", "event") => {
                 if let Some(frame) = arguments.first() {
                     apply_frame(&mut world.state, frame);
                 }
                 let effects = questions::sync(&mut world.state);
-                world.queue.extend(effects);
+                world
+                    .queue
+                    .extend(effects.into_iter().map(|effect| (n, effect)));
             }
             ("in", "action") => {
                 if let Some(action) = arguments
@@ -108,12 +135,16 @@ fn main() -> ExitCode {
                 {
                     let context = world.context;
                     let effects = questions::handle(&mut world.state, &action, &context);
-                    world.queue.extend(effects);
+                    world
+                        .queue
+                        .extend(effects.into_iter().map(|effect| (n, effect)));
                 }
             }
             ("in", "tick") => {
                 let effects = questions::sync(&mut world.state);
-                world.queue.extend(effects);
+                world
+                    .queue
+                    .extend(effects.into_iter().map(|effect| (n, effect)));
             }
             ("doc", "take") => {
                 let Some(row) = expected.get(&n) else {
@@ -172,8 +203,14 @@ struct World {
     state: ChatState,
     context: ChatContext,
     storage: BTreeMap<(String, String), String>,
-    queue: Vec<Effect>,
-    boot: Vec<Effect>,
+    /// Effects raised in the round that has not been answered yet, with the record that raised
+    /// them.
+    queue: Vec<(u64, Effect)>,
+    boot: Vec<(u64, Effect)>,
+    /// The refusals the recording carries, by record number, oldest first.
+    refusals: Vec<(u64, String)>,
+    /// Where the record reader stands, so a refusal is only used once its turn has come.
+    record: u64,
 }
 
 impl World {
@@ -181,7 +218,7 @@ impl World {
     fn settle(&mut self) {
         {
             let mut next = Vec::new();
-            for effect in std::mem::take(&mut self.queue) {
+            for (queued_at, effect) in std::mem::take(&mut self.queue) {
                 match effect {
                     Effect::ReadStorage { key } => {
                         let value = self
@@ -202,17 +239,32 @@ impl World {
                         }
                         if let Some(more) = questions::storage_written(&mut self.state, &key, None)
                         {
-                            next.extend(more);
+                            next.extend(more.into_iter().map(|effect| (self.record, effect)));
                         }
                     }
                     Effect::SendRpc { request_id, .. } => {
-                        let outcome = RpcOutcome::Ok {
-                            result: Value::Object(Default::default()),
+                        // The refusal the recording carries for this call: raised after the
+                        // request went out, and answered by the record after the document that
+                        // shipped it.
+                        let refused = self
+                            .refusals
+                            .first()
+                            .is_some_and(|(at, _)| *at > queued_at && *at <= self.record + 1)
+                            .then(|| self.refusals.remove(0).1);
+                        let outcome = match refused {
+                            Some(message) => RpcOutcome::Err {
+                                code: None,
+                                message,
+                                endpoint: None,
+                            },
+                            None => RpcOutcome::Ok {
+                                result: Value::Object(Default::default()),
+                            },
                         };
                         if let Some(more) =
                             questions::rpc_settled(&mut self.state, request_id, &outcome)
                         {
-                            next.extend(more);
+                            next.extend(more.into_iter().map(|effect| (self.record, effect)));
                         }
                     }
                     _ => {}
