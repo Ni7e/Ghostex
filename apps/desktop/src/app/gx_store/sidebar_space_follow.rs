@@ -18,6 +18,17 @@ impl GhostexGpuiApp {
     /// `restore`, and it is written whatever the follow setting says: the two are asked as one
     /// question so the unfiltered list is built at most once per focus change.
     pub(super) fn gx_store_follow_active_session_space(&mut self, cx: &mut gpui::Context<Self>) {
+        // CDXC:Spaces 2026-09-21 WHY:
+        // Nothing while the loading skeleton is drawn, and the focused row is not CONSUMED either.
+        // This hangs off the end of `gx_store_update_sidebar_list`, which runs before the ready
+        // gate, so on a cold launch the restored session's focus arrived while `inputs.ui` was
+        // still the empty default: the Space it resolved was wrong or none, and `take_followed_session`
+        // spent the row all the same. The read then landed with the user's real Spaces and the
+        // comparison said the focused row had not changed, so the memory a Space switch restores
+        // was never written for the session the launch focused and the section never followed it.
+        if !self.gx_store_sidebar_list_ready() {
+            return;
+        }
         let focused = self
             .gx_store
             .core
