@@ -8,7 +8,6 @@ impl GpuiTitlebarReadingPanel {
         v_flex()
             .size_full()
             .overflow_hidden()
-            .bg(titlebar_popup_menu_background())
             .child(self.render_resources_header(snapshot, cx))
             .when(snapshot.session_inventory_error.is_some(), |this| {
                 this.child(div().p(px(10.0)).text_size(px(12.0)).child(
@@ -314,6 +313,7 @@ impl GpuiTitlebarReadingPanel {
                 .right(px(12.0))
                 .max_w(px(620.0))
                 .gap(px(10.0))
+                .rounded(px(RESOURCE_CARD_RADIUS))
                 .border_1()
                 .border_color(chrome_ink().opacity(0.14))
                 .bg(chrome_color(0x3a3a3a, 0xe5e5e5))
@@ -410,6 +410,7 @@ impl GpuiTitlebarReadingPanel {
                 .h(px(22.0))
                 .items_center()
                 .justify_center()
+                .rounded(px(RESOURCE_CONTROL_RADIUS))
                 .border_1()
                 .border_color(if action_label == "Quit" {
                     chrome_color(0xf87171, 0xc23b3b).opacity(0.40)

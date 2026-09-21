@@ -114,6 +114,7 @@ impl GhostexGpuiApp {
                 | GpuiTitlebarPopupKind::BrowserActions(_)
                 | GpuiTitlebarPopupKind::Extensions
                 | GpuiTitlebarPopupKind::Git
+                | GpuiTitlebarPopupKind::Help
                 | GpuiTitlebarPopupKind::More
                 | GpuiTitlebarPopupKind::OpenTargets
         ) && content_height > popup_height;
@@ -190,6 +191,9 @@ impl GhostexGpuiApp {
                 "mainWindowActive": window.is_window_active(),
             }),
         );
+        if kind == GpuiTitlebarPopupKind::Tips {
+            self.request_gpui_titlebar_tips_runtime_status(cx);
+        }
         cx.notify();
     }
 
@@ -348,6 +352,15 @@ impl GhostexGpuiApp {
                     )
                 }))
             }
+            GpuiTitlebarPopupKind::RemoteSites => {
+                GpuiTitlebarPopupContent::RemoteSites(cx.new(|cx| {
+                    crate::app::window::remote_sites::RemoteSitesPanel::new(
+                        GpuiTitlebarPanelHost::Popup,
+                        main_app,
+                        cx,
+                    )
+                }))
+            }
             GpuiTitlebarPopupKind::Actions => {
                 GpuiTitlebarPopupContent::Menu(PopupMenu::build(window, cx, |menu, _, _| {
                     self.build_gpui_titlebar_actions_popup_menu(
@@ -361,6 +374,16 @@ impl GhostexGpuiApp {
             GpuiTitlebarPopupKind::Git => {
                 GpuiTitlebarPopupContent::Menu(PopupMenu::build(window, cx, |menu, _, _| {
                     self.build_gpui_titlebar_git_popup_menu(
+                        menu,
+                        menu_width,
+                        menu_max_height,
+                        menu_scrollable,
+                    )
+                }))
+            }
+            GpuiTitlebarPopupKind::Help => {
+                GpuiTitlebarPopupContent::Menu(PopupMenu::build(window, cx, |menu, _, _| {
+                    super::help_menu::build_gpui_titlebar_help_popup_menu(
                         menu,
                         menu_width,
                         menu_max_height,
@@ -385,6 +408,32 @@ impl GhostexGpuiApp {
                         menu_width,
                         menu_max_height,
                         menu_scrollable,
+                    )
+                }))
+            }
+            GpuiTitlebarPopupKind::Resources => {
+                let snapshot = self.gpui_native_resources_snapshot(cx);
+                GpuiTitlebarPopupContent::Reading(
+                    cx.new(|_| GpuiTitlebarReadingPanel::resources(main_app, snapshot)),
+                )
+            }
+            GpuiTitlebarPopupKind::Tips => {
+                let live_agent_ids = self
+                    .agents_workspace
+                    .terminal_sessions
+                    .iter()
+                    .filter(|session| session.presentation_state.is_running())
+                    .filter_map(|session| session.agent_icon)
+                    .filter_map(gpui_default_sidebar_agent_by_icon)
+                    .map(|agent| agent.agent_id.to_string())
+                    .collect();
+                GpuiTitlebarPopupContent::Reading(cx.new(|_| {
+                    GpuiTitlebarReadingPanel::tips(
+                        main_app,
+                        self.titlebar_tips_cli_status.clone(),
+                        self.titlebar_tips_agent_hook_status.clone(),
+                        live_agent_ids,
+                        self.titlebar_tips_sidebar_agent_ids.clone(),
                     )
                 }))
             }

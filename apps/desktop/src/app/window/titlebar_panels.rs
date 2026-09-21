@@ -34,9 +34,13 @@ pub(crate) enum GpuiTitlebarPopupKind {
     ContextMenu,
     Extensions,
     Git,
+    Help,
     More,
     Notifications,
     OpenTargets,
+    Resources,
+    RemoteSites,
+    Tips,
 }
 
 impl GpuiTitlebarPopupKind {
@@ -48,9 +52,13 @@ impl GpuiTitlebarPopupKind {
             Self::ContextMenu => "contextMenu",
             Self::Extensions => "extensions",
             Self::Git => "git",
+            Self::Help => "help",
             Self::More => "more",
             Self::Notifications => "notifications",
             Self::OpenTargets => "openTargets",
+            Self::Resources => "resources",
+            Self::RemoteSites => "remoteSites",
+            Self::Tips => "tips",
         }
     }
 }
@@ -147,6 +155,7 @@ pub(crate) enum GpuiTitlebarPopupContent {
     AccountUsage(Entity<super::account_usage::AccountUsagePanel>),
     Menu(Entity<PopupMenu>),
     Reading(Entity<GpuiTitlebarReadingPanel>),
+    RemoteSites(Entity<crate::app::window::remote_sites::RemoteSitesPanel>),
 }
 
 pub(crate) struct GpuiTitlebarPopupWindow {
@@ -169,6 +178,7 @@ impl GpuiTitlebarPopupWindow {
             GpuiTitlebarPopupContent::AccountUsage(_) => "accountUsage",
             GpuiTitlebarPopupContent::Menu(_) => "menu",
             GpuiTitlebarPopupContent::Reading(_) => "reading",
+            GpuiTitlebarPopupContent::RemoteSites(_) => "remoteSites",
         };
         log_gpui_titlebar_popup_repro(
             "gpui.titlebarPopup.windowConstructing",
@@ -201,6 +211,7 @@ impl GpuiTitlebarPopupWindow {
                     },
                 )),
                 GpuiTitlebarPopupContent::Reading(_) => None,
+                GpuiTitlebarPopupContent::RemoteSites(_) => None,
                 GpuiTitlebarPopupContent::AccountUsage(_) => None,
             };
             Self {
@@ -256,6 +267,30 @@ impl GpuiTitlebarPopupWindow {
     ) {
         if let GpuiTitlebarPopupContent::AccountUsage(panel) = &self.content {
             panel.update(cx, |panel, cx| panel.update_account(account, cx));
+        }
+    }
+
+    pub(crate) fn update_tips_runtime_status(
+        &mut self,
+        payload: serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let GpuiTitlebarPopupContent::Reading(panel) = &self.content {
+            panel.update(cx, |panel, cx| {
+                panel.update_tips_runtime_status(payload, cx);
+            });
+        }
+    }
+
+    pub(crate) fn update_tips_sidebar_agent_ids(
+        &mut self,
+        sidebar_agent_ids: HashSet<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let GpuiTitlebarPopupContent::Reading(panel) = &self.content {
+            panel.update(cx, |panel, cx| {
+                panel.update_tips_sidebar_agent_ids(sidebar_agent_ids, cx);
+            });
         }
     }
 
@@ -515,6 +550,7 @@ impl Render for GpuiTitlebarPopupWindow {
                 GpuiTitlebarPopupContent::AccountUsage(panel) => panel.clone().into_any_element(),
                 GpuiTitlebarPopupContent::Menu(menu) => menu.clone().into_any_element(),
                 GpuiTitlebarPopupContent::Reading(panel) => panel.clone().into_any_element(),
+                GpuiTitlebarPopupContent::RemoteSites(panel) => panel.clone().into_any_element(),
             })
     }
 }
@@ -544,10 +580,8 @@ pub(crate) enum GpuiTitlebarReadingPanelState {
     },
 }
 
-/// CDXC:Titlebar 2026-09-20 WHY:
-/// The Tips and Resources panels draw the same thing in two places now: the Notifications dropdown's
-/// child window, and a view panel tab. Every row that used to end with "and close the dropdown" has
-/// to know which, because `window.remove_window()` in the main window would close the app's window.
+/// CDXC:Browser 2026-09-21 WHY:
+/// The Dev servers list is drawn in two places: its dropdown's child window, and a Browser pane's blank tab. Every row that ends with "and close the dropdown" has to know which, because `window.remove_window()` in the main window would close the app's window.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GpuiTitlebarPanelHost {
     Popup,
@@ -555,7 +589,6 @@ pub(crate) enum GpuiTitlebarPanelHost {
 }
 
 pub(crate) struct GpuiTitlebarReadingPanel {
-    pub(super) host: GpuiTitlebarPanelHost,
     pub(super) main_app: gpui::WeakEntity<GhostexGpuiApp>,
     pub(super) scroll_handle: ScrollHandle,
     pub(super) state: GpuiTitlebarReadingPanelState,
@@ -576,7 +609,6 @@ pub(crate) struct GpuiNativeTitlebarNotice {
 
 impl GpuiTitlebarReadingPanel {
     pub(crate) fn tips(
-        host: GpuiTitlebarPanelHost,
         main_app: gpui::WeakEntity<GhostexGpuiApp>,
         cli_status: Option<serde_json::Value>,
         agent_hook_status: Option<serde_json::Value>,
@@ -584,7 +616,6 @@ impl GpuiTitlebarReadingPanel {
         sidebar_agent_ids: Option<HashSet<String>>,
     ) -> Self {
         Self {
-            host,
             main_app,
             scroll_handle: ScrollHandle::new(),
             state: GpuiTitlebarReadingPanelState::Tips {
@@ -636,12 +667,10 @@ impl GpuiTitlebarReadingPanel {
     /// CDXC:Resources 2026-09-07 DECISION:
     /// User: closing and reopening Resources must collapse all rows. Each new panel records only explicit expansions, so hidden sections cannot shift the initial collapse indexes.
     pub(crate) fn resources(
-        host: GpuiTitlebarPanelHost,
         main_app: gpui::WeakEntity<GhostexGpuiApp>,
         snapshot: GpuiNativeResourcesSnapshot,
     ) -> Self {
         Self {
-            host,
             main_app,
             scroll_handle: ScrollHandle::new(),
             state: GpuiTitlebarReadingPanelState::Resources {
@@ -655,14 +684,20 @@ impl GpuiTitlebarReadingPanel {
         }
     }
 
-    /// "…and close the dropdown", for the rows that end that way. A page stays where it is: the
-    /// row's own action already happened, and there is no window of its own to take down.
     pub(super) fn close_popup(&self, window: &mut Window, cx: &mut gpui::Context<Self>) {
-        if self.host == GpuiTitlebarPanelHost::ViewPanel {
-            return;
-        }
         let _ = self.main_app.update_in(cx, |app, _main_window, cx| {
-            app.clear_gpui_titlebar_popup_from_window(GpuiTitlebarPopupKind::Notifications, cx);
+            app.clear_gpui_titlebar_popup_from_window(
+                match self.state {
+                    GpuiTitlebarReadingPanelState::Tips { .. } => GpuiTitlebarPopupKind::Tips,
+                    GpuiTitlebarReadingPanelState::Resources { .. } => {
+                        GpuiTitlebarPopupKind::Resources
+                    }
+                    GpuiTitlebarReadingPanelState::Notifications { .. } => {
+                        GpuiTitlebarPopupKind::Notifications
+                    }
+                },
+                cx,
+            );
         });
         window.remove_window();
     }

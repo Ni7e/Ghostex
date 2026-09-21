@@ -23,7 +23,6 @@ impl GpuiTitlebarReadingPanel {
         feed: GpuiNotificationFeedState,
     ) -> Self {
         Self {
-            host: GpuiTitlebarPanelHost::Popup,
             main_app,
             scroll_handle: ScrollHandle::new(),
             state: GpuiTitlebarReadingPanelState::Notifications {
@@ -232,7 +231,6 @@ impl GpuiTitlebarReadingPanel {
         v_flex()
             .size_full()
             .overflow_hidden()
-            .bg(titlebar_popup_menu_background())
             .child(self.render_notifications_header(feed, cx))
             .child(
                 div()

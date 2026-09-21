@@ -3,11 +3,21 @@
 //! User: remote dev servers must use the exact Resources dropdown width, sizes, fonts, and style; the Resources implementation supersedes the HTML mockup's proportions.
 use crate::*;
 
+/// CDXC:Titlebar 2026-09-21 DECISION:
+/// User: the Tips, Resources and Dev servers dropdowns get the Ask Ghostex menu's roundness instead of a hard square look, with the layout unchanged.
+/// The panel matches the menu's 8px corners and cards its 6px rows; small buttons, chips and icon tiles take a slightly smaller radius so they stay proportionate.
+/// SEE-ALSO: titlebar/popup_menu_builders.rs `titlebar_popup_menu_with_scroll_behavior`.
+pub(super) const RESOURCE_PANEL_RADIUS: f32 = 8.0;
+pub(super) const RESOURCE_CARD_RADIUS: f32 = 6.0;
+pub(super) const RESOURCE_CONTROL_RADIUS: f32 = 5.0;
+
+/// The frame alone paints the panel fill: a square child fill would cover its rounded corners.
 pub(super) fn resource_panel_frame() -> gpui::Div {
     div()
         .relative()
         .size_full()
         .overflow_hidden()
+        .rounded(px(RESOURCE_PANEL_RADIUS))
         .border_1()
         .border_color(titlebar_popup_menu_border_color())
         .bg(titlebar_popup_menu_background())
@@ -68,6 +78,7 @@ pub(super) fn resource_row_frame() -> gpui::Div {
     v_flex()
         .w_full()
         .overflow_hidden()
+        .rounded(px(RESOURCE_CARD_RADIUS))
         .border_1()
         .border_color(chrome_ink().opacity(0.10))
         .bg(resource_card_fill())
@@ -89,6 +100,7 @@ pub(super) fn resource_avatar_tile() -> gpui::Div {
         .size(px(28.0))
         .items_center()
         .justify_center()
+        .rounded(px(RESOURCE_CARD_RADIUS))
         .bg(chrome_ink().opacity(0.10))
 }
 
@@ -118,6 +130,7 @@ pub(super) fn resource_metric(width: f32) -> gpui::Div {
         .items_center()
         .justify_center()
         .gap(px(6.0))
+        .rounded(px(RESOURCE_CONTROL_RADIUS))
         .border_1()
         .border_color(chrome_ink().opacity(0.105))
         .bg(chrome_ink().opacity(0.055))
@@ -132,6 +145,7 @@ pub(super) fn resource_square_button(id: String) -> gpui::Stateful<gpui::Div> {
         .size(px(22.0))
         .items_center()
         .justify_center()
+        .rounded(px(RESOURCE_CONTROL_RADIUS))
         .border_1()
         .border_color(chrome_ink().opacity(0.16))
         .bg(chrome_ink().opacity(0.14))

@@ -724,7 +724,7 @@ function OfficialExtensionList({
         const runtimeId = OFFICIAL_EXTENSION_RUNTIME_IDS[extension.id];
         const runtime = runtimeId ? statusById.get(runtimeId) : undefined;
         const scopeKey = officialViewScopeKey(extension.id);
-        // An app-wide page has no project to be narrowed to, so it shows the switch alone.
+        // An app-wide entry has no project to be narrowed to, so it shows the switch alone.
         const scoped = extension.appWide !== true;
         return (
           <Fragment key={extension.id}>

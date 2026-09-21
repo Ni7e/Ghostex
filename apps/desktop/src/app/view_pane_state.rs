@@ -65,7 +65,6 @@ impl GhostexGpuiApp {
                 self.record_open_view_tab(view);
                 self.last_open_view_mode = Some(view);
                 self.view_panel_picker_open = false;
-                self.ensure_ghostex_page_panel(view, cx);
             }
             None => self.view_panel_maximized = false,
         }

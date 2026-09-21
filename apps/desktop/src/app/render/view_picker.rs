@@ -1,5 +1,5 @@
 //! The view panel with no view in it: a card per view the project could open, grouped built-ins,
-//! then your views and extensions, then the Ghostex pages.
+//! then your views and extensions.
 
 use gpui::AnyElement;
 use gpui::FontWeight;
@@ -21,20 +21,18 @@ use crate::app::helpers::*;
 use crate::app::model::*;
 use crate::*;
 
-/// Which of the picker's three groups a view belongs to. Ruling 13: the picker lists everything, so
+/// Which of the picker's two groups a view belongs to. Ruling 13: the picker lists everything, so
 /// the groups are only how it is read, never what it leaves out.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ViewPickerGroup {
     BuiltIn,
     Extension,
-    Ghostex,
 }
 
 impl ViewPickerGroup {
     fn of(mode: TitlebarMode) -> Self {
         match mode {
             TitlebarMode::Extension(_) => Self::Extension,
-            TitlebarMode::Ghostex(_) => Self::Ghostex,
             _ => Self::BuiltIn,
         }
     }
@@ -44,7 +42,6 @@ impl ViewPickerGroup {
         match self {
             Self::BuiltIn => None,
             Self::Extension => Some("YOUR VIEWS AND EXTENSIONS"),
-            Self::Ghostex => Some("GHOSTEX"),
         }
     }
 }
@@ -58,7 +55,6 @@ fn view_picker_description(mode: TitlebarMode) -> &'static str {
         TitlebarMode::Kanban => "Plan work and track task progress.",
         TitlebarMode::Automate => "Run repeatable project routines.",
         TitlebarMode::Manage => "Notes, plans and reference files.",
-        TitlebarMode::Ghostex(page) => page.description(),
         TitlebarMode::Extension(_) | TitlebarMode::Agents => "",
     }
 }
@@ -66,8 +62,7 @@ fn view_picker_description(mode: TitlebarMode) -> &'static str {
 impl GhostexGpuiApp {
     /// CDXC:Workarea 2026-09-20 DECISION:
     /// User (screen 02, ruling 13): with the panel open and nothing selected, it shows a picker of
-    /// every view this project can open — built-ins, then your views and extensions, then the
-    /// Ghostex pages — with single-letter shortcuts while it has focus and a link to the Settings
+    /// every view this project can open — built-ins, then your views and extensions — with single-letter shortcuts while it has focus and a link to the Settings
     /// scope editor at the bottom. Only views the project's own scope hides are missing from it.
     pub(crate) fn render_view_picker(&mut self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let modes = self.view_picker_entries();
@@ -81,6 +76,7 @@ impl GhostexGpuiApp {
         }
         let mut body = v_flex()
             .w_full()
+            .flex_shrink_0()
             .max_w(px(VIEW_PICKER_CONTENT_WIDTH))
             .items_center()
             .child(
@@ -122,8 +118,17 @@ impl GhostexGpuiApp {
                     row = row.child(self.render_view_picker_card(*item, cx));
                 }
                 if pair.len() == 1 {
-                    // The odd card keeps its column instead of stretching across both.
-                    row = row.child(div().flex_1().min_w_0());
+                    // The odd card keeps its column instead of stretching across both. The spacer
+                    // carries the card's own padding and border, or the card would be that much
+                    // wider than its column and wrap its text differently from how it was measured.
+                    row = row.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .px(px(14.0))
+                            .border_1()
+                            .border_color(gpui::transparent_black()),
+                    );
                 }
                 body = body.child(row);
             }
@@ -261,6 +266,7 @@ impl GhostexGpuiApp {
     fn render_view_picker_manage_link(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         div()
             .id("ghostex-gpui-view-picker-manage")
+            .flex_shrink_0()
             .mt(px(14.0))
             .text_size(px(12.0))
             .text_color(titlebar_inactive_text_color())
@@ -325,6 +331,6 @@ fn view_picker_shortcut(mode: TitlebarMode) -> Option<char> {
         TitlebarMode::Kanban => Some('K'),
         TitlebarMode::Automate => Some('U'),
         TitlebarMode::Manage => Some('D'),
-        TitlebarMode::Agents | TitlebarMode::Extension(_) | TitlebarMode::Ghostex(_) => None,
+        TitlebarMode::Agents | TitlebarMode::Extension(_) => None,
     }
 }

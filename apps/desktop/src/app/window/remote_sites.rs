@@ -354,10 +354,13 @@ impl RemoteSitesPanel {
 
     /// "…and close the dropdown", for the rows that open a site. As a Browser start page there is
     /// nothing to close: the click navigates the very pane the list is drawn in.
-    fn close(&self, window: &mut Window, _cx: &mut gpui::Context<Self>) {
+    fn close(&self, window: &mut Window, cx: &mut gpui::Context<Self>) {
         if self.host == GpuiTitlebarPanelHost::ViewPanel {
             return;
         }
+        let _ = self.main_app.update(cx, |app, cx| {
+            app.clear_gpui_titlebar_popup_from_window(GpuiTitlebarPopupKind::RemoteSites, cx)
+        });
         window.remove_window();
     }
 
@@ -680,6 +683,7 @@ fn site_button(id: String, label: &'static str) -> gpui::Stateful<gpui::Div> {
         .h(px(22.0))
         .items_center()
         .justify_center()
+        .rounded(px(RESOURCE_CONTROL_RADIUS))
         .border_1()
         .border_color(chrome_ink().opacity(0.13))
         .bg(chrome_ink().opacity(0.08))
@@ -740,7 +744,8 @@ impl Render for RemoteSitesPanel {
         } else {
             "No sites checked".into()
         };
-        resource_panel_frame().child(v_flex().size_full().overflow_hidden()
+        // Filling a browser pane as its start page, the frame keeps square corners.
+        resource_panel_frame().when(self.host == GpuiTitlebarPanelHost::ViewPanel, |frame| frame.rounded_none()).child(v_flex().size_full().overflow_hidden()
             .child(resource_header()
                 .child(resource_heading()
                     .child(site_icon(BROWSER_ICON_WORLD, 18.0).text_color(chrome_ink().opacity(0.96)))

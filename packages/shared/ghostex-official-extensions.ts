@@ -61,10 +61,8 @@ export type GhostexOfficialExtensionId =
 
 export type GhostexOfficialExtension = {
   /**
-   * CDXC:Workarea 2026-09-20 DECISION:
-   * User: Ask Ghostex, Tips & Tricks and Resources are app-wide pages, so they are available in every project
-   * regardless of scope. An app-wide entry has an on/off switch and nothing else: no "where it appears" editor,
-   * because there is no project it could be narrowed to.
+   * CDXC:Titlebar 2026-09-21 DECISION:
+   * User: Ask Ghostex, Tips & Tricks and Resources open as overlays from the ⋯ menu again (no longer view tabs), and stay app-wide: available in every project regardless of scope. An app-wide entry has an on/off switch and nothing else: no "where it appears" editor, because there is no project it could be narrowed to.
    */
   appWide?: true;
   description: string;
@@ -113,9 +111,9 @@ export const GHOSTEX_OFFICIAL_EXTENSIONS: readonly GhostexOfficialExtension[] = 
   },
   {
     appWide: true,
-    description: 'A page of short tips for getting more out of Ghostex, opened from the ⋯ menu.',
+    description: 'A panel of short tips for getting more out of Ghostex, opened from the ⋯ menu.',
     id: 'tips',
-    placement: 'view',
+    placement: 'titlebar-button',
     settingsKey: 'tipsAndTricksTitlebarButtonHidden',
     title: 'Tips & Tricks',
   },
@@ -129,14 +127,15 @@ export const GHOSTEX_OFFICIAL_EXTENSIONS: readonly GhostexOfficialExtension[] = 
   {
     appWide: true,
     description:
-      'A page of sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.',
+      'A ⋯ menu entry with sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.',
     id: 'help',
-    placement: 'view',
+    placement: 'titlebar-button',
     settingsKey: 'helpTitlebarButtonHidden',
     title: 'Ghostex Help',
   },
   {
-    description: 'The Browser view\u2019s start page, listing development servers running on this computer.',
+    description:
+      'A ⋯ menu panel listing development servers running on this computer. A new Browser tab shows the same list.',
     id: 'devServers',
     placement: 'titlebar-button',
     settingsKey: 'devServersTitlebarButtonHidden',
@@ -144,9 +143,10 @@ export const GHOSTEX_OFFICIAL_EXTENSIONS: readonly GhostexOfficialExtension[] = 
   },
   {
     appWide: true,
-    description: 'A page listing what Ghostex is running right now, with the CPU and memory each part is using.',
+    description:
+      'A ⋯ menu panel listing what Ghostex is running right now, with the CPU and memory each part is using.',
     id: 'resources',
-    placement: 'view',
+    placement: 'titlebar-button',
     settingsKey: 'resourcesTitlebarButtonHidden',
     title: 'Resources',
   },

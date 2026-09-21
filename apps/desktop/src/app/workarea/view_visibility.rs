@@ -138,21 +138,6 @@ impl GhostexGpuiApp {
                     disabled_reason: None,
                 }),
         );
-        // CDXC:Workarea 2026-09-20 DECISION:
-        // User (screen 07): Ask Ghostex, Tips & Tricks and Resources are views you open as tabs.
-        // They are app-wide, so nothing about the project makes them unavailable; they come last
-        // because `titlebarViewOrder` is the project views' order and these are not in it.
-        items.extend(
-            GhostexPage::ALL
-                .into_iter()
-                .map(TitlebarMode::Ghostex)
-                .filter(|mode| !gpui_titlebar_mode_hidden_from_settings(*mode))
-                .map(|mode| TitlebarModeSwitcherItem {
-                    mode,
-                    is_available: true,
-                    disabled_reason: None,
-                }),
-        );
         // CDXC:Titlebar 2026-09-20 DECISION:
         // User: the view order mixes built-in, extension, and custom views, and it is what a newly opened view's tab position is seeded from. Option+1..9 follows the tabs in the view panel (screen 07), falling through to this order for a number past the last tab.
         // This supersedes the 2026-09-09 wording that the numbers followed the titlebar's displayed list, which no longer exists.

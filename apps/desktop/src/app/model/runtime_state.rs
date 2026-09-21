@@ -420,8 +420,6 @@ impl ProjectScopedWorkareaAvailability {
         */
         match mode {
             TitlebarMode::Agents => true,
-            // A Ghostex page belongs to the app, not to a project, so no project context can take it away.
-            TitlebarMode::Ghostex(_) => true,
             TitlebarMode::Extension(_) => self.project_context.has_project_scoped_workareas(),
             TitlebarMode::Source => self.project_features.source && !self.active_project_is_remote,
             TitlebarMode::Browser | TitlebarMode::Kanban | TitlebarMode::Automate => {
@@ -524,7 +522,7 @@ impl ProjectWorkareaCefSurfaceSlotKey {
             TitlebarMode::Automate => Self::Automate,
             TitlebarMode::Manage => Self::Manage,
             TitlebarMode::Extension(id) => Self::Extension(id),
-            TitlebarMode::Agents | TitlebarMode::Browser | TitlebarMode::Ghostex(_) => {
+            TitlebarMode::Agents | TitlebarMode::Browser => {
                 return None;
             }
         })

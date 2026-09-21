@@ -9,6 +9,7 @@ impl GpuiTitlebarReadingPanel {
             ("Setup", "titlebar/tool.svg"),
             ("Updates", "titlebar/history.svg"),
         ];
+        let actions_len = actions.len();
         h_flex()
             .h(px(TITLEBAR_POPUP_READING_HEADER_HEIGHT))
             .flex_shrink_0()
@@ -47,6 +48,9 @@ impl GpuiTitlebarReadingPanel {
                             .gap(px(6.0))
                             .border_l_1()
                             .border_color(chrome_ink().opacity(0.12))
+                            .when(action_index == actions_len - 1, |this| {
+                                this.rounded_tr(px(RESOURCE_PANEL_RADIUS - 1.0))
+                            })
                             .px(px(15.0))
                             .text_size(px(TITLEBAR_POPUP_READING_HEADER_BUTTON_TEXT_SIZE))
                             .font_weight(FontWeight::NORMAL)
@@ -125,6 +129,7 @@ impl GpuiTitlebarReadingPanel {
                     .size(px(28.0))
                     .items_center()
                     .justify_center()
+                    .rounded(px(RESOURCE_CARD_RADIUS))
                     .bg(chrome_ink().opacity(0.10))
                     .child(titlebar_svg_icon(
                         tip.icon_path,
@@ -163,6 +168,7 @@ impl GpuiTitlebarReadingPanel {
             .min_h(px(72.0))
             .items_start()
             .gap(px(10.0))
+            .rounded(px(RESOURCE_CARD_RADIUS))
             .border_1()
             .border_color(chrome_ink().opacity(0.10))
             .bg(resource_card_fill())
@@ -185,6 +191,7 @@ impl GpuiTitlebarReadingPanel {
                     .self_end()
                     .items_center()
                     .justify_center()
+                    .rounded(px(RESOURCE_CONTROL_RADIUS))
                     .text_color(if read {
                         chrome_ink().opacity(0.46)
                     } else {
@@ -230,6 +237,7 @@ impl GpuiTitlebarReadingPanel {
             .min_h(px(72.0))
             .items_start()
             .gap(px(10.0))
+            .rounded(px(RESOURCE_CARD_RADIUS))
             .border_1()
             .border_color(chrome_ink().opacity(0.10))
             .bg(resource_card_fill())
@@ -255,6 +263,7 @@ impl GpuiTitlebarReadingPanel {
                     .size(px(28.0))
                     .items_center()
                     .justify_center()
+                    .rounded(px(RESOURCE_CARD_RADIUS))
                     .bg(rgb(0xf59e0b).opacity(0.14))
                     // The dark-mode amber is a pale yellow glyph on a pale yellow tile once the
                     // page is white, so light mode takes the darker end of the same ramp.
@@ -486,7 +495,6 @@ impl GpuiTitlebarReadingPanel {
         v_flex()
             .size_full()
             .overflow_hidden()
-            .bg(titlebar_popup_menu_background())
             .child(self.render_tips_header(cx))
             .child(
                 div()

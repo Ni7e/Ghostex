@@ -95,7 +95,6 @@ pub(crate) fn valid_non_command_shell_focus_with_browser_tabs(
                         | TitlebarMode::Kanban
                         | TitlebarMode::Automate
                         | TitlebarMode::Manage
-                        | TitlebarMode::Ghostex(_)
                 ) =>
         {
             Some(focus)
@@ -120,8 +119,7 @@ pub(crate) fn default_shell_focus_for_mode(
         | TitlebarMode::Kanban
         | TitlebarMode::Automate
         | TitlebarMode::Manage
-        | TitlebarMode::Extension(_)
-        | TitlebarMode::Ghostex(_) => ShellFocusTarget::ProjectEditorSurface(active_mode),
+        | TitlebarMode::Extension(_) => ShellFocusTarget::ProjectEditorSurface(active_mode),
     }
 }
 
