@@ -237,7 +237,7 @@ describe('session chat session-option catalogs', () => {
     if (catalog.model.dispatch.kind !== 'command-confirm-picker') {
       throw new Error('cursor model must dispatch a filtered picker command');
     }
-    expect(catalog.model.dispatch.build('cursor-grok-4.6')).toBe('/model Cursor Grok 4.6');
+    expect(catalog.model.dispatch.build('cursor-grok-4.6')).toBe('/model Grok 4.6');
     expect(catalog.optionsForModel('cursor-grok-4.6')[0]?.choices?.map((choice) => choice.label)).toEqual([
       'Low',
       'Medium',

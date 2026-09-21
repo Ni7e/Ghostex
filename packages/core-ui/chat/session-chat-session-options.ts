@@ -396,7 +396,7 @@ function buildCursorCatalog(
   agent: AgentModelCatalogAgent
 ): SessionChatSessionOptionCatalog {
   const choices = modelChoices(agent);
-  /* The picker filter needs the row's literal text ("Cursor Grok 4.6"). */
+  /* The picker filter needs the row's literal text ("Claude Opus 5"). */
   const pickerFilter = (value: string): string => {
     const choice = choices.find((entry) => entry.value === value);
     return choice?.pickerLabel ?? choice?.label ?? value;

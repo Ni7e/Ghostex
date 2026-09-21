@@ -1,7 +1,7 @@
 {
   "_readme": "Do not edit blind. docs/important/agent-model-catalog.md explains the schema, how every Ghostex client loads this file from GitHub (with the bundled copy as the offline source), how to publish a change, and how to re-collect models, efforts and fast mode from the agent CLIs' own /model pickers.",
   "schemaVersion": 1,
-  "updatedAt": "2026-09-09",
+  "updatedAt": "2026-09-21",
   "effortLabels": {
     "none": "None",
     "minimal": "Minimal",
@@ -162,7 +162,7 @@
     },
     "cursor": {
       "name": "Cursor CLI",
-      "cliVersion": "2026.08.31-4057e58",
+      "cliVersion": "2026.09.18-9a7762b",
       "modelCommand": "/model <pickerLabel>",
       "effortCommand": null,
       "efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
@@ -187,9 +187,18 @@
           "fastMode": false
         },
         {
+          "value": "grok-4.7",
+          "label": "Grok 4.7",
+          "pickerLabel": "Grok 4.7",
+          "contextWindows": ["256K"],
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "defaultEffort": "high",
+          "fastMode": true
+        },
+        {
           "value": "cursor-grok-4.6",
           "label": "Grok 4.6",
-          "pickerLabel": "Cursor Grok 4.6",
+          "pickerLabel": "Grok 4.6",
           "efforts": ["low", "medium", "high", "xhigh"],
           "fastMode": true
         },
@@ -233,6 +242,15 @@
           "label": "Gemini 3.8 Flash",
           "pickerLabel": "Gemini 3.8 Flash",
           "efforts": ["low", "medium", "high"],
+          "defaultEffort": "high",
+          "fastMode": false
+        },
+        {
+          "value": "muse-spark-1.3",
+          "label": "Muse Spark 1.3",
+          "pickerLabel": "Muse Spark 1.3",
+          "contextWindows": ["300K", "1M"],
+          "efforts": ["minimal", "low", "medium", "high", "xhigh", "max"],
           "defaultEffort": "high",
           "fastMode": false
         },
@@ -454,7 +472,7 @@
         {
           "value": "cursor-grok-4.5",
           "label": "Grok 4.5",
-          "pickerLabel": "Cursor Grok 4.5",
+          "pickerLabel": "Grok 4.5",
           "efforts": ["low", "medium", "high"],
           "fastMode": true,
           "group": "legacy"
@@ -484,7 +502,7 @@
           "group": "legacy"
         }
       ],
-      "notes": "Labels drop the 'Claude' and 'Cursor' words the TUI shows; pickerLabel is the exact row text the /model filter needs. Row count re-read on 2026-09-03 (36 rows; Gemini 3.8 Flash added between Cursor Grok 4.5 and Gemini 3.7 Flash)."
+      "notes": "Labels drop the 'Claude' word the TUI shows (Cursor dropped its own 'Cursor Grok' prefix in 2026.09.18); pickerLabel is the exact row text the /model filter needs. Row count re-read on 2026-09-03 (36 rows; Gemini 3.8 Flash added between Cursor Grok 4.5 and Gemini 3.7 Flash)."
     },
     "grok": {
       "name": "Grok Build",

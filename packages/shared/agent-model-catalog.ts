@@ -27,8 +27,8 @@ export interface AgentModelCatalogModel {
   label: string;
   /**
    * The exact row text the CLI's own picker shows, when it differs from
-   * `label`. Cursor's `/model <filter>` needs the literal "Cursor Grok 4.6"
-   * even though the pill says "Grok 4.6".
+   * `label`. Cursor's `/model <filter>` needs the literal "Claude Opus 5"
+   * even though the pill says "Opus 5".
    */
   pickerLabel?: string;
   description?: string;
