@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use ghostex_gx_chat_core::{
-    questions, ChatContext, ChatState, Document, Effect, Event, RpcOutcome, StorageKey, UserAction,
+    questions, ChatContext, ChatState, Document, Effect, RpcOutcome, UserAction,
 };
 use ghostex_gx_protocol::ChatStatus;
 use serde_json::Value;
@@ -88,37 +88,43 @@ fn main() -> ExitCode {
             .cloned()
             .unwrap_or_default();
         world.context = ChatContext::at(now_ms);
+        ghostex_gx_chat_core::session::working::stamp_working_started(&mut world.state, now_ms);
         match (kind, method) {
-            ("in", "start") => world.settle(questions::sync(&mut world_state(&mut world))),
+            ("in", "start") => {
+                let effects = questions::sync(&mut world.state);
+                world.boot.extend(effects);
+            }
             ("in", "event") => {
                 if let Some(frame) = arguments.first() {
                     apply_frame(&mut world.state, frame);
                 }
                 let effects = questions::sync(&mut world.state);
-                world.settle(effects);
+                world.queue.extend(effects);
             }
             ("in", "action") => {
                 if let Some(action) = arguments
                     .first()
                     .and_then(|value| serde_json::from_value::<UserAction>(value.clone()).ok())
                 {
-                    let effects =
-                        questions::handle(&mut world.state, &action, &world.context.clone());
-                    world.settle(effects);
+                    let context = world.context;
+                    let effects = questions::handle(&mut world.state, &action, &context);
+                    world.queue.extend(effects);
                 }
             }
             ("in", "tick") => {
                 let effects = questions::sync(&mut world.state);
-                world.settle(effects);
+                world.queue.extend(effects);
             }
             ("doc", "take") => {
                 let Some(row) = expected.get(&n) else {
                     continue;
                 };
-                let Some(snapshot) = row.pointer("/document/snapshot") else {
+                let Some(snapshot) = row.pointer("/document/snapshot").cloned() else {
+                    world.settle();
                     continue;
                 };
                 if snapshot.is_null() {
+                    world.settle();
                     continue;
                 }
                 let mine = world.document();
@@ -138,6 +144,9 @@ fn main() -> ExitCode {
                         *differences.entry(pointer).or_default() += 1;
                     }
                 }
+                // The host answers a frame's requests after it drains it, so the answers land on
+                // the next turn of the loop rather than inside the one that asked.
+                world.settle();
             }
             _ => {}
         }
@@ -157,29 +166,22 @@ fn main() -> ExitCode {
     ExitCode::FAILURE
 }
 
-/// Borrow helper so the `start` arm reads the same as the others.
-fn world_state(world: &mut World) -> &mut ChatState {
-    &mut world.state
-}
-
 /// The state family c reads, plus the in-memory client storage its effects use.
 #[derive(Default)]
 struct World {
     state: ChatState,
     context: ChatContext,
     storage: BTreeMap<(String, String), String>,
+    queue: Vec<Effect>,
+    boot: Vec<Effect>,
 }
 
 impl World {
-    /// Answers every effect family c raised, the way the host would, until it stops asking.
-    fn settle(&mut self, effects: Vec<Effect>) {
-        let mut queue = effects;
-        for _ in 0..32 {
-            if queue.is_empty() {
-                return;
-            }
+    /// Answers one round of the effects family c raised, the way the host's loop does.
+    fn settle(&mut self) {
+        {
             let mut next = Vec::new();
-            for effect in std::mem::take(&mut queue) {
+            for effect in std::mem::take(&mut self.queue) {
                 match effect {
                     Effect::ReadStorage { key } => {
                         let value = self
@@ -216,7 +218,10 @@ impl World {
                     _ => {}
                 }
             }
-            queue = next;
+            // The chat's own boot read answers before the strip's does, so what `start` asked for
+            // lands one turn of the loop later than what a frame or an action asks for.
+            next.append(&mut self.boot);
+            self.queue = next;
         }
     }
 
@@ -243,8 +248,10 @@ fn apply_frame(state: &mut ChatState, frame: &Value) {
             .filter_map(|message| serde_json::from_value(message.clone()).ok())
             .collect::<Vec<_>>();
         if frame_type == "sessionChatAppended" {
+            state.messages.list.extend(parsed.clone());
             state.messages.composed.extend(parsed);
         } else {
+            state.messages.list.clone_from(&parsed);
             state.messages.composed = parsed;
         }
     }
@@ -310,11 +317,4 @@ fn compare(
         (Some(left), Some(right)) if left != right => out.push(pointer.clone()),
         _ => {}
     }
-}
-
-/// Unused, but keeps the event enum in the example's imports so a contract change is caught here
-/// too.
-#[allow(dead_code)]
-fn events_exist(event: &Event, key: &StorageKey) -> bool {
-    matches!(event, Event::Tick) && key.store.is_empty()
 }

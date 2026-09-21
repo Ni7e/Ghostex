@@ -93,7 +93,8 @@ pub fn project(
             .filter(|error| !error.is_empty())
             .unwrap_or_else(|| state.save_error.clone()),
         previous_disabled: held || index == 0,
-        next_disabled: held || index + 1 >= pending.len(),
+        // `index === pending.length - 1`: with nothing pending that is `0 === -1`, false.
+        next_disabled: held || index as i64 == pending.len() as i64 - 1,
         selected: if typed.is_empty() {
             draft.indices.clone()
         } else {

@@ -17,7 +17,7 @@ use crate::questions::drafts::{
 use crate::questions::gates;
 use crate::questions::interactive::{is_answered, select_question_option};
 use crate::questions::model::{InteractivePrompt, TerminalNotice};
-use crate::questions::notice_state::{dismissed_notice_state, notice_dismiss_key};
+use crate::questions::notice_state::dismissed_notice_state;
 use crate::questions::sync::sync;
 use crate::questions::terminal_prompts::{
     terminal_notice_action_answer, terminal_notice_choice_answer,
@@ -450,9 +450,4 @@ fn with_identity(state: &ChatState, params: Value) -> Value {
 fn allocate(state: &mut ChatState) -> u64 {
     state.questions.next_request_id += 1;
     state.questions.next_request_id
-}
-
-/// The dismiss key of the notice on screen, for the settle path.
-pub(crate) fn active_notice_dismiss_key(state: &ChatState) -> Option<String> {
-    notice_dismiss_key(TerminalNotice::parse(state.session.terminal_notice.as_ref()).as_ref())
 }

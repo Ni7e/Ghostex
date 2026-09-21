@@ -104,12 +104,11 @@ fn account_busy(_state: &ChatState) -> bool {
     false
 }
 
-/// Whether the turn is live.
+/// Whether the turn is live, which is the document's `working` key.
 ///
-/// To fold into family a: this is the document's `working` key, which `SessionState` carries the
-/// inputs for but does not derive yet. Only the async strip's `working` flag reads it here.
+/// Family a derives it, lifecycle settle and all; the async strip only reports it.
 pub fn working(state: &ChatState) -> bool {
-    !state.session.interrupted && (state.session.server_working || state.session.external_working)
+    crate::session::working::is_working(state)
 }
 
 /// What the card shows for the prompt on screen.
