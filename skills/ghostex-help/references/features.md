@@ -228,11 +228,11 @@ where they are while you open, change and close views.
   (below any pinned headers, where scrolling allows), then blinks its outline
   twice: pale blue in light mode and white in dark mode. Active sessions also have a slightly
   stronger background and border in light mode.
-- Pane memory: the Commands pane is remembered once for a window with no view open
-  and once for a window with one open, the same for every project, so switching
-  projects never moves it. The sidebar keeps one state everywhere by default;
-  "Sidebar visibility memory" (`sidebarVisibilityMemory`, Advanced) can remember it
-  the same two ways instead, and then a project switch that hides it leaves it
+- Pane memory: each project remembers whether its Commands pane is open or minimized,
+  and opening, closing or switching a view never changes it. The sidebar keeps one
+  state everywhere by default; "Sidebar visibility memory" (`sidebarVisibilityMemory`,
+  Advanced) can instead remember it once for a window with no view open and once for
+  a window with one open, and then a project switch that hides it leaves it
   floating while you hover it. While collapsed, hovering the strip at the window's
   left edge floats the sidebar back over your work, and it slides away when you
   move off it. If you have also expanded a view to fill the window, the strip
@@ -409,8 +409,13 @@ when you open it.
   while an icon-and-title ghost follows the pointer; the insertion line marks
   where the session moves when you drop it.
 - Recent Sessions (Cmd+P) opens Quick Access to jump between sessions.
-  Its four tabs are Commands, Projects, Sessions, and Saved Prompts; Cmd+1
-  through Cmd+4 switch between them. Cmd+Shift+P opens Commands directly to
+  Its four tabs are Commands, Projects, Sessions, and Saved Prompts; they sit
+  at the bottom left of the window and Cmd+1 through Cmd+4 switch between
+  them. Filters (Saved/Recovered/Sent, All/Closed/External, project, tags) are
+  dropdowns at the right of the search line. Enter runs the selected row;
+  Cmd+K, the Actions button at the bottom right, or a right-click lists
+  everything else the row can do (star, tag, copy, edit, delete, remove, New
+  Prompt) with each action's hotkey. Cmd+Shift+P opens Commands directly to
   search app commands, pane actions, and project actions. The Commands row at
   the bottom of the sidebar opens the same thing, and the gear beside it opens
   Settings in one click.
@@ -423,8 +428,8 @@ when you open it.
   a terminal with `zcode --resume <session-id>`; install the ZCode CLI on that
   computer first. Deleted, archived, running, and subagent ZCode conversations
   are excluded from discovery.
-- Search by Prompt (More Options, the floating Search by Prompt button at the
-  bottom of Quick Access > Sessions, the `openFindPrompts` hotkey, default
+- Search by Prompt (More Options, Actions (Cmd+K) in Quick Access > Sessions,
+  the `openFindPrompts` hotkey, default
   `cmd+shift+f`, or `gx f` in a terminal) fuzzy-searches every prompt you ever
   sent to an agent; Enter resumes that session, and starred prompts stay on
   top. Inside the picker the agent and project filters are dropdowns at the top
@@ -636,8 +641,10 @@ The chat input row has one model pill. It shows the agent's logo, the model, and
 after it the reasoning level and the context window, for example
 "Fable 5.1 High · 200K". Click it to open the model picker: a row of agent tabs
 with a starred Favorites tab first, a search box, the models of the chosen tab,
-and at the bottom Reasoning and, for models that offer more than one, Context
-Window, each opening a short list to the side. Type to filter the list, move
+and along the bottom a button each for the reasoning level (brain), the context
+window (chart bars, for models that offer more than one) and Fast mode (bolt).
+Clicking the context window or Fast mode button switches it; the reasoning button
+opens a short list to the side. Type to filter the list, move
 with the arrow keys and press Enter, or press Cmd+1 to Cmd+9 to pick one of the
 first nine rows. Click a row's star to keep that model on the Favorites tab.
 
@@ -828,7 +835,9 @@ conversations stay on disk instead of being deleted after 30 days; a value you
 set yourself is left unchanged. Agent approvals ("accept all") is a
 per-machine default with per-project overrides. Actions (Settings > Actions)
 are saved terminal commands or browser URLs shown on project headers and in
-the header’s Start (Quick Actions) menu; Global Actions apply to every project.
+the header’s Quick Actions button, which shows the name and icon of the Action
+you used last and runs it again on click (its caret opens the full list; it
+reads Start until an Action exists); Global Actions apply to every project.
 
 Agents Hub lets you browse and edit agent files in Skills, MDs, Hooks,
 Configs & MCPs, and Agent Sync. In MDs, expand Shared agent markdown to see the
@@ -1129,15 +1138,17 @@ docs directory), `hideProjectHeaderDiffStats`,
 
 ## Appearance and app
 
-Theme, background contrast and tint, accent color, active pane outline, and
+Theme, background contrast and tint, active pane outline, and
 the app icon live under Settings > General > Theme, the first section.
 App theme offers Dark Gray, Light, and System. Chat and terminal default to
 Follow app, with optional Light, Dark, or System overrides in the same section.
 System is the app default and follows the operating system appearance. Existing
 saved app themes are preserved; dark contrast and tint return unchanged when switching back from Light.
 In light mode, the sidebar and the window chrome have solid light-gray (#f4f4f5) backgrounds. Enable Show
-Advanced to find Dark theme background contrast, Dark theme background tint, and
-Dark theme accent color; these controls do not recolor light-mode chrome.
+Advanced to find Dark theme background contrast and Dark theme background tint;
+these controls do not recolor light-mode chrome. The accent color (status
+highlights, accent text, advanced-setting markers) has no setting of its own: it
+follows the background tint's hue, and a neutral tint keeps the sky-blue accent.
 Keep Awake (Power)
 prevents sleep while agents work.
 Advanced holds Enable Experimental Features. The separate Debugging page sits
@@ -1155,7 +1166,7 @@ In the Settings table of contents, click a page or section title to go there.
 Only the small chevron on its right expands or collapses its entries.
 
 Related settings: `sidebarTheme`, `customSidebarTitlebarBackgroundDarknessPercent`,
-`customSidebarTitlebarBackgroundTintColor`, `accentColor`,
+`customSidebarTitlebarBackgroundTintColor`,
 `showActivePaneOutline`, `appIconSourceId`, the `keepAwake*` rows,
 `showBetaFeatures`, `debuggingMode`.
 
