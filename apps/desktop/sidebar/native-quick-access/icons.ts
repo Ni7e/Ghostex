@@ -61,6 +61,9 @@ export function hotkeyActionIconName(action: ghostexHotkeyAction): string {
   if (action.kind === 'openHotkeys') return 'keyboard';
   if (action.kind === 'toggleSidebarCollapsed') return 'layout-sidebar';
   if (action.kind === 'toggleViewPanel') return 'layout-sidebar-right-expand';
+  if (action.kind === 'expandViewPanel' || action.kind === 'expandViewPanelFully') {
+    return 'arrows-diagonal';
+  }
   if (action.kind === 'renameActiveSession') return 'edit';
   if (action.kind === 'focusedPaneAction') return focusedPaneIconName(action.focusedPaneAction);
   if (action.kind === 'focusAdjacentGroup' || action.kind === 'cyclePaneTab') {

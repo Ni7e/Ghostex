@@ -2162,7 +2162,7 @@ impl GhostexGpuiApp {
                     opens a view that is not open yet. This supersedes the 2026-09-09 rule that they
                     followed the titlebar's displayed view list, because that list is gone.
                     */
-                    let tabs = self.open_view_tabs();
+                    let tabs = self.strip_view_tabs();
                     if let Some(mode) = tabs.get(index).copied() {
                         self.switch_workarea_from_hotkey(mode, window, cx);
                         return;
@@ -2205,6 +2205,14 @@ impl GhostexGpuiApp {
                 }
                 if action_id == "toggleViewPanel" {
                     self.toggle_view_panel(window, cx);
+                    return;
+                }
+                if action_id == "expandViewPanel" {
+                    self.toggle_view_panel_maximized(cx);
+                    return;
+                }
+                if action_id == "expandViewPanelFully" {
+                    self.toggle_view_panel_fully_expanded(cx);
                     return;
                 }
                 if action_id == "openExtensions" {

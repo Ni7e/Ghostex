@@ -76,6 +76,8 @@ export function runNativeSidebarHotkey(ui: NativeSidebarUiState, actionId: strin
     case 'switchTitlebarView':
     case 'terminalToolbarAction':
     case 'toggleViewPanel':
+    case 'expandViewPanel':
+    case 'expandViewPanelFully':
       post({ type: 'runGhostexHotkeyAction', actionId: action.id });
       break;
   }

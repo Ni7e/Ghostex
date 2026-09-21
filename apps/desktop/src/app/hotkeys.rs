@@ -267,6 +267,8 @@ pub(crate) const GPUI_DEFAULT_GHOSTEX_HOTKEYS: &[(&str, &str)] = &[
     ("openHotkeys", "cmd+."),
     ("toggleSidebarCollapsed", "cmd+b"),
     ("toggleViewPanel", "cmd+alt+b"),
+    ("expandViewPanel", "cmd+ctrl+e"),
+    ("expandViewPanelFully", "cmd+ctrl+shift+e"),
     ("renameActiveSession", "cmd+r"),
     ("openBrowserPane", "cmd+n"),
     ("switchAgentsView", ""),
@@ -631,6 +633,14 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
     if action_id == "openNewThreadPalette" {
         return true;
     }
+    // CDXC:Workarea 2026-09-21 WHY:
+    // The view panel toggle is window chrome, so it must win from every responder like the New Thread picker. It was only listed for the owners a view leaves behind while it is open, so Cmd+Option+B closed the panel but could not open it again once the keyboard sat with a responder outside those lists: the router passed the chord on to that responder and GPUI never saw it.
+    if matches!(
+        action_id,
+        "toggleViewPanel" | "expandViewPanel" | "expandViewPanelFully"
+    ) {
+        return true;
+    }
     match owner {
         GpuiKeyboardOwner::CompositedTerminal(_)
         | GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::TerminalSurface(_)) => true,
@@ -653,7 +663,6 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
                 | "navigateHistoryBack"
                 | "navigateHistoryForward"
                 | "openNotifications"
-                | "toggleViewPanel"
                 | "toggleSidebarCollapsed"
         ),
         GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
@@ -669,7 +678,6 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
                 | "navigateHistoryBack"
                 | "navigateHistoryForward"
                 | "openNotifications"
-                | "toggleViewPanel"
                 | "toggleSidebarCollapsed"
         ),
         GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
@@ -684,22 +692,6 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
                 | "navigateHistoryBack"
                 | "navigateHistoryForward"
                 | "openNotifications"
-                | "toggleViewPanel"
-        ),
-        GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
-            FirstResponderCefSurface::SessionChat(_),
-        )) => matches!(
-            action_id,
-            "toggleChatView"
-                | "sessionNote"
-                | "focusNextPaneTab"
-                | "focusNextSession"
-                | "focusPreviousSession"
-                | "focusPreviousPaneTab"
-                | "navigateHistoryBack"
-                | "navigateHistoryForward"
-                | "toggleViewPanel"
-                | "toggleSidebarCollapsed"
         ),
         GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(_))
         | GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::GpuiWindow)

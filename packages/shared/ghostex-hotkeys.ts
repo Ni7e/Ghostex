@@ -35,6 +35,8 @@ export type ghostexHotkeyActionId =
   | 'toggleChatView'
   | 'openFindPrompts'
   | 'toggleViewPanel'
+  | 'expandViewPanel'
+  | 'expandViewPanelFully'
   | 'toggleAgentActions'
   | 'toggleSidebarCollapsed'
   | 'wakeFocusedSession'
@@ -128,6 +130,8 @@ export type ghostexHotkeyAction =
   | { id: ghostexHotkeyActionId; kind: 'switchTitlebarView'; viewIndex: number }
   | { id: ghostexHotkeyActionId; kind: 'terminalToolbarAction'; terminalToolbarAction: ghostexTerminalToolbarAction }
   | { id: ghostexHotkeyActionId; kind: 'toggleViewPanel' }
+  | { id: ghostexHotkeyActionId; kind: 'expandViewPanel' }
+  | { id: ghostexHotkeyActionId; kind: 'expandViewPanelFully' }
   | { id: ghostexHotkeyActionId; kind: 'toggleSidebarCollapsed' }
   | { direction: 'horizontal' | 'vertical'; id: ghostexHotkeyActionId; kind: 'splitFocusedPane' };
 
@@ -287,6 +291,24 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: 'Open or close the view panel beside your sessions.',
     id: 'toggleViewPanel',
     title: 'Toggle View Panel',
+  },
+  {
+    action: { id: 'expandViewPanel', kind: 'expandViewPanel' },
+    /**
+     * CDXC:Workarea 2026-09-21 DECISION:
+     * User: Expand side panel and Expand side panel fully each get a hotkey, Cmd+Ctrl based with E for expand, and the full one is the same chord with Shift held.
+     */
+    defaultKey: 'cmd+ctrl+e',
+    description: 'Expand the side panel over the sessions column, or bring the sessions back.',
+    id: 'expandViewPanel',
+    title: 'Expand Side Panel',
+  },
+  {
+    action: { id: 'expandViewPanelFully', kind: 'expandViewPanelFully' },
+    defaultKey: 'cmd+ctrl+shift+e',
+    description: 'Expand the side panel over the sessions column and hide the sidebar, or bring both back.',
+    id: 'expandViewPanelFully',
+    title: 'Expand Side Panel Fully',
   },
   {
     action: { id: 'renameActiveSession', kind: 'renameActiveSession' },

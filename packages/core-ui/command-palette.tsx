@@ -1011,7 +1011,11 @@ function BuiltInCommandIcon({ command }: { command: BuiltInPaletteCommand }) {
   if (action.kind === 'toggleSidebarCollapsed') {
     return <IconLayoutSidebar aria-hidden='true' />;
   }
-  if (action.kind === 'toggleViewPanel') {
+  if (
+    action.kind === 'toggleViewPanel' ||
+    action.kind === 'expandViewPanel' ||
+    action.kind === 'expandViewPanelFully'
+  ) {
     return <IconLayoutSidebarRightExpand aria-hidden='true' />;
   }
   if (action.kind === 'renameActiveSession') {

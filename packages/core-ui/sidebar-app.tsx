@@ -2943,7 +2943,9 @@ export function SidebarApp({
       action.kind === 'switchWorkareaView' ||
       action.kind === 'switchTitlebarView' ||
       action.kind === 'terminalToolbarAction' ||
-      action.kind === 'toggleViewPanel'
+      action.kind === 'toggleViewPanel' ||
+      action.kind === 'expandViewPanel' ||
+      action.kind === 'expandViewPanelFully'
     ) {
       vscode.postMessage({ actionId: action.id, type: 'runGhostexHotkeyAction' });
     }
