@@ -51,7 +51,7 @@ impl GhostexGpuiApp {
     /// ticked the open views.
     pub(crate) fn show_view_tab_add_menu(
         &mut self,
-        position: gpui::Point<Pixels>,
+        trigger_bounds: gpui::Bounds<Pixels>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -68,16 +68,20 @@ impl GhostexGpuiApp {
             );
         }
         let mut previous_group: Option<u8> = None;
+        // The picker's two groups, as the only thing a compact menu can show of them: a rule
+        // between the built-ins and your views and extensions. Rows are walked by kind so a
+        // built-in the saved view order has not seen yet still lists with the built-ins.
+        let mut items = items
+            .into_iter()
+            .filter(|item| {
+                item.mode != TitlebarMode::Browser
+                    && self.titlebar_mode_view_scope_allows(item.mode)
+            })
+            .collect::<Vec<_>>();
+        items.sort_by_key(|item| u8::from(item.mode.is_addon_view()));
         for item in items {
-            if item.mode == TitlebarMode::Browser
-                || !self.titlebar_mode_view_scope_allows(item.mode)
-            {
-                continue;
-            }
-            // The picker's two groups, as the only thing a compact menu can show of them: a rule
-            // between the built-ins and your views and extensions.
             let group = match item.mode {
-                TitlebarMode::Extension(_) => 1,
+                mode if mode.is_addon_view() => 1,
                 _ => 0,
             };
             if previous_group.is_some_and(|previous| previous != group) {
@@ -106,7 +110,7 @@ impl GhostexGpuiApp {
                 false,
                 Box::new(OpenGpuiExtensionsModal),
             )
-            .show(position, window, cx);
+            .toggle_below(trigger_bounds, window, cx);
     }
 
     /// CDXC:Workarea 2026-09-20 DECISION:
@@ -151,6 +155,21 @@ impl GhostexGpuiApp {
                 )
                 .separator();
         }
+        if let TitlebarMode::Extension(id) = mode
+            && mode
+                .website_provider()
+                .is_some_and(|provider| !provider.automatic())
+        {
+            menu = menu
+                .menu(
+                    format!("Modify home URL for {}…", self.project_name),
+                    Box::new(ProjectViewCommand {
+                        id: id.as_str().into(),
+                        operation: "home".into(),
+                    }),
+                )
+                .separator();
+        }
         let unavailable = !self.titlebar_mode_available(mode);
         menu = menu.menu(
             if self.view_strip_tab_pinned(ViewStripTabKey::View(mode)) {
@@ -164,7 +183,11 @@ impl GhostexGpuiApp {
             }),
         );
         menu = menu.menu_with_disabled(
-            "Reload",
+            if mode.is_storybook() {
+                "Rebuild Storybook"
+            } else {
+                "Reload"
+            },
             unavailable,
             Box::new(ReloadGpuiTitlebarView { mode_index }),
         );
@@ -188,6 +211,7 @@ impl GhostexGpuiApp {
         when the tab strip replaced the mode switcher; nothing about them changed.
         */
         if let TitlebarMode::Extension(id) = mode
+            && mode.website_provider().is_none()
             && gpui_custom_view(id).is_some_and(|view| view.definition.get("source").is_some())
         {
             menu = menu

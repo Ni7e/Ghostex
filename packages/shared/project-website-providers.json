@@ -1,0 +1,26 @@
+[
+  {
+    "id": "linear",
+    "title": "Linear",
+    "hiddenSettingsKey": "linearViewTabHidden",
+    "workspaceKind": "linear",
+    "placeholder": "https://linear.app/your-workspace",
+    "description": "Open your team's issues and projects. Choose a home URL for each project or worktree."
+  },
+  {
+    "id": "jira",
+    "title": "Jira",
+    "hiddenSettingsKey": "jiraViewTabHidden",
+    "workspaceKind": "site",
+    "placeholder": "https://your-team.atlassian.net/jira/…",
+    "description": "Keep your team's board beside your work. Choose a home URL for each project or worktree."
+  },
+  {
+    "id": "github",
+    "title": "GitHub",
+    "hiddenSettingsKey": "githubViewTabHidden",
+    "workspaceKind": "repository",
+    "placeholder": "",
+    "description": "Open this project's GitHub repository automatically from its origin remote."
+  }
+]

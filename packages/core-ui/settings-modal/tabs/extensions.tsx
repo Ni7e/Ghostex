@@ -49,6 +49,7 @@ import {
   IconTrash,
   IconWorld,
   type Icon as TablerIcon,
+  IconTerminal2,
 } from '@tabler/icons-react';
 import {
   GHOSTEX_OFFICIAL_EXTENSIONS,
@@ -105,6 +106,9 @@ type ExtensionPageSettingKey =
 const GHOSTEX_EXTENSIONS_REPO_URL = 'https://github.com/maddada/ghostex-extensions';
 
 const OFFICIAL_EXTENSION_ICONS: Record<GhostexOfficialExtensionId, TablerIcon> = {
+  linear: IconWorld,
+  jira: IconWorld,
+  github: IconGitCommit,
   automate: IconBolt,
   browser: IconWorld,
   code: IconCodeDots,
@@ -118,6 +122,8 @@ const OFFICIAL_EXTENSION_ICONS: Record<GhostexOfficialExtensionId, TablerIcon> =
   openIn: IconFolderOpen,
   quickActions: IconPlayerPlay,
   resources: IconDeviceDesktop,
+  terminal: IconTerminal2,
+  storybook: IconCodeDots,
   tips: IconInfoCircle,
 };
 

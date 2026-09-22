@@ -34,11 +34,16 @@ pub(crate) fn extension_view_scope_key(extension_id: &str) -> String {
 /// The titlebar's own slugs (`source`, `manage`) are deliberately not used as scope keys.
 pub(crate) fn titlebar_mode_official_extension_id(mode: TitlebarMode) -> Option<&'static str> {
     match mode {
+        mode if mode.website_provider().is_some() => {
+            mode.website_provider().map(|provider| provider.id.as_str())
+        }
+        mode if mode.is_storybook() => Some("storybook"),
         TitlebarMode::Source => Some("code"),
         TitlebarMode::Browser => Some("browser"),
         TitlebarMode::Kanban => Some("kanban"),
         TitlebarMode::Automate => Some("automate"),
         TitlebarMode::Manage => Some("docs"),
+        TitlebarMode::Terminal => Some("terminal"),
         // CDXC:Workarea 2026-09-20 DECISION:
         // User: the Ghostex pages are app-wide, so they are available in every project regardless of
         // scope. No scope key means nothing to hide them with, which is exactly that rule.
@@ -268,6 +273,10 @@ impl GhostexGpuiApp {
     /// Custom views keep their own availability rule, so they have no scope key.
     pub(crate) fn titlebar_mode_view_scope_key(&self, mode: TitlebarMode) -> Option<String> {
         match mode {
+            mode if mode.website_provider().is_some() => mode
+                .website_provider()
+                .map(|provider| official_view_scope_key(&provider.id)),
+            mode if mode.is_storybook() => Some(official_view_scope_key("storybook")),
             TitlebarMode::Extension(id) => {
                 (gpui_custom_view(id).is_none()).then(|| extension_view_scope_key(id.as_str()))
             }
@@ -404,6 +413,10 @@ impl GhostexGpuiApp {
     /// `custom_project_view_visible`, so they are not scoped twice.
     pub(crate) fn titlebar_mode_view_scope_allows(&self, mode: TitlebarMode) -> bool {
         match mode {
+            mode if mode.website_provider().is_some() => {
+                self.official_view_scope_allows(&mode.website_provider().unwrap().id)
+            }
+            mode if mode.is_storybook() => self.official_view_scope_allows("storybook"),
             TitlebarMode::Extension(id) => {
                 gpui_custom_view(id).is_some()
                     || self.view_scope_allows(&extension_view_scope_key(id.as_str()))

@@ -137,6 +137,31 @@ impl GhostexGpuiApp {
         self.set_view_strip_drop_index(Some(insertion_index), cx);
     }
 
+    /// CDXC:Workarea 2026-09-22 WHY:
+    /// The drop line is drawn in the gap between two tabs, and the strip is taller than its tabs, so a release aimed at the line is often over no tab at all and no tab's drop ran while the line was still showing. The strip itself takes those releases and lands the tab where the line is; a tab under the pointer still answers first. The line goes away once the pointer leaves the strip, so a release elsewhere reorders nothing.
+    pub(crate) fn handle_view_strip_gap_drop(
+        &mut self,
+        key: ViewStripTabKey,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        match self.view_strip_drop_index {
+            Some(insertion_index) => self.handle_view_strip_drop(key, insertion_index, cx),
+            // Taking the drop keeps the release from the window root, which is what ends a browser tab's drag.
+            None => self.finish_browser_tab_drag(cx),
+        }
+    }
+
+    pub(crate) fn clear_view_strip_drop_outside(
+        &mut self,
+        bounds: gpui::Bounds<Pixels>,
+        position: gpui::Point<Pixels>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !bounds.contains(&position) {
+            self.set_view_strip_drop_index(None, cx);
+        }
+    }
+
     pub(crate) fn handle_view_strip_drop(
         &mut self,
         key: ViewStripTabKey,

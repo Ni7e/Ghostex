@@ -62,7 +62,7 @@ pub(super) fn operation(params: Value, api_port: u16) -> Result<Value> {
     let root = std::fs::canonicalize(text(&params, "projectPath"))
         .context("The project directory is unavailable.")?;
     let id = text(&params["view"], "id");
-    if !id.starts_with("custom-view-") || id.len() > 160 {
+    if (id != "storybook" && !id.starts_with("custom-view-")) || id.len() > 160 {
         bail!("Invalid view ID.");
     }
     let owner = text(&params, "owner");
@@ -170,7 +170,17 @@ fn stopped(instance: &Instance) {
     state["state"] = json!("stopped");
     state["url"] = Value::Null;
 }
+struct OwnedOutput(Option<PathBuf>);
+impl Drop for OwnedOutput {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+}
+
 fn run(instance: &Arc<Instance>, mut plan: Plan, api_port: u16) -> Result<()> {
+    let _output = OwnedOutput(plan.owned_output.take());
     let mut port = None;
     if plan.report.is_none() {
         if plan.url.contains("{port}") {

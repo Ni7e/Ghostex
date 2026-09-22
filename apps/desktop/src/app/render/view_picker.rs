@@ -32,7 +32,7 @@ enum ViewPickerGroup {
 impl ViewPickerGroup {
     fn of(mode: TitlebarMode) -> Self {
         match mode {
-            TitlebarMode::Extension(_) => Self::Extension,
+            mode if mode.is_addon_view() => Self::Extension,
             _ => Self::BuiltIn,
         }
     }
@@ -50,10 +50,13 @@ impl ViewPickerGroup {
 /// own words; an extension or custom view has no description of its own to show.
 fn view_picker_description(mode: TitlebarMode) -> &'static str {
     match mode {
-        TitlebarMode::Source => "Edit and search the project in the built-in editor.",
+        mode if mode.website_provider().is_some() => &mode.website_provider().unwrap().description,
+        mode if mode.is_storybook() => "Annotate your project’s components.",
+        TitlebarMode::Source => "Edit and search project files.",
         TitlebarMode::Browser => "Open a local app or any website.",
         TitlebarMode::Kanban => "Plan work and track task progress.",
         TitlebarMode::Automate => "Run repeatable project routines.",
+        TitlebarMode::Terminal => "Shell commands beside your agents..",
         TitlebarMode::Manage => "Notes, plans and reference files.",
         TitlebarMode::Extension(_) | TitlebarMode::Agents => "",
     }
@@ -66,12 +69,20 @@ impl GhostexGpuiApp {
     /// scope editor at the bottom. Only views the project's own scope hides are missing from it.
     pub(crate) fn render_view_picker(&mut self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let modes = self.view_picker_entries();
+        // CDXC:Workarea 2026-09-22 WHY:
+        // The list is sorted by the user's view order, and a built-in that order has never seen
+        // (a Terminal view added after the order was saved) sorts to the end, behind the
+        // extensions. The groups are read by kind, not by position, so a built-in always lands in
+        // the built-in grid and the label only ever opens the extensions.
         let mut groups: Vec<(ViewPickerGroup, Vec<TitlebarModeSwitcherItem>)> = Vec::new();
-        for item in modes {
-            let group = ViewPickerGroup::of(item.mode);
-            match groups.last_mut() {
-                Some((last, items)) if *last == group => items.push(item),
-                _ => groups.push((group, vec![item])),
+        for group in [ViewPickerGroup::BuiltIn, ViewPickerGroup::Extension] {
+            let items = modes
+                .iter()
+                .copied()
+                .filter(|item| ViewPickerGroup::of(item.mode) == group)
+                .collect::<Vec<_>>();
+            if !items.is_empty() {
+                groups.push((group, items));
             }
         }
         let mut body = v_flex()
@@ -133,15 +144,24 @@ impl GhostexGpuiApp {
                 body = body.child(row);
             }
         }
+        // The cards scroll in their own region so the manage link stays pinned to the panel's
+        // bottom edge instead of trailing the last card.
+        let cards = v_flex()
+            .id("ghostex-gpui-view-picker-cards")
+            .w_full()
+            .flex_1()
+            .min_h_0()
+            .items_center()
+            .justify_center()
+            .overflow_y_scroll()
+            .track_scroll(&self.view_picker_scroll)
+            .child(body);
         v_flex()
             .id("ghostex-gpui-view-picker")
             .size_full()
             .min_w_0()
             .min_h_0()
             .items_center()
-            .justify_center()
-            .overflow_y_scroll()
-            .track_scroll(&self.view_picker_scroll)
             .p(px(24.0))
             .bg(project_editor_shell_background_color())
             .font_family("Inter Variable")
@@ -152,7 +172,7 @@ impl GhostexGpuiApp {
                     this.focus_view_picker(cx);
                 }),
             )
-            .child(body)
+            .child(cards)
             .child(self.render_view_picker_manage_link(cx))
             .into_any_element()
     }
@@ -175,7 +195,7 @@ impl GhostexGpuiApp {
         let available = item.is_available;
         let description = view_picker_description(mode);
         let shortcut = view_picker_shortcut(mode);
-        let dashed = matches!(mode, TitlebarMode::Extension(_));
+        let dashed = mode.is_addon_view();
         div()
             .id(format!(
                 "ghostex-gpui-view-picker-card-{}",
@@ -326,11 +346,13 @@ impl GhostexGpuiApp {
 /// none, because their names are not the app's to reserve a key for.
 fn view_picker_shortcut(mode: TitlebarMode) -> Option<char> {
     match mode {
+        mode if mode.is_storybook() => Some('S'),
         TitlebarMode::Source => Some('C'),
         TitlebarMode::Browser => Some('B'),
         TitlebarMode::Kanban => Some('K'),
         TitlebarMode::Automate => Some('U'),
         TitlebarMode::Manage => Some('D'),
+        TitlebarMode::Terminal => Some('T'),
         TitlebarMode::Agents | TitlebarMode::Extension(_) => None,
     }
 }

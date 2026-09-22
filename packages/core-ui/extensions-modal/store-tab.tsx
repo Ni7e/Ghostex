@@ -185,7 +185,7 @@ export function StoreTab({
                 pending={pendingIds.has(extension.id)}
                 scopeSummary={scopeSummaryFor?.(extension)}
               />
-              {renderScopeEditor?.(extension)}
+              <ScopeEditorInset>{renderScopeEditor?.(extension)}</ScopeEditorInset>
             </Fragment>
           ))}
           {filteredStore.map((entry) => (
@@ -206,4 +206,9 @@ export function StoreTab({
       )}
     </div>
   );
+}
+
+/** The scope editor drops its own horizontal padding for a host list's inset; this list has none, so it borrows the row's. */
+function ScopeEditorInset({ children }: { children: ReactNode }) {
+  return children ? <div className='px-3'>{children}</div> : null;
 }

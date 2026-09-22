@@ -40,6 +40,17 @@ impl GhostexGpuiApp {
         if !mode.is_project_editor_mode() || !self.titlebar_mode_available(mode) {
             return;
         }
+        if mode.is_storybook() {
+            self.project_view_command(
+                &crate::app::project_views::ProjectViewCommand {
+                    id: "storybook".into(),
+                    operation: "restart".into(),
+                },
+                window,
+                cx,
+            );
+            return;
+        }
         let surface = if mode == TitlebarMode::Browser {
             self.browser_surface_for_pane(self.browser_tabs.focused_pane)
         } else {

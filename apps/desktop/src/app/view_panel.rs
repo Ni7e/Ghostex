@@ -24,10 +24,11 @@ impl GhostexGpuiApp {
         self.active_mode != TitlebarMode::Agents || self.view_panel_picker_open
     }
 
-    /// Whether the panel's content is a CEF page. The picker is GPUI's own drawing, so the rules
-    /// that exist because a page paints over everything do not apply to it.
-    pub(crate) fn view_panel_shows_cef_page(&self) -> bool {
-        self.open_view_mode().is_some()
+    /// Whether the panel's content is a native child view (a CEF page, or the Terminal view's
+    /// Ghostty terminals). The picker is GPUI's own drawing, so the rules that exist because a
+    /// native child paints over everything do not apply to it.
+    pub(crate) fn view_panel_shows_native_surface(&self) -> bool {
+        self.open_view_mode().is_some() && !self.website_home_setup_visible(self.active_mode)
     }
 
     /// The panel is open and showing the picker: no tab is selected, so there is no view to draw.
@@ -188,7 +189,7 @@ impl GhostexGpuiApp {
     }
 
     /// The tab that takes over when `mode` closes: the one to its right, else the one to its left,
-    /// else nothing, which closes the panel.
+    /// else nothing, which brings the picker back.
     fn view_tab_successor(&self, mode: TitlebarMode) -> Option<TitlebarMode> {
         let tabs = self.open_view_tabs();
         let index = tabs.iter().position(|tab| *tab == mode)?;
@@ -197,6 +198,10 @@ impl GhostexGpuiApp {
             .copied()
     }
 
+    /// CDXC:Workarea 2026-09-22 DECISION:
+    /// User: closing the last tab in the side panel goes back to the "Open a view" picker instead of
+    /// closing the panel, so the panel stays where it was with the next thing to open in front of
+    /// you. This supersedes the 2026-09-20 rule that a close with no successor closed the panel.
     pub(crate) fn close_view_tab(
         &mut self,
         mode: TitlebarMode,
@@ -217,7 +222,7 @@ impl GhostexGpuiApp {
             Some(next) => {
                 self.set_active_mode(next, window, cx);
             }
-            None if mode == self.active_mode => self.close_view_panel(window, cx),
+            None if mode == self.active_mode => self.open_view_picker(window, cx),
             None => {}
         }
         self.persist_shell_layout_state();

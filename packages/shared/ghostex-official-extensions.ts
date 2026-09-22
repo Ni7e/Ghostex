@@ -12,6 +12,7 @@
  * is `false` or unset.
  */
 import type { ghostexSettings } from './ghostex-settings';
+import { PROJECT_WEBSITE_PROVIDERS, type ProjectWebsiteId } from './ghostex-settings/project-websites';
 
 type BooleanGhostexSettingsKey = {
   [Key in keyof ghostexSettings]-?: boolean extends ghostexSettings[Key] ? Key : never;
@@ -37,6 +38,11 @@ export type GhostexOfficialExtensionSettingsKey = Extract<
   | 'openInTitlebarButtonHidden'
   | 'quickActionsTitlebarButtonHidden'
   | 'resourcesTitlebarButtonHidden'
+  | 'storybookViewTabHidden'
+  | 'linearViewTabHidden'
+  | 'jiraViewTabHidden'
+  | 'githubViewTabHidden'
+  | 'terminalViewTabHidden'
   | 'tipsAndTricksTitlebarButtonHidden'
 >;
 
@@ -44,6 +50,7 @@ export type GhostexOfficialExtensionSettingsKey = Extract<
 export type GhostexOfficialExtensionPlacement = 'view' | 'titlebar-button';
 
 export type GhostexOfficialExtensionId =
+  | ProjectWebsiteId
   | 'automate'
   | 'browser'
   | 'code'
@@ -57,6 +64,8 @@ export type GhostexOfficialExtensionId =
   | 'openIn'
   | 'quickActions'
   | 'resources'
+  | 'storybook'
+  | 'terminal'
   | 'tips';
 
 export type GhostexOfficialExtension = {
@@ -73,6 +82,21 @@ export type GhostexOfficialExtension = {
 };
 
 export const GHOSTEX_OFFICIAL_EXTENSIONS: readonly GhostexOfficialExtension[] = [
+  ...PROJECT_WEBSITE_PROVIDERS.map((provider): GhostexOfficialExtension => ({
+    id: provider.id,
+    title: provider.title,
+    description: provider.description,
+    settingsKey: provider.hiddenSettingsKey,
+    placement: 'view',
+  })),
+  {
+    description:
+      'Build, browse, and annotate your project’s components without a persistent development server. Appears only in projects with Storybook.',
+    id: 'storybook',
+    placement: 'view',
+    settingsKey: 'storybookViewTabHidden',
+    title: 'Storybook',
+  },
   {
     description:
       'Explore, edit, and search your project in a familiar, full-featured workspace without ever leaving Ghostex.',
@@ -108,6 +132,14 @@ export const GHOSTEX_OFFICIAL_EXTENSIONS: readonly GhostexOfficialExtension[] = 
     placement: 'view',
     settingsKey: 'docsViewTabHidden',
     title: 'Docs',
+  },
+  {
+    description:
+      'A command terminal beside your sessions, with its own tabs and splits, that works like the Commands pane but lives in the view panel.',
+    id: 'terminal',
+    placement: 'view',
+    settingsKey: 'terminalViewTabHidden',
+    title: 'Terminal',
   },
   {
     appWide: true,

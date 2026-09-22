@@ -13,6 +13,7 @@ use gpui::Styled as _;
 use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
+use gpui_component::ElementExt as _;
 use gpui_component::h_flex;
 use gpui_component::tooltip::ManagedTooltipExt as _;
 use gpui_component::tooltip::ManagedTooltipPlacement;
@@ -101,6 +102,24 @@ impl GhostexGpuiApp {
             .bg(project_editor_shell_background_color())
             .text_color(titlebar_text_color())
             .font_family("Inter Variable")
+            .on_drag_move::<DraggedViewTab>(cx.listener(
+                |this, event: &gpui::DragMoveEvent<DraggedViewTab>, _window, cx| {
+                    this.clear_view_strip_drop_outside(event.bounds, event.event.position, cx);
+                },
+            ))
+            .on_drag_move::<DraggedBrowserTab>(cx.listener(
+                |this, event: &gpui::DragMoveEvent<DraggedBrowserTab>, _window, cx| {
+                    this.clear_view_strip_drop_outside(event.bounds, event.event.position, cx);
+                },
+            ))
+            .on_drop(cx.listener(|this, dragged: &DraggedViewTab, _window, cx| {
+                this.handle_view_strip_gap_drop(ViewStripTabKey::View(dragged.mode), cx);
+            }))
+            .on_drop(
+                cx.listener(|this, dragged: &DraggedBrowserTab, _window, cx| {
+                    this.handle_view_strip_gap_drop(ViewStripTabKey::Browser(dragged.tab_id), cx);
+                }),
+            )
             .child(
                 h_flex()
                     .flex_shrink_1()
@@ -127,6 +146,9 @@ impl GhostexGpuiApp {
                     )),
             )
             .child(div().flex_1().min_w(px(8.0)).h_full())
+            .when(active_mode.is_storybook(), |strip| {
+                strip.children(self.render_storybook_controls(cx))
+            })
             .when(active_mode != TitlebarMode::Source, |strip| {
                 strip.child(self.render_view_tab_strip_pop_out_button(active_mode, cx))
             })
@@ -360,6 +382,35 @@ impl GhostexGpuiApp {
             ))
     }
 
+    fn render_storybook_controls(&self, cx: &mut gpui::Context<Self>) -> Vec<AnyElement> {
+        [
+            ("annotate", BROWSER_ICON_POINTER, "Annotate with Agentation"),
+            ("rebuild", BROWSER_ICON_RELOAD, "Rebuild Storybook"),
+        ]
+        .into_iter()
+        .map(|(action, icon, label)| {
+            Self::render_view_tab_strip_icon_button(action, icon, true, false)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        if action == "annotate" {
+                            this.annotate_storybook(window, cx);
+                        } else {
+                            this.reload_titlebar_view(this.active_mode, window, cx);
+                        }
+                    }),
+                )
+                .managed_tooltip_with_placement(
+                    ManagedTooltipPlacement::WiderSide,
+                    move |window, cx| titlebar_tooltip(label, window, cx),
+                )
+                .into_any_element()
+        })
+        .collect()
+    }
+
     fn render_view_tab_strip_icon_button(
         id: &'static str,
         icon: &'static str,
@@ -406,8 +457,13 @@ impl GhostexGpuiApp {
         .when(shows_drop_marker, |this| {
             this.relative().child(view_strip_drop_line(false))
         });
+        let trigger_bounds = std::rc::Rc::new(std::cell::Cell::new(None));
         // Anywhere on the `+` is "after the last tab", so both halves mean the same index.
         button
+            .on_prepaint({
+                let trigger_bounds = trigger_bounds.clone();
+                move |bounds, _, _| trigger_bounds.set(Some(bounds))
+            })
             .on_drag_move::<DraggedViewTab>(cx.listener(
                 move |this, event: &gpui::DragMoveEvent<DraggedViewTab>, _window, cx| {
                     if event.bounds.contains(&event.event.position) {
@@ -444,10 +500,12 @@ impl GhostexGpuiApp {
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                cx.listener(move |this, _: &MouseDownEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
-                    this.show_view_tab_add_menu(event.position, window, cx);
+                    if let Some(trigger_bounds) = trigger_bounds.get() {
+                        this.show_view_tab_add_menu(trigger_bounds, window, cx);
+                    }
                 }),
             )
             .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, move |window, cx| {
