@@ -449,6 +449,33 @@ async function main(): Promise<number> {
       },
     },
     {
+      /*
+      The viewer's BODY, which nothing graded until 2026-09-22: `subagentItems` and the row details
+      of a child row. `subagent-2` is the Task transcript's own tool row, so its detail can only be
+      answered by the viewer's own projector: the session's transcript has never seen that id, and
+      `native-host.ts:424` falls through to `subagentViewer.rowDetail(...)` for exactly this.
+      */
+      label: 'the subagent viewer s own transcript: a Task link, a nested one, a row s details, and back',
+      run: async () => {
+        await act({ type: 'openSubagent', selector: 'explorer', name: '/explorer', agentType: 'explorer' });
+        await act({
+          type: 'rowDetails',
+          open: [{ key: 'child-tool-0', kind: 'tool', messageId: 'subagent-2', index: 0 }],
+        });
+        await act({
+          type: 'openSubagent',
+          selector: 'auditor',
+          name: '/explorer/auditor',
+          agentType: 'general-purpose',
+          task: 'audit the turn boundaries',
+        });
+        await act({ type: 'subagentLoadEarlier' });
+        await act({ type: 'subagentBack' });
+        await act({ type: 'rowDetails', open: [] });
+        await act({ type: 'subagentClose' });
+      },
+    },
+    {
       label: 'pagination, a completed turn s work, and the summary modes',
       run: async () => {
         await act({ type: 'loadEarlier' });

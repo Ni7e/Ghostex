@@ -128,6 +128,15 @@ pub struct SubagentState {
     pub working: bool,
     /// When the hold expires and the list settles, or `None` while nothing is held.
     pub hold_until_ms: Option<f64>,
+    /// The viewer's OWN transcript projection.
+    ///
+    /// `native-subagent.ts:48` holds a second `NativeChatPresentation`, built fresh by every
+    /// `restart()`, so the child transcript has its own `agentPath`, its own projection cache and
+    /// its own placeholder queue while the session's list behind the modal keeps every row it had.
+    /// The same struct carries both here; the fields the viewer never uses (the rewind sheet, the
+    /// saved prompts, the deferred-work reads) stay at their defaults, because a child transcript
+    /// has none of them.
+    pub view: crate::state::TranscriptViewState,
 }
 
 /// One read the viewer is waiting on.

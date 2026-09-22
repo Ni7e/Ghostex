@@ -2,6 +2,8 @@
 //!
 //! Ported from `packages/shared/session-chat-controller/native-presentation.ts`.
 
+use std::collections::BTreeMap;
+
 use ghostex_gx_protocol::{ChatBlock, ChatMessage, ChatRole};
 use serde_json::{Map, Value};
 
@@ -284,8 +286,44 @@ pub struct Projection {
     pub minimap: Vec<crate::extras::minimap_rail::MinimapMarkerRow>,
 }
 
+/// The inputs of ONE `NativeChatPresentation` instance.
+///
+/// Two exist: the session's own, whose scope is [`scope`] over [`ChatState`], and the subagent
+/// viewer's, whose scope is the page it read (`native-subagent.ts:175` builds its own projector and
+/// calls `update(page.messages, this.working, false, NO_DEFERRED_WORK, 0)`). Both run the same
+/// rules over different messages, a different `agentPath` and a cache of their own, which is why
+/// the pass is parameterised rather than reading `ChatState` directly.
+pub struct ProjectionScope<'a> {
+    pub messages: &'a [ChatMessage],
+    pub working: bool,
+    pub summary: bool,
+    /// The rows a `loadWork` read brought back, keyed by the turn's user-message id. A child
+    /// transcript has none of its own.
+    pub deferred: &'a BTreeMap<String, Vec<ChatMessage>>,
+    /// The messages whose full projection has been built, with the source each was built from.
+    pub projected: &'a BTreeMap<String, ChatMessage>,
+    /// `/root` for the session, the child's own path inside the subagent viewer.
+    pub agent_path: &'a str,
+    /// Shortens the paths on file-change cards. Module level in the TypeScript, so both instances
+    /// read the same one.
+    pub working_directory: Option<&'a str>,
+}
+
+/// The session's own scope, off the composed list family a builds.
+pub fn scope<'a>(state: &'a ChatState, view: &'a TranscriptViewState) -> ProjectionScope<'a> {
+    ProjectionScope {
+        messages: &state.messages.composed,
+        working: is_working(state),
+        summary: view.summary_mode,
+        deferred: &view.deferred,
+        projected: &view.projected,
+        agent_path: &view.agent_path,
+        working_directory: view.working_directory.as_deref(),
+    }
+}
+
 struct Builder<'a> {
-    view: &'a TranscriptViewState,
+    scope: &'a ProjectionScope<'a>,
     context: &'a ChatContext,
     eager_from: usize,
     backfill: Vec<String>,
@@ -293,14 +331,14 @@ struct Builder<'a> {
 
 impl Builder<'_> {
     fn projected(&self, message: &ChatMessage) -> bool {
-        self.view.projected.get(&message.id) == Some(message)
+        self.scope.projected.get(&message.id) == Some(message)
     }
 
     fn project(&self, message: &ChatMessage) -> Value {
         project_message(
             message,
-            &self.view.agent_path,
-            self.view.working_directory.as_deref(),
+            self.scope.agent_path,
+            self.scope.working_directory,
             self.context,
         )
     }
@@ -334,17 +372,21 @@ fn message_id(item: &TranscriptItem) -> String {
 
 /// The whole transcript list for the state as it stands.
 pub fn build(state: &ChatState, context: &ChatContext) -> Projection {
-    let view = &state.transcript_view;
+    build_scope(&scope(state, &state.transcript_view), context)
+}
+
+/// The whole transcript list for one presentation instance's scope.
+pub fn build_scope(scope: &ProjectionScope, context: &ChatContext) -> Projection {
     let projection: TranscriptProjection =
-        project_chat_transcript(&state.messages.composed, is_working(state), &[]);
-    let summary = view.summary_mode;
+        project_chat_transcript(scope.messages, scope.working, &[]);
+    let summary = scope.summary;
     let length = if summary {
         projection.summary_turns.len()
     } else {
         projection.items.len()
     };
     let mut builder = Builder {
-        view,
+        scope,
         context,
         eager_from: length.saturating_sub(EAGER_TAIL_ITEMS),
         backfill: Vec::new(),
@@ -389,7 +431,7 @@ pub fn build(state: &ChatState, context: &ChatContext) -> Projection {
                     RenderItem::CompletedWork(turn) => turn,
                 };
                 let work =
-                    completed_chat_work(turn, view.deferred.get(&turn.user.id).map(Vec::as_slice));
+                    completed_chat_work(turn, scope.deferred.get(&turn.user.id).map(Vec::as_slice));
                 let (visible_artifacts, collapsed_work) = partition_completed_work(&work);
                 /*
                 A finished turn's writes leave their rows and collect under one "N files changed"
@@ -514,19 +556,13 @@ pub fn build(state: &ChatState, context: &ChatContext) -> Projection {
 /// projected. Folding merges a tool-only message INTO the assistant turn above it, so the blocks a
 /// row's index points at are the anchor's merged blocks, not the raw message's. Rebuilding the same
 /// two lists is how that is reproduced without a cache.
-fn detail_sources(state: &ChatState, _context: &ChatContext) -> Vec<ChatMessage> {
-    let projection = project_chat_transcript(&state.messages.composed, is_working(state), &[]);
+fn detail_sources(scope: &ProjectionScope) -> Vec<ChatMessage> {
+    let projection = project_chat_transcript(scope.messages, scope.working, &[]);
     let mut sources = projection.rendered.clone();
     for item in &projection.items {
         if let RenderItem::CompletedWork(turn) = item {
-            let work = completed_chat_work(
-                turn,
-                state
-                    .transcript_view
-                    .deferred
-                    .get(&turn.user.id)
-                    .map(Vec::as_slice),
-            );
+            let work =
+                completed_chat_work(turn, scope.deferred.get(&turn.user.id).map(Vec::as_slice));
             for message in work {
                 if !sources.iter().any(|seen| seen.id == message.id) {
                     sources.push(message);
@@ -544,7 +580,27 @@ pub fn row_detail(
     message_id: &str,
     index: usize,
 ) -> Option<Value> {
-    let sources = detail_sources(state, context);
+    let _ = context;
+    row_detail_scope(
+        &scope(state, &state.transcript_view),
+        kind,
+        message_id,
+        index,
+    )
+}
+
+/// The same detail, read against one presentation instance's own sources.
+///
+/// `native-host.ts:424` is `presentation.rowDetail(...) ?? subagentViewer.rowDetail(...)`: the open
+/// row belongs to whichever of the two transcripts holds a message with that id, and only the
+/// viewer's own projector can answer for a child's row.
+pub fn row_detail_scope(
+    scope: &ProjectionScope,
+    kind: &str,
+    message_id: &str,
+    index: usize,
+) -> Option<Value> {
+    let sources = detail_sources(scope);
     let source = sources.iter().find(|message| message.id == message_id)?;
     let (files, tools) = message_tool_rows(source);
     if kind == "file" {

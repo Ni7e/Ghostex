@@ -12,7 +12,9 @@ use serde_json::Value;
 use crate::effect::Effect;
 use crate::event::Event;
 use crate::extras::panels::FLEET_CLOCK_TICK_MS;
-use crate::extras::{panels, save_markdown, search, subagent, terminal_tail, working_strip};
+use crate::extras::{
+    panels, save_markdown, search, subagent, subagent_rows, terminal_tail, working_strip,
+};
 use crate::session::timers::TimerTable;
 use crate::state::{
     ChatContext, ChatState, LOADING_STAGE_BLANK, LOADING_STAGE_INDICATOR, LOADING_STAGE_RETRY,
@@ -78,9 +80,19 @@ fn settle_with_ids(
                 context,
                 next_request_id(),
             ));
+            // The viewer's own projector has its own `onBackfill`, which re-projects and publishes
+            // without a state change of its own.
+            if state.core.timer_fired(SUBAGENT_BACKFILL) {
+                subagent_rows::advance(state, context);
+                state.core.request_publish();
+            }
         }
         _ => {}
     }
+    // `project()` runs at the three moments the page, the agent path or the working flag can move
+    // (a restart, a finished read, the settle hold expiring), all of which have already happened by
+    // the time this line runs.
+    subagent_rows::refresh(state, context);
     track_transcript_loading(state, context);
     let working = working(state);
     let tasks = state.session.agent_tasks.clone();
@@ -228,9 +240,15 @@ fn arm_timers(state: &mut ChatState, context: &ChatContext) {
             state.extras.loading_timers_armed_at_ms = None;
         }
     }
+    let backfill = state.extras.subagent.view.has_pending_backfill();
     let timers = &mut state.core.timers;
     deadline(timers, SUBAGENT_POLL, poll, now);
     deadline(timers, SUBAGENT_HOLD, hold, now);
+    if backfill {
+        timers.arm_once(SUBAGENT_BACKFILL, now, 0.0);
+    } else {
+        timers.cancel(SUBAGENT_BACKFILL);
+    }
 }
 
 /// Family f's timer keys, namespaced so no other family can collide with them.
@@ -240,6 +258,9 @@ const LOADING_INDICATOR: &str = "extras.loadingIndicator";
 const LOADING_RETRY: &str = "extras.loadingRetry";
 const SUBAGENT_POLL: &str = "extras.subagentPoll";
 const SUBAGENT_HOLD: &str = "extras.subagentHold";
+/// The viewer's own `scheduleBackfill`, zero delay, separate from family b's because the two
+/// projectors keep separate placeholder queues.
+const SUBAGENT_BACKFILL: &str = "extras.subagentBackfill";
 
 /// A repeating clock, armed while `live` and dropped when it stops.
 fn interval(timers: &mut TimerTable, key: &str, live: bool, now_ms: f64, every_ms: f64) {

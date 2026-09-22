@@ -1,4 +1,5 @@
-//! Family f's two frame channels: the minimap rail and the subagent viewer's own transcript.
+//! Family f's minimap rail, one of its two frame channels; the other, the subagent viewer's own
+//! transcript, is [`crate::extras::subagent_rows`].
 //!
 //! Both ride beside the main transcript so opening the subagent viewer never redraws the main
 //! list. Both are also the two channels the desktop host can drop today
@@ -12,7 +13,7 @@
 
 use serde_json::Value;
 
-use crate::document::{MinimapMarker, TranscriptItem};
+use crate::document::MinimapMarker;
 use crate::extras::minimap_rail::{
     geometry, message_preview, minimap_preview, minimap_visible, MinimapMarkerRow,
 };
@@ -26,20 +27,6 @@ pub fn markers(state: &ChatState, _context: &ChatContext) -> Vec<MinimapMarker> 
         .iter()
         .map(|marker| serde_json::to_value(marker).unwrap_or(Value::Null))
         .collect()
-}
-
-/// The open subagent's transcript, on its own channel.
-///
-/// The rows themselves are family b's projection of the page this viewer read; family f owns which
-/// page that is, the agent path it is read against, and the settle hold its list runs under.
-pub fn subagent_rows(state: &ChatState, _context: &ChatContext) -> Vec<TranscriptItem> {
-    state
-        .extras
-        .subagent
-        .page
-        .as_ref()
-        .map(|_| Vec::new())
-        .unwrap_or_default()
 }
 
 /// `NativeChatMinimap.project` over the typed turns family b projects.

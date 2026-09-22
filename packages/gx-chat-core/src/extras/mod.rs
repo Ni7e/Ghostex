@@ -18,6 +18,7 @@ pub mod save_markdown_paths;
 pub mod search;
 pub mod settle;
 pub mod subagent;
+pub mod subagent_rows;
 pub mod subagent_target;
 pub mod terminal_tail;
 pub mod terminal_tail_format;
@@ -29,5 +30,6 @@ pub mod working_words;
 
 pub use crate::extras::actions::handle;
 pub use crate::extras::document::document;
-pub use crate::extras::minimap::{markers, subagent_rows};
+pub use crate::extras::minimap::markers;
+pub use crate::extras::subagent_rows::{row_detail as subagent_row_detail, rows as subagent_rows};
 pub use crate::extras::settle::settle;

@@ -64,6 +64,9 @@ fn restart(state: &mut SubagentState, next_request: u64) -> Vec<Effect> {
     state.loading_earlier = false;
     state.working = false;
     state.page = None;
+    // `this.presentation = this.projector()`: a restart builds a fresh projector, so the previous
+    // target's cached projections, its placeholder queue and its agent path go with it.
+    state.view = crate::state::TranscriptViewState::default();
     if state.stack.is_empty() {
         return Vec::new();
     }
@@ -340,7 +343,9 @@ pub fn project(chat: &ChatState) -> Value {
         "canBack": state.stack.len() > 1,
         "error": state.error.clone(),
         "loading": page.is_none() && state.error.is_none(),
-        "empty": page.map(|page| messages(page).is_empty()),
+        // `page?.messages.length === 0`: optional chaining short-circuits the WHOLE chain, so a
+        // viewer with no page yet compares `undefined === 0` and answers false, never null.
+        "empty": page.is_some_and(|page| messages(page).is_empty()),
         "hasMore": page_has_more(page) && state.error.is_none(),
         "loadingEarlier": state.loading_earlier,
     })

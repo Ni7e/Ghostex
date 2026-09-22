@@ -28,12 +28,24 @@ pub fn rows(state: &ChatState, context: &ChatContext) -> Vec<TranscriptItem> {
 ///
 /// The open set is reported by `Event::Measured(Measurement::OpenRowDetails)`, so only the rows on
 /// screen ever build their diff lines or tool output.
+///
+/// `native-host.ts:424` is `presentation.rowDetail(...) ?? subagentViewer.rowDetail(...)`: a row
+/// opened INSIDE the subagent viewer belongs to the child transcript, whose messages the session's
+/// own projection has never seen, so the viewer answers for it.
 pub fn row_details(state: &ChatState, context: &ChatContext) -> RowDetails {
     let mut details = RowDetails::new();
     for open in &state.transcript_view.open_rows {
-        if let Some(detail) =
+        let detail =
             presentation::row_detail(state, context, &open.kind, &open.message_id, open.index)
-        {
+                .or_else(|| {
+                    crate::extras::subagent_row_detail(
+                        state,
+                        &open.kind,
+                        &open.message_id,
+                        open.index,
+                    )
+                });
+        if let Some(detail) = detail {
             details.insert(open.key.clone(), detail);
         }
     }
