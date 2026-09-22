@@ -233,14 +233,15 @@ impl ChatCore {
         // pending echoes pruned against the authoritative list, and the pending tool row dropped
         // once the transcript retired it.
         crate::session::before_compose(&mut self.state, &self.context);
-        self.state.messages.composed = crate::session::composition::compose(
-            &self.state,
+        let working = crate::session::working::is_working(&self.state);
+        crate::session::composition::compose_cached(
+            &mut self.state,
             &crate::session::constants::DEFAULT_COMMAND_CATALOG
                 .iter()
                 .map(|name| (*name).to_string())
                 .collect::<Vec<_>>(),
             None,
-            crate::session::working::is_working(&self.state),
+            working,
         );
         // `presentation.update(state.messages, …)` runs here in `publish`, on the list the
         // composition above has just produced.
@@ -276,17 +277,21 @@ impl ChatCore {
             return;
         }
         let probe = assemble(&self.state, &self.published_context);
-        let probe_parts = frame_parts(&self.state, &self.published_context);
         // A rebuilt projection is a publish of its own: `update` rebuilds only when one of its
         // inputs changed identity, every one of those is a `useState` value the lifecycle
         // republishes on, and `take` then ships the new (if equal) array as a degenerate splice.
         // Holding the flag until the next real change shipped that splice a turn late.
         let rebuilt = self.state.transcript_view.projection_rebuilt;
-        if !requested
-            && !rebuilt
-            && probe.reactive() == self.document.reactive()
-            && probe_parts == self.parts
-        {
+        // The transcript items only move on a rebuild, so the probe compares the three small
+        // channels and leaves the items alone: cloning every projected row twice per event was
+        // most of a state frame's cost on a long chat.
+        let parts_moved = rebuilt
+            || crate::extras::subagent_rows(&self.state, &self.published_context)
+                != self.parts.subagent_items
+            || crate::extras::markers(&self.state, &self.published_context) != self.parts.minimap
+            || crate::transcript::row_details(&self.state, &self.published_context)
+                != self.parts.row_details;
+        if !requested && !parts_moved && probe.reactive() == self.document.reactive() {
             return;
         }
         self.document = assemble(&self.state, &self.context);

@@ -154,9 +154,79 @@ pub fn pending_transcript(state: &ChatState, boundaried: &[ChatMessage]) -> Vec<
     rows
 }
 
+/// What `boundaried` depends on: the transcript's identity and the markers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoundariedKey {
+    pub identity: u64,
+    pub markers: Vec<crate::state::CommandMarker>,
+}
+
+/// The dependencies of the `messages` memo in `controller.ts`, by identity where the TypeScript
+/// compares identities and by value where its setters bail out on an equal value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComposeKey {
+    pub identity: u64,
+    pub working: bool,
+    pub async_questions_since: Option<i64>,
+    pub preview_text: Option<String>,
+    pub sends: Vec<crate::state::PendingSend>,
+    pub markers: Vec<crate::state::CommandMarker>,
+    pub statuses: Vec<ChatMessage>,
+    pub stream: Option<crate::state::TerminalStream>,
+    pub visible_tool: Option<ChatMessage>,
+    pub queue: Option<Vec<serde_json::Value>>,
+    pub app_commands: Vec<serde_json::Value>,
+}
+
+/// Rebuilds `state.messages.boundaried` when the transcript or the markers changed, and keeps it
+/// otherwise: the `assembled` / `surfaced` / `boundaried` memos of `controller.ts`.
+pub fn refresh_boundaried(state: &mut ChatState, catalog: &[String]) {
+    let key = BoundariedKey {
+        identity: state.messages.composition_identity,
+        markers: state.pending.markers.clone(),
+    };
+    if state.messages.boundaried_key.as_ref() == Some(&key) {
+        return;
+    }
+    state.messages.boundaried = boundaried_transcript(state, catalog);
+    state.messages.boundaried_key = Some(key);
+}
+
+/// Rebuilds `state.messages.composed` when one of the memo's dependencies changed, and keeps it
+/// otherwise. Bumps `compose_generation` on every rebuild, which is the new array the TypeScript
+/// memo hands back.
+pub fn compose_cached(
+    state: &mut ChatState,
+    catalog: &[String],
+    preview_text: Option<&str>,
+    working: bool,
+) {
+    refresh_boundaried(state, catalog);
+    let key = ComposeKey {
+        identity: state.messages.composition_identity,
+        working,
+        async_questions_since: state.session.async_questions_since,
+        preview_text: preview_text.map(str::to_string),
+        sends: state.pending.sends.clone(),
+        markers: state.pending.markers.clone(),
+        statuses: state.pending.terminal_status_messages.clone(),
+        stream: state.pending.terminal_stream.clone(),
+        visible_tool: visible_terminal_tool(state, working).cloned(),
+        queue: state.session.queue_prompts.clone(),
+        app_commands: state.session.app_commands.clone(),
+    };
+    if state.messages.compose_key.as_ref() == Some(&key) {
+        return;
+    }
+    state.messages.composed = compose(state, catalog, preview_text, working);
+    state.messages.compose_key = Some(key);
+    state.messages.compose_generation = state.messages.compose_generation.wrapping_add(1);
+}
+
 /// The transcript after assembly, skill surfacing and the `/clear` boundary.
 ///
 /// This is `boundaried` in the TypeScript, and it is what every later step measures against.
+/// [`refresh_boundaried`] keeps the answer on the state; this is the rebuild.
 pub fn boundaried_transcript(state: &ChatState, catalog: &[String]) -> Vec<ChatMessage> {
     let mut assembler = Assembler::default();
     assembler.reset(&Row::stamped(&state.messages.list));
@@ -179,7 +249,13 @@ pub fn compose(
     preview_text: Option<&str>,
     working: bool,
 ) -> Vec<ChatMessage> {
-    let boundaried = boundaried_transcript(state, catalog);
+    let boundaried = if state.messages.boundaried_key.as_ref().is_some_and(|key| {
+        key.identity == state.messages.composition_identity && key.markers == state.pending.markers
+    }) {
+        state.messages.boundaried.clone()
+    } else {
+        boundaried_transcript(state, catalog)
+    };
     let queue = state.session.queue_prompts.clone().unwrap_or_default();
     let startup_pending = pending_with_startup_sends(&state.pending.sends, &queue);
     let against = pending_transcript(state, &boundaried);

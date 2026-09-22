@@ -97,6 +97,18 @@ pub struct MessagesState {
     /// Bumped by [`MessagesState::new_composition_identity`] at exactly those sites; a value
     /// change of the composed list rebuilds on its own.
     pub composition_identity: u64,
+    /// The transcript after assembly, skill surfacing and the `/clear` boundary, as the last
+    /// composition saw it (`boundaried` in `controller.ts`), with the inputs it was built from.
+    ///
+    /// The TypeScript memoises it on the transcript's identity and the markers; rebuilding it on
+    /// every event re-keyed and re-sorted the whole transcript once a second on a working session.
+    pub boundaried: Vec<ChatMessage>,
+    pub boundaried_key: Option<crate::session::composition::BoundariedKey>,
+    /// The dependencies the last composed list was built from (the `messages` memo's deps).
+    pub compose_key: Option<crate::session::composition::ComposeKey>,
+    /// Bumped every time the composed list is rebuilt: the memo's output is a new array whenever
+    /// it re-ran, equal rows or not, and the projection compares that identity.
+    pub compose_generation: u64,
 }
 
 impl MessagesState {

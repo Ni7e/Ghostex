@@ -125,9 +125,11 @@ pub struct ProjectedMessage {
 /// What `NativeChatPresentation.update` decides on.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectionInputs {
+    /// The rows themselves, for a projector whose list has no identity of its own (the subagent
+    /// viewer); empty for the session's transcript, whose identity is `composition_identity`.
     pub composed: Vec<ChatMessage>,
     /// The composed array's identity, which the TypeScript compares instead of its rows
-    /// (`MessagesState::composition_identity`).
+    /// (`MessagesState::compose_generation`: a new array whenever the memo re-ran).
     pub composition_identity: u64,
     pub working: bool,
     pub summary: bool,

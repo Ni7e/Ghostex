@@ -63,8 +63,8 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
     // core has no identities, so the five inputs are remembered here and the revision below stands
     // in for "this is a new array".
     let inputs = ProjectionInputs {
-        composed: state.messages.composed.clone(),
-        composition_identity: state.messages.composition_identity,
+        composed: Vec::new(),
+        composition_identity: state.messages.compose_generation,
         working: crate::transcript::foreign::is_working(state),
         summary: state.transcript_view.summary_mode,
         detail_revision: state.transcript_view.detail_revision,

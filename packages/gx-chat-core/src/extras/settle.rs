@@ -96,7 +96,12 @@ fn settle_with_ids(
     track_transcript_loading(state, context);
     let working = working(state);
     let tasks = state.session.agent_tasks.clone();
-    let items = transcript_items(state, context);
+    // Serialising every row is only worth it while the search field is open.
+    let items = if state.extras.search.open {
+        transcript_items(state, context)
+    } else {
+        Vec::new()
+    };
     working_strip::settle_working_word(&mut state.extras.working_word, working, context);
     panels::settle_task_signature(&mut state.extras.panels, tasks.as_ref());
     if state.core.operation_error_code.as_deref() != Some("composerNotReady") {

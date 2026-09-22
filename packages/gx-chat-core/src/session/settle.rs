@@ -4,7 +4,7 @@
 //! before `crate::document::assemble`. All of them are from
 //! `packages/shared/session-chat-controller/controller.ts`.
 
-use crate::session::composition::{boundaried_transcript, pending_transcript};
+use crate::session::composition::{pending_transcript, refresh_boundaried};
 use crate::session::constants::DEFAULT_COMMAND_CATALOG;
 use crate::session::pending::prune_pending_sends;
 use crate::session::startup_sends::{parse_iso_ms, pending_with_startup_sends};
@@ -21,8 +21,10 @@ pub fn before_compose(state: &mut ChatState, context: &ChatContext) {
         .iter()
         .map(|name| (*name).to_string())
         .collect();
-    let boundaried = boundaried_transcript(state, &catalog);
+    refresh_boundaried(state, &catalog);
+    let boundaried = std::mem::take(&mut state.messages.boundaried);
     let transcript = pending_transcript(state, &boundaried);
+    state.messages.boundaried = boundaried;
 
     if !state.pending.sends.is_empty() {
         state.pending.sends = prune_pending_sends(&state.pending.sends, &transcript);
