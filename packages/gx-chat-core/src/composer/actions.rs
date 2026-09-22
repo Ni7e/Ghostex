@@ -668,6 +668,7 @@ fn insert_attachments(action: &UserAction) -> Vec<Effect> {
 fn remove_queue(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
     let prompt_id = string_param(action, "promptId");
     let document = crate::composer::document::queue(state);
+    let mut edit = None;
     if action.param("edit") == Some(&Value::Bool(true)) {
         let Some(row) = document
             .prompts
@@ -679,15 +680,24 @@ fn remove_queue(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
         if !document.capabilities.can_edit || is_queue_row_busy(&row.state) {
             return Vec::new();
         }
+        edit = Some(row.text.clone());
     }
     let prompt_id = prompt_id.to_string();
-    queue_rpc(
+    let effects = queue_rpc(
         state,
         ChatRpcMethod::RemoveSessionChatQueuedPrompt,
         json!({ "promptId": prompt_id }),
         state.composer.transport.remove_queued_prompt,
         Some(prompt_id.clone()),
-    )
+    );
+    let sent = effects.first().and_then(|effect| match effect {
+        Effect::SendRpc { request_id, .. } => Some(*request_id),
+        _ => None,
+    });
+    if let (Some(original), Some(request_id)) = (edit, sent) {
+        crate::composer::queue_edit::begin(state, request_id, original);
+    }
+    effects
 }
 
 /// The strip's own order, applied optimistically and then confirmed.

@@ -21,7 +21,7 @@ use crate::menus::option_values::{
 use crate::menus::time::{iso_from_millis, parse_iso_millis};
 
 /// One optimistic change still waiting for the agent to confirm it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct PendingOptionChange {
     /// The generation that owns these fields, so an old failure cannot roll back a newer one.
     id: u64,
@@ -49,9 +49,10 @@ pub struct OptionStore {
     next_change_id: u64,
     /// Set when a grace window expired without confirmation, which the host reads once.
     unconfirmed: bool,
-    /// True once a dispatch, detection or expiry changed the published state, so the host knows to
-    /// persist it. Mirrors the TypeScript's `persistence.write` on every publish.
-    dirty: bool,
+    /// Every state published since the host last wrote, oldest first. The TypeScript calls
+    /// `persistence.write` on EVERY publish, so a turn that publishes twice (a detection and a
+    /// receipt completing on the same frame) makes two `optionWrite` round trips, not one.
+    published: Vec<OptionState>,
 }
 
 impl OptionStore {
@@ -105,11 +106,12 @@ impl OptionStore {
 
     /// The state to persist, and whether it changed since the host last wrote it.
     pub fn take_dirty(&mut self) -> Option<OptionState> {
-        if !self.dirty {
-            return None;
-        }
-        self.dirty = false;
-        Some(self.state.clone())
+        std::mem::take(&mut self.published).pop()
+    }
+
+    /// Every state published since the host last wrote, oldest first: one write each.
+    pub fn take_published(&mut self) -> Vec<OptionState> {
+        std::mem::take(&mut self.published)
     }
 
     /// Whether a grace window expired without the agent confirming the change. Read once.
@@ -137,8 +139,8 @@ impl OptionStore {
     /// pairs its storage answers against, so the guard is the caller's (`begin_dispatch` is the
     /// one that can hand back `state` itself, when it was asked for no values at all).
     fn publish(&mut self, next: OptionState) {
+        self.published.push(next.clone());
         self.state = next;
-        self.dirty = true;
     }
 
     fn change(&self, id: u64) -> Option<&PendingOptionChange> {
@@ -210,10 +212,12 @@ impl OptionStore {
     }
 
     /// `receipt.complete()`: the command reached the agent, so the grace window starts now.
+    ///
+    /// The receipt's closure holds its change even once a detection confirmed every value and took
+    /// it out of the pending table, and it publishes a fresh object either way: one `optionWrite`
+    /// per call, owned values or not.
     pub fn complete(&mut self, receipt: DispatchReceipt, now_ms: i64) {
-        let Some(change) = self.change(receipt.0).cloned() else {
-            return;
-        };
+        let change = self.change(receipt.0).cloned().unwrap_or_default();
         if let Some(entry) = self
             .pending
             .iter_mut()
@@ -235,10 +239,10 @@ impl OptionStore {
     }
 
     /// `receipt.rollback()`: the command failed, so the pill goes back to what it showed.
+    ///
+    /// Publishes even when no value is still its own, as [`OptionStore::complete`] does.
     pub fn rollback(&mut self, receipt: DispatchReceipt) {
-        let Some(change) = self.change(receipt.0).cloned() else {
-            return;
-        };
+        let change = self.change(receipt.0).cloned().unwrap_or_default();
         let mut next = self.state.clone();
         for id in change.values.keys() {
             if self.owner_of(id) != Some(receipt.0) {

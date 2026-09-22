@@ -654,6 +654,8 @@ fn answer_shape(result: &Value) -> AnswerShape {
     let Some(object) = result.as_object() else {
         return match result {
             Value::Array(_) => AnswerShape::Known(vec![M::ImportNativeAttachments]),
+            // `rpc<string>('readNativeComposer')`: the host answers with the field's text.
+            Value::String(_) => AnswerShape::Known(vec![M::ReadNativeComposer]),
             // A bare boolean or `null` is a `composer(...)` acknowledgement on every real
             // recording; the synthetic generators answer a send, an answer or an interrupt with
             // one, so it still reaches a request whose answers are not all recognised, after the
@@ -766,6 +768,7 @@ fn known_shape(method: &ChatRpcMethod) -> bool {
             | M::SaveSessionAgentNote
             | M::ListStashedPrompts
             | M::ImportNativeAttachments
+            | M::ReadNativeComposer
     )
 }
 

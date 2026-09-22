@@ -42,6 +42,8 @@ pub enum ChatRpcMethod {
     ListStashedPrompts,
     SaveStashedPrompt,
     ImportNativeAttachments,
+    /// The composer field's current text, which the HOST answers rather than gxserver.
+    ReadNativeComposer,
     RunProjectDocsAction,
     /// A method this build does not know; kept verbatim.
     Other(String),
@@ -76,6 +78,7 @@ impl ChatRpcMethod {
             Self::ListStashedPrompts => "listStashedPrompts",
             Self::SaveStashedPrompt => "saveStashedPrompt",
             Self::ImportNativeAttachments => "importNativeAttachments",
+            Self::ReadNativeComposer => "readNativeComposer",
             Self::RunProjectDocsAction => "runProjectDocsAction",
             Self::Other(name) => name.as_str(),
         }
@@ -109,6 +112,7 @@ impl ChatRpcMethod {
             "listStashedPrompts" => Self::ListStashedPrompts,
             "saveStashedPrompt" => Self::SaveStashedPrompt,
             "importNativeAttachments" => Self::ImportNativeAttachments,
+            "readNativeComposer" => Self::ReadNativeComposer,
             "runProjectDocsAction" => Self::RunProjectDocsAction,
             other => Self::Other(other.to_string()),
         }

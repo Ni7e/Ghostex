@@ -188,19 +188,21 @@ fn apply_detection(state: &mut ChatState) {
 
 /// `persistence.write(key, state)`: one `composer('optionWrite', …)` per publish of the store.
 fn persist_options(state: &mut ChatState) -> Vec<Effect> {
-    let Some(next) = state.menus.options.take_dirty() else {
-        return Vec::new();
-    };
+    let published = state.menus.options.take_published();
     // `write: (key, state) => { if (!key) return; … }`.
     let Some(option_key) = state.menus.options.storage_key.clone() else {
         return Vec::new();
     };
-    remember_option_state(&mut state.menus.stored_options, &option_key, &next);
-    vec![Effect::WriteStorage {
-        key: session_options_key(&option_key),
-        value: Some(option_state_to_value(&next).to_string()),
-        durable: true,
-    }]
+    let mut effects = Vec::with_capacity(published.len());
+    for next in published {
+        remember_option_state(&mut state.menus.stored_options, &option_key, &next);
+        effects.push(Effect::WriteStorage {
+            key: session_options_key(&option_key),
+            value: Some(option_state_to_value(&next).to_string()),
+            durable: true,
+        });
+    }
+    effects
 }
 
 /// The `useEffect` that reads the session's accounts on mount and every 30 seconds.

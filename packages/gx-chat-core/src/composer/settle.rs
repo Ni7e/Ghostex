@@ -209,6 +209,11 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
                 Some(round) => effects.extend(round),
                 None => settle_catalog(state, *request_id, outcome.as_ref()),
             }
+            effects.extend(crate::composer::queue_edit::advance(
+                state,
+                *request_id,
+                outcome,
+            ));
         }
         Event::StorageLoaded { key, value } => {
             effects.extend(settle_returned_claim(state, key, value.as_deref()));

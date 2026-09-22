@@ -80,6 +80,8 @@ pub struct ComposerState {
     /// Every mutation answers with the whole authoritative queue, so the answer replaces the
     /// strip rather than patching it (`queueMutation` in `controller.ts`).
     pub queue_mutation: Option<(u64, Option<String>)>,
+    /// Edit on a queued row, between its removal and the text landing in the composer.
+    pub queue_edit: Option<crate::composer::queue_edit::QueueEdit>,
     /// The boot read has answered, so the two catalog reads may go out.
     pub boot_read: bool,
     /// The returned prompt whose claim is in flight: its id and the text to restore.
