@@ -135,27 +135,26 @@ impl GhostexGpuiApp {
         })
     }
 
-    /// CDXC:Workarea 2026-09-22 DECISION:
+    /// CDXC:Workarea 2026-09-23 DECISION:
     /// User: "a new button with a chat icon to the top left that allows just toggling the agents
-    /// area", right of the Toggle sidebar button, and the Expand side panel and Expand side panel
-    /// fully buttons stay "in sync with the current state as much as possible". There is one state
-    /// for all three, not a fourth flag: `view_panel_maximized` (the sessions column is folded
-    /// away) and `sidebar_collapsed`. Expand shows as on when the column is folded and the sidebar
-    /// is not, Expand fully when both are, and this button when the column is on screen. It flips
-    /// only the column, so a fully expanded view keeps its hidden sidebar and Expand fully simply
-    /// stops reading as on; the Toggle sidebar button beside it owns the sidebar. Without an open
-    /// view the column is the whole workarea and there is nothing to fold it behind, so the button
-    /// is disabled the way Expand is, and says so.
+    /// area", called the Agents Panel, right of the Toggle sidebar button, and the Expand side
+    /// panel and Expand side panel fully buttons stay "in sync with the current state as much as
+    /// possible". There is one state for all three, not a fourth flag: `view_panel_maximized` (the
+    /// Agents Panel is folded away) and `sidebar_collapsed`. It flips only the panel, so a fully
+    /// expanded view keeps its hidden sidebar and Expand fully simply stops reading as on; the
+    /// Toggle sidebar button beside it owns the sidebar. User: the button never shows as active
+    /// while the panel is shown, the way Toggle sidebar never does (supersedes the 2026-09-22 lit
+    /// state). Without an open view the panel is the whole workarea and there is nothing to fold
+    /// it behind, so the button is disabled the way Expand is, and says so.
     pub(crate) fn render_workarea_header_agents_toggle(
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let enabled = self.open_view_mode().is_some();
-        let shown = !self.view_panel_maximized();
         let tooltip = if enabled {
-            titlebar_tooltip_label("Toggle sessions column", "expandViewPanel")
+            titlebar_tooltip_label("Toggle Agents Panel", "expandViewPanel")
         } else {
-            "Open a view to hide the sessions column".into()
+            "Open a view to hide the Agents Panel".into()
         };
         header_panel_toggle_button(
             "ghostex-gpui-workarea-header-agents-toggle",
@@ -163,9 +162,6 @@ impl GhostexGpuiApp {
             0.0,
             enabled,
         )
-        .when(enabled && shown, |this| {
-            this.bg(titlebar_active_segment_color())
-        })
         .when(enabled, |this| {
             this.on_mouse_down(
                 MouseButton::Left,

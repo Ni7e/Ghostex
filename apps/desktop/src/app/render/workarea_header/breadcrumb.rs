@@ -102,15 +102,17 @@ impl GhostexGpuiApp {
                             .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
                             .child(self.render_sidebar_collapse_button(cx)),
                     )
+                    // The Agents Panel toggle follows the sidebar toggle wherever that one is
+                    // drawn; while the docked Search row owns it, that row draws this one too. The
+                    // 4pt is that row's gap, so the icon does not jump when the sidebar collapses.
+                    .child(
+                        div()
+                            .relative()
+                            .ml(px(4.0))
+                            .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
+                            .child(self.render_workarea_header_agents_toggle(cx)),
+                    )
                 },
-            )
-            // The sessions-column toggle sits right of the sidebar toggle, and first in the row
-            // when the docked sidebar's Search row has taken that toggle.
-            .child(
-                div()
-                    .relative()
-                    .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
-                    .child(self.render_workarea_header_agents_toggle(cx)),
             )
             /*
             CDXC:Navigation 2026-08-19:

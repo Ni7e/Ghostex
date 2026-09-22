@@ -84,12 +84,14 @@ impl GhostexGpuiApp {
         the button right after the traffic lights, at the unscaled x the collapsed workarea header
         draws it (`WINDOW_CONTROLS_LEADING_RESERVE`); the header only draws it while collapsed.
         */
+        // Two buttons of the same shape: Toggle sidebar and the Agents Panel toggle after it.
         let sidebar_toggle_width = if reserves_window_controls {
             7.0 * scale
-                + TITLEBAR_BUTTON_HORIZONTAL_PADDING * 2.0
-                + TITLEBAR_SIDEBAR_COLLAPSE_ICON_LEFT_OFFSET
-                + TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE
-                + 4.0 * scale
+                + 2.0
+                    * (TITLEBAR_BUTTON_HORIZONTAL_PADDING * 2.0
+                        + TITLEBAR_SIDEBAR_COLLAPSE_ICON_LEFT_OFFSET
+                        + TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE)
+                + 4.0
         } else {
             0.0
         };
@@ -144,6 +146,14 @@ impl GhostexGpuiApp {
                         .flex_shrink_0()
                         .ml(px(7.0 * scale))
                         .child(self.render_sidebar_collapse_button(cx)),
+                )
+                // Right of Toggle sidebar, as in the collapsed header (workarea_header/breadcrumb.rs),
+                // which puts it 4pt after that button: the margin tops the scaled row gap up to it.
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .ml(px(4.0 - 4.0 * scale))
+                        .child(self.render_workarea_header_agents_toggle(cx)),
                 )
                 .when(compact, |row| row.child(div().flex_1()))
             })

@@ -300,14 +300,14 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
      * User: Expand side panel and Expand side panel fully each get a hotkey, Cmd+Ctrl based with E for expand, and the full one is the same chord with Shift held.
      */
     defaultKey: 'cmd+ctrl+e',
-    description: 'Expand the side panel over the sessions column, or bring the sessions back.',
+    description: 'Expand the side panel over the Agents Panel, or bring the Agents Panel back.',
     id: 'expandViewPanel',
     title: 'Expand Side Panel',
   },
   {
     action: { id: 'expandViewPanelFully', kind: 'expandViewPanelFully' },
     defaultKey: 'cmd+ctrl+shift+e',
-    description: 'Expand the side panel over the sessions column and hide the sidebar, or bring both back.',
+    description: 'Expand the side panel over the Agents Panel and hide the sidebar, or bring both back.',
     id: 'expandViewPanelFully',
     title: 'Expand Side Panel Fully',
   },
