@@ -16,9 +16,6 @@ use gpui::Point;
 use super::model::*;
 use crate::*;
 
-/// The slide's duration, matching the AppKit panel's 0.22s ease-out.
-const FLOATING_REVEAL_SLIDE_SECS: f32 = 0.22;
-
 /// How long the pointer may stay off the panel before it slides away, matching the AppKit host's
 /// own 0.2s grace.
 const FLOATING_REVEAL_DISMISS_DELAY_MS: u64 = 200;
@@ -133,7 +130,12 @@ impl GhostexGpuiApp {
     fn step_floating_reveal_slide(&mut self, cx: &mut gpui::Context<Self>) {
         let slide = self.floating_reveal.slide;
         let elapsed = slide.started.elapsed().as_secs_f32();
-        let t = (elapsed / FLOATING_REVEAL_SLIDE_SECS).clamp(0.0, 1.0);
+        let duration = floating_reveal_slide_duration().as_secs_f32();
+        let t = if duration <= 0.0 {
+            1.0
+        } else {
+            (elapsed / duration).clamp(0.0, 1.0)
+        };
         let remaining = 1.0 - t;
         let eased = 1.0 - remaining * remaining * remaining;
         let progress = slide.from + (slide.target - slide.from) * eased;

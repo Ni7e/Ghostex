@@ -38,6 +38,9 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
 @property(nonatomic) double revealStartProgress;
 @property(nonatomic) double revealTarget;
 @property(nonatomic) NSTimeInterval revealStartedAt;
+/// Seconds for one slide, in or out. The GPUI panel is handed the Collapse animation speed
+/// setting on every update; the legacy CEF panel keeps its 0.22s.
+@property(nonatomic) double slideDuration;
 @property(nonatomic, strong) NSTimer *animationTimer;
 - (void)layoutReveal;
 - (void)animateIn;
@@ -73,7 +76,14 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
   self.animationTimer = nil;
   self.revealTarget = target;
   self.revealStartProgress = self.revealProgress;
-  if (NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
+  // CDXC:Sidebar 2026-09-22 DECISION:
+  // User: the floating panels were "appearing instantly and without any animation even though we
+  // do have a setting for this". The GPUI panel's slide follows that setting alone
+  // (`floating_reveal_slide_duration` in app/floating_reveal/model.rs; 0 is instant) and no longer
+  // consults Reduce Motion, which was on and had been skipping the slide whatever the setting said.
+  BOOL instant = self.slideDuration <= 0 ||
+                 (!self.companion && NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion);
+  if (instant) {
     self.revealProgress = target;
     [self layoutReveal];
     if (target == 0) {
@@ -91,7 +101,7 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
       return;
     }
     double elapsed = NSProcessInfo.processInfo.systemUptime - state.revealStartedAt;
-    double t = MIN(1, MAX(0, elapsed / 0.22));
+    double t = MIN(1, MAX(0, elapsed / state.slideDuration));
     double remaining = 1 - t;
     double eased = 1 - remaining * remaining * remaining;
     state.revealProgress = state.revealStartProgress + (state.revealTarget - state.revealStartProgress) * eased;
@@ -177,6 +187,7 @@ bool GhostexGpuiSidebarRevealUpdate(void *sidebarPtr, void *rootPtr,
     state = [GhostexGpuiSidebarReveal new];
     state.sidebar = sidebar;
     state.root = root;
+    state.slideDuration = 0.22;
     state.panel = [[GhostexGpuiSidebarRevealPanel alloc]
         initWithContentRect:NSZeroRect
                   styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
@@ -312,7 +323,7 @@ void GhostexGpuiSidebarRevealDispose(void *sidebarPtr) {
 // terminals, and chat pages all need their normal window-local layout and input.
 static bool GhostexGpuiNativeRevealUpdate(void *rootPtr, void *popupPtr, bool enabled,
                                          double width, double titlebarHeight, double leftInset,
-                                         bool requested, bool sticky) {
+                                         bool requested, bool sticky, double slideSeconds) {
   NSView *root = (__bridge NSView *)rootPtr;
   NSView *popup = (__bridge NSView *)popupPtr;
   NSWindow *parent = root.window;
@@ -350,6 +361,7 @@ static bool GhostexGpuiNativeRevealUpdate(void *rootPtr, void *popupPtr, bool en
     [parent addChildWindow:state.panel ordered:NSWindowAbove];
     state.attached = YES;
     state.targetFrame = frame;
+    state.slideDuration = slideSeconds;
     objc_setAssociatedObject(popup, GhostexGpuiSidebarRevealKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (sticky) {
       state.revealTarget = 1;
@@ -361,6 +373,8 @@ static bool GhostexGpuiNativeRevealUpdate(void *rootPtr, void *popupPtr, bool en
     }
   } else {
     state.targetFrame = frame;
+    // A settings change reaches the next slide; one already running keeps its clock.
+    if (!state.animationTimer) state.slideDuration = slideSeconds;
     [state layoutReveal];
   }
   NSPoint pointer = NSEvent.mouseLocation;
@@ -397,11 +411,11 @@ static bool GhostexGpuiNativeRevealUpdate(void *rootPtr, void *popupPtr, bool en
 }
 
 bool GhostexGpuiCompanionRevealUpdate(void *root, void *popup, bool enabled, double width, double titlebarHeight) {
-  return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, 0, false, false);
+  return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, 0, false, false, 0.22);
 }
 
-bool GhostexGpuiNativeSidebarRevealUpdate(void *root, void *popup, bool enabled, double width, double titlebarHeight, double leftInset, bool requested, bool sticky) {
-  return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, leftInset, requested, sticky);
+bool GhostexGpuiNativeSidebarRevealUpdate(void *root, void *popup, bool enabled, double width, double titlebarHeight, double leftInset, bool requested, bool sticky, double slideSeconds) {
+  return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, leftInset, requested, sticky, slideSeconds);
 }
 
 // CDXC:Sidebar 2026-09-20 DECISION:

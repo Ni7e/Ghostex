@@ -10,14 +10,14 @@ pub(crate) struct NativeSidebarState {
     pub(crate) disclosures: super::disclosure::SidebarDisclosures,
     pub(crate) group_bounds: std::collections::HashMap<String, gpui::Bounds<gpui::Pixels>>,
     pub(crate) space_gesture: super::space_gesture::SpaceGesture,
-    pub(crate) completion_flashes: std::collections::HashMap<String, std::time::Instant>,
+    pub(crate) completion_flashes: std::collections::HashMap<String, web_time::Instant>,
     pub(crate) bounds: gpui::Bounds<gpui::Pixels>,
     pub(crate) menu: Option<super::menu_state::SidebarMenuState>,
     pub(crate) next_menu_request: u64,
     /// Where the sidebar menu button was last painted, so its menu can drop down from it.
     pub(crate) more_button_bounds: std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
     /// When the More menu was dismissed by the same press that is still on its button.
-    pub(crate) more_menu_dismissed_at: Option<std::time::Instant>,
+    pub(crate) more_menu_dismissed_at: Option<web_time::Instant>,
     /// CDXC:Sidebar 2026-09-17 WHY:
     /// A frame profile found snapshot and session deep copies dominating the UI thread during redraws.
     /// Share immutable snapshots with row callbacks; incoming patches and clock updates use copy-on-write mutation.
@@ -31,7 +31,7 @@ pub(crate) struct NativeSidebarState {
     pub(crate) handled_rename: Option<u64>,
     pub(crate) handled_reveal: Option<u64>,
     pub(crate) scroll_animation: Option<super::scroll::SidebarScrollAnimation>,
-    pub(crate) reveal_flash: Option<(String, std::time::Instant)>,
+    pub(crate) reveal_flash: Option<(String, web_time::Instant)>,
     pub(crate) dragging: Option<(&'static str, String)>,
     pub(crate) drop_command: Option<serde_json::Value>,
     pub(crate) name_editor: Option<super::rename::SidebarNameEditor>,
@@ -44,6 +44,10 @@ pub(crate) struct NativeSidebarState {
     /// This frame's project header probes; `hovered_group` follows them.
     pub(crate) header_hover: super::project_hover::ProjectHeaderHoverProbes,
     pub(crate) hovered_session: Option<String>,
+    /// The pointer is on the Commands row's account-usage pin (usage.rs); the unpinned strip peeks while it is.
+    pub(crate) usage_pin_hovered: bool,
+    /// The pointer is on the peeking usage strip itself, so leaving the pin for a card keeps it up.
+    pub(crate) usage_peek_hovered: bool,
     /// Every painted session card's bounds. A tooltip captures its span the moment hover starts, so the card it belongs to must already be known then.
     pub(crate) session_card_bounds: std::collections::HashMap<String, gpui::Bounds<gpui::Pixels>>,
     /// Armed Delayed Send / Close After Done labels by sidebar session id, for every session rather than only the rows the snapshot shows (session_chat_armed_actions.rs).

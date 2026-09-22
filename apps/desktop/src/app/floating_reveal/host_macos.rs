@@ -29,6 +29,7 @@ unsafe extern "C" {
         left_inset: f64,
         requested: bool,
         sticky: bool,
+        slide_seconds: f64,
     ) -> bool;
 }
 
@@ -50,6 +51,7 @@ impl GhostexGpuiApp {
                     self.floating_reveal_left_inset() as f64,
                     requested,
                     false,
+                    floating_reveal_slide_duration().as_secs_f64(),
                 )
             };
             if !visible {
@@ -107,12 +109,16 @@ impl GhostexGpuiApp {
                 self.floating_reveal_left_inset() as f64,
                 requested,
                 sticky,
+                floating_reveal_slide_duration().as_secs_f64(),
             )
         };
         if !visible {
             self.close_floating_reveal(cx);
             return false;
         }
+        // AppKit sized the panel from the frame it computed just now, from inside this update;
+        // GPUI has to be told about that size the same way it is told about every other one.
+        self.schedule_floating_reveal_bounds_refresh(cx);
         true
     }
 
@@ -127,6 +133,7 @@ impl GhostexGpuiApp {
                 0.0,
                 false,
                 false,
+                0.0,
             );
         }
     }

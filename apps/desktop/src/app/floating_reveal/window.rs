@@ -200,7 +200,30 @@ impl GhostexGpuiApp {
             self.update_active_mode_cef_child_visibility(cx);
             self.schedule_floating_reveal_focus(cx);
         }
+        self.schedule_floating_reveal_bounds_refresh(cx);
         cx.notify();
+    }
+
+    /// CDXC:Sidebar 2026-09-22 WHY:
+    /// GPUI learns a window's new size only from the platform's resize callback, and that callback
+    /// re-enters the app through `AsyncApp::update_window`, which gives up when the app is already
+    /// borrowed. The hosts resize the panel from inside an app update (a session click in the
+    /// floating sidebar, the poll), so the callback failed silently and the window kept laying out
+    /// at its old width: the sessions column a click added was clipped off the layout, and its
+    /// share of the wider window stayed unpainted black. Re-reading the bounds on a deferred tick,
+    /// once the update that resized the window has ended, does what the callback would have done.
+    pub(super) fn schedule_floating_reveal_bounds_refresh(&self, cx: &mut gpui::Context<Self>) {
+        let Some(handle) = self
+            .floating_reveal
+            .panel
+            .as_ref()
+            .map(|panel| panel.window)
+        else {
+            return;
+        };
+        gpui::App::defer(cx, move |cx| {
+            let _ = handle.update(cx, |_, window, cx| window.bounds_changed(cx));
+        });
     }
 
     /// CDXC:Sidebar 2026-09-09 WHY:

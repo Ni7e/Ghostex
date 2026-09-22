@@ -78,7 +78,10 @@ const MIN_TERMINAL_VIEW_WIDTH_PERCENT: f64 = 50.0;
 const MAX_TERMINAL_VIEW_WIDTH_PERCENT: f64 = 100.0;
 const DEFAULT_CHAT_CONTENT_MAX_WIDTH_PX: f32 = 768.0;
 const DEFAULT_TERMINAL_WIDTH_APPLY_TO_COMMAND_PANE_TERMINALS: bool = false;
-const DEFAULT_SHOW_AGENTS_PANE_TAB_BAR_WHEN_UNSPLIT: bool = false;
+/// Mirrors `DEFAULT_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS` / `MAX_...` in
+/// `packages/shared/ghostex-settings/types.ts`.
+const DEFAULT_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS: f64 = 400.0;
+const MAX_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS: f64 = 1000.0;
 const MIN_TERMINAL_FONT_WEIGHT: f64 = 100.0;
 const MAX_TERMINAL_FONT_WEIGHT: f64 = 900.0;
 const MIN_TERMINAL_LINE_HEIGHT: f64 = 0.8;
@@ -753,6 +756,17 @@ impl SharedSidebarSettingsSnapshot {
             .and_then(json_value_to_f32)
     }
 
+    /// The Collapse animation speed slider: sidebar disclosures and the floating sidebar's slide
+    /// (`app/floating_reveal`) both run for this long, clamped to the slider's own range.
+    pub fn sidebar_collapse_animation_duration_ms(&self) -> f32 {
+        read_finite_number_field(
+            &self.object,
+            "sidebarCollapseAnimationDurationMs",
+            DEFAULT_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS,
+        )
+        .clamp(0.0, MAX_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS) as f32
+    }
+
     /// `None` when the keep-alive slider is at 0, which restores release-on-switch.
     pub fn project_switch_keep_alive(&self) -> Option<std::time::Duration> {
         let minutes = self
@@ -1075,11 +1089,6 @@ impl SharedSidebarSettingsSnapshot {
     pub fn terminal_width_applies_to_command_pane_terminals(&self) -> bool {
         strict_bool_field(&self.object, "terminalWidthApplyToCommandPaneTerminals")
             .unwrap_or(DEFAULT_TERMINAL_WIDTH_APPLY_TO_COMMAND_PANE_TERMINALS)
-    }
-
-    pub fn show_agents_pane_tab_bar_when_unsplit(&self) -> bool {
-        strict_bool_field(&self.object, "showAgentsPaneTabBarWhenUnsplit")
-            .unwrap_or(DEFAULT_SHOW_AGENTS_PANE_TAB_BAR_WHEN_UNSPLIT)
     }
 
     pub fn show_session_id_in_terminal_panes(&self) -> bool {

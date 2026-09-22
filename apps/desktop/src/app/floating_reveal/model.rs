@@ -31,6 +31,22 @@ pub(crate) const FLOATING_REVEAL_AGENTS_COLUMN_WIDTH: f32 = 520.0;
 /// How long a reveal asked for by name (Reveal Active Session) waits for the pointer.
 pub(crate) const FLOATING_REVEAL_REQUEST_GRACE_SECS: u64 = 5;
 
+/// How long the panel takes to slide in, and to slide away again.
+///
+/// CDXC:Sidebar 2026-09-22 DECISION:
+/// User: the floating sidebar and sessions column were "appearing instantly and without any
+/// animation even though we do have a setting for this". The slide runs for the Collapse animation
+/// speed setting (`sidebarCollapseAnimationDurationMs`, 0 is instant) and for that setting alone:
+/// it no longer defers to macOS Reduce Motion, which was on and had been skipping the slide
+/// whatever the setting said. The hard-coded 0.22s the hosts used before is gone with it.
+pub(crate) fn floating_reveal_slide_duration() -> std::time::Duration {
+    let millis = shared_settings::shared_sidebar_settings_snapshot()
+        .sidebar_collapse_animation_duration_ms()
+        .round()
+        .max(0.0) as u64;
+    std::time::Duration::from_millis(millis)
+}
+
 /// The reveal's sweep while nothing is on screen: often enough to feel immediate on the edge,
 /// rare enough to cost nothing.
 pub(crate) const SIDEBAR_HOVER_REVEAL_IDLE_POLL: std::time::Duration =
