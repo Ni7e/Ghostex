@@ -126,92 +126,22 @@ impl GhostexGpuiApp {
         if self.focus_existing_gpui_remote_attach_terminal(&key, true, cx) {
             return;
         }
-        let prepare_reference = reference.clone();
         let open_chat_early = placement == AgentsWorkspaceNewTerminalPlacement::Tab
             && self
                 .pending_agents_chat_launch_intents
                 .contains(&GpuiWorkspaceTerminalSessionKey::Remote(key.clone()));
         let preview_pane_id = requested_pane_id.unwrap_or(self.agents_workspace.focused_pane);
-        let update_reference = reference;
-        let failed_open_key = key.clone();
-        let remote_machine_id = key.remote_machine_id;
-        let background = cx.background_executor().clone();
-        cx.spawn(async move |this, cx| {
-            if open_chat_early {
-                let preview_target = target.clone();
-                let preview_reference = prepare_reference.clone();
-                let preview = background
-                    .spawn(async move {
-                        gpui_remote_gxserver_rpc_result(
-                            &preview_target,
-                            "/api/attachSessionMetadata",
-                            &serde_json::json!({
-                                "projectId": preview_reference.project_id,
-                                "sessionId": preview_reference.session_id,
-                            }),
-                            std::time::Duration::from_secs(15),
-                        )
-                    })
-                    .await;
-                if let Ok(metadata) = preview {
-                    let _ = this.update(cx, |this, cx| {
-                        this.show_pending_agents_chat_launch(
-                            GpuiWorkspaceTerminalSessionKey::Remote(
-                                GpuiRemoteAttachSessionKey::from(&prepare_reference),
-                            ),
-                            &metadata,
-                            preview_pane_id,
-                            this.pending_keep_view_remote_focus
-                                .contains(&GpuiRemoteAttachSessionKey::from(&prepare_reference)),
-                            cx,
-                        );
-                    });
-                }
-            }
-            let result = background
-                .spawn(async move {
-                    gpui_prepare_remote_attach_terminal_plan(
-                        &config,
-                        &target,
-                        &prepare_reference,
-                        true,
-                        true,
-                    )
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| match result {
-                Ok(plan) => {
-                    this.open_gpui_remote_attach_terminal(
-                        update_reference,
-                        plan,
-                        requested_pane_id,
-                        placement,
-                        GpuiRemoteAttachOpenIntent::AttachExistingSession,
-                        cx,
-                    );
-                    this.refresh_gpui_remote_gxserver_presentation_in_background(
-                        remote_machine_id,
-                        false,
-                        cx,
-                    );
-                }
-                Err(message) => {
-                    this.pending_keep_view_remote_focus.remove(&failed_open_key);
-                    support_logs::append(
-                        support_logs::GpuiSupportLog::TerminalFocus,
-                        "gpui.remoteAttach.planFailed",
-                        serde_json::json!({ "machineId": remote_machine_id }),
-                    );
-                    this.dispatch_gpui_app_modal_toast(
-                        "warning",
-                        "Remote attach unavailable",
-                        message.as_str(),
-                        cx,
-                    );
-                }
-            });
-        })
-        .detach();
+        self.prepare_gpui_remote_attach_request(
+            reference,
+            config,
+            target,
+            super::attach_request::RemoteAttachRequestIntent::Open {
+                requested_pane_id,
+                placement,
+                preview_pane_id: open_chat_early.then_some(preview_pane_id),
+            },
+            cx,
+        );
     }
 
     /// Consumes the keep-view intent parked for this remote session by the native open action.

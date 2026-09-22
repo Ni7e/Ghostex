@@ -36,7 +36,6 @@ impl MachineGroup {
 }
 
 pub(crate) struct RemoteSitesPanel {
-    host: GpuiTitlebarPanelHost,
     main_app: gpui::WeakEntity<GhostexGpuiApp>,
     groups: Vec<MachineGroup>,
     scroll: ScrollHandle,
@@ -50,7 +49,6 @@ pub(crate) struct RemoteSitesPanel {
 
 impl RemoteSitesPanel {
     pub(crate) fn new(
-        host: GpuiTitlebarPanelHost,
         main_app: gpui::WeakEntity<GhostexGpuiApp>,
         cx: &mut gpui::Context<Self>,
     ) -> Self {
@@ -80,7 +78,6 @@ impl RemoteSitesPanel {
         })
         .detach();
         Self {
-            host,
             main_app,
             groups: vec![MachineGroup::local()],
             scroll: ScrollHandle::new(),
@@ -352,12 +349,8 @@ impl RemoteSitesPanel {
         cx.notify();
     }
 
-    /// "…and close the dropdown", for the rows that open a site. As a Browser start page there is
-    /// nothing to close: the click navigates the very pane the list is drawn in.
+    /// "…and close the dropdown", for the rows that open a site.
     fn close(&self, window: &mut Window, cx: &mut gpui::Context<Self>) {
-        if self.host == GpuiTitlebarPanelHost::ViewPanel {
-            return;
-        }
         let _ = self.main_app.update(cx, |app, cx| {
             app.clear_gpui_titlebar_popup_from_window(GpuiTitlebarPopupKind::RemoteSites, cx)
         });
@@ -743,8 +736,7 @@ impl Render for RemoteSitesPanel {
         } else {
             "No sites checked".into()
         };
-        // Filling a browser pane as its start page, the frame keeps square corners.
-        resource_panel_frame().when(self.host == GpuiTitlebarPanelHost::ViewPanel, |frame| frame.rounded_none()).child(v_flex().size_full().overflow_hidden()
+        resource_panel_frame().child(v_flex().size_full().overflow_hidden()
             .child(resource_header()
                 .child(resource_heading()
                     .child(site_icon(BROWSER_ICON_WORLD, 18.0).text_color(chrome_ink().opacity(0.96)))

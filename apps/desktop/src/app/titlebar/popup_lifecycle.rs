@@ -354,11 +354,7 @@ impl GhostexGpuiApp {
             }
             GpuiTitlebarPopupKind::RemoteSites => {
                 GpuiTitlebarPopupContent::RemoteSites(cx.new(|cx| {
-                    crate::app::window::remote_sites::RemoteSitesPanel::new(
-                        GpuiTitlebarPanelHost::Popup,
-                        main_app,
-                        cx,
-                    )
+                    crate::app::window::remote_sites::RemoteSitesPanel::new(main_app, cx)
                 }))
             }
             GpuiTitlebarPopupKind::Actions => {
