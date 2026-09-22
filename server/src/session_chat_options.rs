@@ -621,6 +621,24 @@ fn is_model_version_suffix(rest: &str) -> bool {
     }
 }
 
+/// CDXC:AgentProviders 2026-09-22 WHY:
+/// Claude Code 2.1.280 moved the `opus` alias onto Opus 5.5, leaving the older
+/// Opus 5 reachable only as `claude-opus-5`, which is the catalog id for it.
+/// Both print as "Opus <version>", so the version digits are the only thing
+/// that tells the two rows apart.
+fn claude_model_value(family_value: &str, version: &str) -> &'static str {
+    match (family_value, version) {
+        ("opus", "5") => "claude-opus-5",
+        _ => match family_value {
+            "fable" => "fable",
+            "opus" => "opus",
+            "sonnet" => "sonnet",
+            "haiku" => "haiku",
+            _ => "",
+        },
+    }
+}
+
 fn match_claude_model(segment: &str) -> Option<SessionChatDetectedChoice> {
     let variant_model = segment
         .strip_suffix(" (1M)")
@@ -633,14 +651,18 @@ fn match_claude_model(segment: &str) -> Option<SessionChatDetectedChoice> {
                 .strip_prefix(*family)
                 .is_some_and(is_model_version_suffix)
         })
-        .map(|(_, value)| SessionChatDetectedChoice {
-            value: if variant_model.is_some() {
-                format!("{value}[1m]")
-            } else {
-                (*value).to_string()
-            },
-            label: segment.to_string(),
-            source: SessionChatOptionEvidence::Terminal,
+        .map(|(family, value)| {
+            let version = model.strip_prefix(*family).unwrap_or("").trim();
+            let value = claude_model_value(value, version);
+            SessionChatDetectedChoice {
+                value: if variant_model.is_some() {
+                    format!("{value}[1m]")
+                } else {
+                    value.to_string()
+                },
+                label: segment.to_string(),
+                source: SessionChatOptionEvidence::Terminal,
+            }
         })
 }
 
@@ -1553,12 +1575,13 @@ pub(crate) fn claude_transcript_model_choice(model: &str) -> Option<SessionChatD
     } else {
         format!("{title} {}", version.join("."))
     };
+    let id = claude_model_value(family, &version.join("."));
     let (value, label) = match variant {
         Some(variant) => (
-            format!("{family}[{variant}]"),
+            format!("{id}[{variant}]"),
             format!("{label} ({})", variant.to_ascii_uppercase()),
         ),
-        None => (family.to_string(), label),
+        None => (id.to_string(), label),
     };
     Some(SessionChatDetectedChoice {
         value,

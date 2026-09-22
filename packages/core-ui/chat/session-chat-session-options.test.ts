@@ -36,7 +36,7 @@ describe('pending session chat options', () => {
     const unsubscribe = store.subscribe(changed);
     const request = store.beginDispatch({ model: 'opus' });
     expect(changed).toHaveBeenCalledOnce();
-    expect(sessionChatOptionValueLabel(catalog.model, store.getSnapshot())).toBe('Opus 5');
+    expect(sessionChatOptionValueLabel(catalog.model, store.getSnapshot())).toBe('Opus 5.5');
     expect(store.getSnapshot().model?.source).toBe('dispatched');
     request.rollback();
     expect(sessionChatOptionValueLabel(catalog.model, store.getSnapshot())).toBe('Sonnet 5');
@@ -128,8 +128,9 @@ describe('session chat session-option catalogs', () => {
   it('shows the claude model lineup from the published agent model catalog', () => {
     expect(catalogFor('claude').model.choices?.map(({ value, label }) => ({ value, label }))).toEqual([
       { value: 'fable', label: 'Fable 5.1' },
-      { value: 'opus[1m]', label: 'Opus 5 (1M)' },
-      { value: 'opus', label: 'Opus 5' },
+      { value: 'opus[1m]', label: 'Opus 5.5 (1M)' },
+      { value: 'opus', label: 'Opus 5.5' },
+      { value: 'claude-opus-5', label: 'Opus 5' },
       { value: 'sonnet', label: 'Sonnet 5' },
       { value: 'haiku', label: 'Haiku 4.5' },
     ]);
