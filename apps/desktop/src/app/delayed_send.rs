@@ -3172,13 +3172,19 @@ impl GhostexGpuiApp {
             "copyRecentProjectPath" | "openRecentProjectInFinder" | "openRecentProjectTerminal" => {
                 self.handle_gpui_app_modal_recent_project_path_action(command_type, command, cx);
             }
+            // CDXC:Navigation 2026-09-23 DECISION:
+            // User: selecting a Quick Access session while chat is collapsed shows it floating at the side and keeps the chat collapsed.
             "focusSession" => {
                 if let Some(session_id) = command
                     .get("sessionId")
                     .and_then(serde_json::Value::as_str)
                     .map(str::to_string)
                 {
-                    let _ = self.dispatch_gpui_command_palette_session_focus(&session_id, cx);
+                    if self.dispatch_gpui_command_palette_session_focus(&session_id, cx) {
+                        // Dismiss Quick Access before giving the floating sessions pane focus.
+                        self.close_gpui_quick_access_window(cx);
+                        self.reveal_floating_sessions(cx);
+                    }
                 }
             }
             /*
