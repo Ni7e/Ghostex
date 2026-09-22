@@ -833,9 +833,8 @@ fn perform(
         // Nothing answers this one. A refused cache write is not a failure the chat reports: the
         // live stream stays authoritative and the next fold writes again.
         Effect::WriteRetainedSnapshot { value } => {
-            if retained::write(key, value.as_deref(), now_ms).is_err() {
-                world.counters.storage_refused += 1;
-            }
+            let written = retained::write(key, value.as_deref(), now_ms);
+            world.counters.storage_refused += u64::from(written.is_err());
         }
         Effect::SetTimer { delay_ms } => match delay_ms {
             Some(delay) => {
