@@ -216,11 +216,13 @@ impl NativeChatView {
                     .into_any_element(),
             );
         }
+        // Trust and Remember stays reachable on a collapsed picker, matching
+        // the React card: the collapsed rows are the prompt's own Yes/No.
         for action in notice["actions"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|_| !collapsed)
+            .filter(|action| !collapsed || action["kind"] == "trustAndRemember")
         {
             if action["kind"] == "switchToTerminal" {
                 actions.push(self.host_button("terminalView", "titlebar/terminal-2.svg", p, cx));

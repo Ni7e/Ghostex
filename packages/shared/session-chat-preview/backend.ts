@@ -219,7 +219,8 @@ export class ChatPreviewBackend {
                 Date.now()
               ),
             ];
-        } else this.snapshot.prompt = undefined;
+        } else if (params.kind === 'trustAndRemember') this.snapshot.terminalNotice = undefined;
+        else this.snapshot.prompt = undefined;
         this.publish();
         break;
       case 'setSessionChatDraft':

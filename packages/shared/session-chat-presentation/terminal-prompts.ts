@@ -95,5 +95,15 @@ export function terminalNoticeActionAnswer(
   if (action.kind === 'recoverCodexConversation' && notice.conversationLock)
     return { kind: 'recoverCodexConversation', conversationLock: notice.conversationLock };
   if (action.kind === 'sendKeys' && action.send !== undefined) return { kind: 'approval', approvalSend: action.send };
+  if (action.kind === 'trustAndRemember') return { kind: 'trustAndRemember' };
   return null;
+}
+
+/**
+ * Whether a notice action may be triggered by the primary shortcut. Trust and
+ * Remember is deliberately click-only: a shortcut meant to accept one prompt
+ * must not also change what happens on every later one.
+ */
+export function terminalNoticeActionShortcutEligible(action: SessionChatTerminalNoticeAction): boolean {
+  return action.kind !== 'trustAndRemember';
 }

@@ -2177,6 +2177,14 @@ pub fn detect_session_chat_terminal_state(
     if let Some(notice) = notice.as_mut() {
         crate::session_chat_codex_lock::enrich_notice(repository, project_id, session_id, notice);
     }
+    if let Some(notice) = notice.as_mut().filter(|notice| {
+        notice.kind == crate::session_chat_notice::SESSION_CHAT_NOTICE_TRUST_PROMPT
+    }) {
+        let remembered = crate::session_chat_trust_memory::session_folders_remembered(
+            repository, project_id, session_id,
+        );
+        crate::session_chat_trust_memory::decorate_trust_notice(notice, remembered);
+    }
     let options = merge_session_chat_option_selections(transcript, statusline, terminal)
         .map(SessionChatDetectedOptions::new);
     // A usage limit an account switch is hiding must not veto the composer either: after the switch the resumed CLI repaints the previous login's limit, and the continuation dot and the user's sends have to reach the new login.
@@ -2848,7 +2856,10 @@ pub(crate) fn session_chat_hook_state_directory(paths: &GxserverPaths) -> std::p
 #[derive(Clone)]
 pub(crate) struct SessionChatOptionDetector {
     cache: Arc<Mutex<HashMap<String, SessionChatOptionCacheEntry>>>,
+    recovery: Arc<crate::accounts::recovery::RecoverySignals>,
     compacting_publisher: crate::session_chat_compacting::SessionChatCompactingPublisher,
+    followers: Arc<Mutex<HashMap<String, SessionChatFollowerEntry>>>,
+    event_hub: GxserverEventHub,
     paths: GxserverPaths,
     server_id: String,
 }
@@ -2857,8 +2868,11 @@ impl SessionChatOptionDetector {
     pub(crate) fn new(state: &AppState) -> Self {
         Self {
             cache: state.session_chat_option_cache.clone(),
+            recovery: state.accounts.recovery.clone(),
             compacting_publisher:
                 crate::session_chat_compacting::SessionChatCompactingPublisher::new(state),
+            followers: state.session_chat_followers.clone(),
+            event_hub: state.event_hub.clone(),
             paths: state.paths.clone(),
             server_id: state.metadata.server_id.clone(),
         }
@@ -2880,7 +2894,7 @@ impl SessionChatOptionDetector {
             .unwrap_or_default();
         detected.notice = detected.notice.filter(|notice| {
             crate::session_chat_notice_progress::visible(project_id, session_id, notice)
-                && !crate::session_chat_notice::account_usage_notice_suppressed(
+                && !crate::session_chat_notice::session_chat_notice_hidden(
                     project_id, session_id, notice,
                 )
         });
@@ -2918,7 +2932,7 @@ impl SessionChatOptionDetector {
                         detected.notice = detected.notice.filter(|notice| {
                             crate::session_chat_notice_progress::visible(
                                 project_id, session_id, notice,
-                            ) && !crate::session_chat_notice::account_usage_notice_suppressed(
+                            ) && !crate::session_chat_notice::session_chat_notice_hidden(
                                 project_id, session_id, notice,
                             )
                         });
@@ -2927,17 +2941,25 @@ impl SessionChatOptionDetector {
                 }
             }
         }
+        let mut auto_trust_plan = None;
         let mut detected = open_gxserver_database(&self.paths)
             .ok()
             .map(|db| {
                 let repository = DomainRepository::new(&db, self.server_id.as_str());
-                crate::session_chat_options::detect_session_chat_terminal_state(
+                let detected = crate::session_chat_options::detect_session_chat_terminal_state(
                     &repository,
                     &session_chat_hook_state_directory(&self.paths),
                     project_id,
                     session_id,
                     agent,
-                )
+                );
+                auto_trust_plan = crate::session_chat_trust_memory::auto_trust_plan(
+                    &repository,
+                    project_id,
+                    session_id,
+                    detected.notice.as_ref(),
+                );
+                detected
             })
             .unwrap_or_default();
         /*
@@ -2981,7 +3003,7 @@ impl SessionChatOptionDetector {
             let previous_monitor = cache.get(&key).and_then(|entry| entry.projected_monitor);
             let detected_monitor = if detected.captured {
                 Some(
-                    crate::session_chat_terminal_activity::is_session_chat_monitor_activity(
+                    crate::session_chat_terminal_activity::is_session_chat_background_work_activity(
                         detected.activity.as_ref(),
                     ),
                 )
@@ -3193,14 +3215,46 @@ impl SessionChatOptionDetector {
                 );
             }
         }
-        // The cache above keeps the raw notice so a repaint keeps its identity; callers only ever see the visible one, and the account-switch suppression is part of visibility (see `account_usage_notice_suppressed`).
+        // A trust prompt on a remembered folder is answered from here, the one
+        // place every fresh capture passes through, so it is accepted whichever
+        // probe first sees it (session_chat_trust_memory.rs).
+        if let Some(plan) = auto_trust_plan {
+            if crate::session_chat_trust_memory::claim_auto_trust_attempt(project_id, session_id) {
+                crate::session_chat_trust_memory::dispatch_auto_trust(
+                    self.clone(),
+                    plan,
+                    project_id,
+                    session_id,
+                    agent,
+                );
+            }
+        }
+        // The cache above keeps the raw notice so a repaint keeps its identity; callers only ever see the visible one, and the account-switch suppression and a remembered folder's auto-trust are part of visibility (see `session_chat_notice_hidden`).
         detected.notice = detected.notice.filter(|notice| {
             crate::session_chat_notice_progress::visible(project_id, session_id, notice)
-                && !crate::session_chat_notice::account_usage_notice_suppressed(
+                && !crate::session_chat_notice::session_chat_notice_hidden(
                     project_id, session_id, notice,
                 )
         });
+        if detected.captured {
+            self.recovery
+                .observe(project_id, session_id, detected.notice.as_ref());
+        }
         detected
+    }
+
+    /// Republish the cached screen state to this session's chat followers,
+    /// for a server-side writer that just changed the screen and re-probed.
+    pub(crate) fn publish_screen_state(&self, project_id: &str, session_id: &str) {
+        publish_cached_session_chat_screen_state(
+            &self.followers,
+            &self.event_hub,
+            &self.paths,
+            &self.server_id,
+            &self.cache,
+            project_id,
+            session_id,
+        );
     }
 
     /// Async handlers must not block the executor on a process spawn.
@@ -3361,47 +3415,69 @@ pub(crate) fn session_chat_terminal_notice_publisher(
     let project_id = project_id.to_string();
     let session_id = session_id.to_string();
     Arc::new(move || {
-        let key = session_observer_key(&project_id, &session_id);
-        let (options, prompt, screen_notice, activity, fleet, tasks, captured) = option_cache
-            .lock()
-            .ok()
-            .and_then(|cache| {
-                cache.get(&key).map(|entry| {
-                    (
-                        entry.value.options.clone(),
-                        entry.value.prompt.clone(),
-                        entry.value.notice.clone(),
-                        entry.value.activity.clone(),
-                        entry.value.fleet.clone(),
-                        entry.value.tasks.clone(),
-                        entry.value.attempted,
-                    )
-                })
-            })
-            .unwrap_or_default();
-        let notice = crate::session_chat_notice::resolve_session_chat_terminal_notice(
-            &project_id,
-            &session_id,
-            screen_notice,
-        );
-        emit_session_chat_options_state_frame(
+        publish_cached_session_chat_screen_state(
             &followers,
             &event_hub,
             &paths,
             &server_id,
+            &option_cache,
             &project_id,
             &session_id,
-            options.as_ref(),
-            crate::session_chat::SessionChatScreenState {
-                prompt: prompt.as_ref(),
-                notice: notice.as_ref(),
-                activity: activity.as_ref(),
-                fleet: fleet.as_ref(),
-                tasks: tasks.as_ref(),
-                probed: captured,
-            },
         );
     })
+}
+
+/// The publisher's body, callable without an `AppState`: read the cached
+/// screen state and emit it to the session's followers.
+fn publish_cached_session_chat_screen_state(
+    followers: &Arc<Mutex<HashMap<String, SessionChatFollowerEntry>>>,
+    event_hub: &GxserverEventHub,
+    paths: &GxserverPaths,
+    server_id: &str,
+    option_cache: &Arc<Mutex<HashMap<String, SessionChatOptionCacheEntry>>>,
+    project_id: &str,
+    session_id: &str,
+) {
+    let key = session_observer_key(project_id, session_id);
+    let (options, prompt, screen_notice, activity, fleet, tasks, captured) = option_cache
+        .lock()
+        .ok()
+        .and_then(|cache| {
+            cache.get(&key).map(|entry| {
+                (
+                    entry.value.options.clone(),
+                    entry.value.prompt.clone(),
+                    entry.value.notice.clone(),
+                    entry.value.activity.clone(),
+                    entry.value.fleet.clone(),
+                    entry.value.tasks.clone(),
+                    entry.value.attempted,
+                )
+            })
+        })
+        .unwrap_or_default();
+    let notice = crate::session_chat_notice::resolve_session_chat_terminal_notice(
+        project_id,
+        session_id,
+        screen_notice,
+    );
+    emit_session_chat_options_state_frame(
+        followers,
+        event_hub,
+        paths,
+        server_id,
+        project_id,
+        session_id,
+        options.as_ref(),
+        crate::session_chat::SessionChatScreenState {
+            prompt: prompt.as_ref(),
+            notice: notice.as_ref(),
+            activity: activity.as_ref(),
+            fleet: fleet.as_ref(),
+            tasks: tasks.as_ref(),
+            probed: captured,
+        },
+    );
 }
 
 /// Fresh lifecycle/working truth for the watchdog's timeout decision. Blocking

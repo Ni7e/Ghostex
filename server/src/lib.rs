@@ -118,6 +118,7 @@ pub mod session_chat_terminal_activity;
 pub mod session_chat_terminal_dialog;
 #[cfg(test)]
 mod session_chat_tests;
+pub mod session_chat_trust_memory;
 pub mod session_chat_watchdog;
 pub mod session_chat_workspace_trust;
 pub mod session_chat_zcode;

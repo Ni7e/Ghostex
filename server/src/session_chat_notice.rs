@@ -166,6 +166,9 @@ pub enum SessionChatTerminalNoticeActionKind {
     /// Verbatim bytes, delivered through the existing approval-answer path.
     SendKeys,
     RecoverCodexConversation,
+    /// Server-side: remember the session's folders as trusted, then accept
+    /// the prompt on screen (session_chat_trust_memory.rs).
+    TrustAndRemember,
 }
 
 impl SessionChatTerminalNoticeActionKind {
@@ -174,6 +177,7 @@ impl SessionChatTerminalNoticeActionKind {
             Self::SwitchToTerminal => "switchToTerminal",
             Self::SendKeys => "sendKeys",
             Self::RecoverCodexConversation => "recoverCodexConversation",
+            Self::TrustAndRemember => "trustAndRemember",
         }
     }
 }
@@ -203,6 +207,15 @@ impl SessionChatTerminalNoticeAction {
             label: label.to_string(),
             kind: SessionChatTerminalNoticeActionKind::SendKeys,
             send: Some(send.to_string()),
+        }
+    }
+
+    pub fn trust_and_remember() -> Self {
+        Self {
+            id: "trustAndRemember".to_string(),
+            label: "Trust and Remember".to_string(),
+            kind: SessionChatTerminalNoticeActionKind::TrustAndRemember,
+            send: None,
         }
     }
 
@@ -267,6 +280,9 @@ pub struct SessionChatTerminalNotice {
     pub choices: Vec<SessionChatTerminalNoticeChoice>,
     pub dialog: Option<crate::session_chat_terminal_dialog::TerminalDialog>,
     pub conversation_lock: Option<crate::session_chat_codex_lock::ConversationLock>,
+    /// A trust prompt on a remembered folder: the detection funnel answers it
+    /// itself and clients never see it (session_chat_trust_memory.rs).
+    pub auto_trust: bool,
     /// Server-side delivery policy for this particular detected state.
     blocks_input: bool,
 }
@@ -290,6 +306,7 @@ impl SessionChatTerminalNotice {
             choices: Vec::new(),
             dialog: None,
             conversation_lock: None,
+            auto_trust: false,
             blocks_input: session_chat_notice_kind_blocks_input(kind),
         }
     }
@@ -340,6 +357,7 @@ impl SessionChatTerminalNotice {
                 && self.actions == other.actions
                 && self.dialog == other.dialog
                 && self.conversation_lock == other.conversation_lock
+                && self.auto_trust == other.auto_trust
                 // Labels only: the highlight moves whenever the user arrows
                 // around in the terminal, and re-minting `detectedAt` for that
                 // would resurrect a card they just dismissed.
@@ -1847,6 +1865,15 @@ pub fn classify_session_chat_terminal_notice(
             return Some(notice_from_picker(&screen, picker));
         }
         if let Some(dialog) = crate::session_chat_claude_dialog::detect_claude_dialog(screen_text) {
+            // CDXC:AgentProviders 2026-09-22 WHY:
+            // Claude's limit-choice panel used to mask the quota error as a generic question, so automatic account switching never started. Keep its controls for manual use while exposing its actual recovery cause.
+            if crate::session_chat_composer::is_claude_usage_limit_dialog(screen_text) {
+                let mut notice = dialog
+                    .into_notice(SESSION_CHAT_NOTICE_USAGE_LIMIT)
+                    .with_input_blocking(true);
+                notice.severity = SessionChatTerminalNoticeSeverity::Warning;
+                return Some(notice);
+            }
             return Some(dialog.into_notice(SESSION_CHAT_NOTICE_CLAUDE_INPUT_BLOCKED));
         }
     }
@@ -2322,13 +2349,25 @@ pub(crate) fn account_usage_notice_suppressed(
 }
 
 /// Store lookup and merge for read/frame paths holding a screen classification.
+/// A notice the cache keeps but no client may see: a usage notice an account
+/// switch is hiding, or a trust prompt on a remembered folder that the
+/// detection funnel is answering itself. The cache keeps it so the send path
+/// and the queue still treat the screen as blocked until it is gone.
+pub fn session_chat_notice_hidden(
+    project_id: &str,
+    session_id: &str,
+    notice: &SessionChatTerminalNotice,
+) -> bool {
+    notice.auto_trust || account_usage_notice_suppressed(project_id, session_id, notice)
+}
+
 pub fn resolve_session_chat_terminal_notice(
     project_id: &str,
     session_id: &str,
     screen: Option<SessionChatTerminalNotice>,
 ) -> Option<SessionChatTerminalNotice> {
     let visible = |notice: &SessionChatTerminalNotice| {
-        !account_usage_notice_suppressed(project_id, session_id, notice)
+        !session_chat_notice_hidden(project_id, session_id, notice)
             && crate::session_chat_notice_progress::visible(project_id, session_id, notice)
     };
     merge_session_chat_terminal_notices(

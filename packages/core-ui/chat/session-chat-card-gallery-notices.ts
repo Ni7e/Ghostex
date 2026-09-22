@@ -61,6 +61,11 @@ export const DETECTED_NOTICE_EXAMPLES = [
           send: '\u001b[A\r',
         },
         {
+          id: 'trustAndRemember',
+          label: 'Trust and Remember',
+          kind: 'trustAndRemember',
+        },
+        {
           id: 'switchToTerminal',
           label: 'Open terminal',
           kind: 'switchToTerminal',

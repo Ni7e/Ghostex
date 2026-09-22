@@ -141,7 +141,8 @@ export interface SessionChatTerminalNoticeCardProps {
 type RenderableNoticeAction =
   | { id: string; label: string; kind: 'switchToTerminal' }
   | { id: string; label: string; kind: 'sendKeys'; send: string }
-  | { id: string; label: string; kind: 'recoverCodexConversation' };
+  | { id: string; label: string; kind: 'recoverCodexConversation' }
+  | { id: string; label: string; kind: 'trustAndRemember' };
 
 export function SessionChatTerminalNoticeCard({
   canSend,
@@ -271,7 +272,9 @@ export function SessionChatTerminalNoticeCard({
     if (
       action.kind === 'recoverCodexConversation'
         ? !notice?.conversationLock || !onAnswerDialog
-        : action.send === undefined
+        : action.kind === 'trustAndRemember'
+          ? !onAnswerDialog
+          : action.send === undefined
     )
       return;
     sendingRef.current = true;
@@ -281,11 +284,19 @@ export function SessionChatTerminalNoticeCard({
     const request =
       action.kind === 'recoverCodexConversation' && notice?.conversationLock && onAnswerDialog
         ? onAnswerDialog({ kind: 'recoverCodexConversation', conversationLock: notice.conversationLock })
-        : onSendKeys(action.send!);
+        : action.kind === 'trustAndRemember' && onAnswerDialog
+          ? onAnswerDialog({ kind: 'trustAndRemember' })
+          : onSendKeys(action.send!);
     void request
       .catch((error: unknown) => {
         if (action.kind === 'recoverCodexConversation') {
           setChoiceError(error instanceof Error ? error.message : 'Could not recover the conversation. Please retry.');
+          return;
+        }
+        if (action.kind === 'trustAndRemember') {
+          // gxserver's message says whether the folder was remembered even
+          // when this one prompt still needs the terminal.
+          setChoiceError(error instanceof Error ? error.message : 'Could not remember this folder. Please retry.');
           return;
         }
         // The keystrokes never reached the TUI: say so instead of pretending
@@ -375,6 +386,8 @@ export function SessionChatTerminalNoticeCard({
       }
     } else if (action.kind === 'recoverCodexConversation' && notice.conversationLock && onAnswerDialog) {
       actions.push({ id: action.id, kind: action.kind, label: action.label });
+    } else if (action.kind === 'trustAndRemember' && onAnswerDialog) {
+      actions.push({ id: action.id, kind: action.kind, label: action.label });
     } else if (action.kind === 'sendKeys' && action.send !== undefined) {
       // A `sendKeys` action without bytes has nothing to write; an inert button
       // would claim an ability the notice never carried.
@@ -438,10 +451,14 @@ export function SessionChatTerminalNoticeCard({
       </Button>
     ) : null;
   const escapeHatch = accountMenu || switchToTerminalActions.length > 0 || otherSessionButton;
+  // Trust and Remember stays reachable on a collapsed picker: the collapsed
+  // rows are the prompt's own Yes/No, and the point of the button is to not
+  // have to expand anything to stop seeing this card for a folder.
+  const footerActions = collapsed ? inputActions.filter((action) => action.kind === 'trustAndRemember') : inputActions;
   const footer =
-    !collapsed && (inputActions.length > 0 || escapeHatch) ? (
+    footerActions.length > 0 || (!collapsed && escapeHatch) ? (
       <>
-        {inputActions.map((action, inputIndex) => (
+        {footerActions.map((action) => (
           <Button
             disabled={!canSend || sending}
             key={action.id}
@@ -450,15 +467,19 @@ export function SessionChatTerminalNoticeCard({
             variant='outline'
             {...(canSend ? {} : { title: READ_ONLY_HINT })}
           >
-            {sending && action.kind === 'recoverCodexConversation' ? 'Continuing…' : action.label}
-            {showShortcutLabels && inputIndex === 0 && keyboardInputAction ? (
+            {sending && action.kind === 'recoverCodexConversation'
+              ? 'Continuing…'
+              : sending && action.kind === 'trustAndRemember'
+                ? 'Trusting…'
+                : action.label}
+            {showShortcutLabels && keyboardInputAction && firstSendAction?.id === action.id ? (
               <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ml-0.5 flex h-4 min-w-4 shrink-0 items-center justify-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground tabular-nums'>
                 {primaryShortcutLabel}
               </kbd>
             ) : null}
           </Button>
         ))}
-        {escapeHatch ? (
+        {!collapsed && escapeHatch ? (
           <SessionChatStatusCardActions>
             {accountMenu}
             {otherSessionButton}
