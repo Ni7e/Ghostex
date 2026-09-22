@@ -65,12 +65,15 @@ pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> 
 
 /// One settle per family, in assembly order.
 type Settle = fn(&mut ChatState, &Event, &ChatContext) -> Vec<Effect>;
-const SETTLE: [Settle; 6] = [
+const SETTLE: [Settle; 7] = [
     crate::session::settle,
     crate::transcript::settle,
     crate::questions::settle,
     crate::composer::settle,
     crate::menus::settle,
+    // The controller's own `restoreReturned` effect is declared right after
+    // `computeNativeChatOptions` in `startController`, so it runs after the option store's write.
+    crate::composer::settle::restore_returned_effect,
     crate::extras::settle,
 ];
 

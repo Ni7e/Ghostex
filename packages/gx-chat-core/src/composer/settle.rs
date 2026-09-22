@@ -155,6 +155,38 @@ fn settle_returned_claim(
     ]
 }
 
+/// The controller's own `useEffect(() => { if (chat.returnedPrompt) void action({ type:
+/// 'restoreReturned', returned: chat.returnedPrompt }) }, [chat.returnedPrompt?.id])`.
+///
+/// The brain dispatches the action to itself, so no renderer ever sends it; without this the core
+/// never claimed a returned prompt, and the live brain's `claimReturned` round trip answered
+/// nothing the core had asked for.
+pub fn restore_returned_effect(
+    state: &mut ChatState,
+    _event: &Event,
+    context: &ChatContext,
+) -> Vec<Effect> {
+    if !state.core.controller_started {
+        return Vec::new();
+    }
+    let returned = state.session.returned_prompt.clone();
+    let id = returned
+        .as_ref()
+        .and_then(|prompt| prompt.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if id == state.composer.returned_effect_id {
+        return Vec::new();
+    }
+    state.composer.returned_effect_id = id;
+    let Some(returned) = returned.filter(|prompt| !prompt.is_null()) else {
+        return Vec::new();
+    };
+    let mut action = crate::action::UserAction::new(crate::action::ActionKind::RestoreReturned);
+    action.params.insert("returned".to_string(), returned);
+    crate::dispatch::actions::dispatch(state, &action, context)
+}
+
 /// `composerHistory = { entries: await composer('history'), index: null }`, then the Up the arm was
 /// suspended on.
 ///

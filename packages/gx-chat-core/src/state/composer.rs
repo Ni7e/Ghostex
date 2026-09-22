@@ -89,6 +89,8 @@ pub struct ComposerState {
     /// `composer('claimReturned')` reads the applied-id list, and the restore only happens when
     /// the id was not already on it.
     pub claiming_returned: Option<(String, String)>,
+    /// The returned prompt id the controller's `useEffect` last ran for (`[chat.returnedPrompt?.id]`).
+    pub returned_effect_id: Option<String>,
     /// `sendBlockedReason(state)`, recomputed once per event by family d's settle.
     ///
     /// Family b's `rewindEnabled` is `sendBlockedReason(...) === null`, and `document::assemble`

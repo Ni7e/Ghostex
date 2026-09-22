@@ -235,7 +235,7 @@ impl BridgeTranslator {
                 Effect::ReadStorage { key } => {
                     let value = self.storage.get(&slot(key)).cloned();
                     self.storage_answers.push_back((
-                        Expect::Any,
+                        read_expectation(&key.store),
                         Event::StorageLoaded {
                             key: key.clone(),
                             value,
@@ -591,6 +591,19 @@ fn queued_storage_answer(queue: &VecDeque<(Expect, Event)>, got: Expect) -> Opti
         .iter()
         .position(|(expect, _)| *expect == got)
         .or_else(|| queue.iter().position(|(expect, _)| expect.accepts(got)))
+}
+
+/// What the bridge answers a read of `store` with, by the composer operation the read rides on.
+///
+/// `composer('claimReturned')` is the read of the applied returned-prompt ids, and the bridge
+/// answers it with the claim's `true`/`false`. As `Any` it lost every boolean to the option writes
+/// queued behind it and was answered two broker responses late.
+fn read_expectation(store: &str) -> Expect {
+    if store == crate::composer::storage::RETURNED_PROMPTS_STORE {
+        Expect::Bool
+    } else {
+        Expect::Any
+    }
 }
 
 /// What the bridge answers a write to `store` with, by the composer operation the store rides on.
