@@ -20,6 +20,8 @@ import {
   gpuiProjectNameFromPath,
   gpuiWorktreeFolderSuffix,
   gpuiWorktreeRenameUserVisibleErrorMessage,
+  gpuiWorktreeListErrorText,
+  gpuiWorktreeListFailureMessage,
   gpuiWorktreeSlugFromPrompt,
   gpuiWorktreeUserVisibleErrorMessage,
   isGpuiManagedWorktreeBranch,
@@ -65,6 +67,10 @@ at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeWorktreeMethods {
   handleGpuiWorktreeModalCommand(payload: unknown): void;
+  resolveWorktreeDialogSourceProject(scope: {
+    projectId?: string;
+    projectPath?: string;
+  }): Promise<{ error?: string; project?: GxserverProjectDomainState }>;
   requestProjectWorktrees(
     message: Extract<SidebarToExtensionMessage, { type: 'requestProjectWorktrees' }>
   ): Promise<void>;
@@ -188,6 +194,50 @@ export const gpuiSidebarRuntimeWorktreeMethods = {
     }
   },
 
+  /**
+   * CDXC:Worktrees 2026-09-22 WHY:
+   * The Add Worktree dialog names the project whose header was clicked. When that id or path is
+   * not in the runtime's project list (a hydrate that failed, or a list the daemon has changed
+   * since), the old `?? activeDomainProject()` fallback silently listed and created worktrees for
+   * whatever project happened to be active, and a plain folder there answered "not a git
+   * repository" with no hint of which folder git had run in. Refresh the list from the daemon once
+   * and look again; a scope that still resolves to nothing is an error the dialog shows, never a
+   * different project. The active-project fallback remains only for commands that name no project.
+   */
+  async resolveWorktreeDialogSourceProject(
+    this: GpuiSidebarRuntime,
+    scope: { projectId?: string; projectPath?: string }
+  ): Promise<{ error?: string; project?: GxserverProjectDomainState }> {
+    const projectId = scope.projectId?.trim();
+    const projectPath = normalizeGpuiProjectPath(scope.projectPath);
+    const resolved = this.resolveDomainProjectScope(scope);
+    if (resolved) {
+      return { project: resolved };
+    }
+    if (!projectId && !projectPath) {
+      const active = this.activeDomainProject();
+      return active ? { project: active } : { error: 'No active gxserver project is available.' };
+    }
+    const client = this.client;
+    if (client) {
+      try {
+        const projects = await client.fetchProjectList();
+        if (this.client === client) {
+          this.domainProjects = [...projects];
+        }
+      } catch {
+        // The lookup below reports the miss; a failed refresh must not pick another project.
+      }
+      const refreshed = this.resolveDomainProjectScope(scope);
+      if (refreshed) {
+        return { project: refreshed };
+      }
+    }
+    return {
+      error: `Project ${projectId ?? projectPath} is not registered with gxserver. Close this dialog and open it again from the project header.`,
+    };
+  },
+
   async requestProjectWorktrees(
     this: GpuiSidebarRuntime,
     message: Extract<SidebarToExtensionMessage, { type: 'requestProjectWorktrees' }>
@@ -200,11 +250,12 @@ export const gpuiSidebarRuntimeWorktreeMethods = {
       await this.requestRemoteProjectWorktrees(message, requestId);
       return;
     }
-    const sourceProject = this.resolveDomainProjectScope(message) ?? this.activeDomainProject();
+    const resolvedSource = await this.resolveWorktreeDialogSourceProject(message);
+    const sourceProject = resolvedSource.project;
     if (!sourceProject || !this.client) {
       this.trustedExistingWorktreeList = undefined;
       this.postProjectWorktreesResult(requestId, {
-        error: 'No active gxserver project is available.',
+        error: resolvedSource.error ?? 'No active gxserver project is available.',
         ok: false,
       });
       return;
@@ -222,7 +273,7 @@ export const gpuiSidebarRuntimeWorktreeMethods = {
         }),
       ]);
       if (worktreeResult.exitCode !== 0 || branchResult.exitCode !== 0) {
-        throw new Error('gxserver could not read worktree metadata.');
+        throw new Error(gpuiWorktreeListFailureMessage(parentProject.path, [worktreeResult, branchResult]));
       }
       const worktrees = createGpuiExistingWorktreeOptions(
         worktreeResult.worktrees,
@@ -240,10 +291,10 @@ export const gpuiSidebarRuntimeWorktreeMethods = {
         ok: true,
         worktrees,
       });
-    } catch {
+    } catch (error) {
       this.trustedExistingWorktreeList = undefined;
       this.postProjectWorktreesResult(requestId, {
-        error: 'Could not load gxserver worktrees.',
+        error: gpuiWorktreeListErrorText(error, parentProject.path),
         ok: false,
       });
     }
@@ -324,7 +375,11 @@ export const gpuiSidebarRuntimeWorktreeMethods = {
       if (!this.client) {
         throw new Error('gxserver is unavailable.');
       }
-      const sourceProject = this.resolveDomainProjectScope(message) ?? this.activeDomainProject();
+      const resolvedSource = await this.resolveWorktreeDialogSourceProject(message);
+      if (resolvedSource.error) {
+        throw new Error(resolvedSource.error);
+      }
+      const sourceProject = resolvedSource.project;
       if (!sourceProject || !normalizeGpuiProjectPath(sourceProject.path)) {
         throw new Error('Open an active code project before creating a worktree.');
       }
