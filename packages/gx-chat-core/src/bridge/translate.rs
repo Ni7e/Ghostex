@@ -80,14 +80,17 @@ pub struct BridgeTranslator {
     direct_answers: VecDeque<Event>,
     /// The retained record this run holds, so a core that writes one can read it back.
     retained_snapshot: Option<String>,
-    /// Recall-ring reads the core is waiting for, kept OUT of `storage_answers`.
+    /// Reads the bridge answers with a bare ARRAY, kept OUT of `storage_answers`, oldest first.
     ///
-    /// `composer('history')` is a SCAN of the sent-prompt store, not a record: the translator's
-    /// in-memory storage cannot reproduce it, and the payload of the bridge's own
-    /// `composer('history')` is the only answer both brains can agree on. It also must not join
-    /// the FIFO above: inserting one answer there delays every answer after it by one `resolve`,
-    /// which drifts the pairing for the rest of the run.
-    history_reads: VecDeque<StorageKey>,
+    /// Two of the core's reads are answered by the other brain's own composer operations rather
+    /// than by a record the translator holds: `composer('history')` is a SCAN of the sent-prompt
+    /// store, and `composer('modelFavorites')` is the starred-model list the host keeps. The
+    /// translator's in-memory storage cannot reproduce either, and the payload of the bridge's own
+    /// answer is the only value both brains can agree on. They must not join the FIFO above:
+    /// inserting one answer there delays every answer after it by one `resolve`, which drifts the
+    /// pairing for the rest of the run. Both answer a bare array, and both brains ask in the same
+    /// order (the picker's tab, the composer's Up arrow), so the oldest queued read takes it.
+    array_reads: VecDeque<StorageKey>,
     /// Chunked broker payloads being reassembled, by transfer id: `(total, parts)`.
     transfers: BTreeMap<String, (usize, Vec<String>)>,
     /// The last call was a chunk that was accepted into `transfers` and produced no event yet.
@@ -219,9 +222,10 @@ impl BridgeTranslator {
                     });
                 }
                 Effect::ReadStorage { key }
-                    if key.store == crate::composer::storage::COMPOSER_HISTORY_STORE =>
+                    if key.store == crate::composer::storage::COMPOSER_HISTORY_STORE
+                        || key.store == crate::menus::picker::favorites::MODEL_FAVORITES_STORE =>
                 {
-                    self.history_reads.push_back(key.clone());
+                    self.array_reads.push_back(key.clone());
                 }
                 Effect::ReadStorage { key } => {
                     let value = self.storage.get(&slot(key)).cloned();
@@ -430,7 +434,7 @@ impl BridgeTranslator {
         if !result.is_array() {
             return None;
         }
-        let key = self.history_reads.pop_front()?;
+        let key = self.array_reads.pop_front()?;
         Some(Event::StorageLoaded {
             key,
             value: serde_json::to_string(result).ok(),

@@ -66,6 +66,16 @@ pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
     // `observe` runs on every event, and the drain removes a one-shot before any family sees it,
     // so re-arming here is the interval's next period.
     if state.core.controller_started {
+        // `useState(Date.now)` on the first render; `setNow(Date.now())` when the interval fires.
+        // The setter is a state change, so the live brain publishes on it even when no label
+        // moved, which is what `request_publish` reproduces.
+        if state.menus.meter_now_ms.is_none() {
+            state.menus.meter_now_ms = Some(context.now_ms);
+        }
+        if state.core.timer_fired("menus.contextMeter") {
+            state.menus.meter_now_ms = Some(context.now_ms);
+            state.core.request_publish();
+        }
         state.core.timers.arm_once(
             "menus.contextMeter",
             context.now_ms,

@@ -19,6 +19,14 @@ use crate::menus::catalog::AgentModelCatalog;
 use crate::menus::option_store::OptionStore;
 
 /// What the menus, pickers, options, accounts and context surfaces remember between frames.
+/// `case 'switchDraftAgent'` (`native-host.ts:888`), one `await` at a time.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DraftAgentSwitch {
+    pub agent_id: String,
+    /// The gxserver call once the flush has answered; `None` while the flush is in flight.
+    pub request_id: Option<u64>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct MenusState {
     /// The agent model catalog in effect, pushed in by the host. Empty until the first push, which
@@ -43,6 +51,15 @@ pub struct MenusState {
     pub session_key: Option<String>,
     /// The draft agent id the storage key latched onto, with the session key it was latched for.
     pub latched_draft_agent: Option<(String, Option<String>)>,
+    /// The context meter's clock (`native-context.ts:51`, `useState(Date.now)`).
+    ///
+    /// Latched, not live: the meter's countdown labels move only when this does, which is once
+    /// when the controller first renders, whenever the settings or the context preferences are
+    /// adopted, and every 30 seconds on its own interval. Each of those is a state change the live
+    /// brain publishes on, whether or not a label moved.
+    pub meter_now_ms: Option<f64>,
+    /// A `switchDraftAgent` in flight: `await composer('flush')`, then the call, then `refresh()`.
+    pub draft_agent_switch: Option<DraftAgentSwitch>,
     /// The option values and the changes still in flight.
     pub options: OptionStore,
     /// The agent the option store was built for, so an agent change rebuilds it.
@@ -101,6 +118,8 @@ impl Default for MenusState {
             model_catalog_generation: 0,
             session_key: None,
             latched_draft_agent: None,
+            meter_now_ms: None,
+            draft_agent_switch: None,
             options: OptionStore::default(),
             options_agent: None,
             options_catalog_generation: 0,

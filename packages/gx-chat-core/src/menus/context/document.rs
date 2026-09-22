@@ -42,7 +42,16 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
         hide_account_emails: state.core.hide_account_emails,
     };
     let agent = crate::menus::context::ContextDetailsAgent::from_icon(input.icon);
-    let result = compute_context_meter(&input, pickers.context.preferences.get(agent), context);
+    // The rows count down from the meter's own latched clock, not the event's.
+    let mut meter_context = context.clone();
+    if let Some(latched) = state.menus.meter_now_ms {
+        meter_context.now_ms = latched;
+    }
+    let result = compute_context_meter(
+        &input,
+        pickers.context.preferences.get(agent),
+        &meter_context,
+    );
     into.context_meter = match result.meter {
         Value::Null => Tri::Null,
         meter => Tri::Value(meter),

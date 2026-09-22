@@ -231,8 +231,17 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
                             .as_object()
                             .map(|object| object.keys().map(String::as_str).collect())
                             .unwrap_or_default();
+                        // For a chat read, the lane that issued it (seed, resync, page).
+                        let lane = core
+                            .state()
+                            .messages
+                            .reads
+                            .last()
+                            .map(|read| format!(" lane={:?}", read.kind))
+                            .filter(|_| method.as_str() == "readSessionChat")
+                            .unwrap_or_default();
                         eprintln!(
-                            "rpc run={run} n={number} method={} params={{{}}}",
+                            "rpc run={run} n={number} method={} params={{{}}}{lane}",
                             method.as_str(),
                             keys.join(",")
                         );
@@ -433,7 +442,13 @@ fn refusal_shape(args: &[Value]) -> String {
             Value::Null => "null".to_string(),
         }
     }
-    let Some(first) = args.first() else {
+    // A `resolve` carries `(requestId, value, error)`: the value is the shape that matters.
+    let described = if args.len() >= 2 && args[0].is_number() {
+        args.get(1)
+    } else {
+        args.first()
+    };
+    let Some(first) = described else {
         return "no arguments".to_string();
     };
     let mut shape = describe(first);

@@ -93,12 +93,79 @@ pub fn switch_draft_agent_to(state: &mut ChatState, agent_id: &str) -> Vec<Effec
     if !known || state.session.session_agent_id.as_deref() == Some(agent_id) {
         return Vec::new();
     }
+    // `await composer('flush')` comes first: the draft outbox is on disk before the agent changes
+    // under it. The call itself goes out when the flush answers (`switch_after_flush`), and the
+    // arm's `finally { chat.refresh() }` runs when the call answers (`switch_settled`); the
+    // closing publish waits for all three, as the TypeScript's does.
+    state.menus.draft_agent_switch = Some(crate::state::DraftAgentSwitch {
+        agent_id: agent_id.to_string(),
+        request_id: None,
+    });
+    let effects = vec![Effect::FlushStorage {
+        store: crate::composer::storage::DRAFTS_STORE.to_string(),
+    }];
+    state.core.publish_after(&effects);
+    effects
+}
+
+/// The flush answered: the `switchDraftAgent` call goes out now.
+pub fn switch_after_flush(
+    state: &mut ChatState,
+    key: &crate::event::StorageKey,
+    error: Option<&str>,
+) -> Vec<Effect> {
+    let waiting = state
+        .menus
+        .draft_agent_switch
+        .as_ref()
+        .is_some_and(|switch| switch.request_id.is_none());
+    if !waiting || key.store != crate::composer::storage::DRAFTS_STORE || !key.suffix.is_empty() {
+        return Vec::new();
+    }
+    if let Some(message) = error {
+        // A refused flush throws out of the arm before the call is made.
+        state.menus.draft_agent_switch = None;
+        state.core.fail(message.to_string(), None);
+        return Vec::new();
+    }
     let request_id = state.core.allocate_request_id();
-    vec![Effect::SendRpc {
+    let agent_id = state
+        .menus
+        .draft_agent_switch
+        .as_ref()
+        .map(|switch| switch.agent_id.clone())
+        .unwrap_or_default();
+    if let Some(switch) = state.menus.draft_agent_switch.as_mut() {
+        switch.request_id = Some(request_id);
+    }
+    let effects = vec![Effect::SendRpc {
         request_id,
         method: ChatRpcMethod::SwitchDraftAgent,
         params: Box::new(serde_json::json!({ "agentId": agent_id })),
-    }]
+    }];
+    state.core.publish_after(&effects);
+    effects
+}
+
+/// The call answered, refused or not: `finally { chat.refresh() }` re-reads the session.
+pub fn switch_settled(
+    state: &mut ChatState,
+    context: &crate::state::ChatContext,
+    request_id: u64,
+) -> Vec<Effect> {
+    if state
+        .menus
+        .draft_agent_switch
+        .as_ref()
+        .and_then(|switch| switch.request_id)
+        != Some(request_id)
+    {
+        return Vec::new();
+    }
+    state.menus.draft_agent_switch = None;
+    let effects = crate::session::reads::request_resync(state, context);
+    state.core.publish_after(&effects);
+    effects
 }
 
 /// `case 'selectOption'`: one row of a pill's menu.
