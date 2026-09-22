@@ -93,14 +93,25 @@ impl GhostexGpuiApp {
             // On macOS the docked sidebar's Search row draws the toggle (native_sidebar/navigation.rs).
             // The docked Search row puts the button's top at 5pt, while this 36pt row centres the
             // 27pt button at 4.5pt; the half point keeps it from jumping when the sidebar collapses.
-            .when(self.sidebar_collapsed || !cfg!(target_os = "macos"), |this| {
-                this.child(
-                    div()
-                        .relative()
-                        .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
-                        .child(self.render_sidebar_collapse_button(cx)),
-                )
-            })
+            .when(
+                self.sidebar_collapsed || !cfg!(target_os = "macos"),
+                |this| {
+                    this.child(
+                        div()
+                            .relative()
+                            .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
+                            .child(self.render_sidebar_collapse_button(cx)),
+                    )
+                },
+            )
+            // The sessions-column toggle sits right of the sidebar toggle, and first in the row
+            // when the docked sidebar's Search row has taken that toggle.
+            .child(
+                div()
+                    .relative()
+                    .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
+                    .child(self.render_workarea_header_agents_toggle(cx)),
+            )
             /*
             CDXC:Navigation 2026-08-19:
             Back/Forward sit LEFT of the project name, next to the sidebar

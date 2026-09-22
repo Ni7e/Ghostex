@@ -31,7 +31,10 @@ pub(crate) enum ProjectEditorPlaceholderAction {
 
 impl ProjectEditorPlaceholderSignature {
     pub(crate) fn for_mode(mode: TitlebarMode) -> Option<Self> {
-        if matches!(mode, TitlebarMode::Agents | TitlebarMode::Browser) {
+        if matches!(
+            mode,
+            TitlebarMode::Agents | TitlebarMode::Browser | TitlebarMode::Terminal
+        ) {
             return None;
         }
 
@@ -113,7 +116,7 @@ impl ProjectEditorSleepingPlaceholderSignature {
             ),
             TitlebarMode::Extension(_) => ("View is sleeping", "Select this view to wake it."),
             // A Ghostex page is drawn by GPUI, so it never sleeps and has no sleeping placeholder.
-            TitlebarMode::Agents => return None,
+            TitlebarMode::Agents | TitlebarMode::Terminal => return None,
         };
 
         Some(Self {

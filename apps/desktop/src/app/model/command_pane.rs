@@ -6,7 +6,13 @@ use crate::*;
 
 pub(crate) struct CommandPaneModel {
     pub(crate) terminal_sessions: Vec<CommandTerminalSession>,
+    /// The Commands pane's groups (`CommandPaneDock::Panel`).
     pub(crate) root: CommandPaneNode,
+    /// The Terminal view's groups (`CommandPaneDock::View`); see `command_pane_docks.rs`.
+    pub(crate) view_root: CommandPaneNode,
+    /// Runtime only: whether the Terminal view is the view the panel shows. The app writes it at
+    /// every mode change; it is never persisted, like `resize_drag`.
+    pub(crate) view_dock_visible: bool,
     pub(crate) focused_group: CommandPaneGroupId,
     pub(crate) focus_mode_group: Option<CommandPaneGroupId>,
     pub(crate) mode: CommandPaneMode,
@@ -34,6 +40,8 @@ impl CommandPaneModel {
         Self {
             terminal_sessions: Vec::new(),
             root: command_pane_dummy_node(),
+            view_root: command_pane_dummy_node(),
+            view_dock_visible: false,
             focused_group: CommandPaneGroupId(0),
             focus_mode_group: None,
             mode: CommandPaneMode::Collapsed,
@@ -59,21 +67,6 @@ impl CommandPaneModel {
             self.mode,
             CommandPaneMode::Pinned | CommandPaneMode::Floating
         )
-    }
-
-    pub(crate) fn active_group_and_session_id(
-        &self,
-    ) -> Option<(CommandPaneGroupId, CommandSessionId)> {
-        self.find_leaf(self.focused_group)
-            .and_then(|leaf| leaf.tab_group.active_session_id())
-            .map(|session_id| (self.focused_group, session_id))
-            .or_else(|| {
-                first_command_leaf(&self.root).and_then(|leaf| {
-                    leaf.tab_group
-                        .active_session_id()
-                        .map(|session_id| (leaf.group_id, session_id))
-                })
-            })
     }
 
     pub(crate) fn focused_group_active_session_id(
@@ -282,10 +275,7 @@ impl CommandPaneModel {
             .retain(|session| session.id != session_id);
 
         if self.terminal_sessions.is_empty() {
-            self.root = command_pane_dummy_node();
-            self.focused_group = CommandPaneGroupId(0);
-            self.focus_mode_group = None;
-            self.collapse();
+            self.reset_empty_layout();
             return true;
         }
 
@@ -447,14 +437,29 @@ impl CommandPaneModel {
         CDXC:CommandPane 2026-06-25-11:40:
         Opening an empty command pane mirrors macOS `openCommandsPanelForActiveProject`: create exactly one selected `Command Terminal` placeholder at open time. If a valid command tab already exists, preserve it and only expand/focus the pane so opening never invents extra tabs.
         */
-        if let Some((group_id, session_id)) = self.active_group_and_session_id() {
+        if let Some((group_id, session_id)) =
+            self.active_group_and_session_id_in_dock(CommandPaneDock::Panel)
+        {
             self.focused_group = group_id;
             self.expand();
             return Some((group_id, session_id, false));
         }
 
-        let session_id = self.add_session_to_focused_group();
-        Some((self.focused_group, session_id, true))
+        // The Commands pane has no groups. Create its first one directly rather than through the
+        // focused group, which may be a Terminal view group.
+        let session_id = self.allocate_session_id();
+        self.terminal_sessions
+            .push(CommandTerminalSession::placeholder(
+                session_id,
+                COMMAND_PANE_DEFAULT_SESSION_TITLE.to_string(),
+            ));
+        let tab = CommandPaneTab { session_id };
+        let group_id = self.replace_empty_command_layout_with_created_tab(
+            CommandPaneDock::Panel,
+            tab,
+            session_id,
+        );
+        Some((group_id, session_id, true))
     }
 
     pub(crate) fn add_new_session(
@@ -518,7 +523,7 @@ impl CommandPaneModel {
             return self.insert_created_tab_into_group(group_id, tab, session_id);
         }
 
-        self.replace_empty_command_layout_with_created_tab(tab, session_id)
+        self.replace_empty_command_layout_with_created_tab(CommandPaneDock::Panel, tab, session_id)
     }
 
     pub(crate) fn insert_created_action_tab_for_untargeted_creation(
@@ -531,7 +536,11 @@ impl CommandPaneModel {
         Newly-created non-reused terminal Actions follow native untargeted Action placement, not Cmd+T focus placement: an empty command layout creates the first owner, a single owner appends as a tab, and an existing split gets a new selected rightmost command owner without moving existing group memberships.
         */
         match command_node_leaf_count(&self.root) {
-            0 => self.replace_empty_command_layout_with_created_tab(tab, session_id),
+            0 => self.replace_empty_command_layout_with_created_tab(
+                CommandPaneDock::Panel,
+                tab,
+                session_id,
+            ),
             1 => {
                 let group_id = first_command_leaf_id(&self.root)
                     .expect("single live command layout must have a command group");
@@ -562,17 +571,18 @@ impl CommandPaneModel {
         leaf.tab_group.active_session = session_id;
         self.set_focused_group_for_selected_owner(group_id);
         self.clear_focus_mode_if_invalid();
-        self.expand();
+        self.reveal_dock_for_group(group_id);
         group_id
     }
 
     pub(crate) fn replace_empty_command_layout_with_created_tab(
         &mut self,
+        dock: CommandPaneDock,
         tab: CommandPaneTab,
         session_id: CommandSessionId,
     ) -> CommandPaneGroupId {
         let group_id = self.allocate_group_id();
-        self.root = CommandPaneNode::Leaf(CommandPaneLeaf {
+        *self.root_for_dock_mut(dock) = CommandPaneNode::Leaf(CommandPaneLeaf {
             group_id,
             tab_group: CommandPaneTabGroup {
                 tabs: vec![tab],
@@ -581,7 +591,7 @@ impl CommandPaneModel {
         });
         self.focused_group = group_id;
         self.focus_mode_group = None;
-        self.expand();
+        self.reveal_dock_for_group(group_id);
         group_id
     }
 
@@ -639,7 +649,7 @@ impl CommandPaneModel {
                 session.title = title;
                 session.action_command_id = Some(command_id);
             }
-            self.expand();
+            self.reveal_dock_for_group(group_id);
             return CommandPaneActionSessionSelection {
                 kind,
                 group_id,
@@ -696,10 +706,7 @@ impl CommandPaneModel {
             }
         }
         if self.terminal_sessions.is_empty() {
-            self.root = command_pane_dummy_node();
-            self.focused_group = CommandPaneGroupId(0);
-            self.focus_mode_group = None;
-            self.collapse();
+            self.reset_empty_layout();
         }
         changed
     }
@@ -1066,14 +1073,10 @@ impl CommandPaneModel {
             },
         };
 
-        if insert_command_leaf_split(
-            &mut self.root,
-            target_group_id,
-            new_leaf,
-            axis,
-            false,
-            split_id,
-        ) {
+        let Some(root) = self.root_for_group_mut(target_group_id) else {
+            return None;
+        };
+        if insert_command_leaf_split(root, target_group_id, new_leaf, axis, false, split_id) {
             self.terminal_sessions
                 .push(CommandTerminalSession::placeholder(
                     session_id,
@@ -1081,7 +1084,7 @@ impl CommandPaneModel {
                 ));
             self.focus_mode_group = None;
             self.focused_group = group_id;
-            self.expand();
+            self.reveal_dock_for_group(group_id);
             Some((group_id, session_id))
         } else {
             None
@@ -1098,13 +1101,11 @@ impl CommandPaneModel {
         CDXC:CommandPane 2026-06-22-13:05:
         Workspace-to-command drops are command-pane placeholder creation, not command-tab movement. Allocate a command-only session id, keep the dragged Agents tab title for the live placeholder label, and map top/bottom intent to center grouping because command panes support only tab grouping and left/right horizontal splits.
         */
-        match zone {
-            WorkspaceDropZone::Left | WorkspaceDropZone::Right => {
-                self.split_placeholder_session_from_workspace_title(target_group_id, title, zone)
-            }
-            WorkspaceDropZone::Center | WorkspaceDropZone::Top | WorkspaceDropZone::Bottom => {
-                self.group_placeholder_session_from_workspace_title(target_group_id, title)
-            }
+        let dock = self.dock_for_group(target_group_id)?;
+        if command_pane_drop_zone_splits(dock, zone) {
+            self.split_placeholder_session_from_workspace_title(target_group_id, title, zone)
+        } else {
+            self.group_placeholder_session_from_workspace_title(target_group_id, title)
         }
     }
 
@@ -1148,7 +1149,7 @@ impl CommandPaneModel {
         target_leaf.tab_group.active_session = session_id;
         self.set_focused_group_for_selected_owner(target_group_id);
         self.clear_focus_mode_if_invalid();
-        self.expand();
+        self.reveal_dock_for_group(target_group_id);
         Some((target_group_id, session_id))
     }
 
@@ -1158,10 +1159,10 @@ impl CommandPaneModel {
         title: String,
         zone: WorkspaceDropZone,
     ) -> Option<(CommandPaneGroupId, CommandSessionId)> {
-        if !matches!(zone, WorkspaceDropZone::Left | WorkspaceDropZone::Right) {
+        let dock = self.dock_for_group(target_group_id)?;
+        if !command_pane_drop_zone_splits(dock, zone) {
             return self.group_placeholder_session_from_workspace_title(target_group_id, title);
         }
-        self.find_leaf(target_group_id)?;
 
         let session_id = self.allocate_session_id();
         let group_id = self.allocate_group_id();
@@ -1173,13 +1174,17 @@ impl CommandPaneModel {
                 active_session: session_id,
             },
         };
-        let dragged_first = matches!(zone, WorkspaceDropZone::Left);
+        let axis = command_pane_drop_zone_split_axis(zone);
+        let dragged_first = matches!(zone, WorkspaceDropZone::Left | WorkspaceDropZone::Top);
 
+        let Some(root) = self.root_for_group_mut(target_group_id) else {
+            return None;
+        };
         if insert_command_leaf_split(
-            &mut self.root,
+            root,
             target_group_id,
             new_leaf,
-            WorkspaceSplitAxis::Horizontal,
+            axis,
             dragged_first,
             split_id,
         ) {
@@ -1187,7 +1192,7 @@ impl CommandPaneModel {
                 .push(CommandTerminalSession::placeholder(session_id, title));
             self.focus_mode_group = None;
             self.focused_group = group_id;
-            self.expand();
+            self.reveal_dock_for_group(group_id);
             Some((group_id, session_id))
         } else {
             None
@@ -1197,6 +1202,7 @@ impl CommandPaneModel {
     pub(crate) fn flat_tab_ids(&self) -> Vec<(CommandPaneGroupId, CommandSessionId)> {
         let mut tabs = Vec::new();
         collect_command_tabs(&self.root, &mut tabs);
+        collect_command_tabs(&self.view_root, &mut tabs);
         tabs
     }
 
@@ -1300,6 +1306,7 @@ impl CommandPaneModel {
     pub(crate) fn group_order(&self) -> Vec<CommandPaneGroupId> {
         let mut group_ids = Vec::new();
         collect_command_leaf_ids(&self.root, &mut group_ids);
+        collect_command_leaf_ids(&self.view_root, &mut group_ids);
         group_ids
     }
 
@@ -1311,7 +1318,7 @@ impl CommandPaneModel {
         CDXC:Terminal 2026-06-27-04:36:
         GPUI command-pane body ownership mirrors native `visibleCommandPaneOwnerSessionIds`: an expanded command group gives its visible body to the stored selected command tab only when that exact tab still has a stored session. Sleeping selected tabs own a placeholder body without a Ghostty mount slot, and stale active ids must not fall back to sibling tabs.
         */
-        if !self.is_expanded() {
+        if !self.group_dock_visible(leaf.group_id) {
             return None;
         }
 
@@ -1345,14 +1352,20 @@ impl CommandPaneModel {
         let slots = self.rendered_terminal_body_mount_slots_without_focus();
         match self.focus_mode_group {
             Some(focus_group_id)
-                if self.focus_mode_eligible_group_count_without_focus() > 1
+                if self.focus_mode_eligible_group_count_for_group(focus_group_id) > 1
                     && slots
                         .iter()
                         .any(|slot_id| slot_id.group_id == focus_group_id) =>
             {
+                // Focus mode zooms one group inside its own dock; the other dock's groups are
+                // untouched.
+                let focus_dock = self.dock_for_group(focus_group_id);
                 slots
                     .into_iter()
-                    .filter(|slot_id| slot_id.group_id == focus_group_id)
+                    .filter(|slot_id| {
+                        slot_id.group_id == focus_group_id
+                            || self.dock_for_group(slot_id.group_id) != focus_dock
+                    })
                     .collect()
             }
             _ => slots,
@@ -1376,7 +1389,7 @@ impl CommandPaneModel {
     pub(crate) fn rendered_terminal_body_mount_slots_without_focus(
         &self,
     ) -> Vec<CommandTerminalBodyMountSlotId> {
-        if !self.is_expanded() {
+        if !self.any_dock_visible() {
             return Vec::new();
         }
 
@@ -1401,9 +1414,16 @@ impl CommandPaneModel {
             .and_then(CommandPaneVisibleBodyOwner::mount_slot_id)
     }
 
-    pub(crate) fn focus_mode_eligible_group_count_without_focus(&self) -> usize {
+    /// How many groups in `group_id`'s dock have a rendered body: Focus mode is a per-dock zoom.
+    pub(crate) fn focus_mode_eligible_group_count_for_group(
+        &self,
+        group_id: CommandPaneGroupId,
+    ) -> usize {
+        let dock = self.dock_for_group(group_id);
         self.rendered_terminal_body_mount_slots_without_focus()
-            .len()
+            .into_iter()
+            .filter(|slot_id| self.dock_for_group(slot_id.group_id) == dock)
+            .count()
     }
 
     pub(crate) fn group_is_focus_mode_eligible_without_focus(
@@ -1419,7 +1439,7 @@ impl CommandPaneModel {
         let Some(focus_group_id) = self.focus_mode_group else {
             return false;
         };
-        if self.focus_mode_eligible_group_count_without_focus() <= 1
+        if self.focus_mode_eligible_group_count_for_group(focus_group_id) <= 1
             || !self.group_is_focus_mode_eligible_without_focus(focus_group_id)
         {
             self.focus_mode_group = None;
@@ -1445,7 +1465,7 @@ impl CommandPaneModel {
             return false;
         }
 
-        self.focus_mode_eligible_group_count_without_focus() > 1
+        self.focus_mode_eligible_group_count_for_group(group_id) > 1
             && self.group_is_focus_mode_eligible_without_focus(group_id)
     }
 
@@ -1573,7 +1593,12 @@ impl CommandPaneModel {
         CDXC:CommandPane 2026-06-26-06:37:
         Native command-panel same-session body side drops resolve the drop to the first or last remaining tab sibling before removing the dragged tab. GPUI owns only command groups here, so split after removal beside the still-live source group, reject single-tab self side drops, leave the source group order/selection to the normal removal rule, and focus the new dragged split group without touching unrelated groups.
         */
-        if !matches!(zone, WorkspaceDropZone::Left | WorkspaceDropZone::Right) {
+        // Top and bottom split only in the Terminal view (CDXC:CommandPane 2026-09-22 in
+        // drag_transfer.rs); in the Commands pane they still group, as the 06-22 rule above says.
+        let Some(dock) = self.dock_for_group(target_group_id) else {
+            return false;
+        };
+        if !command_pane_drop_zone_splits(dock, zone) {
             return self.group_tab_into_group(source_group_id, target_group_id, session_id);
         }
 
@@ -1605,13 +1630,17 @@ impl CommandPaneModel {
                 active_session: session_id,
             },
         };
-        let dragged_first = matches!(zone, WorkspaceDropZone::Left);
+        let axis = command_pane_drop_zone_split_axis(zone);
+        let dragged_first = matches!(zone, WorkspaceDropZone::Left | WorkspaceDropZone::Top);
 
+        let Some(root) = self.root_for_group_mut(target_group_id) else {
+            return false;
+        };
         if insert_command_leaf_split(
-            &mut self.root,
+            root,
             target_group_id,
             new_leaf,
-            WorkspaceSplitAxis::Horizontal,
+            axis,
             dragged_first,
             split_id,
         ) {
@@ -1635,13 +1664,21 @@ impl CommandPaneModel {
     }
 
     pub(crate) fn collapse_empty_leaf(&mut self, group_id: CommandPaneGroupId) {
-        let root_is_empty = collapse_empty_command_leaf(&mut self.root, group_id);
+        let Some(dock) = self.dock_for_group(group_id) else {
+            return;
+        };
+        let root = self.root_for_dock_mut(dock);
+        let root_is_empty = collapse_empty_command_leaf(root, group_id);
         if root_is_empty {
-            self.root = command_pane_dummy_node();
+            *root = command_pane_dummy_node();
         }
+        self.prune_emptied_docks();
 
         if self.focused_group == group_id
-            && let Some(first_leaf_id) = first_command_leaf_id(&self.root)
+            && let Some(first_leaf_id) = self
+                .first_leaf_id_in_dock(dock)
+                .or_else(|| first_command_leaf_id(&self.root))
+                .or_else(|| first_command_leaf_id(&self.view_root))
         {
             self.focused_group = first_leaf_id;
         }
@@ -1650,22 +1687,41 @@ impl CommandPaneModel {
 
     pub(crate) fn find_leaf(&self, group_id: CommandPaneGroupId) -> Option<&CommandPaneLeaf> {
         find_command_leaf(&self.root, group_id)
+            .or_else(|| find_command_leaf(&self.view_root, group_id))
     }
 
     pub(crate) fn find_leaf_mut(
         &mut self,
         group_id: CommandPaneGroupId,
     ) -> Option<&mut CommandPaneLeaf> {
-        find_command_leaf_mut(&mut self.root, group_id)
+        if command_node_contains_group(&self.root, group_id) {
+            find_command_leaf_mut(&mut self.root, group_id)
+        } else {
+            find_command_leaf_mut(&mut self.view_root, group_id)
+        }
+    }
+
+    fn find_split(&self, split_id: CommandPaneSplitId) -> Option<&CommandPaneSplit> {
+        find_command_split(&self.root, split_id)
+            .or_else(|| find_command_split(&self.view_root, split_id))
+    }
+
+    fn find_split_mut(&mut self, split_id: CommandPaneSplitId) -> Option<&mut CommandPaneSplit> {
+        if find_command_split(&self.root, split_id).is_some() {
+            find_command_split_mut(&mut self.root, split_id)
+        } else {
+            find_command_split_mut(&mut self.view_root, split_id)
+        }
     }
 
     pub(crate) fn split_ratio(&self, split_id: CommandPaneSplitId) -> Option<f32> {
-        find_command_split(&self.root, split_id).map(|split| workspace_split_ratio(split.ratio))
+        self.find_split(split_id)
+            .map(|split| workspace_split_ratio(split.ratio))
     }
 
     pub(crate) fn set_split_ratio(&mut self, split_id: CommandPaneSplitId, ratio: f32) -> bool {
         let next_ratio = workspace_split_ratio(ratio);
-        let Some(split) = find_command_split_mut(&mut self.root, split_id) else {
+        let Some(split) = self.find_split_mut(split_id) else {
             return false;
         };
 
@@ -1678,7 +1734,8 @@ impl CommandPaneModel {
     }
 
     pub(crate) fn reset_split_ratio(&mut self, split_id: CommandPaneSplitId) -> bool {
-        let Some(default_ratio) = find_command_split(&self.root, split_id)
+        let Some(default_ratio) = self
+            .find_split(split_id)
             .map(|split| command_split_native_default_ratio(split).unwrap_or(0.5))
         else {
             return false;
@@ -1691,7 +1748,7 @@ impl CommandPaneModel {
         split_id: CommandPaneSplitId,
         content_span: f32,
     ) -> Option<(f32, f32)> {
-        let split = find_command_split(&self.root, split_id)?;
+        let split = self.find_split(split_id)?;
         let minimum = split_pane_resize_minimum_for_axis(split.axis);
         split_drag_ratio_bounds_from_minimums(
             command_node_axis_pane_count(&split.first, split.axis) as f32 * minimum,

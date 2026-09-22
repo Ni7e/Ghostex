@@ -277,6 +277,7 @@ pub(crate) const GPUI_DEFAULT_GHOSTEX_HOTKEYS: &[(&str, &str)] = &[
     ("switchKanbanView", ""),
     ("switchManageView", ""),
     ("switchAutomateView", ""),
+    ("switchTerminalView", ""),
     ("switchTitlebarView1", "alt+1"),
     ("switchTitlebarView2", "alt+2"),
     ("switchTitlebarView3", "alt+3"),

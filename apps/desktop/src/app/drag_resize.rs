@@ -279,73 +279,11 @@ impl GhostexGpuiApp {
         self.set_workspace_drop_feedback(None, cx);
     }
 
-    pub(crate) fn begin_pending_workspace_tab_click(
-        &mut self,
-        pane_id: WorkspacePaneId,
-        session_id: TerminalSessionId,
-    ) {
-        self.pending_workspace_tab_click = Some(WorkspacePendingTabClick {
-            pane_id,
-            session_id,
-        });
-    }
-
-    pub(crate) fn cancel_pending_workspace_tab_click(&mut self) {
-        self.pending_workspace_tab_click = None;
-    }
-
-    pub(crate) fn cancel_pending_workspace_tab_click_for_tab(
-        &mut self,
-        pane_id: WorkspacePaneId,
-        session_id: TerminalSessionId,
-    ) {
-        let target = WorkspacePendingTabClick {
-            pane_id,
-            session_id,
-        };
-        self.pending_workspace_tab_click = workspace_tab_pending_click_after_mouse_up_out(
-            self.pending_workspace_tab_click,
-            target,
-        );
-    }
-
-    pub(crate) fn handle_workspace_tab_left_mouse_up(
-        &mut self,
-        pane_id: WorkspacePaneId,
-        session_id: TerminalSessionId,
-        click_count: usize,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let target = WorkspacePendingTabClick {
-            pane_id,
-            session_id,
-        };
-        let pending_click = self.pending_workspace_tab_click.take();
-        if workspace_tab_left_mouse_up_focuses(
-            click_count,
-            pending_click,
-            target,
-            self.workspace_tab_drag_active,
-        ) {
-            self.double_click_agents_workspace_tab(pane_id, session_id, cx);
-            return;
-        }
-        if workspace_tab_left_mouse_up_selects(
-            pending_click,
-            target,
-            self.workspace_tab_drag_active,
-        ) {
-            self.select_agents_tab(pane_id, session_id, cx);
-            cx.notify();
-        }
-    }
-
     pub(crate) fn begin_workspace_tab_drag(&mut self, cx: &mut gpui::Context<Self>) {
         /*
         CDXC:Workarea 2026-07-03:
         Workspace tab drag begin/finish only flips the runtime drag flag and lets the existing gated sync passes do the hiding: CEF child views re-evaluate through the shared allows-cef-child-views gate, and mounted Agents/command terminals hide-and-park on the next render-driven host sync. No native view is created, destroyed, or overlaid here; drop and cancel restore through the same parked-owner reattach machinery.
         */
-        self.pending_workspace_tab_click = None;
         if self.workspace_tab_drag_active {
             return;
         }
@@ -356,7 +294,6 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn finish_workspace_tab_drag_state(&mut self, cx: &mut gpui::Context<Self>) -> bool {
-        self.pending_workspace_tab_click = None;
         let drag_was_active = self.workspace_tab_drag_active;
         let changed = drag_was_active || self.workspace_drop_feedback.is_some();
         if !changed {
@@ -375,54 +312,6 @@ impl GhostexGpuiApp {
         if self.finish_workspace_tab_drag_state(cx) {
             cx.notify();
         }
-    }
-
-    pub(crate) fn update_workspace_tab_drag_feedback(
-        &mut self,
-        event: &gpui::DragMoveEvent<DraggedWorkspaceTab>,
-        pane_id: WorkspacePaneId,
-        tab_index: usize,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let insertion_index =
-            workspace_tab_insertion_index(event.bounds, event.event.position, tab_index);
-        let feedback = WorkspaceDropFeedback {
-            pane_id,
-            target: WorkspaceDropTarget::TabStrip(insertion_index),
-        };
-
-        if event.drag(cx).source_pane_id != pane_id || !event.bounds.contains(&event.event.position)
-        {
-            if self.workspace_drop_feedback == Some(feedback) {
-                self.clear_workspace_drop_feedback(cx);
-            }
-            return;
-        }
-
-        self.set_workspace_drop_feedback(Some(feedback), cx);
-    }
-
-    pub(crate) fn update_workspace_tab_end_drag_feedback(
-        &mut self,
-        event: &gpui::DragMoveEvent<DraggedWorkspaceTab>,
-        pane_id: WorkspacePaneId,
-        insertion_index: usize,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let feedback = WorkspaceDropFeedback {
-            pane_id,
-            target: WorkspaceDropTarget::TabStrip(insertion_index),
-        };
-
-        if event.drag(cx).source_pane_id != pane_id || !event.bounds.contains(&event.event.position)
-        {
-            if self.workspace_drop_feedback == Some(feedback) {
-                self.clear_workspace_drop_feedback(cx);
-            }
-            return;
-        }
-
-        self.set_workspace_drop_feedback(Some(feedback), cx);
     }
 
     pub(crate) fn update_workspace_pane_drag_feedback(
@@ -495,106 +384,6 @@ impl GhostexGpuiApp {
             }),
             cx,
         );
-    }
-
-    pub(crate) fn update_command_tab_over_workspace_tab_drag_feedback(
-        &mut self,
-        event: &gpui::DragMoveEvent<DraggedCommandTab>,
-        pane_id: WorkspacePaneId,
-        tab_index: usize,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let insertion_index =
-            workspace_tab_insertion_index(event.bounds, event.event.position, tab_index);
-        self.update_command_tab_over_workspace_tab_strip_feedback(
-            event,
-            pane_id,
-            insertion_index,
-            cx,
-        );
-    }
-
-    pub(crate) fn update_command_tab_over_workspace_tab_end_drag_feedback(
-        &mut self,
-        event: &gpui::DragMoveEvent<DraggedCommandTab>,
-        pane_id: WorkspacePaneId,
-        insertion_index: usize,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        self.update_command_tab_over_workspace_tab_strip_feedback(
-            event,
-            pane_id,
-            insertion_index,
-            cx,
-        );
-    }
-
-    pub(crate) fn update_command_tab_over_workspace_tab_strip_feedback(
-        &mut self,
-        event: &gpui::DragMoveEvent<DraggedCommandTab>,
-        pane_id: WorkspacePaneId,
-        insertion_index: usize,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        self.begin_command_tab_drag(cx);
-
-        let feedback = WorkspaceDropFeedback {
-            pane_id,
-            target: WorkspaceDropTarget::TabStrip(insertion_index),
-        };
-        let dragged = event.drag(cx);
-        let source_has_session = self
-            .command_pane
-            .find_leaf(dragged.source_group_id)
-            .is_some_and(|leaf| leaf.tab_group.has_session(dragged.session_id));
-
-        if !source_has_session || !event.bounds.contains(&event.event.position) {
-            if self.workspace_drop_feedback == Some(feedback) {
-                self.clear_workspace_drop_feedback(cx);
-            }
-            return;
-        }
-
-        self.set_workspace_drop_feedback(Some(feedback), cx);
-    }
-
-    pub(crate) fn handle_workspace_tab_strip_drop(
-        &mut self,
-        pane_id: WorkspacePaneId,
-        default_insertion_index: usize,
-        dragged: &DraggedWorkspaceTab,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        window.prevent_default();
-        cx.stop_propagation();
-
-        let insertion_index = match self.workspace_drop_feedback {
-            Some(WorkspaceDropFeedback {
-                pane_id: feedback_pane_id,
-                target: WorkspaceDropTarget::TabStrip(insertion_index),
-            }) if feedback_pane_id == pane_id => insertion_index,
-            _ => default_insertion_index,
-        };
-        self.finish_workspace_tab_drag_state(cx);
-
-        if dragged.source_pane_id == pane_id
-            && self.agents_workspace.reorder_tab_within_pane(
-                pane_id,
-                dragged.session_id,
-                insertion_index,
-            )
-        {
-            self.focus_shell_target(
-                ShellFocusTarget::AgentsPane(self.agents_workspace.focused_pane),
-                cx,
-            );
-            self.scroll_workspace_pane_active_tab(pane_id);
-            self.persist_shell_layout_state();
-            cx.notify();
-        } else {
-            cx.notify();
-        }
     }
 
     pub(crate) fn handle_workspace_pane_body_drop(
@@ -718,16 +507,6 @@ impl GhostexGpuiApp {
                     source_session_id,
                     target_pane_id,
                     zone,
-                )
-            }
-            CommandToAgentsDropPlacement::TabStrip(insertion_index) => {
-                transfer_command_placeholder_to_workspace_tab_strip(
-                    &mut self.agents_workspace,
-                    &mut self.command_pane,
-                    source_group_id,
-                    source_session_id,
-                    target_pane_id,
-                    insertion_index,
                 )
             }
         };
@@ -897,54 +676,6 @@ impl GhostexGpuiApp {
         self.update_active_mode_cef_child_visibility(cx);
         self.scroll_workspace_pane_active_tab(inserted_pane_id);
         self.scroll_workspace_pane_active_tab(self.agents_workspace.focused_pane);
-        self.schedule_project_editor_auto_sleep_for_inactive_modes(cx);
-        self.persist_shell_layout_state();
-        self.sync_gpui_keep_awake_automation_from_current_settings(cx);
-        cx.notify();
-    }
-
-    pub(crate) fn handle_command_tab_workspace_tab_strip_drop(
-        &mut self,
-        target_pane_id: WorkspacePaneId,
-        default_insertion_index: usize,
-        dragged: &DraggedCommandTab,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        /*
-        CDXC:Workarea 2026-06-22-16:04:
-        Dropping a command tab on an Agents tab strip uses the visible tab boundary/end marker as the exact insertion point, switches to Agents, and focuses the target Agents pane so the selected placeholder is visible. This path must not reorder existing Agents tabs for command drags and must not transfer command text, stdout/stderr, terminal content, real process state, libghostty state, Source/Kanban/Automate/Manage surfaces, overlays, hidden hit regions, or native/root hit-test routing.
-        */
-        window.prevent_default();
-        cx.stop_propagation();
-
-        let insertion_index = match self.workspace_drop_feedback {
-            Some(WorkspaceDropFeedback {
-                pane_id,
-                target: WorkspaceDropTarget::TabStrip(insertion_index),
-            }) if pane_id == target_pane_id => insertion_index,
-            _ => default_insertion_index,
-        };
-        self.workspace_drop_feedback = None;
-        self.finish_command_tab_drag_state(cx);
-
-        let Some((inserted_pane_id, _inserted_session_id)) = self
-            .transfer_live_command_tab_to_agents(
-                dragged.source_group_id,
-                dragged.session_id,
-                target_pane_id,
-                CommandToAgentsDropPlacement::TabStrip(insertion_index),
-                cx,
-            )
-        else {
-            cx.notify();
-            return;
-        };
-
-        self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
-        self.focus_shell_target(ShellFocusTarget::AgentsPane(inserted_pane_id), cx);
-        self.update_active_mode_cef_child_visibility(cx);
-        self.scroll_workspace_pane_active_tab(inserted_pane_id);
         self.schedule_project_editor_auto_sleep_for_inactive_modes(cx);
         self.persist_shell_layout_state();
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);
@@ -1169,7 +900,12 @@ impl GhostexGpuiApp {
         }
 
         let dragged = event.drag(cx);
-        let mut zone = command_pane_body_drop_zone(event.bounds, event.event.position);
+        let dock = self
+            .command_pane
+            .dock_for_group(group_id)
+            .unwrap_or(CommandPaneDock::Panel);
+        let mut zone =
+            command_pane_body_drop_zone_for_dock(dock, event.bounds, event.event.position);
         if dragged.source_group_id == group_id
             && !matches!(zone, WorkspaceDropZone::Center)
             && self
@@ -1206,7 +942,11 @@ impl GhostexGpuiApp {
             return;
         }
 
-        let zone = command_pane_body_drop_zone(event.bounds, event.event.position);
+        let dock = self
+            .command_pane
+            .dock_for_group(group_id)
+            .unwrap_or(CommandPaneDock::Panel);
+        let zone = command_pane_body_drop_zone_for_dock(dock, event.bounds, event.event.position);
         self.set_command_drop_feedback(
             Some(CommandPaneDropFeedback {
                 group_id,
@@ -1380,18 +1120,23 @@ impl GhostexGpuiApp {
         };
         self.finish_command_tab_drag_state(cx);
 
-        let changed = match zone {
-            WorkspaceDropZone::Left | WorkspaceDropZone::Right => {
-                self.command_pane.split_tab_to_group(
-                    dragged.source_group_id,
-                    target_group_id,
-                    dragged.session_id,
-                    zone,
-                )
-            }
-            WorkspaceDropZone::Center | WorkspaceDropZone::Top | WorkspaceDropZone::Bottom => self
-                .command_pane
-                .group_tab_into_group(dragged.source_group_id, target_group_id, dragged.session_id),
+        let dock = self
+            .command_pane
+            .dock_for_group(target_group_id)
+            .unwrap_or(CommandPaneDock::Panel);
+        let changed = if command_pane_drop_zone_splits(dock, zone) {
+            self.command_pane.split_tab_to_group(
+                dragged.source_group_id,
+                target_group_id,
+                dragged.session_id,
+                zone,
+            )
+        } else {
+            self.command_pane.group_tab_into_group(
+                dragged.source_group_id,
+                target_group_id,
+                dragged.session_id,
+            )
         };
 
         if changed {
@@ -2163,8 +1908,14 @@ impl GhostexGpuiApp {
         owns shell focus. Minimize reuses the titlebar chevron collapse path so
         sessions, height, and previous non-command focus stay intact.
         */
-        match command_pane_palette_open_decision(self.command_pane.is_expanded(), self.shell_focus)
-        {
+        // Typing in the Terminal view is command focus too, but not the Commands pane's: F12
+        // must open or focus the pane then, not minimize it.
+        let command_pane_focused = self.shell_focus == ShellFocusTarget::CommandPane
+            && self.command_pane.focused_group_in_panel();
+        match command_pane_palette_open_decision(
+            self.command_pane.is_expanded(),
+            command_pane_focused,
+        ) {
             CommandPanePaletteOpenDecision::Minimize => {
                 self.handle_command_pane_control_action(
                     CommandPaneControlAction::ToggleExpanded,
@@ -2333,7 +2084,10 @@ impl GhostexGpuiApp {
         CDXC:CommandPane 2026-06-25-13:58:
         Native accepts double-click on empty pane-titlebar chrome after real tabs and controls decline the hit. GPUI command tab-strip backgrounds use this shared handler so expanded command chrome creates a New Terminal without affecting child tab/control clicks. A single click on collapsed empty chrome expands and focuses the existing active command tab.
         */
-        if !self.command_pane.is_expanded() {
+        let in_panel = group_id.is_none_or(|group_id| {
+            self.command_pane.dock_for_group(group_id) != Some(CommandPaneDock::View)
+        });
+        if in_panel && !self.command_pane.is_expanded() {
             window.prevent_default();
             cx.stop_propagation();
             self.handle_command_pane_control_action(

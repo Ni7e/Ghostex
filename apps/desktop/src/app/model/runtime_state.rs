@@ -431,7 +431,9 @@ impl ProjectScopedWorkareaAvailability {
                         _ => false,
                     }
             }
-            TitlebarMode::Manage => self.project_context.has_project_scoped_workareas(),
+            TitlebarMode::Manage | TitlebarMode::Terminal => {
+                self.project_context.has_project_scoped_workareas()
+            }
         }
     }
 
@@ -451,6 +453,7 @@ impl ProjectScopedWorkareaAvailability {
             TitlebarMode::Kanban,
             TitlebarMode::Automate,
             TitlebarMode::Manage,
+            TitlebarMode::Terminal,
         ];
 
         modes
@@ -468,6 +471,7 @@ impl ProjectScopedWorkareaAvailability {
                             | TitlebarMode::Kanban
                             | TitlebarMode::Automate
                             | TitlebarMode::Manage
+                            | TitlebarMode::Terminal
                     )
                 {
                     Some(TITLEBAR_PROJECT_CONTEXT_DISABLED_REASON)
@@ -522,7 +526,7 @@ impl ProjectWorkareaCefSurfaceSlotKey {
             TitlebarMode::Automate => Self::Automate,
             TitlebarMode::Manage => Self::Manage,
             TitlebarMode::Extension(id) => Self::Extension(id),
-            TitlebarMode::Agents | TitlebarMode::Browser => {
+            TitlebarMode::Agents | TitlebarMode::Browser | TitlebarMode::Terminal => {
                 return None;
             }
         })

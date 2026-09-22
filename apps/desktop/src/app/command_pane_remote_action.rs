@@ -182,6 +182,7 @@ impl GhostexGpuiApp {
         }
         let group_id = selection.group_id;
         let session_id = selection.session_id;
+        self.reveal_command_group_dock(group_id, cx);
         let slot_id = CommandTerminalBodyMountSlotId {
             group_id,
             session_id,

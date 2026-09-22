@@ -364,26 +364,6 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
-    pub(crate) fn set_workspace_tab_hovered(
-        &mut self,
-        tab: WorkspaceHoverTab,
-        hovered: bool,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if hovered {
-            if self.hovered_workspace_tab != Some(tab) {
-                self.hovered_workspace_tab = Some(tab);
-                cx.notify();
-            }
-            return;
-        }
-
-        if self.hovered_workspace_tab == Some(tab) {
-            self.hovered_workspace_tab = None;
-            cx.notify();
-        }
-    }
-
     pub(crate) fn set_command_pane_tab_hovered(
         &mut self,
         tab: CommandPaneHoverTab,
@@ -465,7 +445,7 @@ impl GhostexGpuiApp {
 
     pub(crate) fn clear_command_resize_hover_state_if_command_pane_hidden(&mut self) -> bool {
         clear_command_resize_hover_state_fields_if_command_pane_hidden(
-            self.command_pane.has_sessions(),
+            self.command_pane.has_panel_sessions(),
             &mut self.command_resize_hovering,
             &mut self.command_resize_hover_visible,
             &mut self.command_resize_hover_epoch,
@@ -478,6 +458,13 @@ impl GhostexGpuiApp {
         expanded_chrome: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
+        if group_id.is_some_and(|group_id| {
+            self.command_pane.dock_for_group(group_id) == Some(CommandPaneDock::View)
+        }) {
+            // Pin, Keep open and Minimize are Commands pane controls; a Terminal view leaf has
+            // only its inline add button, and the view tab strip's own controls above it.
+            return div().into_any_element();
+        }
         let pin_tooltip = command_pane_panel_pin_label(self.command_pane.mode);
         let pin_icon_path = command_pane_panel_pin_icon_path(self.command_pane.mode);
         let expand_icon_path =

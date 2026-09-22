@@ -59,7 +59,7 @@ impl GhostexGpuiApp {
             command_pane_workspace_width(window, self.sidebar_width, self.sidebar_collapsed);
         let layout_plan = command_pane_workspace_layout_plan(
             self.command_pane.mode,
-            self.command_pane.has_sessions(),
+            self.command_pane.has_panel_sessions(),
             command_pane_content_height(window),
             self.command_pane.height_ratio,
             self.command_pane_side,
@@ -259,16 +259,7 @@ impl GhostexGpuiApp {
                     .mr(px(COMMAND_PANE_OUTER_CONTENT_RIGHT_INSET))
                     .when_some(
                         self.command_pane
-                            .focus_mode_group
-                            .and_then(|group_id| self.command_pane.find_leaf(group_id))
-                            .filter(|leaf| {
-                                self.command_pane
-                                    .focus_mode_eligible_group_count_without_focus()
-                                    > 1
-                                    && self
-                                        .command_pane
-                                        .group_is_focus_mode_eligible_without_focus(leaf.group_id)
-                            }),
+                            .focus_mode_leaf_for_dock(CommandPaneDock::Panel),
                         |this, focus_leaf| {
                             this.child(self.render_command_pane_leaf(
                                 focus_leaf,
@@ -280,16 +271,7 @@ impl GhostexGpuiApp {
                     )
                     .when(
                         self.command_pane
-                            .focus_mode_group
-                            .and_then(|group_id| self.command_pane.find_leaf(group_id))
-                            .filter(|leaf| {
-                                self.command_pane
-                                    .focus_mode_eligible_group_count_without_focus()
-                                    > 1
-                                    && self
-                                        .command_pane
-                                        .group_is_focus_mode_eligible_without_focus(leaf.group_id)
-                            })
+                            .focus_mode_leaf_for_dock(CommandPaneDock::Panel)
                             .is_none(),
                         |this| {
                             this.child(self.render_command_pane_node(
@@ -304,10 +286,10 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
-    /// The workarea above the command pane boundary is partly a CEF page whenever a view panel is
-    /// open; the grab strip then lies wholly over the command pane, which is always GPUI-painted.
+    /// When the view panel shows a native child, the grab strip lies wholly over the command pane,
+    /// which is always GPUI-painted.
     fn command_pane_boundary_grab_side(&self) -> ResizeRailGrabSide {
-        if self.view_panel_shows_cef_page() {
+        if self.view_panel_shows_native_surface() {
             ResizeRailGrabSide::Trailing
         } else {
             ResizeRailGrabSide::Straddle

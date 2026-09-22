@@ -406,7 +406,7 @@ pub(crate) fn focused_sleeping_command_placeholder_wake_target(
     Keyboard wake resolves through the visible command body owner, so only the exact focused selected sleeping tab can wake. Stale selected ids, missing sessions, inactive siblings, and collapsed panes have no visible placeholder owner and must not wake or create a terminal.
     */
     if shell_focus != ShellFocusTarget::CommandPane
-        || !command_pane.is_expanded()
+        || !command_pane.focused_group_dock_visible()
         || !command_pane_sleeping_placeholder_keystroke_requests_wake(keystroke)
     {
         return None;

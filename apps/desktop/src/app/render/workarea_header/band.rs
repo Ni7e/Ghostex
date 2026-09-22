@@ -118,7 +118,7 @@ impl GhostexGpuiApp {
             command_pane_workspace_width(window, self.sidebar_width, self.sidebar_collapsed);
         match command_pane_workspace_layout_plan(
             self.command_pane.mode,
-            self.command_pane.has_sessions(),
+            self.command_pane.has_panel_sessions(),
             command_pane_content_height(window),
             self.command_pane.height_ratio,
             self.command_pane_side,

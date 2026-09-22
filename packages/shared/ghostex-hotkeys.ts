@@ -64,6 +64,7 @@ export type ghostexHotkeyActionId =
   | 'switchKanbanView'
   | 'switchManageView'
   | 'switchAutomateView'
+  | 'switchTerminalView'
   | `switchTitlebarView${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`
   | `runActionSlot${1 | 2 | 3 | 4 | 5}`
   | `jumpToProject${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`
@@ -125,7 +126,7 @@ export type ghostexHotkeyAction =
   | {
       id: ghostexHotkeyActionId;
       kind: 'switchWorkareaView';
-      view: 'agents' | 'github' | 'kanban' | 'manage' | 'source' | 'automate';
+      view: 'agents' | 'github' | 'kanban' | 'manage' | 'source' | 'automate' | 'terminal';
     }
   | { id: ghostexHotkeyActionId; kind: 'switchTitlebarView'; viewIndex: number }
   | { id: ghostexHotkeyActionId; kind: 'terminalToolbarAction'; terminalToolbarAction: ghostexTerminalToolbarAction }
@@ -342,6 +343,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
       ['switchKanbanView', 'kanban', 'alt+4', 'Kanban'],
       ['switchManageView', 'manage', 'alt+5', 'Docs'],
       ['switchAutomateView', 'automate', '', 'Automate'],
+      ['switchTerminalView', 'terminal', '', 'Terminal'],
     ] as const
   ).map(([id, view, defaultKey, title]) => ({
     action: {

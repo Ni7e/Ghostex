@@ -193,7 +193,7 @@ pub(crate) enum CommandPanePaletteOpenDecision {
 
 pub(crate) fn command_pane_palette_open_decision(
     command_pane_expanded: bool,
-    shell_focus: ShellFocusTarget,
+    command_pane_focused: bool,
 ) -> CommandPanePaletteOpenDecision {
     /*
     Open Commands Panel and F12 share one open/focus/minimize contract.
@@ -204,7 +204,7 @@ pub(crate) fn command_pane_palette_open_decision(
     */
     if !command_pane_expanded {
         CommandPanePaletteOpenDecision::OpenAndFocus
-    } else if shell_focus == ShellFocusTarget::CommandPane {
+    } else if command_pane_focused {
         CommandPanePaletteOpenDecision::Minimize
     } else {
         CommandPanePaletteOpenDecision::FocusVisible

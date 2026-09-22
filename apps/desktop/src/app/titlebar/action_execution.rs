@@ -234,6 +234,7 @@ impl GhostexGpuiApp {
         }
         let group_id = selection.group_id;
         let session_id = selection.session_id;
+        self.reveal_command_group_dock(group_id, cx);
         if matches!(
             selection.kind,
             CommandPaneActionSessionSelectionKind::ReusedActive

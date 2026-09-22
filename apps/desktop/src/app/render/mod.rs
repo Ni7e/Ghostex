@@ -7,9 +7,7 @@
 // exactly as render.rs itself was declared in app/mod.rs before this split
 // (that `pub(crate) mod render;` line is unchanged).
 pub(crate) mod agents_workspace_layout;
-pub(crate) mod agents_workspace_tabs;
 pub(crate) mod browser_body_and_tabs;
-pub(crate) mod browser_start_page;
 pub(crate) mod browser_workspace_layout;
 pub(crate) mod command_pane_structure;
 pub(crate) mod command_pane_tabs_controls;
@@ -23,9 +21,10 @@ pub(crate) mod terminal_agent_action_bar;
 pub(crate) mod terminal_body_slot;
 pub(crate) mod terminal_content_layout;
 pub(crate) mod terminal_placeholders_and_editor_shell;
+pub(crate) mod terminal_view_surface;
 pub(crate) mod view_picker;
 pub(crate) mod view_tab_strip;
-pub(crate) mod window_drag_region;
 pub(crate) mod view_tab_strip_browser_tabs;
+pub(crate) mod window_drag_region;
 pub(crate) mod workarea_header;
 pub(crate) mod workarea_split;

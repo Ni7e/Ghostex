@@ -276,8 +276,9 @@ impl GhostexGpuiApp {
         CDXC:Workarea 2026-07-03:
         Workspace/Agents tab drags can drop into expanded command groups, so mounted command terminals hide-and-park for the whole drag exactly like a command-panel collapse. The reattach pass must pause with the same gate; otherwise the body canvas keeps recording bounds during the drag and parked command owners would reattach and detach every frame.
         */
+        self.sync_command_pane_view_dock_visibility();
         let command_terminal_native_views_may_be_visible =
-            self.command_pane.is_expanded() && !self.workspace_tab_drag_active;
+            self.command_pane.any_dock_visible() && !self.workspace_tab_drag_active;
         let commands = self
             .command_terminal_surface_host
             .sync_visible_command_slots(

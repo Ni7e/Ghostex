@@ -39,13 +39,6 @@ impl GhostexGpuiApp {
         }
     }
 
-    pub(crate) fn workspace_tab_scroll_handle(&self, pane_id: WorkspacePaneId) -> ScrollHandle {
-        self.workspace_tab_scroll_handles
-            .get(&pane_id)
-            .cloned()
-            .unwrap_or_else(ScrollHandle::new)
-    }
-
     pub(crate) fn browser_tab_scroll_handle(&self, pane_id: BrowserPaneId) -> ScrollHandle {
         self.browser_tab_scroll_handles
             .get(&pane_id)
@@ -177,19 +170,15 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn scroll_command_collapsed_active_tab_without_ensure(&self) {
-        let Some((active_group_id, active_session_id)) =
-            self.command_pane.active_group_and_session_id()
+        let Some((active_group_id, active_session_id)) = self
+            .command_pane
+            .active_group_and_session_id_in_dock(CommandPaneDock::Panel)
         else {
             return;
         };
-        let Some(active_index) =
-            self.command_pane
-                .flat_tab_ids()
-                .into_iter()
-                .position(|(group_id, session_id)| {
-                    group_id == active_group_id && session_id == active_session_id
-                })
-        else {
+        let Some(active_index) = self.command_pane.panel_flat_tab_ids().into_iter().position(
+            |(group_id, session_id)| group_id == active_group_id && session_id == active_session_id,
+        ) else {
             return;
         };
         command_pane_reveal_active_tab_with_native_margin(

@@ -13,7 +13,7 @@ pub(crate) fn focused_command_pane_create_split_hotkey_source(
     CDXC:FocusMode 2026-06-26-06:47:
     Cmd+T/Cmd+D command-placeholder creation is a native responder path only while the Commands panel is visibly expanded. Require expanded command-pane focus plus a live focused source session before allocating command tabs or splits, so stale/collapsed command focus no-ops instead of creating hidden command sessions; clicked command-panel creation keeps its explicit hidden-open route.
     */
-    if shell_focus != ShellFocusTarget::CommandPane || !command_pane.is_expanded() {
+    if shell_focus != ShellFocusTarget::CommandPane || !command_pane.focused_group_dock_visible() {
         return None;
     }
 
@@ -218,6 +218,7 @@ pub(crate) fn gpui_command_palette_switch_workarea_hotkey_mode(
         "switchKanbanView" => Some(TitlebarMode::Kanban),
         "switchManageView" => Some(TitlebarMode::Manage),
         "switchAutomateView" => Some(TitlebarMode::Automate),
+        "switchTerminalView" => Some(TitlebarMode::Terminal),
         _ => None,
     }
 }

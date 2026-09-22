@@ -237,6 +237,8 @@ pub(crate) const AUTOMATE_VIEW_TAB_HIDDEN_SETTINGS_KEY: &str = "automateViewTabH
 
 pub(crate) const DOCS_VIEW_TAB_HIDDEN_SETTINGS_KEY: &str = "docsViewTabHidden";
 
+pub(crate) const TERMINAL_VIEW_TAB_HIDDEN_SETTINGS_KEY: &str = "terminalViewTabHidden";
+
 pub(crate) const TIPS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY: &str =
     "tipsAndTricksTitlebarButtonHidden";
 

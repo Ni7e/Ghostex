@@ -47,11 +47,12 @@ impl GhostexGpuiApp {
             // The Agents workspace is never the view panel's occupant: it is the column beside it.
             TitlebarMode::Agents => gpui::div().into_any_element(),
             TitlebarMode::Browser => self.render_browser_workspace(window, cx),
+            TitlebarMode::Terminal => self.render_terminal_view_surface(cx),
             TitlebarMode::Source => self.render_source_workarea_surface(cx),
             TitlebarMode::Kanban => self.render_kanban_workarea_surface(cx),
             TitlebarMode::Automate => self.render_automate_workarea_surface(cx),
             TitlebarMode::Manage => self.render_manage_workarea_surface(cx),
-            TitlebarMode::Extension(id) => self.render_extension_workarea_surface(id, cx),
+            TitlebarMode::Extension(id) => self.render_extension_workarea_surface(id, window, cx),
         }
     }
 
@@ -287,10 +288,14 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn render_extension_workarea_surface(
-        &self,
+        &mut self,
         id: ExtensionId,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
+        if self.website_home_setup_visible(TitlebarMode::Extension(id)) {
+            return self.render_website_home_setup(id, window, cx);
+        }
         let slot_key = ProjectWorkareaCefSurfaceSlotKey::Extension(id);
         if let Some(surface) = self.project_workarea_runtime_cef_surface_for_render(slot_key) {
             return self.render_project_workarea_runtime_cef_surface(slot_key, surface, cx);

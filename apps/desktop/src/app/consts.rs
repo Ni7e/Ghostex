@@ -653,6 +653,9 @@ pub(crate) const TITLEBAR_ICON_PANEL_BOTTOM: &str = "titlebar/panel-bottom.svg";
 
 pub(crate) const TITLEBAR_ICON_PANEL_RIGHT: &str = "titlebar/panel-right.svg";
 
+pub(crate) const TITLEBAR_ICON_TERMINAL: &str = "titlebar/terminal-2.svg";
+pub(crate) const TITLEBAR_ICON_MESSAGE: &str = "titlebar/message.svg";
+
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub(crate) const TITLEBAR_ICON_WINDOW_MINIMIZE: &str = "titlebar/window-minimize.svg";
 
@@ -870,7 +873,13 @@ pub(crate) const APP_MODAL_HOST_SIDEBAR_SPACE_EDITOR_WINDOW_WIDTH: f32 = 480.0;
 
 pub(crate) const APP_MODAL_HOST_SIDEBAR_SPACE_EDITOR_WINDOW_HEIGHT: f32 = 380.0;
 
-pub(crate) const APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_HEIGHT: f32 = 680.0;
+/// CDXC:AppModal 2026-09-22 DECISION:
+/// User: make the height of the Ghostex Quick Access modal 25% less. All four Quick Access tabs open on this one frame, 510px instead of the previous 680px.
+pub(crate) const APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_HEIGHT: f32 = 510.0;
+
+/// CDXC:AppModal 2026-09-22 WHY:
+/// Browser History used to borrow the Quick Access frame; it keeps the earlier 680px height so the Quick Access decision above does not shorten it as a side effect.
+pub(crate) const APP_MODAL_HOST_BROWSER_HISTORY_WINDOW_HEIGHT: f32 = 680.0;
 
 pub(crate) const APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH: f32 = 470.0;
 
@@ -1217,54 +1226,6 @@ Browser tab right-click context menus are GPUI popup menus scoped to the clicked
         CDXC:CommandPane 2026-06-22-16:18:
         Agents workspace tabs can also be dragged to an expanded command-pane tab-strip boundary or end target. This creates a command-only placeholder tab with the visible Agents title at the exact requested command tab index, focuses/expands that command group, then removes the Agents source only after insertion succeeds; it never transfers libghostty state, terminal content, command text, process state, Source/Kanban/Automate/Manage surfaces, CEF state, overlays, hidden hit regions, or native/root hit-test routing.
         */
-pub(crate) const WORKSPACE_TAB_BAR_HEIGHT: f32 = 36.0;
-
-pub(crate) const WORKSPACE_TAB_WIDTH: f32 = 172.0;
-
-pub(crate) const WORKSPACE_TAB_ICON_WIDTH: f32 = 14.0;
-
-pub(crate) const WORKSPACE_TAB_AGENT_ICON_SIZE: f32 = 14.0;
-
-pub(crate) const WORKSPACE_TAB_CLOSE_SIZE: f32 = 20.0;
-
-pub(crate) const WORKSPACE_TAB_CLOSE_TRAILING_PADDING: f32 = 4.0;
-
-pub(crate) const WORKSPACE_TAB_CLOSE_TOP_OFFSET: f32 =
-    (WORKSPACE_TAB_BAR_HEIGHT - WORKSPACE_TAB_CLOSE_SIZE) / 2.0;
-
-pub(crate) const WORKSPACE_TAB_CLOSE_ICON_SIZE: f32 = 10.0;
-
-pub(crate) const WORKSPACE_TAB_STATUS_INDICATOR_SIZE: f32 = 7.0;
-
-pub(crate) const WORKSPACE_TAB_STATUS_INDICATOR_TRAILING_PADDING: f32 = 10.0;
-
-pub(crate) const WORKSPACE_TAB_SLEEP_ICON_SIZE: f32 = WORKSPACE_TAB_AGENT_ICON_SIZE;
-
-pub(crate) const WORKSPACE_TAB_SLEEP_SVG_SIZE: f32 = 11.0;
-
-pub(crate) const WORKSPACE_TAB_SLEEP_ICON_TRAILING_PADDING: f32 = 11.0;
-
-pub(crate) const WORKSPACE_TAB_STATUS_TITLE_GAP: f32 = 4.0;
-
-pub(crate) const WORKSPACE_TAB_STATUS_TITLE_RESERVED_WIDTH: f32 =
-    WORKSPACE_TAB_STATUS_INDICATOR_SIZE
-        + WORKSPACE_TAB_STATUS_INDICATOR_TRAILING_PADDING
-        + WORKSPACE_TAB_STATUS_TITLE_GAP;
-
-pub(crate) const WORKSPACE_TAB_SLEEP_TITLE_RESERVED_WIDTH: f32 = WORKSPACE_TAB_SLEEP_ICON_SIZE
-    + WORKSPACE_TAB_SLEEP_ICON_TRAILING_PADDING
-    + WORKSPACE_TAB_STATUS_TITLE_GAP;
-
-pub(crate) const WORKSPACE_TAB_ACTION_BUTTON_WIDTH: f32 = 42.0;
-
-pub(crate) const WORKSPACE_TAB_ACTION_BUTTON_HEIGHT: f32 = 34.0;
-
-pub(crate) const WORKSPACE_TAB_ACTION_ICON_SIZE: f32 = 15.0;
-
-pub(crate) const WORKSPACE_TAB_SELECTED_WHITE_OVERLAY_ALPHA: f32 = 0.13;
-
-pub(crate) const WORKSPACE_TAB_INACTIVE_WHITE_OVERLAY_ALPHA: f32 = 0.06;
-
 pub(crate) const WORKSPACE_SPLIT_HANDLE_THICKNESS: f32 = 1.0;
 
 pub(crate) const WORKSPACE_BOTTOM_ROW_TOP_RATIO: f32 = 0.72;
@@ -1397,17 +1358,11 @@ pub(crate) const COMMAND_PANE_TAB_SEPARATOR_WIDTH: f32 = 1.0;
 
 /*
 CDXC:CommandPane 2026-06-25-14:36:
-Native command tabs use the AppKit pane-tab compositing base (#050608) with white overlays: 13% for active command tabs and 6% for inactive command tabs. Hover reveals close chrome only; it does not brighten the tab fill.
+Native command tabs use the AppKit pane-tab compositing base with white overlays: 13% for active command tabs and 6% for inactive command tabs. Hover reveals close chrome only; it does not brighten the tab fill. Since 2026-09-22 the base is the themed command chrome (command_pane_chrome_color) rather than the fixed #050608.
 
 CDXC:SessionSleep 2026-06-25-14:39:
 Inactive sleeping command tabs use the native parked-tab visual treatment: keep selected sleeping tabs visually selected, but reduce inactive sleeping tab fill to a 3.2% white overlay and dim its title by 48%.
 */
-pub(crate) const COMMAND_PANE_TAB_BACKGROUND_BASE_RED: u8 = 0x05;
-
-pub(crate) const COMMAND_PANE_TAB_BACKGROUND_BASE_GREEN: u8 = 0x06;
-
-pub(crate) const COMMAND_PANE_TAB_BACKGROUND_BASE_BLUE: u8 = 0x08;
-
 pub(crate) const COMMAND_PANE_TAB_ACTIVE_OVERLAY_ALPHA: f32 = 0.13;
 
 pub(crate) const COMMAND_PANE_TAB_INACTIVE_OVERLAY_ALPHA: f32 = 0.06;

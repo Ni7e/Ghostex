@@ -294,6 +294,8 @@ impl GhostexGpuiApp {
                     }
                 } else if self.active_mode != mode {
                     ShellKeyboardOwner::Nothing
+                } else if self.website_home_setup_visible(mode) {
+                    ShellKeyboardOwner::GpuiViewPanelSurface
                 } else if mode.is_project_editor_mode() {
                     ShellKeyboardOwner::WorkareaPage(mode)
                 } else {
@@ -418,11 +420,8 @@ impl GhostexGpuiApp {
             }
             ShellKeyboardOwner::TerminalMounting => {}
             ShellKeyboardOwner::ChatComposer(session_id) => {
-                if !self
-                    .session_chat_composer_ready_sessions
-                    .contains(&session_id)
-                {
-                    // Completed by the page's composerReady report.
+                if !self.native_chat_views.contains_key(&session_id) {
+                    // Native input can take focus before its background runtime restores the draft.
                     return;
                 }
                 self.pending_keyboard_handoff = None;
@@ -528,12 +527,11 @@ impl GhostexGpuiApp {
                         .any(|slot_id| slot_id.session_id == session_id)
             }
             GpuiEngineTerminalEventTarget::Command(session_id) => {
-                self.command_pane.is_expanded()
-                    && self
-                        .command_pane
-                        .rendered_terminal_body_mount_slots()
-                        .iter()
-                        .any(|slot_id| slot_id.session_id == session_id)
+                // Rendered slots are already limited to the docks on screen.
+                self.command_pane
+                    .rendered_terminal_body_mount_slots()
+                    .iter()
+                    .any(|slot_id| slot_id.session_id == session_id)
             }
         }
     }

@@ -551,169 +551,11 @@ impl GhostexGpuiApp {
         }
     }
 
-    pub(crate) fn show_agents_pane_actions_menu(
-        &self,
-        pane_id: WorkspacePaneId,
-        position: gpui::Point<Pixels>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(pane_id) = self.agents_workspace.resolve_action_pane_id(pane_id) else {
-            return;
-        };
-        let action_pane_id = pane_id.0;
-        let menu = GpuiContextMenu::new()
-            .menu(
-                "Split Sideways",
-                Box::new(SplitPaneRightWithNewTerminal {
-                    pane_id: action_pane_id,
-                }),
-            )
-            .menu(
-                "Split Downwards",
-                Box::new(SplitPaneBelowWithNewTerminal {
-                    pane_id: action_pane_id,
-                }),
-            )
-            .menu(
-                "Rotate Panes Clockwise",
-                Box::new(RotateAgentsPanesForPane {
-                    pane_id: action_pane_id,
-                }),
-            )
-            .menu(
-                "Merge all tabs",
-                Box::new(MergeAllTabsForPane {
-                    pane_id: action_pane_id,
-                }),
-            );
-
-        menu.show(position, window, cx);
-    }
-
     pub(crate) fn open_browser_pane_in_external_browser(&self, pane_id: BrowserPaneId) {
         let Some(tab) = self.browser_tabs.active_tab_for_pane(pane_id) else {
             return;
         };
         let _ = gpui_open_external_http_url(&tab.url);
-    }
-
-    pub(crate) fn show_agents_tab_context_menu(
-        &self,
-        pane_id: WorkspacePaneId,
-        session_id: TerminalSessionId,
-        position: gpui::Point<Pixels>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        /*
-        CDXC:ContextMenus 2026-06-22-11:19:
-        Individual Agents workspace tabs need an owned GPUI popup window at the right-click position. The menu is scoped to the clicked pane id and session id, contains only tab-level commands, and must not duplicate far-right pane/layout actions such as new terminal, splits, or bottom row.
-
-        CDXC:ContextMenus 2026-06-26-06:57:
-        Agents right-click tab menus now mirror native pane tabs instead of Browser-style tab menus: no Select Tab row, no direct Close Tab row, optional Focus when real Focus mode can run, Sleep scopes before Close scopes, and scope resolution confined to the clicked pane tab group.
-        */
-        let tab_exists = self
-            .agents_workspace
-            .find_leaf(pane_id)
-            .is_some_and(|leaf| leaf.tab_group.has_session(session_id));
-        if !tab_exists {
-            return;
-        }
-        let clicked_tab_is_sleeping =
-            self.agents_workspace
-                .session(session_id)
-                .is_some_and(|session| {
-                    session.presentation_state == TerminalSessionPresentationState::Sleeping
-                });
-        let mut menu = GpuiContextMenu::new();
-
-        // Rename and direct Sleep are the primary clicked-session actions.
-        // Rename is gxserver-backed, while Sleep also applies to an unmapped
-        // local placeholder tab.
-        let clicked_tab_has_gxserver_mapping = self
-            .local_workspace_session_mappings
-            .values()
-            .any(|mapped| *mapped == session_id);
-        if clicked_tab_has_gxserver_mapping {
-            menu = menu.menu(
-                "Rename",
-                Box::new(RenameAgentsWorkspaceTab {
-                    session_id: session_id.0,
-                }),
-            );
-        }
-        if !clicked_tab_is_sleeping {
-            menu = menu.menu(
-                "Sleep",
-                Box::new(SleepAgentsWorkspaceTabsByScope {
-                    pane_id: pane_id.0,
-                    session_id: session_id.0,
-                    scope: AgentsWorkspaceTabSleepScope::Sleep.action_value(),
-                }),
-            );
-        }
-        if clicked_tab_has_gxserver_mapping || !clicked_tab_is_sleeping {
-            menu = menu.separator();
-        }
-
-        let has_focus_row = self.agents_pane_focus_mode_menu_label(pane_id).is_some();
-        if has_focus_row {
-            menu = menu.menu(
-                agents_workspace_tab_context_focus_label(),
-                Box::new(FocusAgentsWorkspaceTab {
-                    pane_id: pane_id.0,
-                    session_id: session_id.0,
-                }),
-            );
-        }
-
-        // Fork/Reload mirror the macOS pane-titlebar session actions and are
-        // gxserver mutations, so only mapped gxserver sessions offer them.
-        if clicked_tab_has_gxserver_mapping {
-            menu = menu.menu(
-                "Fork Session",
-                Box::new(ForkAgentsWorkspaceTab {
-                    pane_id: pane_id.0,
-                    session_id: session_id.0,
-                }),
-            );
-            menu = menu.menu(
-                "Reload Session",
-                Box::new(ReloadAgentsWorkspaceTab {
-                    pane_id: pane_id.0,
-                    session_id: session_id.0,
-                }),
-            );
-        }
-
-        if has_focus_row || clicked_tab_has_gxserver_mapping {
-            menu = menu.separator();
-        }
-        for scope in agents_workspace_tab_context_scoped_sleep_order() {
-            menu = menu.menu(
-                agents_workspace_tab_context_sleep_scope_label(scope),
-                Box::new(SleepAgentsWorkspaceTabsByScope {
-                    pane_id: pane_id.0,
-                    session_id: session_id.0,
-                    scope: scope.action_value(),
-                }),
-            );
-        }
-        menu = menu.separator();
-
-        for scope in agents_workspace_tab_context_scoped_close_order() {
-            menu = menu.menu(
-                agents_workspace_tab_context_close_scope_label(scope),
-                Box::new(CloseAgentsWorkspaceTabsByScope {
-                    pane_id: pane_id.0,
-                    session_id: session_id.0,
-                    scope: scope.action_value(),
-                }),
-            );
-        }
-
-        menu.show(position, window, cx);
     }
 
     pub(crate) fn show_browser_tab_context_menu(
@@ -1286,19 +1128,6 @@ impl GhostexGpuiApp {
         );
     }
 
-    pub(crate) fn agents_pane_focus_mode_menu_label(
-        &self,
-        pane_id: WorkspacePaneId,
-    ) -> Option<&'static str> {
-        if self.agents_workspace.focus_mode_pane.is_some() {
-            return Some("Exit Focus Mode");
-        }
-
-        (self.agents_workspace.focus_mode_eligible_leaf_count() > 1
-            && self.agents_workspace.leaf_is_focus_mode_eligible(pane_id))
-        .then_some("Enter Focus Mode")
-    }
-
     pub(crate) fn focus_command_pane(&mut self, cx: &mut gpui::Context<Self>) {
         if self.command_pane.has_sessions() {
             self.remember_current_non_command_focus();
@@ -1315,11 +1144,14 @@ impl GhostexGpuiApp {
         CDXC:FocusRouting 2026-06-25-23:35:
         Cmd-Opt directional focus into command panes must use a live expanded command-panel route. Specific command-group targets validate and focus that group; generic command-pane targets require the current focused group to still resolve, so stale shell focus never falls back to another command session.
         */
-        if !command_pane.is_expanded() || !command_pane.has_sessions() {
+        if !command_pane.any_dock_visible() || !command_pane.has_sessions() {
             return None;
         }
 
         if let Some(group_id) = target_group_id {
+            if !command_pane.group_dock_visible(group_id) {
+                return None;
+            }
             let active_session_id = command_pane
                 .find_leaf(group_id)
                 .and_then(|leaf| leaf.tab_group.active_session_id())?;
@@ -1330,6 +1162,9 @@ impl GhostexGpuiApp {
             }
         }
 
+        if !command_pane.focused_group_dock_visible() {
+            return None;
+        }
         let (_group_id, session_id) = command_pane.focused_group_active_session_id()?;
         command_pane.session(session_id).map(|_| session_id)
     }
@@ -1375,6 +1210,13 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         if self.active_mode == mode {
+            if mode == TitlebarMode::Terminal {
+                if self.seed_terminal_view_for_open(cx) {
+                    self.focus_command_pane(cx);
+                    self.request_focused_command_terminal_text_focus_handoff();
+                }
+                return;
+            }
             self.mark_project_editor_mode_awake(mode, cx);
             let focus = match mode {
                 TitlebarMode::Agents => {
@@ -1383,6 +1225,7 @@ impl GhostexGpuiApp {
                 TitlebarMode::Browser => {
                     ShellFocusTarget::BrowserPane(self.browser_tabs.focused_pane)
                 }
+                TitlebarMode::Terminal => ShellFocusTarget::CommandPane,
                 TitlebarMode::Source
                 | TitlebarMode::Kanban
                 | TitlebarMode::Automate
@@ -1408,6 +1251,12 @@ impl GhostexGpuiApp {
     ) -> bool {
         if self.active_mode != mode {
             return false;
+        }
+
+        if mode == TitlebarMode::Terminal {
+            self.focus_project_editor_surface(mode, window, cx);
+            self.drain_pending_keyboard_handoff(window, cx);
+            return self.shell_focus == ShellFocusTarget::CommandPane;
         }
 
         if !mode.is_project_editor_mode() {
@@ -1439,7 +1288,7 @@ impl GhostexGpuiApp {
             | TitlebarMode::Automate
             | TitlebarMode::Manage
             | TitlebarMode::Extension(_) => ShellFocusTarget::ProjectEditorSurface(mode),
-            TitlebarMode::Agents => return false,
+            TitlebarMode::Agents | TitlebarMode::Terminal => return false,
         };
         self.focus_shell_target(focus, cx);
         self.update_active_mode_cef_child_visibility(cx);
@@ -1458,7 +1307,9 @@ impl GhostexGpuiApp {
         CDXC:CommandPane 2026-06-25-23:20:
         Keyboard cycling shares direct command-tab activation semantics: after a successful cycle, acknowledge only the selected Attention command session through the existing command attention path.
         */
-        if shell_focus != ShellFocusTarget::CommandPane || !command_pane.is_expanded() {
+        if shell_focus != ShellFocusTarget::CommandPane
+            || !command_pane.focused_group_dock_visible()
+        {
             return None;
         }
         command_pane.focused_group_active_session_id()
@@ -1772,12 +1623,21 @@ impl GhostexGpuiApp {
         candidates
     }
 
+    /// The command groups spatial focus can move between: those in a dock that is on screen.
+    pub(crate) fn visible_command_focus_group_ids(&self) -> Vec<CommandPaneGroupId> {
+        self.command_pane
+            .group_order()
+            .into_iter()
+            .filter(|group_id| self.command_pane.group_dock_visible(*group_id))
+            .collect()
+    }
+
     pub(crate) fn command_spatial_focus_bounds_ready(&self) -> bool {
-        if !self.command_pane.is_expanded() || !self.command_pane.has_sessions() {
+        if !self.command_pane.any_dock_visible() || !self.command_pane.has_sessions() {
             return true;
         }
 
-        let command_group_ids = self.command_pane.group_order();
+        let command_group_ids = self.visible_command_focus_group_ids();
         if command_group_ids.is_empty() {
             return self.command_pane_layout_bounds.is_some();
         }
@@ -1792,8 +1652,8 @@ impl GhostexGpuiApp {
         &self,
         candidates: &mut Vec<FocusCandidate>,
     ) {
-        if self.command_pane.is_expanded() && self.command_pane.has_sessions() {
-            let command_group_ids = self.command_pane.group_order();
+        if self.command_pane.any_dock_visible() && self.command_pane.has_sessions() {
+            let command_group_ids = self.visible_command_focus_group_ids();
             let command_group_candidates: Option<Vec<_>> = command_group_ids
                 .iter()
                 .map(|group_id| {
@@ -1831,9 +1691,7 @@ impl GhostexGpuiApp {
                 .get(&pane_id)
                 .copied()
                 .map(|bounds| (SpatialFocusTarget::AgentsPane(pane_id), bounds)),
-            ShellFocusTarget::CommandPane
-                if self.command_pane.is_expanded() && self.command_pane.has_sessions() =>
-            {
+            ShellFocusTarget::CommandPane if self.command_pane.focused_group_dock_visible() => {
                 self.current_command_spatial_focus_bounds()
             }
             ShellFocusTarget::ProjectEditorSurface(mode) if self.active_mode == mode => self
@@ -1869,7 +1727,7 @@ impl GhostexGpuiApp {
     pub(crate) fn current_command_spatial_focus_bounds(
         &self,
     ) -> Option<(SpatialFocusTarget, Bounds<Pixels>)> {
-        if !self.command_pane.is_expanded() || !self.command_pane.has_sessions() {
+        if !self.command_pane.focused_group_dock_visible() {
             return None;
         }
 
@@ -1986,9 +1844,9 @@ impl GhostexGpuiApp {
             open_view,
             open_view.is_some_and(|mode| self.project_editor_shell.is_mode_awake(mode)),
             self.browser_tabs.rendered_leaf_order(),
-            self.command_pane.is_expanded(),
+            self.command_pane.any_dock_visible(),
             self.command_pane.has_sessions(),
-            self.command_pane.group_order(),
+            self.visible_command_focus_group_ids(),
         )
     }
 

@@ -1117,7 +1117,6 @@ impl GhostexGpuiApp {
         self.workspace_split_hover_visible = None;
         self.workspace_drop_feedback = None;
         self.workspace_tab_drag_active = false;
-        self.pending_workspace_tab_click = None;
 
         if matches!(self.shell_focus, ShellFocusTarget::AgentsPane(_)) {
             self.focus_shell_target(
@@ -1262,6 +1261,7 @@ impl GhostexGpuiApp {
         if self.shell_focus == ShellFocusTarget::CommandPane && !self.command_pane.has_sessions() {
             self.restore_previous_non_command_focus_or_default(cx);
         }
+        self.seed_terminal_view_for_open(cx);
         self.scroll_focused_command_active_tab();
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);
         self.persist_shell_layout_state();
@@ -1698,7 +1698,7 @@ impl GhostexGpuiApp {
     pub(crate) fn show_browser_profile_menu(
         &mut self,
         pane_id: BrowserPaneId,
-        position: gpui::Point<Pixels>,
+        trigger_bounds: gpui::Bounds<Pixels>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -1706,7 +1706,11 @@ impl GhostexGpuiApp {
         CDXC:Browser 2026-06-23-11:14:
         Browser Profiles are a normal GPUI Browser toolbar feature. The menu reflects real shell profile state through an owned GPUI popup window with checked generated profile rows and New Profile; do not use GPUI overlays, hidden hit regions, hit-test routing, or user-entered profile names.
         */
-        if !self.prepare_browser_toolbar_right_action(pane_id, cx) {
+        // CDXC:Browser 2026-09-22 WHY:
+        // Opening the menu must not run prepare_browser_toolbar_right_action: its keyboard handoff makes the CEF page first responder on the next render, and that responder transition is the boundary that closes every titlebar popup, so the menu appeared and vanished. The Select/New Profile handlers activate the pane when a row is chosen.
+        if !self.titlebar_mode_available(TitlebarMode::Browser)
+            || self.browser_tabs.find_leaf(pane_id).is_none()
+        {
             return;
         }
 
@@ -1732,7 +1736,7 @@ impl GhostexGpuiApp {
                 "New Profile...",
                 Box::new(CreateBrowserProfile { pane_id: pane_id.0 }),
             )
-            .show(position, window, cx);
+            .toggle_below(trigger_bounds, window, cx);
     }
 
     pub(crate) fn select_browser_profile_from_menu(
@@ -2055,9 +2059,10 @@ impl GhostexGpuiApp {
         self.reconcile_browser_address_inputs();
         // CDXC:Browser 2026-09-21 DECISION:
         // User: closing the last browser tab closes the Browser view, the way closing any view's tab
-        // does, so the panel moves on to the neighbouring open view and closes only when Browser was
-        // the last one. Supersedes the 2026-09-08 rule that it always switched back to Agents, which
-        // closed the whole panel even with Docs or Code still open beside it. The tab model retains
+        // does, so the panel moves on to the neighbouring open view and, when Browser was the last
+        // one, goes back to the view picker (the 2026-09-22 side panel rule). Supersedes the
+        // 2026-09-08 rule that it always switched back to Agents, which closed the whole panel even
+        // with Docs or Code still open beside it. The tab model retains
         // an address-only placeholder, so count tabs before closing; New Browser Tab reopens from it.
         if closing_last_browser_tab {
             self.close_view_tab(TitlebarMode::Browser, window, cx);
@@ -2120,6 +2125,8 @@ impl GhostexGpuiApp {
         {
             tab.remote_machine_id = remote_machine_id;
         }
+        // A website view can open the project's first Browser tab without activating Browser.
+        self.record_open_view_tab(TitlebarMode::Browser);
         self.reveal_new_browser_tab(popup_tab_id);
         if matches!(placement, cef::BrowserPopupPlacement::Background) {
             /*
@@ -2189,6 +2196,11 @@ impl GhostexGpuiApp {
         let previous_shell_focus = self.shell_focus;
         let previous_first_responder_target = self.first_responder_target;
         self.change_active_mode_with_pane_state(mode, cx);
+        // The Terminal view's default focus is its focused command group, so the group has to
+        // exist, and be the focused one, before the default focus below is computed.
+        if mode == TitlebarMode::Terminal {
+            self.seed_terminal_view_for_open(cx);
+        }
         /*
         CDXC:CodeEditor 2026-07-05:
         Opening Source, Browser, Kanban, Automate, or Docs is an activation
@@ -2205,6 +2217,9 @@ impl GhostexGpuiApp {
             self.seed_current_project_browser_tab_if_empty();
         }
         self.focus_default_surface_for_active_mode(cx);
+        if mode == TitlebarMode::Terminal {
+            self.request_focused_command_terminal_text_focus_handoff();
+        }
         let requested_agents_terminal_focus =
             if let Some(FocusedTerminalTextMountTarget::Agents(slot_id)) =
                 self.focused_terminal_text_mount_target()

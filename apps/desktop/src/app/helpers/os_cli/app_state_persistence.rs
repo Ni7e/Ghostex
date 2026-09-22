@@ -191,19 +191,27 @@ pub(crate) fn restored_gpui_window_bounds_from_state(
         .or_else(|| cx.primary_display())
         .or_else(|| displays.first().cloned())?;
     let display_bounds = display.bounds();
+    // CDXC:Workarea 2026-09-22 WHY:
+    // The frame is clamped to the display's visible area, not its full bounds: a saved frame as
+    // tall as the screen restored against the full bounds sat under the Dock, where macOS hid the
+    // window's last row and with it every pane's bottom border. The origin stays relative to the
+    // display's own origin, which is what the saved state records.
+    let visible = display.visible_bounds();
     let width = px(state
         .width
         .max(min_width)
-        .min(display_bounds.size.width.as_f32()));
+        .min(visible.size.width.as_f32()));
     let height = px(state
         .height
         .max(min_height)
-        .min(display_bounds.size.height.as_f32()));
-    let max_x = (display_bounds.size.width - width).max(px(0.0));
-    let max_y = (display_bounds.size.height - height).max(px(0.0));
+        .min(visible.size.height.as_f32()));
+    let min_x = visible.origin.x - display_bounds.origin.x;
+    let min_y = visible.origin.y - display_bounds.origin.y;
+    let max_x = (min_x + visible.size.width - width).max(min_x);
+    let max_y = (min_y + visible.size.height - height).max(min_y);
     let origin = gpui::point(
-        display_bounds.origin.x + px(state.relative_origin_x).clamp(px(0.0), max_x),
-        display_bounds.origin.y + px(state.relative_origin_y).clamp(px(0.0), max_y),
+        display_bounds.origin.x + px(state.relative_origin_x).clamp(min_x, max_x),
+        display_bounds.origin.y + px(state.relative_origin_y).clamp(min_y, max_y),
     );
     let bounds = Bounds::new(origin, size(width, height));
     let window_bounds = match state.state.as_str() {

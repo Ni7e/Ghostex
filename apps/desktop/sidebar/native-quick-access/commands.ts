@@ -167,8 +167,14 @@ function hiddenWorkareaCommandIds(): Set<string> {
       projectSpaceRefs: state.hud.activeProjectSpaceRefs ?? [],
       scope: ghostexViewScope(viewScopes, officialViewScopeKey(officialExtensionId)),
     });
-  const flag = (key: 'browserViewTabHidden' | 'codeViewTabHidden' | 'docsViewTabHidden' | 'kanbanViewTabHidden') =>
-    (settings?.[key] ?? DEFAULT_ghostex_SETTINGS[key]) === true;
+  const flag = (
+    key:
+      | 'browserViewTabHidden'
+      | 'codeViewTabHidden'
+      | 'docsViewTabHidden'
+      | 'kanbanViewTabHidden'
+      | 'terminalViewTabHidden'
+  ) => (settings?.[key] ?? DEFAULT_ghostex_SETTINGS[key]) === true;
   const hidden = new Set<string>();
   if (flag('browserViewTabHidden') || outOfScope('browser')) {
     hidden.add('switchGitHubView');
@@ -178,6 +184,7 @@ function hiddenWorkareaCommandIds(): Set<string> {
   if (flag('codeViewTabHidden') || outOfScope('code')) hidden.add('switchSourceView');
   if (flag('docsViewTabHidden') || outOfScope('docs')) hidden.add('switchManageView');
   if (flag('kanbanViewTabHidden') || outOfScope('kanban')) hidden.add('switchKanbanView');
+  if (flag('terminalViewTabHidden') || outOfScope('terminal')) hidden.add('switchTerminalView');
   return hidden;
 }
 

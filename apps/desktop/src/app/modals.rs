@@ -350,10 +350,13 @@ impl GhostexGpuiApp {
         if !self.command_pane_tab_exists(group_id, session_id) {
             return false;
         }
-        let expand_pane = !self.command_pane.is_expanded();
+        let expand_pane = self.command_pane.dock_for_group(group_id)
+            == Some(CommandPaneDock::Panel)
+            && !self.command_pane.is_expanded();
         if !self.select_command_pane_tab(group_id, session_id, expand_pane, window, cx) {
             return false;
         }
+        self.reveal_command_group_dock(group_id, cx);
         if self
             .command_pane
             .session(session_id)
@@ -2051,7 +2054,11 @@ impl GhostexGpuiApp {
         #[cfg(not(target_os = "macos"))]
         let mut config =
             terminal_gpui_engine::GpuiTerminalEngineConfig::from_shared(&shared_engine_settings);
-        config.apply_color_scheme(&shared_engine_settings, gpui_system_uses_light_appearance());
+        config.apply_color_scheme(
+            &shared_engine_settings,
+            gpui_system_uses_light_appearance(),
+            gpui_terminal_theme_background(&shared_engine_settings),
+        );
 
         // This setting is app-owned and is not part of Ghostty's finalized
         // config string on macOS.

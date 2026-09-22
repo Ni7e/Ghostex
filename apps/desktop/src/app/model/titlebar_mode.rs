@@ -50,6 +50,9 @@ pub(crate) enum TitlebarMode {
     Kanban,
     Automate,
     Manage,
+    /// The Terminal view: the Commands pane's second tree, drawn as a view tab. See
+    /// `model/command_pane_docks.rs`.
+    Terminal,
     Extension(ExtensionId),
 }
 
@@ -62,6 +65,7 @@ impl TitlebarMode {
             "kanban" => Some(Self::Kanban),
             "automate" => Some(Self::Automate),
             "manage" => Some(Self::Manage),
+            "terminal" => Some(Self::Terminal),
             value if value.starts_with("extension:") => {
                 ExtensionId::new(value.trim_start_matches("extension:")).map(Self::Extension)
             }
@@ -77,6 +81,7 @@ impl TitlebarMode {
             Self::Kanban => "kanban".to_string(),
             Self::Automate => "automate".to_string(),
             Self::Manage => "manage".to_string(),
+            Self::Terminal => "terminal".to_string(),
             Self::Extension(id) => format!("extension:{}", id.as_str()),
         }
     }
@@ -89,6 +94,7 @@ impl TitlebarMode {
             Self::Kanban => "Kanban",
             Self::Automate => "Automate",
             Self::Manage => "Docs",
+            Self::Terminal => "Terminal",
             Self::Extension(id) => id.as_str(),
         }
     }
@@ -97,12 +103,21 @@ impl TitlebarMode {
     /// and custom views share the puzzle glyph because their manifests carry no icon.
     pub(crate) fn tab_icon(self) -> &'static str {
         match self {
+            mode if mode
+                .website_provider()
+                .is_some_and(|provider| provider.automatic()) =>
+            {
+                "titlebar/brand-github.svg"
+            }
+            mode if mode.website_provider().is_some() => TITLEBAR_ICON_WORLD,
+            mode if mode.is_storybook() => TITLEBAR_ICON_LAYOUT_BOARD_SPLIT,
             Self::Agents => TITLEBAR_ICON_LAYOUT_COLUMNS,
             Self::Source => TITLEBAR_ICON_CODE,
             Self::Browser => TITLEBAR_ICON_WORLD,
             Self::Kanban => TITLEBAR_ICON_LAYOUT_BOARD_SPLIT,
             Self::Automate => TITLEBAR_ICON_BOLT,
             Self::Manage => TITLEBAR_ICON_FILE_TEXT,
+            Self::Terminal => TITLEBAR_ICON_TERMINAL,
             Self::Extension(_) => TITLEBAR_ICON_EXTENSIONS,
         }
     }
@@ -118,6 +133,8 @@ impl TitlebarMode {
         }
     }
 
+    /// A view backed by a CEF page, with the awake/sleep lifecycle that implies. The Terminal view
+    /// is GPUI chrome around native terminals: it never sleeps as a view and owns no page.
     pub(crate) fn is_project_editor_mode(self) -> bool {
         matches!(
             self,
@@ -137,8 +154,9 @@ impl TitlebarMode {
             Self::Kanban => 2,
             Self::Automate => 3,
             Self::Manage => 4,
-            Self::Extension(_) => 5,
-            Self::Agents => 6,
+            Self::Terminal => 5,
+            Self::Extension(_) => 6,
+            Self::Agents => 7,
         }
     }
 
@@ -150,6 +168,7 @@ impl TitlebarMode {
             Self::Kanban => 3,
             Self::Automate => 4,
             Self::Manage => 5,
+            Self::Terminal => 6,
             Self::Extension(id) => {
                 id.as_str()
                     .bytes()
@@ -172,6 +191,7 @@ impl TitlebarMode {
             Self::Kanban => "Kanban is unavailable for the current project context.",
             Self::Automate => "Automate is unavailable for the current project context.",
             Self::Manage => "Docs is unavailable for the current project context.",
+            Self::Terminal => "",
             Self::Extension(_) => "This extension is unavailable for the current project context.",
         }
     }

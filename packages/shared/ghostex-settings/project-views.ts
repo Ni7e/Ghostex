@@ -107,7 +107,7 @@ export function normalizeProjectViewOptions(value: Record<string, unknown>): Pro
 
 /**
  * CDXC:Extensions 2026-09-09 DECISION:
- * User approved Website, Dev server, and HTML report primitives with reusable templates and per-project values, including a Linear URL and detected Storybook command.
+ * User approved Website, Dev server, and HTML report primitives with reusable templates and per-project values, including a Linear URL. Storybook is now built in (2026-09-22), superseding its template entry; existing custom Storybook views keep working.
  * Existing fixed URL views keep their identity and ordering; templates create editable copies rather than live links.
  */
 export const BUILTIN_PROJECT_VIEW_TEMPLATES: readonly ProjectViewTemplate[] = [
@@ -124,13 +124,6 @@ export const BUILTIN_PROJECT_VIEW_TEMPLATES: readonly ProjectViewTemplate[] = [
     url: '',
     availability: 'matching',
     source: { ...DEFAULT_PROJECT_VIEW_SOURCE, destination: 'github-actions' },
-  },
-  {
-    id: 'storybook',
-    name: 'Storybook',
-    url: '',
-    availability: 'matching',
-    source: { ...DEFAULT_PROJECT_VIEW_SOURCE, kind: 'dev-server', discovery: 'storybook' },
   },
   {
     id: 'linear',

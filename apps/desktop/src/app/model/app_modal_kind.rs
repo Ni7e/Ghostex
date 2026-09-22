@@ -183,7 +183,10 @@ impl GpuiAppModalKind {
 
     pub(crate) fn window_size(self) -> Size<Pixels> {
         match self {
-            Self::BrowserHistory => Self::PreviousSessions.window_size(),
+            Self::BrowserHistory => size(
+                px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH),
+                px(APP_MODAL_HOST_BROWSER_HISTORY_WINDOW_HEIGHT),
+            ),
             Self::ModelPicker => size(px(1260.0), px(1050.0)),
             /* All four Quick Access tabs share one stable child-window frame. */
             Self::CommandPalette

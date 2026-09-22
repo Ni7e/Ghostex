@@ -1,5 +1,6 @@
 import type { GhostexInstalledExtension } from '../ghostex-extensions';
 import type { ghostexSettings } from './types';
+import { PROJECT_WEBSITE_PROVIDERS } from './project-websites';
 
 export type TitlebarViewOrderItem = {
   id: string;
@@ -15,7 +16,7 @@ export function normalizeTitlebarViewOrder(value: unknown): string[] {
       value.filter(
         (id): id is string =>
           typeof id === 'string' &&
-          /^(agents|source|browser|kanban|automate|manage|extension:[a-z0-9]+(?:-[a-z0-9]+)*)$/u.test(id)
+          /^(agents|source|browser|kanban|automate|manage|terminal|extension:[a-z0-9]+(?:-[a-z0-9]+)*)$/u.test(id)
       )
     ),
   ];
@@ -37,11 +38,23 @@ export function titlebarViewOrderItems(
     { id: 'kanban', title: 'Kanban', source: 'Built-in', visible: !settings.kanbanViewTabHidden },
     { id: 'automate', title: 'Automate', source: 'Built-in', visible: !settings.automateViewTabHidden },
     { id: 'manage', title: 'Docs', source: 'Built-in', visible: !settings.docsViewTabHidden },
+    { id: 'terminal', title: 'Terminal', source: 'Built-in', visible: !settings.terminalViewTabHidden },
+    { id: 'extension:storybook', title: 'Storybook', source: 'Built-in', visible: !settings.storybookViewTabHidden },
   ];
+  items.push(
+    ...PROJECT_WEBSITE_PROVIDERS.map((provider): TitlebarViewOrderItem => ({
+      id: `extension:${provider.id}`,
+      title: provider.title,
+      source: 'Built-in',
+      visible: !settings[provider.hiddenSettingsKey],
+    }))
+  );
   items.push(
     ...installed
       .filter(
         (extension) =>
+          extension.id !== 'storybook' &&
+          !PROJECT_WEBSITE_PROVIDERS.some((provider) => provider.id === extension.id) &&
           extension.manifest.placements?.includes('view') &&
           extension.state.placement === 'view' &&
           !settings.customViews.some((view) => view.id === extension.id)

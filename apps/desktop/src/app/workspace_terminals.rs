@@ -394,6 +394,9 @@ impl GhostexGpuiApp {
         if !self.agents_sessions_pending_surface_transfer.is_empty() {
             return false;
         }
+        if self.has_unbound_agent_chat_launch() {
+            return false;
+        }
         let changed = self.agents_workspace.reconcile_with_sidebar_tab_sessions(
             focus_state.active_project_id.as_deref(),
             tab_sessions,
@@ -614,6 +617,7 @@ impl GhostexGpuiApp {
             self.view_panel_maximized = false;
             self.last_open_view_mode = self.open_view_mode();
             self.apply_view_pane_state(cx);
+            self.seed_terminal_view_for_open(cx);
             self.focus_default_surface_for_active_mode(cx);
             self.update_active_mode_cef_child_visibility(cx);
             return;
@@ -648,6 +652,7 @@ impl GhostexGpuiApp {
         self.view_panel_picker_open =
             self.view_panel_picker_open && target_mode == TitlebarMode::Agents;
         self.apply_view_pane_state(cx);
+        self.seed_terminal_view_for_open(cx);
         self.focus_shell_target(
             default_shell_focus_for_mode(
                 target_mode,
@@ -769,52 +774,21 @@ impl GhostexGpuiApp {
             .collect::<Vec<_>>();
 
         for (pane_id, session_id, key) in candidates {
-            if !self.remote_workspace_attach_pending.insert(key.clone()) {
-                continue;
-            }
             let reference = GpuiRemoteAttachSessionReference {
                 remote_machine_id: key.remote_machine_id.clone(),
                 project_id: key.project_id.clone(),
                 session_id: key.session_id.clone(),
             };
-            let prepare_config = config.clone();
-            let prepare_target = target.clone();
-            let background = cx.background_executor().clone();
-            cx.spawn(async move |this, cx| {
-                let prepare_reference = reference.clone();
-                let result = background
-                    .spawn(async move {
-                        /*
-                        Wake is requested here for the same reason the click
-                        path requests it: a restored session whose zmx provider
-                        died while the app was closed must be resumed remotely
-                        before there is anything to attach to.
-                        */
-                        gpui_prepare_remote_attach_terminal_plan(
-                            &prepare_config,
-                            &prepare_target,
-                            &prepare_reference,
-                            true,
-                            true,
-                        )
-                    })
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    this.remote_workspace_attach_pending.remove(&key);
-                    let Ok(plan) = result else {
-                        support_logs::append(
-                            support_logs::GpuiSupportLog::TerminalFocus,
-                            "gpui.remoteAttach.surfacedRestorePlanFailed",
-                            serde_json::json!({ "machineId": key.remote_machine_id }),
-                        );
-                        return;
-                    };
-                    this.arm_surfaced_remote_workspace_terminal(
-                        &key, pane_id, session_id, plan, cx,
-                    );
-                });
-            })
-            .detach();
+            self.prepare_gpui_remote_attach_request(
+                reference,
+                config.clone(),
+                target.clone(),
+                crate::app::remote_conn::attach_request::RemoteAttachRequestIntent::Restore {
+                    pane_id,
+                    session_id,
+                },
+                cx,
+            );
         }
     }
 
@@ -1593,6 +1567,9 @@ impl GhostexGpuiApp {
         if !self.local_workspace_terminal_can_focus_existing(pane_id, shell_session_id) {
             return false;
         }
+        // The selection rule (session_pane_placement.rs): the session comes to the focused pane
+        // unless it is already on screen in another one.
+        let pane_id = self.pull_workspace_session_into_focused_pane(pane_id, shell_session_id);
 
         /*
         CDXC:FocusRouting 2026-06-26-06:34:
@@ -1719,6 +1696,7 @@ impl GhostexGpuiApp {
         if !self.local_workspace_terminal_can_focus_existing(pane_id, shell_session_id) {
             return false;
         }
+        let pane_id = self.pull_workspace_session_into_focused_pane(pane_id, shell_session_id);
         focus_existing_local_workspace_terminal_tab_model(
             &mut self.agents_workspace,
             &mut self.agents_terminal_runtime_sessions,

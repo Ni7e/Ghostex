@@ -115,6 +115,9 @@ pub(crate) fn default_shell_focus_for_mode(
     match active_mode {
         TitlebarMode::Agents => ShellFocusTarget::AgentsPane(agents_workspace.focused_pane),
         TitlebarMode::Browser => ShellFocusTarget::BrowserSurface,
+        // The Terminal view's default surface is its focused command group; the caller points
+        // `focused_group` at that tree before asking.
+        TitlebarMode::Terminal => ShellFocusTarget::CommandPane,
         TitlebarMode::Source
         | TitlebarMode::Kanban
         | TitlebarMode::Automate

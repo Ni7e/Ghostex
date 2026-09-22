@@ -442,6 +442,10 @@ impl GhostexGpuiApp {
             .top_0()
             .left_0()
             .size_full();
+        let splits = self
+            .command_pane
+            .dock_for_group(group_id)
+            .is_some_and(|dock| command_pane_drop_zone_splits(dock, zone));
 
         match zone {
             WorkspaceDropZone::Left => feedback
@@ -458,6 +462,22 @@ impl GhostexGpuiApp {
                         .right_0()
                         .top_0()
                         .bottom_0(),
+                )
+                .into_any_element(),
+            WorkspaceDropZone::Top if splits => feedback
+                .child(
+                    self.render_agents_workspace_drop_edge_band(zone)
+                        .top_0()
+                        .left_0()
+                        .right_0(),
+                )
+                .into_any_element(),
+            WorkspaceDropZone::Bottom if splits => feedback
+                .child(
+                    self.render_agents_workspace_drop_edge_band(zone)
+                        .bottom_0()
+                        .left_0()
+                        .right_0(),
                 )
                 .into_any_element(),
             WorkspaceDropZone::Center | WorkspaceDropZone::Top | WorkspaceDropZone::Bottom => {

@@ -86,6 +86,12 @@ impl GhostexGpuiApp {
                 serde_json::from_str::<serde_json::Value>(&previous_settings_json).ok();
             let appearance_settings_changed = [
                 "sidebarTheme",
+                "darkThemePreset",
+                "lightThemePreset",
+                "customSidebarTitlebarBackgroundDarknessPercent",
+                "customSidebarTitlebarBackgroundTintColor",
+                "customSidebarTitlebarLightBackgroundLightnessPercent",
+                "customSidebarTitlebarLightBackgroundTintColor",
                 "sessionChatTheme",
                 "terminalColorScheme",
                 "terminalGhosttyLightTheme",
@@ -1499,6 +1505,7 @@ impl GhostexGpuiApp {
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        self.schedule_close_terminal_view_if_empty(cx);
         let sessions = self.command_pane.sidebar_command_session_sources(
             self.shell_focus == ShellFocusTarget::CommandPane,
             &self.command_delayed_send_timers,

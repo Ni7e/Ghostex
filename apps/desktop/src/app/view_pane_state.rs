@@ -43,6 +43,7 @@ impl GhostexGpuiApp {
         }
         self.capture_view_pane_layout();
         self.active_mode = mode;
+        self.sync_command_pane_view_dock_visibility();
         /*
         CDXC:Workarea 2026-09-20 WHY:
         Every route that opens a view ends here, so the tab strip is maintained here too rather than
