@@ -405,19 +405,78 @@ function methodAt(source: Source, offset: number): Method | null {
   return best;
 }
 
+/**
+ * Method names the standard library also uses. A call through an unknown local receiver proves
+ * nothing for these, because `entries.push(...)` on a `Vec` outnumbers `history.push(...)` on the
+ * struct a hundred to one, and counting them hid `ComposerHistory::push`, whose absence of callers
+ * is the whole bug.
+ */
+const AMBIGUOUS_METHODS = new Set([
+  'push',
+  'push_str',
+  'insert',
+  'remove',
+  'clear',
+  'extend',
+  'retain',
+  'take',
+  'replace',
+  'pop',
+  'sort',
+  'truncate',
+  'drain',
+  'entry',
+  'append',
+  'dedup',
+  'reverse',
+  'swap',
+  'fill',
+  'resize',
+  'len',
+  'is_empty',
+  'get',
+  'iter',
+  'contains',
+  'next',
+  'last',
+  'first',
+  'count',
+  'map',
+  'filter',
+  'as_str',
+  'to_string',
+  'clone',
+  'default',
+  'new',
+  'push',
+  'read',
+  'write',
+  'update',
+  'value',
+  'values',
+  'keys',
+]);
+
+/** Whether this receiver name is some OTHER audited struct's field, and so not ours. */
+function ownedElsewhere(struct: string, receiver: string): boolean {
+  for (const [name, set] of receiversOf) {
+    if (name !== struct && set.has(receiver)) return true;
+  }
+  return false;
+}
+
 type Site = { source: Source; offset: number };
 const sitesOf = new Map<string, Site[]>();
 for (const method of methods) {
   const key = `${method.struct}::${method.name}`;
   if (sitesOf.has(key)) continue;
-  const receivers = [...(receiversOf.get(method.struct) ?? new Set<string>())].map(escape);
+  const receivers = receiversOf.get(method.struct) ?? new Set<string>();
   const patterns = [
     new RegExp(`\\b${escape(method.struct)}\\s*::\\s*${escape(method.name)}\\b`, 'g'),
-    new RegExp(`\\bself\\s*\\.\\s*${escape(method.name)}\\s*\\(`, 'g'),
+    // Any receiver, filtered below: a value is reached through a local binding
+    // (`picker.scroll(...)`) as often as through the field that owns it.
+    new RegExp(`\\b([a-z_]\\w*)\\s*\\.\\s*${escape(method.name)}\\b`, 'g'),
   ];
-  if (receivers.length > 0) {
-    patterns.push(new RegExp(`\\b(?:${receivers.join('|')})\\s*\\.\\s*${escape(method.name)}\\b`, 'g'));
-  }
   const sites: Site[] = [];
   for (const source of sources) {
     for (const pattern of patterns) {
@@ -426,6 +485,17 @@ for (const method of methods) {
       while ((match = pattern.exec(source.clean)) !== null) {
         const preceding = source.clean.substring(Math.max(0, match.index - 8), match.index);
         if (/\bfn\s+$/.test(preceding)) continue;
+        const receiver = match[1];
+        if (receiver !== undefined && !receivers.has(receiver)) {
+          if (receiver === 'self') {
+            const block = implAt(source, match.index);
+            if (block && block.target !== method.struct) continue;
+          } else if (ownedElsewhere(method.struct, receiver)) {
+            continue;
+          } else if (AMBIGUOUS_METHODS.has(method.name)) {
+            continue;
+          }
+        }
         sites.push({ source, offset: match.index });
       }
     }
