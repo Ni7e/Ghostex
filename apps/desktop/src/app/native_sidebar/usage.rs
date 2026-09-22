@@ -42,13 +42,9 @@ const SIDEBAR_USAGE_BADGE_ADVANCE: f32 = 0.65;
 const SIDEBAR_FOOTER_ROW_HEIGHT: f32 = 36.0;
 const SIDEBAR_FOOTER_ROW_TOP_PADDING: f32 = 5.0;
 
-/// An account this close to its limit lights the Commands row's pin while the
-/// strip is unpinned, so putting the strip away never puts the warning away.
-const SIDEBAR_USAGE_ALERT_PRESSURE: f64 = 0.9;
-
 impl GhostexGpuiApp {
     /// CDXC:Sidebar 2026-09-22 DECISION:
-    /// User: hovering the account usage button at the bottom of the sidebar shows the accounts floating over the bottom of the list, without pushing the content or the scroll area; the button itself looks like a pin, and clicking it pins the strip in place, where it sits above the Commands row as before. This supersedes the 2026-09-20 rule that the chart button was a plain show/hide toggle: a click still pins and unpins, and a hover now peeks.
+    /// User: hovering the account usage button at the bottom of the sidebar shows the accounts floating over the bottom of the list, without pushing the content or the scroll area, at exactly the place they take when pinned; clicking the button pins the strip there above the Commands row as before. The button keeps its bar-chart icon by default and only turns into a pin while hovered: an outline pin while unpinned (the Tabler pin, the exact outline twin of the filled pin, not the old `pin.svg` shape the user rejected), a filled pin while pinned. The near-limit dot the button carried is gone. This supersedes the 2026-09-20 rule that the chart button was a plain show/hide toggle: a click still pins and unpins, and a hover now peeks.
     ///
     /// CDXC:Sidebar 2026-09-20 DECISION:
     /// User: each meter is a card with its own background, the cards fill their column so the rows line up, and their content is centred, which is the `space-around` look the user asked for: the gap from the sidebar's edge to the first card's content matches the gap from the last card's content to the other edge. The strip also sits lower, with more room between the session list and the first row of cards.
@@ -83,10 +79,12 @@ impl GhostexGpuiApp {
         }
         let strip = self.render_native_sidebar_usage_strip(appearance, window, cx)?;
         let scale = appearance.scale;
-        // The peek's box reaches down to the top of the pin's own hitbox (the Commands row's
-        // 5px top padding sits between them), so a pointer sliding from the pin up into a card
-        // never crosses a strip of nothing that would have closed the peek halfway.
-        let bottom = (SIDEBAR_FOOTER_ROW_HEIGHT - SIDEBAR_FOOTER_ROW_TOP_PADDING) * scale;
+        // The painted box sits exactly where the pinned strip sits, on top of the Commands row.
+        // Its hover box alone reaches down through the row's top padding to the pin's own hitbox,
+        // so a pointer sliding from the pin up into a card never crosses a strip of nothing that
+        // would have closed the peek halfway.
+        let bridge = SIDEBAR_FOOTER_ROW_TOP_PADDING * scale;
+        let bottom = SIDEBAR_FOOTER_ROW_HEIGHT * scale - bridge;
         Some(
             deferred(
                 div()
@@ -95,16 +93,21 @@ impl GhostexGpuiApp {
                     .left_0()
                     .right_0()
                     .bottom(px(bottom))
-                    .bg(titlebar_background())
-                    .border_t_1()
-                    .border_color(appearance.hover)
+                    .pb(px(bridge))
                     .on_hover(cx.listener(|app, hovered: &bool, _, cx| {
                         if app.native_sidebar.usage_peek_hovered != *hovered {
                             app.native_sidebar.usage_peek_hovered = *hovered;
                             cx.notify();
                         }
                     }))
-                    .child(strip),
+                    .child(
+                        div()
+                            .w_full()
+                            .bg(titlebar_background())
+                            .border_t_1()
+                            .border_color(appearance.hover)
+                            .child(strip),
+                    ),
             )
             .with_priority(6)
             .into_any_element(),
@@ -213,92 +216,82 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
-    /// The Commands row's account-usage pin: hovering it peeks the strip, clicking it
-    /// pins or unpins it. It carries a dot while the strip is unpinned and an account is
-    /// close to a limit, so putting the meters away never puts the warning away.
+    /// The Commands row's account-usage button: a bar chart at rest, a pin while hovered.
+    /// Hovering it peeks the strip, clicking it pins or unpins it.
     pub(crate) fn render_native_sidebar_usage_toggle(
         &self,
         appearance: &SidebarAppearance,
         cx: &mut gpui::Context<Self>,
     ) -> Option<AnyElement> {
-        // One pass over the accounts per frame: the button exists only once an
-        // account is starred, and the same list decides whether it is alerting.
-        let meters = self.account_usage_meters();
-        if meters.is_empty() {
+        // The button exists only once an account is starred.
+        if self.account_usage_meters().is_empty() {
             return None;
         }
         let scale = appearance.scale;
         let visible = self.sidebar_usage_visible;
-        let alerting = !visible
-            && meters
-                .iter()
-                .any(|meter| meter.pressure >= SIDEBAR_USAGE_ALERT_PRESSURE);
+        let hovered = self.native_sidebar.usage_pin_hovered;
         let tooltip_delay = appearance.tooltip_delay;
+        // CDXC:Sidebar 2026-09-22 WHY:
+        // A GPUI element holds one hover listener, and the managed tooltip installs its own, so an
+        // `on_hover` on the button itself is silently replaced in release builds (debug asserts).
+        // The peek's hover therefore lives on this wrapper, the tooltip on the button inside it.
         Some(
             div()
-                .id("native-sidebar-usage-toggle")
-                .role(gpui::Role::Button)
-                .aria_label("Account usage")
-                .relative()
-                .h(px(28.0 * scale))
-                .w(px(34.0 * scale))
-                .mr(px(2.0 * scale))
-                .rounded(px(5.0 * scale))
-                .flex()
+                .id("native-sidebar-usage-toggle-hover")
                 .flex_shrink_0()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .when(visible, |button| button.bg(appearance.hover))
-                .hover(|button| button.bg(appearance.hover))
+                .mr(px(2.0 * scale))
                 .on_hover(cx.listener(|app, hovered: &bool, _, cx| {
                     if app.native_sidebar.usage_pin_hovered != *hovered {
                         app.native_sidebar.usage_pin_hovered = *hovered;
                         cx.notify();
                     }
                 }))
-                .child(titlebar_svg_icon(
-                    if visible {
-                        "titlebar/pin-filled.svg"
-                    } else {
-                        "titlebar/pin.svg"
-                    },
-                    15.0 * scale,
-                    if visible {
-                        titlebar_active_text_color()
-                    } else {
-                        appearance.muted
-                    },
-                ))
-                .when(alerting, |button| {
-                    button.child(
-                        div()
-                            .absolute()
-                            .top(px(5.0 * scale))
-                            .right(px(6.0 * scale))
-                            .size(px(5.0 * scale))
-                            .rounded_full()
-                            .bg(chrome_color(0xe2a06a, 0xb4642a)),
-                    )
-                })
-                .on_click(cx.listener(|app, _, _, cx| {
-                    cx.stop_propagation();
-                    app.toggle_native_sidebar_usage_visible(cx);
-                }))
-                .managed_discrete_tooltip_with_placement(
-                    ManagedTooltipPlacement::Right,
-                    tooltip_delay,
-                    move |window, cx| {
-                        titlebar_tooltip(
-                            if visible {
-                                "Unpin account usage"
-                            } else {
-                                "Pin account usage"
+                .child(
+                    div()
+                        .id("native-sidebar-usage-toggle")
+                        .relative()
+                        .h(px(28.0 * scale))
+                        .w(px(34.0 * scale))
+                        .rounded(px(5.0 * scale))
+                        .flex()
+                        .flex_shrink_0()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .when(visible, |button| button.bg(appearance.hover))
+                        .hover(|button| button.bg(appearance.hover))
+                        .child(titlebar_svg_icon(
+                            match (hovered, visible) {
+                                (false, _) => "titlebar/chart-bar.svg",
+                                (true, false) => "titlebar/pin-outline.svg",
+                                (true, true) => "titlebar/pin-filled.svg",
                             },
-                            window,
-                            cx,
-                        )
-                    },
+                            15.0 * scale,
+                            if visible {
+                                titlebar_active_text_color()
+                            } else {
+                                appearance.muted
+                            },
+                        ))
+                        .on_click(cx.listener(|app, _, _, cx| {
+                            cx.stop_propagation();
+                            app.toggle_native_sidebar_usage_visible(cx);
+                        }))
+                        .managed_discrete_tooltip_with_placement(
+                            ManagedTooltipPlacement::AboveLeft,
+                            tooltip_delay,
+                            move |window, cx| {
+                                titlebar_tooltip(
+                                    if visible {
+                                        "Unpin account usage"
+                                    } else {
+                                        "Pin account usage"
+                                    },
+                                    window,
+                                    cx,
+                                )
+                            },
+                        ),
                 )
                 .into_any_element(),
         )

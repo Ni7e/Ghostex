@@ -152,35 +152,6 @@ fn badge_lines(account: &Value) -> Vec<String> {
     }
 }
 
-/// How close an account is to running out, as the highest used percentage among the
-/// same windows its two badge numbers come from. The collapsed sidebar strip shows
-/// only as many meters as fit, so it orders them by this and drops the coolest.
-fn account_pressure(account: &Value) -> f64 {
-    let windows = account["usage"]
-        .as_array()
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
-    let percent = |window: &Value| window["usedPercent"].as_f64().unwrap_or(0.0);
-    let headline: Vec<&Value> = if text(account, "provider") == "codex" {
-        windows
-            .iter()
-            .filter(|window| window["model"].is_null())
-            .filter(|window| {
-                window["limitWindowSeconds"].as_i64() == Some(18000)
-                    || window["limitWindowSeconds"]
-                        .as_i64()
-                        .is_some_and(|seconds| seconds >= 604800)
-            })
-            .collect()
-    } else {
-        claude_headline_windows(windows)
-    };
-    headline
-        .into_iter()
-        .map(percent)
-        .fold(0.0_f64, |highest, value| highest.max(value))
-}
-
 /// CDXC:AgentProviders 2026-09-11 DECISION:
 /// User: for Claude accounts the Fable limit is the most important number and must never be hidden. Wherever a Claude account shows two percentages, show the two tightest of the weekly, five-hour, and Fable limits, in that fixed order, so the number about to run out is always one of them. Port of `accountHeadlineWindows` in packages/shared/account-usage-windows.ts; the popup in apps/desktop/src/app/window/account_usage/limits.rs shows all three as main bars.
 pub(crate) fn claude_headline_windows(windows: &[Value]) -> Vec<&Value> {
@@ -224,7 +195,6 @@ pub(crate) struct GpuiAccountUsageMeter {
     pub(crate) codex: bool,
     pub(crate) indicator: Option<String>,
     pub(crate) badge_lines: Vec<String>,
-    pub(crate) pressure: f64,
 }
 
 /// The badge text size beside a meter's glyph. A host that lines its meters up in columns
@@ -414,7 +384,6 @@ impl GhostexGpuiApp {
                     indicator: (!indicator.is_empty() && indicator != "-")
                         .then(|| indicator.to_string()),
                     badge_lines: badge_lines(account),
-                    pressure: account_pressure(account),
                 })
             })
             .collect()
