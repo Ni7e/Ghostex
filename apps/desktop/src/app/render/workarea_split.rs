@@ -171,6 +171,9 @@ impl GhostexGpuiApp {
         let surface_border_state = self.project_editor_surface_border_state(mode, window);
         let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
         let surface_view = cx.entity().clone();
+        // CDXC:Workarea 2026-09-23 DECISION:
+        // User: with the chat hidden, every view except Browser gets a #252525 1px line above the side panel content. It replaces the pane's own top border so the edge is one line, not two.
+        let draws_top_line = mode != TitlebarMode::Browser;
         v_flex()
             .id(format!("ghostex-gpui-workarea-maximized-{}", mode_slug))
             .pt(px(WORKAREA_HEADER_HEIGHT))
@@ -179,6 +182,19 @@ impl GhostexGpuiApp {
             .min_h_0()
             .overflow_hidden()
             .bg(project_editor_shell_background_color())
+            .when(draws_top_line, |this| {
+                this.child(
+                    div()
+                        .id(format!(
+                            "ghostex-gpui-workarea-maximized-top-line-{}",
+                            mode_slug
+                        ))
+                        .flex_shrink_0()
+                        .w_full()
+                        .h(px(1.0))
+                        .bg(maximized_view_panel_top_line_color()),
+                )
+            })
             .child(
                 div()
                     .on_children_prepainted(move |child_bounds, _window, cx| {
@@ -198,10 +214,13 @@ impl GhostexGpuiApp {
                     .min_w_0()
                     .min_h_0()
                     .overflow_hidden()
-                    .when(mode != TitlebarMode::Browser, |this| {
+                    .when(draws_top_line, |this| {
                         rail_aware_pane_border(
                             this,
-                            outer_rail_edges,
+                            RailFacingEdges {
+                                top: true,
+                                ..outer_rail_edges
+                            },
                             workspace_pane_border_color_for_state(surface_border_state),
                             workspace_pane_border_color(),
                             None,

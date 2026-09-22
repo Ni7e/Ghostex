@@ -531,6 +531,10 @@ pub(crate) fn project_editor_companion_divider_background_color() -> Hsla {
     project_editor_companion_border_color_for_state(WorkspacePaneBorderState::Neutral)
 }
 
+pub(crate) fn maximized_view_panel_top_line_color() -> Hsla {
+    chrome_color(0x252525, 0xe5e5e5).into()
+}
+
 pub(crate) fn command_pane_chrome_color() -> Hsla {
     /*
     CDXC:CommandPane 2026-06-25-13:19:
