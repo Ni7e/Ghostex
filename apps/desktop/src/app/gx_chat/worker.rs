@@ -441,7 +441,8 @@ fn step(world: &mut World, command: Option<HostCommand>) {
             // outbox, and opening its chat is what registers the writer that drains it.
             world.draft_workers.entry(key.clone()).or_default();
             world.retry_wakes.insert(key.clone(), Instant::now());
-            drive(world, &key, Vec::new());
+            let settings = settings_moved(world, &key);
+            drive(world, &key, settings.into_iter().collect());
         }
         Some(HostCommand::Detach { key, sink }) => {
             if world.sinks.get(&key).is_some_and(|held| held.id == sink) {
@@ -538,6 +539,23 @@ fn step(world: &mut World, command: Option<HostCommand>) {
             }
         }
     }
+}
+
+/// The chat settings again, for a RETAINED chat whose copy is older than Settings.
+///
+/// A QuickJS chat re-read them with every new view, because each view booted its own brain. A core
+/// here outlives its views by up to five minutes and boots once, so without this a chat reopened
+/// after "Hide account emails" was switched kept drawing with the value it booted with. A chat that
+/// has not booted yet gets them from its boot read instead.
+fn settings_moved(world: &World, key: &str) -> Option<Event> {
+    let state = world.store.get(key)?.core.state();
+    if !state.core.controller_started {
+        return None;
+    }
+    let settings = boot::chat_settings();
+    (settings.hide_account_emails != state.core.hide_account_emails
+        || settings.title != state.core.title)
+        .then(|| Event::SettingsChanged(Box::new(settings)))
 }
 
 /// Counts one gxserver refusal by its CODE, and only when the code is one.

@@ -9,7 +9,7 @@
 use ghostex_gx_chat_core::composer::storage::{
     StoredDraftRecord, decode_stored_draft, decode_summary, decode_verbose,
 };
-use ghostex_gx_chat_core::{ComposerBootRead, StorageKey};
+use ghostex_gx_chat_core::{ChatSettings, ComposerBootRead, StorageKey};
 use serde_json::{Map, Value, json};
 
 use super::storage;
@@ -69,9 +69,7 @@ pub(super) fn read(session_key: &str, now_ms: i64, errors: &mut BootReads) -> Co
         option_states: scoped("sessionOptions", session_key, now_ms, errors),
         model_outboxes: scoped("modelOutbox", session_key, now_ms, errors),
         model_catalog,
-        // The two settings arrive as a push (`Event::SettingsChanged`) as well, and the push is the
-        // authority; this is only what the first frame draws with.
-        chat_settings: json!({"hideAccountEmails": false, "title": Value::Null}),
+        chat_settings: serde_json::to_value(chat_settings()).unwrap_or(Value::Null),
         context_preferences: json!({ "claude": claude_context, "codex": codex_context }),
         dismissed_notice,
         summary_mode,
@@ -79,6 +77,30 @@ pub(super) fn read(session_key: &str, now_ms: i64, errors: &mut BootReads) -> Co
             Some(verbose) => Value::Bool(verbose),
             None => Value::Null,
         },
+    }
+}
+
+/// `nativeChatSettings(sessionKey)`: the two settings the chat reads from the app rather than from
+/// its own storage.
+///
+/// CDXC:SessionChat 2026-09-23 WHY:
+/// The boot read is the ONLY channel these reach the chat through, in both brains. The
+/// `chatSettings` push that `broker.ts` would send never fires on desktop, because
+/// `relay_session_chat_runtime_request` forwards only `limit` and `beforeOffset` and so drops the
+/// `catalog` flag that turns it on. The host used to answer a constant `false` here, so a chat under
+/// the Rust brain showed full account emails in its status line, account panel and context rows
+/// while Settings said to hide them. `hideAccountEmails` is the same Settings key the TypeScript
+/// reads (`hud.settings`, fed from this settings file). `title` stays `null`: the TypeScript looks
+/// it up in the service's `sessionsById` by `projectId:sessionId`, and on desktop that map is never
+/// fed (the `hydrate` message carries no groups), so it is `null` under QuickJS too.
+pub(super) fn chat_settings() -> ChatSettings {
+    ChatSettings {
+        hide_account_emails: crate::shared_settings::shared_sidebar_settings_snapshot()
+            .object()
+            .get("hideAccountEmails")
+            .and_then(Value::as_bool)
+            == Some(true),
+        title: None,
     }
 }
 
