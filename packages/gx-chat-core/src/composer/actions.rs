@@ -521,18 +521,25 @@ fn refresh_chrome(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
         .param("sessionId")
         .map(|value| value.as_str().map(str::to_string));
     state.composer.chrome.begin_refresh(session_id);
+    let prompts_request = state.core.allocate_request_id();
     let mut effects = vec![Effect::SendRpc {
-        request_id: 0,
+        request_id: prompts_request,
         method: ChatRpcMethod::ListStashedPrompts,
         params: Box::new(json!({})),
     }];
-    if state.composer.chrome.wants_note_read() {
+    let note_request = state.composer.chrome.wants_note_read().then(|| {
+        let request_id = state.core.allocate_request_id();
         effects.push(Effect::SendRpc {
-            request_id: 0,
+            request_id,
             method: ChatRpcMethod::ReadSessionAgentNote,
             params: Box::new(json!({})),
         });
-    }
+        request_id
+    });
+    state
+        .composer
+        .chrome
+        .await_refresh(prompts_request, note_request);
     effects
 }
 

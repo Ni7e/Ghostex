@@ -72,12 +72,31 @@ pub struct ComposerChromeState {
     note_owned: bool,
     session_id: Option<String>,
     stashed_prompt_count: usize,
+    /// The refresh in flight: its generation, the two request ids, and what has answered.
+    ///
+    /// `refresh()` is one `Promise.all` over two reads, each with its own `.catch(() => null)`,
+    /// so a refused read leaves the other half's answer intact and raises nothing on the
+    /// composer's error bar.
+    pending: Option<ChromeRefresh>,
+}
+
+/// One `composerChrome.refresh()` waiting for its two reads.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct ChromeRefresh {
+    generation: u64,
+    prompts_request: Option<u64>,
+    note_request: Option<u64>,
+    prompts: Option<Vec<StashedPromptRow>>,
+    note: Option<String>,
 }
 
 /// One row of the stashed-prompt list, as far as the badge needs it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StashedPromptRow {
+    #[serde(default)]
     pub agent_session_id: Option<String>,
+    #[serde(default)]
     pub session_id: Option<String>,
 }
 
@@ -94,6 +113,56 @@ impl ComposerChromeState {
     /// Whether the note read is worth making at all.
     pub fn wants_note_read(&self) -> bool {
         !self.note_owned
+    }
+
+    /// Records the two reads this refresh is waiting for.
+    pub fn await_refresh(&mut self, prompts_request: u64, note_request: Option<u64>) {
+        self.pending = Some(ChromeRefresh {
+            generation: self.generation,
+            prompts_request: Some(prompts_request),
+            note_request,
+            prompts: None,
+            note: None,
+        });
+    }
+
+    /// Whether this request is one of the refresh's two reads.
+    pub fn awaits(&self, request_id: u64) -> bool {
+        self.pending.as_ref().is_some_and(|pending| {
+            pending.prompts_request == Some(request_id) || pending.note_request == Some(request_id)
+        })
+    }
+
+    /// One of the two reads answered. `None` for a refusal, which the read's own `catch` swallows.
+    ///
+    /// The refresh folds in only once both have answered, which is what `Promise.all` waits for.
+    pub fn settle_refresh(
+        &mut self,
+        request_id: u64,
+        prompts: Option<Vec<StashedPromptRow>>,
+        note: Option<String>,
+    ) {
+        let Some(pending) = self.pending.as_mut() else {
+            return;
+        };
+        if pending.prompts_request == Some(request_id) {
+            pending.prompts_request = None;
+            pending.prompts = prompts;
+        } else if pending.note_request == Some(request_id) {
+            pending.note_request = None;
+            pending.note = note;
+        } else {
+            return;
+        }
+        if pending.prompts_request.is_some() || pending.note_request.is_some() {
+            return;
+        }
+        let finished = self.pending.take().unwrap_or_default();
+        self.finish_refresh(
+            finished.generation,
+            finished.prompts.as_deref(),
+            finished.note.as_deref(),
+        );
     }
 
     /// Folds a refresh's answers in, unless the conversation moved on.

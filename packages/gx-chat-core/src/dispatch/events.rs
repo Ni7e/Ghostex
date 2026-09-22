@@ -35,6 +35,15 @@ pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> 
     for settle in SETTLE {
         effects.extend(settle(state, event, context));
     }
+    // `action`'s one `catch` (native-host.ts:1630): a call the arm awaited that refused throws
+    // out of the arm, whatever the arm was doing, and the message lands on `operationError`. Run
+    // after every family so a family that wants the refusal on a surface of its own can claim it.
+    if let Some((message, code)) = state.core.awaited_refusal.take() {
+        if !std::mem::take(&mut state.core.refusal_claimed) {
+            state.core.fail(message, code);
+        }
+    }
+    state.core.refusal_claimed = false;
     // Every family has had its chance to continue an action's chain, so the closing publish of an
     // arm whose last `await` just answered is asked for here rather than in family a's settle.
     state.core.finish_publish_awaits();

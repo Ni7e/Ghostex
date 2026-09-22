@@ -44,10 +44,25 @@ pub fn handle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
 /// (`crate::dispatch::actions::dispatch`).
 pub fn settle(state: &mut ChatState, event: &Event, _context: &ChatContext) -> Vec<Effect> {
     match event {
-        Event::RpcSettled { request_id, .. } => {
+        Event::RpcSettled {
+            request_id,
+            outcome,
+        } => {
+            let awaited = state
+                .core
+                .publish_awaits
+                .contains(&PublishAwait::Rpc(*request_id));
             state
                 .core
                 .settle_publish_await(&PublishAwait::Rpc(*request_id));
+            // The arm is suspended on this call, so a refusal is a throw out of it. Remembered
+            // rather than applied here, because the family that owns the request settles later
+            // and may claim the refusal for a surface of its own.
+            if awaited {
+                if let crate::wire::RpcOutcome::Err { message, code, .. } = outcome.as_ref() {
+                    state.core.awaited_refusal = Some((message.clone(), code.clone()));
+                }
+            }
         }
         Event::StorageLoaded { key, .. } | Event::StorageWritten { key, .. } => {
             state

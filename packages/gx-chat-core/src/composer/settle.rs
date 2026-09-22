@@ -14,6 +14,41 @@ use crate::event::{ComposerBootRead, Event};
 use crate::state::{ChatContext, ChatState};
 use crate::wire::{ChatRpcMethod, RpcOutcome};
 
+/// `composerChrome.refresh()`: one `Promise.all` over the stash list and the session note.
+///
+/// Each read has its own `.catch(() => null)` (`native-composer-chrome.ts:49`), so a refusal is
+/// half an answer rather than a throw: the other half still lands, the badge and the dot keep what
+/// they had, and nothing reaches the action's outer `catch`. Both halves had `request_id: 0` and
+/// no settle at all until 2026-09-22, so the stash badge and the note dot never updated and a
+/// refused stash-list read raised the composer's error bar where the TypeScript raises nothing.
+fn settle_chrome_refresh(
+    state: &mut ChatState,
+    request_id: u64,
+    outcome: &RpcOutcome,
+) -> Option<Vec<Effect>> {
+    if !state.composer.chrome.awaits(request_id) {
+        return None;
+    }
+    state.core.claim_refusal();
+    let (prompts, note) = match outcome {
+        RpcOutcome::Ok { result } => (
+            result
+                .get("prompts")
+                .and_then(|prompts| serde_json::from_value(prompts.clone()).ok()),
+            result
+                .get("note")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        ),
+        RpcOutcome::Err { .. } => (None, None),
+    };
+    state
+        .composer
+        .chrome
+        .settle_refresh(request_id, prompts, note);
+    Some(Vec::new())
+}
+
 /// `toggleNote`'s read: the body fills the sheet, and the `finally` stops it spinning either way.
 fn settle_note_read(
     state: &mut ChatState,
@@ -142,6 +177,7 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
                         crate::composer::send::settle_queue_mutation(state, *request_id, outcome)
                     });
             let claimed = claimed
+                .or_else(|| settle_chrome_refresh(state, *request_id, outcome))
                 .or_else(|| settle_note_read(state, *request_id, outcome))
                 .or_else(|| settle_attachment_import(state, *request_id, outcome))
                 .or_else(|| settle_draft_push(state, *request_id, outcome));

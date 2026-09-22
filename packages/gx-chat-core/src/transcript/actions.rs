@@ -288,9 +288,14 @@ pub fn settle_rpc(state: &mut ChatState, request_id: u64, outcome: &RpcOutcome) 
             .transcript_view
             .saved_prompts
             .insert(message_id, status.to_string());
+        // `NativeMessageActions.save` has its own `catch` (`native-message-actions.ts:129`), so
+        // the row turns red and the action's outer `catch` never sees the refusal.
+        state.core.claim_refusal();
         return Vec::new();
     }
     if let Some(mut walk) = state.transcript_view.deferred_requests.remove(&request_id) {
+        // `readWork`'s own `catch` writes the row's text; nothing reaches the composer's bar.
+        state.core.claim_refusal();
         let turn_id = walk.turn_id.clone();
         let step = match result {
             Some(page) => walk.advance(&page),
@@ -330,6 +335,9 @@ pub fn settle_rpc(state: &mut ChatState, request_id: u64, outcome: &RpcOutcome) 
         return Vec::new();
     }
     if let Some(path) = state.transcript_view.image_requests.remove(&request_id) {
+        // `loadImage`'s arm catches for itself and pushes `chatImage/failed`
+        // (`native-host.ts:1509`), so a picture that has gone does not raise the error bar.
+        state.core.claim_refusal();
         return vec![Effect::HostAction {
             action: "chatImage".to_string(),
             params: Box::new(match &result {
@@ -349,6 +357,9 @@ pub fn settle_rpc(state: &mut ChatState, request_id: u64, outcome: &RpcOutcome) 
     }
     request.request_id = None;
     request.busy = false;
+    // `NativeMessageActions.submit` catches for itself: the sentence goes on the rewind dialog
+    // (`native-message-actions.ts:105`), not on the composer's error bar.
+    state.core.claim_refusal();
     let prompt = request.prompt.clone();
     match result {
         Some(result) => {

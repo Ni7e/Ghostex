@@ -120,6 +120,16 @@ pub struct CoreState {
     /// the dispatcher knows about on its own. Set by the handler, read and cleared by
     /// `crate::dispatch::actions::dispatch`.
     pub skip_closing_publish: bool,
+    /// A gxserver call an in-flight action was awaiting refused during this dispatch.
+    ///
+    /// `action` wraps its whole switch in one `try`/`catch` (`native-host.ts:1630`), so a refused
+    /// `await` throws out of the arm and lands on `operationError` whatever the arm was doing.
+    /// The core's arms have already returned by the time the answer comes back, so the decision is
+    /// made once at the end of the dispatch instead, over the same list of answers the closing
+    /// publish waits on.
+    pub awaited_refusal: Option<(String, Option<String>)>,
+    /// Set by a family that has put this dispatch's refusal somewhere of its own.
+    pub refusal_claimed: bool,
     /// The id the next request carries, for every family.
     ///
     /// One counter for the whole core, because [`crate::Event::RpcSettled`] routes by id alone: two
@@ -239,9 +249,24 @@ impl CoreState {
     }
 
     /// Records a refusal, replacing whatever was shown before.
+    ///
+    /// `sendCancelled` keeps its CODE and shows no message, because the person cancelled the send
+    /// themselves and there is nothing to tell them (`native-host.ts:1632`).
     pub fn fail(&mut self, message: impl Into<String>, code: Option<String>) {
-        self.operation_error = Some(message.into());
         self.operation_error_code = code;
+        self.operation_error = match self.operation_error_code.as_deref() {
+            Some("sendCancelled") => None,
+            _ => Some(message.into()),
+        };
+    }
+
+    /// The refusal this dispatch carries already has an owner, so the action's own `catch` must
+    /// not write it a second time.
+    ///
+    /// Family c's picker answers are the case: a refused `terminalChoice` belongs on the notice
+    /// card and the composer's error line stays clear (`native-host.ts:1634`).
+    pub fn claim_refusal(&mut self) {
+        self.refusal_claimed = true;
     }
 
     /// Clears the refusal, which every successful action does.

@@ -102,6 +102,7 @@ fn answer_settled(state: &mut ChatState, outcome: &RpcOutcome) -> Vec<Effect> {
             // A picker refusal belongs on the notice card, not on the composer's error line.
             if request.answer_kind == "terminalChoice" || request.answer_kind == "terminalDialog" {
                 state.questions.notice_error = Some(message.clone());
+                state.core.claim_refusal();
             } else {
                 state.core.fail(message.clone(), code.clone());
             }
