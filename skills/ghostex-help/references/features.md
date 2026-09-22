@@ -56,13 +56,17 @@ the view this project last had open, and shows **Open a view** when the project
 has no tabs yet. Closing it leaves your sessions at full width. The header itself
 carries the project breadcrumb, Start, Open and Commit, the **⋯** button (Ask
 Ghostex, Tips & Tricks, Resources, Dev servers, Extensions and Customize), **Hide sidebar**,
-and the command terminal toggle. When an update is available, a download button
-appears just before the project name.
+the chat-icon **Toggle sessions column** button beside it (it hides or shows the sessions
+column while a view is open, the same thing Expand side panel does, and leaves the
+sidebar alone), and the command terminal toggle. When an update is available, a download button
+appears just before the project name. On Linux the button opens the release
+notes with an **Open download page** button instead of installing the update;
+install the new package the same way you installed Ghostex.
 
 **Open a view** is the picker the panel shows when nothing is open in it. It
 lists every view you can open here: the built-in views first, then your own views
 and extensions. Press a view's letter to open it (C for Code, B for Browser, K for
-Kanban, U for Automate, D for Docs) while the picker is in front. Views you hid
+Kanban, U for Automate, D for Docs, T for Terminal) while the picker is in front. Views you hid
 for this project are not in the list; **Manage views and where they appear…** at
 the bottom opens their settings, and **Hidden here** on the `+` menu brings one
 back.
@@ -80,9 +84,14 @@ this menu as well. Custom project views also offer **Command output** and
 **Configure view**, which opens that view's editor in Settings > Extensions and
 focuses its name field.
 
-- **Agents**: the terminal grid. Panes and tabs run agent CLIs or plain shells,
-  split horizontally or vertically, in one or more groups. Each pane can show
-  the raw terminal or Session Chat. Cmd+T creates a session, Cmd+D splits.
+- **Agents**: the terminal grid. Panes run agent CLIs or plain shells, split
+  horizontally or vertically. There is no tab bar above a pane: the sidebar is
+  the list of sessions, selecting one shows it in the focused pane in place of
+  the session that was there, and a session already on screen in another pane
+  is focused there instead. To split, drag a session row from the sidebar onto
+  the left, right, top or bottom edge of a pane (terminal or Session Chat), or
+  use Advanced > Split Right in the session's menu. Each pane can show the raw
+  terminal or Session Chat. Cmd+T creates a session, Cmd+D splits.
   Cmd+Shift+T opens the New Thread picker: type to filter the configured
   agents (last used first), Browser, or Terminal, press Enter to start it in
   the active project, and press Tab on Claude or Codex to pick an account.
@@ -98,12 +107,10 @@ focuses its name field.
   strip to reorder. Right-click a tab for Select Tab, Pin Tab, Sleep (that tab),
   Sleep Browser (every browser tab), and Close Tab. Closing the last browser tab closes the
   Browser the way closing any view does: the panel moves to the next open view,
-  and closes only when Browser was the last one. **Browser Tab** at the top of the strip's **+** menu opens
-  another tab.
-  A tab with no address yet shows the **start page**: the development
-  servers running on this computer, and on each remote computer you have set up,
-  with their page titles and whether they are responding. Click one to open it,
-  or copy its address. Web links from terminals, chat, and detected dev servers
+  and shows the Open a view picker when Browser was the last one. **Browser Tab** at the top of the strip's **+** menu opens
+  another tab. A tab with no address yet is blank: type or paste an address, or
+  pick a running server from the ⋯ menu's Dev servers panel.
+  Web links from terminals, chat, and detected dev servers
   open here or in the system browser depending on Open links in. Annotate the current page
   with Agentation in the Browser toolbar; GitHub pages disallow that tool.
   When a page shows its content inside a frame, such as a Storybook story,
@@ -112,6 +119,30 @@ focuses its name field.
   the toolbar's own settings panel (Clear on copy/send) turns that off.
   HTML files in Docs use the same Agentation overlay via Annotate. Markdown
   files use Docs selection comments instead (see Docs below).
+- **Linear and Jira**: open either view from the **+** menu. Paste the workspace,
+  project, team, or board URL you want as its home. Ghostex identifies the workspace
+  from the address and preserves the full URL, including filters. Previously used
+  workspaces are offered when setting up another project. Worktrees follow their
+  parent project's home until you choose a different home for that worktree.
+  Right-click the Linear or Jira view tab and choose **Modify home URL for…** to
+  reopen setup; choose **Follow** to restore the parent home. Middle-click or
+  Cmd-click (Ctrl-click on Windows/Linux) a link to open it in a new background
+  Browser tab. Settings > Extensions controls visibility (`linearViewTabHidden`,
+  `jiraViewTabHidden`).
+- **GitHub**: automatically opens the GitHub repository from the project's origin
+  remote, including in worktrees. No URL setup is needed. It appears when a GitHub
+  repository is available and supports opening links in new Browser tabs just like
+  Linear and Jira. Settings > Extensions controls visibility (`githubViewTabHidden`).
+- **Storybook**: the built-in component workshop appears in the view picker and
+  **+** menu only when the project has Storybook. Press S in the picker to open it.
+  Ghostex runs the project’s `build:storybook`, `build-storybook`, or
+  `storybook:build` script, then serves the generated pages without keeping a Node
+  server running. Install the project’s dependencies first. **Rebuild Storybook**
+  refreshes the workshop after source changes; this static view has no live reload.
+  **Annotate with Agentation** selects elements inside the story preview, just as
+  in Browser. Build failures offer Retry and Command output. For a workspace with
+  several Storybooks, open the desired package as a project or provide a root build
+  script. Settings > Extensions controls visibility (`storybookViewTabHidden`).
 - **Kanban**: the project board backed by the Beads `bd` CLI (see Project
   board).
 - **Automate**: scheduled and triggered agent runs (see Automations).
@@ -150,6 +181,15 @@ focuses its name field.
   search: inside a Markdown document it shows Find and Replace with the caret
   ready, and anywhere else it reveals the files list and focuses its search.
   Escape closes the document search.
+- **Terminal**: a command terminal in the view panel that works like the
+  Commands pane, only on the right beside your sessions instead of below them.
+  It has its own tab bar with a **+** for new terminals, Cmd+T for another tab
+  and Cmd+D for a split while it has focus, drag to regroup or split, right-click
+  a tab for Sleep and Close scopes, and Actions can run in it. A project has one
+  Terminal view; opening it creates its first Command Terminal, closing its last
+  tab closes the view, and its terminals keep running and come back when you
+  reopen it. It does not replace the Commands pane: F12 and the header's command
+  terminal toggle still open that pane, and both can be open at once.
 
 Related settings: `terminalViewWidthMode`, `webLinkOpenTarget`,
 `markdownFileOpenView`, `htmlFileOpenView`, the Auto Sleep rows
@@ -190,6 +230,15 @@ button that an empty project list or empty Space shows, or by right-clicking
 the empty sidebar area) joins the Space that is open at the time and appears at
 the top of it; add a project while Other is selected to leave it out of every
 Space.
+Right-click a Space icon for its menu: Manage (Edit Space, New Space) and
+Sleep. Sleep Space puts everything in the Space to sleep: every session in its
+projects and every view those projects have open (Code, Browser tabs, Kanban,
+Automate, Docs). Sleep Inactive sleeps only the Space's sessions that are awake
+but neither working nor waiting on you. Sleep Others sleeps everything outside
+the Space, sessions and views, so only that Space stays awake. Sessions and
+tabs stay where they are, asleep, and wake when you open them; a row is greyed
+out when it has nothing to sleep. The Other button offers the same rows for
+projects that are in no Space.
 Space icons keep their normal glyph and show amber working-session and blue
 attention-session counts in extra-bold text near the bottom of each icon, including
 the selected Space.
@@ -235,7 +284,9 @@ where they are while you open, change and close views.
   a window with one open, and then a project switch that hides it leaves it
   floating while you hover it. While collapsed, hovering the strip at the window's
   left edge floats the sidebar back over your work, and it slides away when you
-  move off it. If you have also expanded a view to fill the window, the strip
+  move off it; the slide runs at the sidebar's Collapse animation speed
+  (`sidebarCollapseAnimationDurationMs`, 0 for no animation), whatever the
+  system's Reduce Motion setting says. If you have also expanded a view to fill the window, the strip
   splits in two: the top half (sidebar icon) floats the sidebar and the bottom half
   (chat icon) floats the sessions column, so you can glance at your agents without
   leaving the view. With the sidebar open and a view expanded, hover the sidebar's
@@ -351,7 +402,9 @@ Related settings: everything under General > Sidebar, `agentManagerZoomPercent`
 ## Commands pane
 
 The Commands pane holds command terminals below the workspace, or on its right
-when Command Pane Side is set to Right. Open it with F12. Auto-minimize Commands
+when Command Pane Side is set to Right. Open it with F12. The **Terminal** view
+(see Views) is the same kind of terminal opened as a tab of the view panel
+instead; it has its own tabs and does not affect the Commands pane. Auto-minimize Commands
 pane is on by default: after you move focus elsewhere and leave the pointer
 outside the pane for 1 minute, it minimizes while commands keep running.
 Focusing, hovering, selecting text, scrolling, or resizing keeps it open and
@@ -373,7 +426,8 @@ A session is one terminal pane. Sessions persist across app restarts (zmx keeps
 the process alive) and are restored with the agent's resume command. From the
 sidebar or `ghostex`, a session can be focused, renamed, pinned, tagged,
 slept and woken (`ghostex sleep|wake <selector>`), forked, closed, or moved
-between panes and groups. A session carries one tag at a time, chosen from the
+between panes and groups. Selecting a session shows it in the focused pane;
+dragging its row onto a pane's edge opens it in a new split beside that pane. A session carries one tag at a time, chosen from the
 Tag As menu (right-click the session): the built-in Priority, Progress, and
 Type tags, plus any custom tags you define. Custom tags are created in one
 place, Settings > General > Sidebar > Sidebar Tags: choose Add tag, then give
@@ -555,6 +609,17 @@ To compact before sending a new prompt, press `⌥Enter` on macOS or `Alt+Enter`
 Option-click Send (Alt-click on Windows and Linux), or right-click Send and choose Compact & Send. Ghostex sends `/compact` first,
 then puts your written prompt in the queue above the input to send after compaction.
 In narrow chats, notice cards hide Show terminal output; Open terminal remains available.
+When an agent asks whether to trust the project folder (Claude Code, Codex,
+Cursor, Grok Build, Pi, and Antigravity all do on a new folder), chat shows a
+folder-trust card with the agent's own Yes/No choices. Its **Trust and Remember**
+button trusts the folder now and remembers it: from then on Ghostex answers the
+trust prompt for that project on its own, whichever agent asks, without showing
+a card. Worktrees count as part of their parent project, wherever they live on
+disk. The remembered folders are kept per computer in `workspace-trust.json`
+inside Ghostex's gxserver state folder; delete a folder's entry there to be asked
+again. One exception: older Claude Code builds' "Do you trust the files in this
+folder?" screen has no safe automatic answer, so that screen still shows the card
+and needs a click in the terminal even for a remembered folder.
 If Codex says **Conversation open elsewhere**, choose **Continue here** or press
 Cmd+Enter (Ctrl+Enter on Windows and Linux) to close the other matching Ghostex
 sessions and retry here. This stops their running work but keeps conversation history.
@@ -642,11 +707,14 @@ after it the reasoning level and the context window, for example
 "Fable 5.1 High · 200K". Click it to open the model picker: a row of agent tabs
 with a starred Favorites tab first, a search box, the models of the chosen tab,
 and along the bottom a button each for the reasoning level (brain), the context
-window (chart bars, for models that offer more than one) and Fast mode (bolt).
-Clicking the context window or Fast mode button switches it; the reasoning button
-opens a short list to the side. Type to filter the list, move
+window (chart bars) and Fast mode (bolt). Clicking the context window or Fast
+mode button switches it; the reasoning button opens a short list to the side. A
+button the current model has no choice for is dimmed: reasoning and context
+window read Default, and Fast mode reads Off. Auto, where an agent offers it,
+always sits at the top of that agent's list. Type to filter the list, move
 with the arrow keys and press Enter, or press Cmd+1 to Cmd+9 to pick one of the
-first nine rows. Click a row's star to keep that model on the Favorites tab.
+first nine rows. Click a row's star to keep that model on the Favorites tab;
+hover the eye that appears on a row to read what that model is for.
 
 Clicking a model or a reasoning level applies it to this session and saves it as
 the agent's default for new sessions. Right-clicking applies it to this session
@@ -713,7 +781,11 @@ pointer across other menu items, so you can move into them without rushing.
 Switching a running Claude or Codex session to another account, from More
 actions > Switch Account, a terminal notice, or automatically when its account hits a usage limit,
 exits the CLI inside its own terminal and resumes the same conversation there,
-so the terminal tab and the chat stay open. A card in the middle of Session Chat,
+so the terminal tab and the chat stay open. Switching dismisses open CLI dialogs
+and interrupts the current work until the agent exits, then resumes your saved
+conversation on the selected account. For a Claude background session,
+switching stops that conversation and its remaining jobs before resuming its
+saved history on the selected account. A card in the middle of Session Chat,
 over a dimmed conversation, shows the current and selected accounts, their usage
 percentages (including Claude's Fable limit), and the switch progress. It stays
 until the new account is confirmed and the conversation is ready on it, then
@@ -791,7 +863,7 @@ or your machine default editor for long prompts. The Ghostex editor uses the
 same text editing controls as the chat composer, with F1 commands, find/replace,
 undo/redo, and image previews. Cmd+S/Ctrl+S or Ctrl+G saves and closes it; Cancel
 leaves the original prompt unchanged. Dev Servers detects localhost URLs from output and
-lists them in the ⋯ menu's Dev servers panel and on the Browser view's start page.
+lists them in the ⋯ menu's Dev servers panel.
 
 Terminals follow the app theme by default. Settings > General > Theme groups
 App theme, Chat theme, and Terminal theme together at the top of Settings.
@@ -847,17 +919,22 @@ from disk and Save to write your edits.
 
 Agent Sync (the fifth Hub tab, Cmd+5) keeps one source of truth in `~/.agents`
 (skills, `main.md` and the other rule files, hook scripts, `.skill-lock.json`)
-and points every agent on the computer at it. The left list shows each detected
-agent and profile with three dots for Skills, Instructions, and Hooks; the right
-pane shows the problems found (dangling links, copied skill folders, whole-folder
-links, instruction files that do not point at `main.md`, stale lock entries) and
-one agent's details when selected. Sync all or Sync <agent> opens a plan first:
+and points every agent on the computer at it. The Overview says how many agents
+are out of sync, shows how many use the shared Skills, Instructions, and Hook
+scripts, and lists the things to fix in plain words (links to skills that no
+longer exist, skills that are copies instead of links, agents that link the whole
+skills folder, agents that do not read the shared instructions); open a row to
+see which agents it affects and what the fix does. The left list shows each
+agent with "to fix" or a check, profiles nested under their agent, and a To fix /
+In sync / All filter; select an agent to see its Skills, Instructions, and Hook
+scripts cards. Review and fix all, a row's Fix, or an agent's Review and fix
+opens a plan first:
 one relative symlink per skill in every agent's skills folder, whole-folder links
 converted to per-skill links, the one-line pointer written into each agent's
 instruction file (a file with other content is backed up as
 `<name>.pre-sync-<stamp>.bak` first), and the hooks folder and lock file linked
-into Claude Code and Codex. Nothing is deleted; pruning stale lock entries is an
-opt-in group. Agents that read `~/.agents/skills` directly (Amp, Cursor,
+into Claude Code and Codex. Nothing is deleted; tidying leftover lock file
+entries is opt-in (the Optional cleanup switch, or the plan's last group). Agents that read `~/.agents/skills` directly (Amp, Cursor,
 OpenCode) get no links. The same scan, plan, and apply run from the CLI:
 `ghostex agent-sync status`, `ghostex agent-sync plan [--agent <id>]`, and
 `ghostex agent-sync apply --yes [--agent <id>] [--group <group>...]
@@ -1058,9 +1135,9 @@ docs directory), `hideProjectHeaderDiffStats`,
 ## Extensions, Open In, and integrations
 
 - Settings > Extensions manages the built-in views, the official extensions
-  (Code, Browser, Kanban, Automate, Docs, Chromium runtime), the Extension
+  (Code, Browser, Storybook, Kanban, Automate, Docs, Chromium runtime), the Extension
   store for audited third-party extensions, and Your views (custom URLs,
-  Storybook, Linear, GitHub Issues, dev server commands, HTML reports).
+  Linear, GitHub Issues, dev server commands, HTML reports).
   Extension commands use the active local project's folder unless the extension
   supplies a folder; relative folders are resolved inside the active project.
   Every row on this page has an Edit (pencil) button that chooses where that
@@ -1077,12 +1154,14 @@ docs directory), `hideProjectHeaderDiffStats`,
   Its Account usage in the sidebar section lets you star saved Claude and Codex
   accounts to show their usage at the bottom of the desktop sidebar, or unstar
   them to hide it. These are the same per-account stars available in
-  Settings > Accounts. The meters are hidden until you ask for them: the chart
-  button in the sidebar's Commands row, just left of the Settings gear, shows
-  every starred account four per row, and clicking it again hides them again.
-  Ghostex remembers the choice. While the meters are hidden the button carries a
-  small dot whenever one of those accounts is close to a limit, and the button
-  itself is only there once you have starred an account.
+  Settings > Accounts. The meters are hidden until you ask for them: hover the
+  pin button in the sidebar's Commands row, just left of the Settings gear, and
+  every starred account floats over the bottom of the list, four per row,
+  without moving the list. Click the pin to keep them there above the Commands
+  row, and click it again to unpin them. Ghostex remembers whether they are
+  pinned. While the meters are unpinned the button carries a small dot whenever
+  one of those accounts is close to a limit, and the button itself is only
+  there once you have starred an account.
   Claude meters show the two tightest of the weekly, five-hour, and Fable
   limits, so the Fable limit is never hidden when it is running out; launcher
   and picker rows and the Accounts figures use the same two numbers. Each
@@ -1141,15 +1220,23 @@ docs directory), `hideProjectHeaderDiffStats`,
 
 Theme, background contrast and tint, active pane outline, and
 the app icon live under Settings > General > Theme, the first section.
-App theme offers Dark Gray, Light, and System. Chat and terminal default to
-Follow app, with optional Light, Dark, or System overrides in the same section.
-System is the app default and follows the operating system appearance. Existing
-saved app themes are preserved; dark contrast and tint return unchanged when switching back from Light.
-In light mode, the sidebar and the window chrome have solid light-gray (#f4f4f5) backgrounds. Enable Show
-Advanced to find Dark theme background contrast and Dark theme background tint;
-these controls do not recolor light-mode chrome. The accent color (status
-highlights, accent text, advanced-setting markers) has no setting of its own: it
-follows the background tint's hue, and a neutral tint keeps the sky-blue accent.
+App theme offers Dark, Light, and System. System is the app default and follows
+the operating system appearance. Below it, Dark theme and Light theme each pick a
+preset for that appearance: Dark theme offers Dark Gray (the default), Black,
+Blue, Green, Red, Purple, or Custom; Light theme offers Light Gray (the default,
+#f4f4f5), White, Blue, Green, Pink, Orange, or Custom. Choosing Custom reveals
+that appearance's Background contrast slider (85 to 100 for dark, 60 to 100 for
+light; 100 is black for dark, white for light) and Background tint color picker; the other appearance's rows
+stay hidden. A preset never overwrites the custom values, so switching back to
+Custom restores them. The chosen theme colors the sidebar and window chrome, the
+sidebar's dropdown menus, and the chat view background (chat keeps following its
+own Chat theme setting, so a light chat in a dark app uses the light theme's
+color). Chat and terminal default to Follow app, with optional Light, Dark, or
+System overrides in the same section. Existing saved themes are preserved, and a
+saved dark contrast or tint that differs from the default starts on Custom. The
+accent color (status highlights, accent text, advanced-setting markers) has no
+setting of its own: it follows the dark theme's tint hue, and a neutral tint
+keeps the sky-blue accent.
 Keep Awake (Power)
 prevents sleep while agents work.
 Advanced holds Enable Experimental Features. The separate Debugging page sits
@@ -1166,8 +1253,9 @@ name. They appear when the parent setting enables them.
 In the Settings table of contents, click a page or section title to go there.
 Only the small chevron on its right expands or collapses its entries.
 
-Related settings: `sidebarTheme`, `customSidebarTitlebarBackgroundDarknessPercent`,
-`customSidebarTitlebarBackgroundTintColor`,
+Related settings: `sidebarTheme`, `darkThemePreset`, `lightThemePreset`,
+`customSidebarTitlebarBackgroundDarknessPercent`, `customSidebarTitlebarBackgroundTintColor`,
+`customSidebarTitlebarLightBackgroundLightnessPercent`, `customSidebarTitlebarLightBackgroundTintColor`,
 `showActivePaneOutline`, `appIconSourceId`, the `keepAwake*` rows,
 `showBetaFeatures`, `debuggingMode`.
 

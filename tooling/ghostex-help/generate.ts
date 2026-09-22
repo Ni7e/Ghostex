@@ -282,6 +282,32 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
       'Stop offering the Docs view, so it is missing from the view panel tab strip, its + menu and the view picker.',
     title: 'Hide Docs view',
   },
+  linearViewTabHidden: {
+    ...viewRows,
+    title: 'Hide Linear view',
+    subtitle: 'Hide the Linear view from the view picker and tab menus.',
+  },
+  jiraViewTabHidden: {
+    ...viewRows,
+    title: 'Hide Jira view',
+    subtitle: 'Hide the Jira view from the view picker and tab menus.',
+  },
+  githubViewTabHidden: {
+    ...viewRows,
+    title: 'Hide GitHub view',
+    subtitle: 'Hide the automatic repository view from the view picker and tab menus.',
+  },
+  storybookViewTabHidden: {
+    ...viewRows,
+    title: 'Hide Storybook view',
+    subtitle: 'Hide the built-in component workshop. When enabled, it appears only in projects with Storybook.',
+  },
+  terminalViewTabHidden: {
+    ...viewRows,
+    subtitle:
+      'Stop offering the Terminal view, so it is missing from the view panel tab strip, its + menu and the view picker.',
+    title: 'Hide Terminal view',
+  },
   tipsAndTricksTitlebarButtonHidden: {
     ...viewRows,
     subtitle: 'Stop offering the Tips & Tricks page, so it is missing from the header ⋯ menu and the view picker.',
@@ -304,7 +330,7 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
   },
   devServersTitlebarButtonHidden: {
     ...viewRows,
-    subtitle: 'Hide Dev servers from the header ⋯ menu. The Browser view start page still lists them.',
+    subtitle: 'Hide Dev servers from the header ⋯ menu.',
     title: 'Hide Dev Servers button',
   },
   extensionsTitlebarButtonHidden: {

@@ -5,7 +5,7 @@
     {
       "key": "sidebarTheme",
       "title": "App theme",
-      "subtitle": "Follow the system appearance by default, or choose Light or Dark Gray.",
+      "subtitle": "Follow the system appearance by default, or choose Light or Dark.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
@@ -16,7 +16,7 @@
       "default": "system",
       "options": [
         {
-          "label": "Dark Gray",
+          "label": "Dark",
           "value": "dark-2"
         },
         {
@@ -28,6 +28,152 @@
           "value": "system"
         }
       ],
+      "agentWritable": true
+    },
+    {
+      "key": "darkThemePreset",
+      "title": "Dark theme",
+      "subtitle": "Preset dark chrome for the sidebar and window, or Custom to tune its contrast and tint.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "enum",
+      "default": "gray",
+      "options": [
+        {
+          "label": "Dark Gray",
+          "value": "gray"
+        },
+        {
+          "label": "Black",
+          "value": "black"
+        },
+        {
+          "label": "Blue",
+          "value": "blue"
+        },
+        {
+          "label": "Green",
+          "value": "green"
+        },
+        {
+          "label": "Red",
+          "value": "red"
+        },
+        {
+          "label": "Purple",
+          "value": "purple"
+        },
+        {
+          "label": "Custom",
+          "value": "custom"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "customSidebarTitlebarBackgroundDarknessPercent",
+      "title": "Dark theme background contrast",
+      "subtitle": "Contrast of the dark sidebar and window chrome background while Dark theme is Custom.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "number",
+      "default": 96,
+      "min": 85,
+      "max": 100,
+      "agentWritable": true
+    },
+    {
+      "key": "customSidebarTitlebarBackgroundTintColor",
+      "title": "Dark theme background tint",
+      "subtitle": "Subtle tint of the dark sidebar and window chrome background while Dark theme is Custom.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "string",
+      "default": "#808080",
+      "agentWritable": true
+    },
+    {
+      "key": "lightThemePreset",
+      "title": "Light theme",
+      "subtitle": "Preset light chrome for the sidebar and window, or Custom to tune its contrast and tint.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "enum",
+      "default": "gray",
+      "options": [
+        {
+          "label": "Light Gray",
+          "value": "gray"
+        },
+        {
+          "label": "White",
+          "value": "white"
+        },
+        {
+          "label": "Blue",
+          "value": "blue"
+        },
+        {
+          "label": "Green",
+          "value": "green"
+        },
+        {
+          "label": "Pink",
+          "value": "pink"
+        },
+        {
+          "label": "Orange",
+          "value": "orange"
+        },
+        {
+          "label": "Custom",
+          "value": "custom"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "customSidebarTitlebarLightBackgroundLightnessPercent",
+      "title": "Light theme background contrast",
+      "subtitle": "Contrast of the light sidebar and window chrome background while Light theme is Custom.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "number",
+      "default": 96,
+      "agentWritable": true
+    },
+    {
+      "key": "customSidebarTitlebarLightBackgroundTintColor",
+      "title": "Light theme background tint",
+      "subtitle": "Subtle tint of the light sidebar and window chrome background while Light theme is Custom.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "string",
+      "default": "#808080",
       "agentWritable": true
     },
     {
@@ -4019,38 +4165,6 @@
       "agentWritable": true
     },
     {
-      "key": "customSidebarTitlebarBackgroundDarknessPercent",
-      "title": "Dark theme background contrast",
-      "subtitle": "Contrast level for the sidebar and window chrome background in dark mode. Light mode stays light gray.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "appearance",
-      "groupTitle": "Theme",
-      "section": "theming",
-      "sectionTitle": "Theme",
-      "type": "number",
-      "default": 96,
-      "min": 85,
-      "max": 100,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "customSidebarTitlebarBackgroundTintColor",
-      "title": "Dark theme background tint",
-      "subtitle": "Subtle tint color for the sidebar and window chrome background in dark mode. Light mode stays light gray.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "appearance",
-      "groupTitle": "Theme",
-      "section": "theming",
-      "sectionTitle": "Theme",
-      "type": "string",
-      "default": "#808080",
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
       "key": "showActivePaneOutline",
       "title": "Show Active Pane Outline",
       "subtitle": "Show an outline around the currently focused pane.",
@@ -4382,7 +4496,7 @@
     {
       "key": "sidebarCollapseAnimationDurationMs",
       "title": "Collapse animation speed",
-      "subtitle": "Set how quickly sidebar sections, groups, and projects expand or collapse. Set to 0 for no animation.",
+      "subtitle": "Set how quickly sidebar sections, groups, and projects expand or collapse, and how quickly the floating sidebar and sessions column slide in from the window edge. Set to 0 for no animation.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "sidebar",
@@ -5539,20 +5653,6 @@
       "type": "boolean",
       "default": true,
       "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "showAgentsPaneTabBarWhenUnsplit",
-      "title": "Show tabs bar when not split",
-      "subtitle": "Keep the tabs bar above the agents pane even when the screen is not split.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "boolean",
-      "default": false,
       "agentWritable": true
     },
     {
@@ -6845,6 +6945,30 @@
       "agentWritable": false
     },
     {
+      "key": "projectWebsiteViews",
+      "title": "projectWebsiteViews",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": {},
+      "agentWritable": false
+    },
+    {
+      "key": "customSidebarTitlebarLightBackgroundColor",
+      "title": "customSidebarTitlebarLightBackgroundColor",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "string",
+      "default": "#f4f4f5",
+      "agentWritable": false
+    },
+    {
       "key": "hotkeys",
       "title": "hotkeys",
       "subtitle": "App-managed state saved with the settings; not a user preference.",
@@ -6876,6 +7000,7 @@
         "switchKanbanView": "",
         "switchManageView": "",
         "switchAutomateView": "",
+        "switchTerminalView": "",
         "switchTitlebarView1": "alt+1",
         "switchTitlebarView2": "alt+2",
         "switchTitlebarView3": "alt+3",
@@ -8165,6 +8290,66 @@
       "agentWritable": true
     },
     {
+      "key": "linearViewTabHidden",
+      "title": "Hide Linear view",
+      "subtitle": "Hide the Linear view from the view picker and tab menus.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "jiraViewTabHidden",
+      "title": "Hide Jira view",
+      "subtitle": "Hide the Jira view from the view picker and tab menus.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "githubViewTabHidden",
+      "title": "Hide GitHub view",
+      "subtitle": "Hide the automatic repository view from the view picker and tab menus.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "storybookViewTabHidden",
+      "title": "Hide Storybook view",
+      "subtitle": "Hide the built-in component workshop. When enabled, it appears only in projects with Storybook.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalViewTabHidden",
+      "title": "Hide Terminal view",
+      "subtitle": "Stop offering the Terminal view, so it is missing from the view panel tab strip, its + menu and the view picker.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
       "key": "tipsAndTricksTitlebarButtonHidden",
       "title": "Hide Tips button",
       "subtitle": "Stop offering the Tips & Tricks page, so it is missing from the header ⋯ menu and the view picker.",
@@ -8215,7 +8400,7 @@
     {
       "key": "devServersTitlebarButtonHidden",
       "title": "Hide Dev Servers button",
-      "subtitle": "Hide Dev servers from the header ⋯ menu. The Browser view start page still lists them.",
+      "subtitle": "Hide Dev servers from the header ⋯ menu.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
@@ -8273,6 +8458,39 @@
       "agentWritable": true
     },
     {
+      "key": "linear",
+      "title": "Linear",
+      "subtitle": "Open your team's issues and projects. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "jira",
+      "title": "Jira",
+      "subtitle": "Keep your team's board beside your work. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "storybook",
+      "title": "Storybook",
+      "subtitle": "Build, browse, and annotate your project’s components without a persistent development server. Appears only in projects with Storybook.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
       "key": "code",
       "title": "Code editor",
       "subtitle": "Explore, edit, and search your project in a familiar, full-featured workspace without ever leaving Ghostex.",
@@ -8320,6 +8538,17 @@
       "key": "docs",
       "title": "Docs",
       "subtitle": "Browse your project’s notes, plans, and reference files together in one focused reading space.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "terminal",
+      "title": "Terminal",
+      "subtitle": "A command terminal beside your sessions, with its own tabs and splits, that works like the Commands pane but lives in the view panel.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -9413,6 +9642,12 @@
       "id": "switchAutomateView",
       "title": "Switch to Automate",
       "description": "Switch to Automate view.",
+      "defaultKey": ""
+    },
+    {
+      "id": "switchTerminalView",
+      "title": "Switch to Terminal",
+      "description": "Switch to Terminal view.",
       "defaultKey": ""
     },
     {

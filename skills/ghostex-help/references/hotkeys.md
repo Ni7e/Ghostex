@@ -28,6 +28,7 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Switch to Kanban | unassigned |  | Switch to Kanban view. | `switchKanbanView` |
 | Switch to Docs | unassigned |  | Switch to Docs view. | `switchManageView` |
 | Switch to Automate | unassigned |  | Switch to Automate view. | `switchAutomateView` |
+| Switch to Terminal | unassigned |  | Switch to Terminal view. | `switchTerminalView` |
 | Switch to View Tab 1 | `alt+1` |  | Open tab 1 in the view panel's tab strip. | `switchTitlebarView1` |
 | Switch to View Tab 2 | `alt+2` |  | Open tab 2 in the view panel's tab strip. | `switchTitlebarView2` |
 | Switch to View Tab 3 | `alt+3` |  | Open tab 3 in the view panel's tab strip. | `switchTitlebarView3` |
