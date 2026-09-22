@@ -163,7 +163,37 @@ impl GpuiContextMenu {
         self
     }
 
-    pub(crate) fn show(mut self, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    pub(crate) fn show(self, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+        self.show_anchored(
+            Bounds {
+                origin: position,
+                size: size(px(1.0), px(1.0)),
+            },
+            false,
+            window,
+            cx,
+        );
+    }
+
+    /// CDXC:ContextMenus 2026-09-22 DECISION:
+    /// User: the Browser profile button and the view strip's `+` open their menu like the "Browser pane actions menu" button: always below the button in a set position, never where the pointer landed, and clicking the button while its menu is open closes it.
+    /// The button's bounds are the popup's trigger bounds, so the root's outside-click capture leaves that click to this toggle.
+    pub(crate) fn toggle_below(
+        self,
+        trigger_bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.show_anchored(trigger_bounds, true, window, cx);
+    }
+
+    fn show_anchored(
+        mut self,
+        trigger_bounds: Bounds<Pixels>,
+        toggle: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         while self
             .entries
             .last()
@@ -180,13 +210,33 @@ impl GpuiContextMenu {
         let Ok(app) = root.read(cx).view().clone().downcast::<GhostexGpuiApp>() else {
             return;
         };
-        self.show_for_app(app, position, window, cx);
+        self.show_for_app_anchored(app, trigger_bounds, toggle, window, cx);
     }
 
     pub(crate) fn show_for_app(
-        mut self,
+        self,
         app: Entity<GhostexGpuiApp>,
         position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.show_for_app_anchored(
+            app,
+            Bounds {
+                origin: position,
+                size: size(px(1.0), px(1.0)),
+            },
+            false,
+            window,
+            cx,
+        );
+    }
+
+    fn show_for_app_anchored(
+        mut self,
+        app: Entity<GhostexGpuiApp>,
+        trigger_bounds: Bounds<Pixels>,
+        toggle: bool,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -197,15 +247,20 @@ impl GpuiContextMenu {
         cx.defer(move |cx| {
             let _ = source_window.update(cx, |_, window, cx| {
                 app.update(cx, |app, cx| {
+                    let already_open = toggle
+                        && app.titlebar_popup_menu.as_ref().is_some_and(|state| {
+                            state.kind == GpuiTitlebarPopupKind::ContextMenu
+                                && state.trigger_bounds == trigger_bounds
+                        });
                     app.close_gpui_titlebar_popup(None, window, cx);
+                    if already_open {
+                        return;
+                    }
                     app.context_menu = Some(self);
                     app.set_gpui_titlebar_popup_open(
                         GpuiTitlebarPopupKind::ContextMenu,
                         true,
-                        Some(Bounds {
-                            origin: position,
-                            size: size(px(1.0), px(1.0)),
-                        }),
+                        Some(trigger_bounds),
                         window,
                         cx,
                     );
@@ -229,9 +284,9 @@ impl GpuiContextMenu {
         } else {
             0.0
         };
-        // The 8px slack keeps the widest row whole: measured to the exact pixel, it lost a fraction
-        // to layout rounding and drew as an ellipsis ("Browser…").
-        line.width.as_f32() + 34.0 + 8.0 + check_width + icon_width + extra
+        // The 24px slack keeps the widest row whole: this measures with the main window's text style,
+        // which can run narrower than the popup's, and with less slack "Browser Tab" drew as "Browser…".
+        line.width.as_f32() + 34.0 + 24.0 + check_width + icon_width + extra
     }
 
     pub(crate) fn content_width(&self, window: &Window) -> f32 {
@@ -302,10 +357,7 @@ impl GpuiContextMenu {
                 .flex()
                 .flex_1()
                 .min_w_0()
-                // Without nowrap the label wraps at its first space during layout and the
-                // ellipsis lands there, so a roomy row still drew "Browser Tab" as "Browser…".
                 .whitespace_nowrap()
-                .text_ellipsis()
                 .items_center()
                 .min_h(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT))
                 .text_size(px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE))
@@ -319,7 +371,9 @@ impl GpuiContextMenu {
                         titlebar_popup_menu_foreground(),
                     ))
                 })
-                .child(label.clone())
+                // The menu is sized to its widest label, so a label keeps its full width rather
+                // than shrinking into an ellipsis ("Browser…" for "Browser Tab").
+                .child(div().flex_none().child(label.clone()))
         })
         .disabled(row.disabled)
         .checked(row.checked)

@@ -204,6 +204,12 @@ impl GhostexGpuiApp {
         if self.gx_store_run_collection_menu_edit(&command, cx) {
             return;
         }
+        // A Space icon's Sleep Space names the Space's projects and awake rows, sleeps the views
+        // those projects have open, and hands the rows to the bulk path below as one
+        // `setSessionsSleeping` (gx_store/space_sleep.rs).
+        if self.gx_store_run_sidebar_space_sleep(&command, cx) {
+            return;
+        }
         // The bulk menu, a collection's lifecycle items and a project's Sleep, Wake and Close
         // resolve their set here and fan out into the per-session actions above, paced when the
         // action is a sleep (gx_store/sidebar_bulk.rs).

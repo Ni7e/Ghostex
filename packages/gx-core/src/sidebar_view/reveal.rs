@@ -271,7 +271,7 @@ pub fn reveal_plan(
 }
 
 /// The inputs with everything that hides a row lifted: the Space, Show Hidden and the tag filters.
-fn unfiltered(inputs: &SidebarInputs) -> SidebarInputs {
+pub(crate) fn unfiltered(inputs: &SidebarInputs) -> SidebarInputs {
     let mut probe = inputs.clone();
     probe.ui.show_hidden = true;
     probe.ui.selected_tag_filters.clear();
@@ -544,7 +544,7 @@ fn machine_tab_id(machine: &MachineId) -> String {
     }
 }
 
-fn machine_key(machine_id: &str) -> MachineId {
+pub(crate) fn machine_key(machine_id: &str) -> MachineId {
     if machine_id == LOCAL_MACHINE_ID {
         MachineId::Local
     } else {

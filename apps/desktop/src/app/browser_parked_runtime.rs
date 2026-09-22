@@ -231,6 +231,11 @@ impl GhostexGpuiApp {
         {
             tab.remote_machine_id = remote_machine_id;
         }
+        if let Some(state) = self.project_view_states_by_project.get_mut(project_id)
+            && !state.open_views.contains(&TitlebarMode::Browser)
+        {
+            state.open_views.push(TitlebarMode::Browser);
+        }
         self.persist_shell_layout_state();
         cx.notify();
     }
@@ -257,6 +262,27 @@ impl GhostexGpuiApp {
             return;
         }
         cx.notify();
+    }
+
+    /// Sleep every parked page of a project that is not mounted, one tab at a time through the
+    /// per-tab path, so each tab stays in the project's model as a restored placeholder and the
+    /// panes' address text survives. Returns whether any page was dropped.
+    pub(crate) fn sleep_parked_browser_project(
+        &mut self,
+        project_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(runtime) = self.parked_browser_runtimes_by_project.get(project_id) else {
+            return false;
+        };
+        let mut dropped = false;
+        for tab_id in runtime.surface_tab_ids() {
+            dropped |= self.forget_parked_browser_tab_runtime(project_id, tab_id);
+        }
+        if dropped {
+            cx.notify();
+        }
+        dropped
     }
 
     /// Close a tab of a parked project, including its parked page.

@@ -68,9 +68,9 @@ mod local_focus;
 mod project_docs;
 mod records_storage;
 mod remote_clients;
+mod remote_last_seen;
 mod remote_project_docs;
 mod runtime_facts;
-mod remote_last_seen;
 mod session_walk;
 mod shadow_diff;
 mod sidebar_accounts;
@@ -96,8 +96,8 @@ mod sidebar_runtime_route;
 mod sidebar_scratch_compare;
 mod sidebar_self_check;
 mod sidebar_session_slot;
-mod sidebar_snapshot;
 mod sidebar_slot_jump;
+mod sidebar_snapshot;
 mod sidebar_snooze;
 mod sidebar_space_follow;
 mod sidebar_state_actions;
@@ -106,6 +106,7 @@ mod sidebar_ui_commands;
 mod sidebar_ui_paths;
 mod sidebar_ui_storage;
 mod space_editor;
+mod space_sleep;
 mod space_switch;
 mod workspace_groups;
 
@@ -114,7 +115,7 @@ mod workspace_groups;
 /// same connection pool rather than opening a second one: there is one client-storage database and
 /// one busy timeout, and a second pool would deadlock against this one.
 pub(crate) use records_storage::{
-    read_record_raw, remove_record, scan_record_raw, write_record, RecordRead, RecordStore,
+    RecordRead, RecordStore, read_record_raw, remove_record, scan_record_raw, write_record,
 };
 pub(crate) use sidebar_ui_storage::{with_read_connection, with_write_connection};
 
