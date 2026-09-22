@@ -48,6 +48,12 @@ pub struct PickersState {
     pub model_favorites_loaded: bool,
     /// The model selection outbox and what it is waiting for.
     pub model_selection: ModelSelectionState,
+    /// `seed.modelOutboxes`: the stored intent per SCOPED option key, as the boot read handed it
+    /// over and as every write since has updated it.
+    pub model_outboxes: serde_json::Value,
+    /// The scoped key the outbox above was last read for, so a draft session that latches its
+    /// agent re-reads rather than keeping the plain key's record.
+    pub model_outbox_key: Option<String>,
     /// The delivery in flight: the request id and the intent id it carries.
     ///
     /// `computeModelSelectionOutbox`'s delivery `useEffect` keeps one operation per session key in

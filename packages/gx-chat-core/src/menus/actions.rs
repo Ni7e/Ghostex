@@ -253,7 +253,7 @@ fn queue_effects(
         context.random_id(0),
     );
     vec![Effect::WriteStorage {
-        key: crate::menus::picker::selection::model_outbox_key(&state.identity.session_key),
+        key: crate::menus::picker::selection::scoped_model_outbox_key(state),
         value: Some(serde_json::to_string(&intent).unwrap_or_else(|_| "null".to_string())),
         durable: true,
     }]

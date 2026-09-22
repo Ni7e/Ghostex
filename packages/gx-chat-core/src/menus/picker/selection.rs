@@ -26,12 +26,30 @@ pub const MODEL_OUTBOX_RETRY_MS: f64 = 5000.0;
 /// `ghostex.model-selection-outbox.` prefix and the per-session suffix.
 pub const MODEL_OUTBOX_STORE: &str = "modelOutbox";
 
-/// The outbox record for one session key.
-pub fn model_outbox_key(session_key: &str) -> StorageKey {
+/// The outbox record for one SCOPED option key.
+pub fn model_outbox_key(option_key: &str) -> StorageKey {
     StorageKey {
         store: MODEL_OUTBOX_STORE.to_string(),
-        suffix: session_key.to_string(),
+        suffix: option_key.to_string(),
     }
+}
+
+/// The scoped option key this session's outbox lives under.
+///
+/// `sessionOptions.sessionKey`, which is the session key until a draft session latches its agent
+/// and `<sessionKey>#<agentId>` afterwards. Family e1 owns the latch; this reads it.
+pub fn scoped_outbox_key(state: &crate::state::ChatState) -> String {
+    state
+        .menus
+        .options
+        .storage_key
+        .clone()
+        .unwrap_or_else(|| state.identity.session_key.clone())
+}
+
+/// [`model_outbox_key`] of [`scoped_outbox_key`].
+pub fn scoped_model_outbox_key(state: &crate::state::ChatState) -> StorageKey {
+    model_outbox_key(&scoped_outbox_key(state))
 }
 
 /// One durable intent: the selection, the options that ride with it, and its scope.

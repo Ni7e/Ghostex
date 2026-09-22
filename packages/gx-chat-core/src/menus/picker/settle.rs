@@ -49,6 +49,9 @@ pub fn settle(
             state.menus.model_catalog = bundled;
         }
     }
+    // Family e1's `observe` has already rebuilt the option store this turn, so the scoped key is
+    // current before the outbox is read against it.
+    adopt_scoped_outbox(state);
     match event {
         // To fold into family e1: `menus.model_catalog` is e1's field and this adoption belongs
         // in an e1 settle. Nothing routed `ModelCatalogChanged` anywhere, so the option catalog
@@ -219,8 +222,9 @@ fn settle_picker_timers(state: &mut ChatState, context: &ChatContext) -> Vec<Eff
         Some(outcome.scope),
         context.random_id(0),
     );
+    remember_outbox(state, Some(&intent));
     vec![Effect::WriteStorage {
-        key: crate::menus::picker::selection::model_outbox_key(&state.identity.session_key),
+        key: crate::menus::picker::selection::scoped_model_outbox_key(state),
         value: Some(crate::menus::picker::selection::serialize_model_selection_intent(&intent)),
         durable: true,
     }]
@@ -297,10 +301,9 @@ fn settle_outbox_answer(
     match accepted {
         Ok(_) => {
             if state.pickers.model_selection.acknowledge(&intent_id) {
+                remember_outbox(state, None);
                 return Some(vec![Effect::WriteStorage {
-                    key: crate::menus::picker::selection::model_outbox_key(
-                        &state.identity.session_key,
-                    ),
+                    key: crate::menus::picker::selection::scoped_model_outbox_key(state),
                     value: None,
                     durable: true,
                 }]);
@@ -426,15 +429,63 @@ pub fn adopt_boot_read(state: &mut ChatState, read: &crate::event::ComposerBootR
                 crate::menus::context::preferences::normalize_preferences(stored, agent);
         }
     }
-    // The outbox record for THIS session key, if one survived the last run. Other keys in the map
-    // are this session's scoped variants, which the picker re-derives rather than adopts.
-    let stored = read
+    // `seed.modelOutboxes` is kept whole, because the key the outbox is read under is the SCOPED
+    // option key and a draft session's latches to `<sessionKey>#<agentId>` a frame or two later.
+    // `adopt_scoped_outbox` re-reads it whenever that key moves, which is
+    // `useEffect(..., [key, persistence])` in `computeModelSelectionOutbox`.
+    state.pickers.model_outboxes = read.model_outboxes.clone();
+    state.pickers.model_outbox_key = None;
+}
+
+/// `seed.modelOutboxes[key] = value`: the in-memory map the scoped read is answered from, kept in
+/// step with every durable write so a key that moves away and back reads what was stored.
+fn remember_outbox(
+    state: &mut ChatState,
+    intent: Option<&crate::menus::picker::selection::ModelSelectionIntent>,
+) {
+    let key = crate::menus::picker::selection::scoped_outbox_key(state);
+    let value = match intent {
+        Some(intent) => serde_json::to_value(intent).unwrap_or(serde_json::Value::Null),
+        None => serde_json::Value::Null,
+    };
+    match state.pickers.model_outboxes.as_object_mut() {
+        Some(object) => {
+            object.insert(key, value);
+        }
+        None => {
+            let mut object = serde_json::Map::new();
+            object.insert(key, value);
+            state.pickers.model_outboxes = serde_json::Value::Object(object);
+        }
+    }
+}
+
+/// `useEffect(() => { latest.current = persistence.read(key); setOutbox(...); receipt.current =
+/// null; }, [key, persistence])`.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// The outbox record is keyed by the SCOPED option key (`<sessionKey>#<draftAgentId>` while a
+/// draft session still offers an agent switcher), not by the session key: `native-options.ts`
+/// passes `sessionOptions.sessionKey` into `computeModelSelectionOutbox`, and that is
+/// `session-options.ts`'s latching `storageKey`. Reading and writing the plain key made a draft
+/// session's queued model land in a record neither brain reads back. Found by the desktop host
+/// agent on 2026-09-22.
+pub fn adopt_scoped_outbox(state: &mut ChatState) {
+    if !state.menus.options_seeded {
+        return;
+    }
+    let key = crate::menus::picker::selection::scoped_outbox_key(state);
+    if state.pickers.model_outbox_key.as_deref() == Some(key.as_str()) {
+        return;
+    }
+    state.pickers.model_outbox_key = Some(key.clone());
+    state.pickers.model_selection.outbox = state
+        .pickers
         .model_outboxes
-        .get(&read.session_key)
+        .get(&key)
         .and_then(|record| record.get("selection").or(Some(record)))
         .filter(|record| record.is_object())
         .and_then(|record| serde_json::from_value(record.clone()).ok());
-    if let Some(intent) = stored {
-        state.pickers.model_selection.outbox = Some(intent);
-    }
+    // `receipt.current = null`: the pills stop showing the previous key's intent as dispatched.
+    state.pickers.model_selection.dispatch_receipt = None;
 }
