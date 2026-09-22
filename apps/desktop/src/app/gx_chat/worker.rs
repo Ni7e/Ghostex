@@ -550,8 +550,17 @@ fn drive(world: &mut World, key: &str, events: Vec<Event>) {
                     .effects
                     .entry(effect_name(&effect))
                     .or_insert(0) += 1;
-                note_unperformed(world, &effect);
                 match effects::route(effect) {
+                    // Performed by doing nothing, because the shipped brain does nothing either
+                    // (`effects::SWALLOWED_HOST_ACTIONS`). Counted by name so a deliberate no-op is
+                    // still visible in `gxChat.host.summary`; the name is a code constant.
+                    Routed::Swallowed(name) => {
+                        *world
+                            .counters
+                            .host_actions_swallowed
+                            .entry(name)
+                            .or_insert(0) += 1;
+                    }
                     Routed::Renderer(request) => {
                         if request.kind
                             == ghostex_gx_chat_core::RequestKind::Other(
@@ -908,22 +917,4 @@ fn effect_name(effect: &Effect) -> &'static str {
         Effect::HostAction { .. } => "hostAction",
         _ => "unrouted",
     }
-}
-
-/// Counts a host action nothing performs, by its own name.
-///
-/// The names in [`effects::UNPERFORMED_HOST_ACTIONS`] are the core calling itself through a door
-/// that does not exist. The counter is what makes that visible in `gxChat.host.summary` rather than
-/// leaving a gesture silently doing nothing.
-fn note_unperformed(world: &mut World, effect: &Effect) {
-    let Effect::HostAction { action, .. } = effect else {
-        return;
-    };
-    let Some(name) = effects::UNPERFORMED_HOST_ACTIONS
-        .iter()
-        .find(|known| *known == action)
-    else {
-        return;
-    };
-    *world.counters.host_actions_dropped.entry(name).or_insert(0) += 1;
 }

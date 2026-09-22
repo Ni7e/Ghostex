@@ -26,35 +26,28 @@ pub(super) enum Routed {
     Renderer(Box<HostRequest>),
     /// The core itself, as a gesture it asked to have replayed at it.
     SelfAction(Box<UserAction>),
+    /// Nothing, on purpose, because the QuickJS brain performs nothing either. Named so the
+    /// deliberate no-op is visible in the counters rather than looking like a lost effect.
+    Swallowed(&'static str),
 }
 
-/// The host actions the core emits that nothing performs, and why each is here.
+/// The host actions this host deliberately performs nothing for, because the shipped brain does
+/// not either.
 ///
 /// CDXC:SessionChat 2026-09-22 WHY:
-/// One left, and it is a no-op on the TypeScript side too. `suggestionSend` is the slash picker
-/// saying "the draft is already the whole command, send it instead of completing it", which
-/// `native-host.ts` answers by pushing nothing at all: its arm keeps only a completion that carries
-/// `content`, so `{send: true}` falls out of the switch. The send happens in the VIEW, one step
-/// earlier: `keyboard.rs` reads `suggestions.sendOnEnter` off the snapshot and calls `send` itself
-/// rather than dispatching `suggestionKey`, so the core's inner rule (the same rule, in
-/// `composer/suggestions.rs`) is only reached when the view's snapshot is a turn stale. The host
-/// CANNOT perform it: a send needs the composer field, the draft id and the draft revision, all of
-/// which are the view's. Performing it here would make the Rust brain send where the QuickJS brain
-/// swallows the key, which is a behaviour change the parity window must not make. It stays counted
-/// by name so a rise in `hostActionsDropped` is visible; the name is a code constant, never a
-/// user's data.
-///
-/// `switchToTerminal` is here for a different reason: it IS an app-shell action and it reaches the
-/// app shell, which has no arm for it and returns. That is not a port gap, because the QuickJS
-/// brain pushes the identical request (`native-host.ts:946`) and it is dropped identically, so
-/// performing it here would be a behaviour change rather than a fix. It is counted so the gap is
-/// measurable: an option dispatch that has to reach the terminal view emits it, and the shell's
-/// own `terminalView` is what it wants.
-///
-/// `selectModel` and `switchDraftAgentForProvider` left this list on 2026-09-22: core agent 3
-/// resolved both inside the crate (`menus/picker/settle.rs`, `menus/picker/actions.rs`), so the
-/// model pick now goes down the durable outbox lane and the provider switch looks its own agent up.
-pub(super) const UNPERFORMED_HOST_ACTIONS: &[&str] = &["suggestionSend", "switchToTerminal"];
+/// The spec for the parity window is what the app does TODAY, not what it ought to do, and today
+/// the QuickJS brain SWALLOWS `suggestionSend`. It is the slash picker saying "the draft is already
+/// the whole command, send it instead of completing it", and `native-host.ts`'s `suggestionKey` arm
+/// keeps only a completion that carries `content`, so `{send: true}` falls out of the switch and
+/// nothing at all is pushed. The real send happens one step EARLIER, in the view: `keyboard.rs`
+/// reads `suggestions.sendOnEnter` off the snapshot and calls `send` itself rather than dispatching
+/// `suggestionKey`, and that flag is the same rule the core's inner test is
+/// (`composer/suggestions.rs`), so the effect is reached only when the view's snapshot is a turn
+/// stale. This host therefore swallows it too, explicitly: forwarding it to the app shell (which is
+/// what this file did until now) is a request the QuickJS brain never sends, and performing the send
+/// here is impossible anyway, because a send needs the composer field, the draft id and the draft
+/// revision, all of which are the view's. The name is a code constant, never a user's data.
+pub(super) const SWALLOWED_HOST_ACTIONS: &[&str] = &["suggestionSend"];
 
 /// Sorts one effect into its performer.
 ///
@@ -186,24 +179,7 @@ pub(super) fn route(effect: Effect) -> Routed {
                 params,
             }))
         }
-        // `selectOption` is a gesture the core asked to have replayed at itself: its params are
-        // already a `UserAction`, `"type"` and all, because `native-host.ts` called its own
-        // `action` switch here rather than pushing a request. Feeding it back is what makes a model
-        // menu's option pick land; forwarding it to the app shell would drop it.
-        Effect::HostAction { action, params } if action == "selectOption" => {
-            match serde_json::from_value::<UserAction>(*params) {
-                Ok(action) => Routed::SelfAction(Box::new(action)),
-                Err(_) => Routed::Renderer(Box::new(HostRequest {
-                    id: None,
-                    kind: RequestKind::Other(UNROUTED.to_string()),
-                    method: String::new(),
-                    params: Map::new(),
-                })),
-            }
-        }
-        Effect::HostAction { action, params } => {
-            Routed::Renderer(Box::new(dispatched(&action, object(*params))))
-        }
+        Effect::HostAction { action, params } => host_action(action, *params),
         // `Effect` is `#[non_exhaustive]`: a core newer than this host is a missing arm, not a
         // crash. Every variant this build knows is spelled out above, so an arm can only be missing
         // when the crate grows one, and `gxChat.host.summary` counts it as `effectsUnrouted`.
@@ -220,6 +196,42 @@ pub(super) fn route(effect: Effect) -> Routed {
 ///
 /// The view has no arm for it, so it draws nothing; the counter is how it is noticed.
 pub(super) const UNROUTED: &str = "unrouted";
+
+/// Where one [`Effect::HostAction`] goes: nowhere, back into the core, or to the app shell.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// `switchToTerminal` is forwarded from here unchanged, and the app shell drops it. That is
+/// deliberate: `native-host.ts` pushes the identical `{kind: 'host', method: 'switchToTerminal'}`
+/// and `receive_session_chat_host_action` has no arm for that spelling (it knows `terminalView`), so
+/// both brains do exactly the same nothing. The missing arm is an app-shell gap that predates this
+/// port and affects the shipped brain just as much; fixing it in `session_chat.rs` would change
+/// behaviour for both at once, which is a change for after the parity window, not a host routing
+/// decision. Forwarding is what keeps the two brains equal either way: on the day the shell grows
+/// the arm, both start switching together.
+fn host_action(action: String, params: Value) -> Routed {
+    if let Some(name) = SWALLOWED_HOST_ACTIONS
+        .iter()
+        .find(|known| **known == action)
+    {
+        return Routed::Swallowed(name);
+    }
+    // `selectOption` is a gesture the core asked to have replayed at itself: its params are already
+    // a `UserAction`, `"type"` and all, because `native-host.ts` called its own `action` switch here
+    // rather than pushing a request. Feeding it back is what makes a model menu's option pick land;
+    // forwarding it to the app shell would drop it.
+    if action == "selectOption" {
+        return match serde_json::from_value::<UserAction>(params) {
+            Ok(action) => Routed::SelfAction(Box::new(action)),
+            Err(_) => Routed::Renderer(Box::new(HostRequest {
+                id: None,
+                kind: RequestKind::Other(UNROUTED.to_string()),
+                method: String::new(),
+                params: Map::new(),
+            })),
+        };
+    }
+    Routed::Renderer(Box::new(dispatched(&action, object(params))))
+}
 
 /// `{kind: "broker", method, params}`: what the view forwards to the app runtime's transport.
 fn broker(method: &str, params: Map<String, Value>) -> HostRequest {

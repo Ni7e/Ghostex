@@ -39,9 +39,10 @@ pub(super) struct HostCounters {
     /// Effects this build has no arm for, which is only possible when the core grows a variant:
     /// `Effect` is `#[non_exhaustive]` and `effects::route` spells out every one it knows.
     pub(super) effects_unrouted: u64,
-    /// Host actions the core emits that nothing performs, by name. The names are code constants
-    /// (`effects::UNPERFORMED_HOST_ACTIONS`), never a chat's own data.
-    pub(super) host_actions_dropped: BTreeMap<&'static str, u64>,
+    /// Host actions this host deliberately performs nothing for, by name, because the shipped brain
+    /// performs nothing either. The names are code constants
+    /// (`effects::SWALLOWED_HOST_ACTIONS`), never a chat's own data.
+    pub(super) host_actions_swallowed: BTreeMap<&'static str, u64>,
     /// Chats whose brain panicked and were disabled for the rest of the run. Any number above zero
     /// is a bug in `packages/gx-chat-core` or in this host, and the user saw a broken pane.
     pub(super) chats_disabled: u64,
@@ -105,7 +106,7 @@ impl HostDiagnostics {
                 "storageRefused": counters.storage_refused,
                 "actionsUnrouted": counters.actions_unrouted,
                 "effectsUnrouted": counters.effects_unrouted,
-                "hostActionsDropped": counters.host_actions_dropped,
+                "hostActionsSwallowed": counters.host_actions_swallowed,
                 // Spelled without `disabled`/`dropped` reading as a failure marker: the summary
                 // stays a routine record behind both gates. The one record that deliberately
                 // bypasses them is `gxChat.host.chatDisabledAfterPanic`, written once per chat.
