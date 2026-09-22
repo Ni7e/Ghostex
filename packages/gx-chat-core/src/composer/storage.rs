@@ -43,6 +43,20 @@ pub const DRAFT_SUBMITTED_STORE: &str = "draftSubmitted";
 /// `composer('park', {text, version})`: the draft was handed to the terminal, so it is kept under
 /// its revision and marked parked. The value carries `{text, version}`.
 pub const DRAFT_PARK_STORE: &str = "draftPark";
+/// `composer('history')`: what this machine's composers have sent, oldest first.
+///
+/// A store of its own rather than a record, because the host answers it with a SCAN rather than a
+/// key: `listSentSessionChatMessages().map(message => message.content).reverse()`
+/// (`native-composer.ts:121`), which is the last 50 prompts across every session, newest-first
+/// sorted and then reversed. The `sentHistory` store itself stays the host's, written by
+/// [`DRAFT_SUBMITTED_STORE`]; the core only ever reads this projection of it, lazily, on the first
+/// Up arrow.
+///
+/// CDXC:SavedPrompts 2026-09-08 DECISION:
+/// User: retain the last 50 sent messages across all sessions for Up-arrow recall and the Saved
+/// prompts Sent tab.
+pub const COMPOSER_HISTORY_STORE: &str = "composerHistory";
+
 /// `composer('receive', {text, version, current})`: a draft arrived from another client. The host
 /// writes the recovery checkpoint and flushes the save outbox; the DISPOSITION is decided in the
 /// core, because `classifyDraftHandoff` is a pure rule over state the core already holds.
@@ -240,4 +254,24 @@ pub fn verbose_key(session_key: &str) -> crate::event::StorageKey {
         store: VERBOSE_STORE.to_string(),
         suffix: session_key.to_string(),
     }
+}
+
+/// The recall ring's read. Per session, because the host scopes the scan by the session it is
+/// asked from, even though the rows themselves come from every composer.
+pub fn composer_history_key(session_key: &str) -> crate::event::StorageKey {
+    crate::event::StorageKey {
+        store: COMPOSER_HISTORY_STORE.to_string(),
+        suffix: session_key.to_string(),
+    }
+}
+
+/// The answer to [`composer_history_key`]: a JSON array of strings, oldest last.
+///
+/// Anything else is an empty ring, which is what `await composer('history')` returning a non-array
+/// would leave `entries` as.
+pub fn decode_composer_history(value: Option<&str>) -> Vec<String> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<String>>(value).unwrap_or_default()
 }

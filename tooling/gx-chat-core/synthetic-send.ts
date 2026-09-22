@@ -498,6 +498,28 @@ async function main(): Promise<number> {
         await act({ type: 'useIncomingDraft' });
       },
     },
+    {
+      /*
+      Up-arrow recall, which only has anything to walk once prompts have been sent. The ring is
+      read LAZILY, on the first Up with no entry showing (`native-host.ts:1209`), and the arm
+      awaits that read; `ComposerHistory::entries` had no writer at all until 2026-09-22, so this
+      is what grades the read, the recall state machine and `historyActive`.
+      */
+      label: 'up-arrow recall: up, up, down, an edit that drops out of it, and down again',
+      run: async () => {
+        await act({ type: 'editDraft', text: '' });
+        await act({ type: 'recallHistory', direction: 'up' });
+        await act({ type: 'recallHistory', direction: 'up' });
+        await act({ type: 'recallHistory', direction: 'down' });
+        // Any manual edit resets the cursor and keeps the ring, so the next Up re-reads it.
+        await act({ type: 'editDraft', text: 'typed over the recalled prompt' });
+        await act({ type: 'recallHistory', direction: 'up' });
+        // Walking forward past the newest entry leaves a blank composer rather than an entry.
+        await act({ type: 'recallHistory', direction: 'down' });
+        // And a Down with nothing showing is a no-op, not a read.
+        await act({ type: 'recallHistory', direction: 'down' });
+      },
+    },
   ];
 
   for (const step of steps) await step.run();

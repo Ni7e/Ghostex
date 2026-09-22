@@ -465,8 +465,25 @@ fn save_draft(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
     }]
 }
 
+/// `recallHistory`: Up walks back through what this machine has sent, Down walks forward.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// The ring is read lazily, on the FIRST Up with no entry showing, and the arm awaits that read
+/// (`native-host.ts:1209`). `ComposerHistory::entries` had no writer at all until then, so Up and
+/// Down did nothing and `historyActive` was permanently false.
 fn recall_history(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
     let up = action.param("direction").and_then(Value::as_str) == Some("up");
+    if up && state.composer.history.index.is_none() {
+        state.composer.history.loading = true;
+        return vec![Effect::ReadStorage {
+            key: crate::composer::storage::composer_history_key(&state.identity.session_key),
+        }];
+    }
+    apply_recall(state, up)
+}
+
+/// The half of the arm that runs once the ring is known.
+pub(crate) fn apply_recall(state: &mut ChatState, up: bool) -> Vec<Effect> {
     let recalled = if up {
         state.composer.history.recall_previous()
     } else {

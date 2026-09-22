@@ -154,6 +154,29 @@ fn settle_returned_claim(
     ]
 }
 
+/// `composerHistory = { entries: await composer('history'), index: null }`, then the Up the arm was
+/// suspended on.
+///
+/// The read only ever happens on an Up with no entry showing, so the recall that resumes is always
+/// backwards; a Down never reaches here because `recallNextSessionChatDraft` answers `null` with a
+/// null index.
+fn settle_history_read(
+    state: &mut ChatState,
+    key: &crate::event::StorageKey,
+    value: Option<&str>,
+) -> Vec<Effect> {
+    if key.store != crate::composer::storage::COMPOSER_HISTORY_STORE
+        || !state.composer.history.loading
+    {
+        return Vec::new();
+    }
+    state
+        .composer
+        .history
+        .adopt(crate::composer::storage::decode_composer_history(value));
+    crate::composer::actions::apply_recall(state, true)
+}
+
 /// Settles family d's carried state for this event.
 pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
     let mut effects = Vec::new();
@@ -188,6 +211,7 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
         }
         Event::StorageLoaded { key, value } => {
             effects.extend(settle_returned_claim(state, key, value.as_deref()));
+            effects.extend(settle_history_read(state, key, value.as_deref()));
         }
         Event::StorageWritten { key, error } => {
             if let Some(round) =

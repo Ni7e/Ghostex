@@ -80,6 +80,14 @@ pub struct BridgeTranslator {
     direct_answers: VecDeque<Event>,
     /// The retained record this run holds, so a core that writes one can read it back.
     retained_snapshot: Option<String>,
+    /// Recall-ring reads the core is waiting for, kept OUT of `storage_answers`.
+    ///
+    /// `composer('history')` is a SCAN of the sent-prompt store, not a record: the translator's
+    /// in-memory storage cannot reproduce it, and the payload of the bridge's own
+    /// `composer('history')` is the only answer both brains can agree on. It also must not join
+    /// the FIFO above: inserting one answer there delays every answer after it by one `resolve`,
+    /// which drifts the pairing for the rest of the run.
+    history_reads: VecDeque<StorageKey>,
     /// The revision the translator itself last drained, so a `take` asks "what changed since MY
     /// last drain" rather than replaying the other brain's counter.
     last_revision: u64,
@@ -199,6 +207,11 @@ impl BridgeTranslator {
                         method: None,
                     });
                 }
+                Effect::ReadStorage { key }
+                    if key.store == crate::composer::storage::COMPOSER_HISTORY_STORE =>
+                {
+                    self.history_reads.push_back(key.clone());
+                }
                 Effect::ReadStorage { key } => {
                     let value = self.storage.get(&slot(key)).cloned();
                     self.storage_answers.push_back(Event::StorageLoaded {
@@ -292,14 +305,40 @@ impl BridgeTranslator {
             BridgeCall::Frame(frame) => chat_frame(&frame),
             BridgeCall::BrokerMessage(message) => broker_events(&message),
             BridgeCall::Resolve { value, error, .. } => {
-                self.answer(value, error).into_iter().collect()
+                // The recall ring is answered BESIDE whatever this `resolve` was already paired
+                // with, never instead of it. `composer('history')` is a bridge round trip on the
+                // other side and an out-of-band read here, so consuming a FIFO slot for it (or
+                // freeing one) would move every storage answer after it by one record and drift
+                // the pairing for the rest of the run.
+                let ring = self.recall_ring(&value);
+                let claimed = ring.is_some();
+                let mut events: Vec<Event> = ring.into_iter().collect();
+                events.extend(self.answer(value, error, claimed));
+                events
             }
             BridgeCall::Query { .. } | BridgeCall::Take { .. } => Vec::new(),
         }
     }
 
+    /// The `composer('history')` answer, when this `resolve` is one and the core asked for it.
+    ///
+    /// The ring is a SCAN of the sent-prompt store, so the translator's in-memory storage cannot
+    /// reproduce it and the payload in front of us is the only answer both brains can agree on. It
+    /// is also the only bridge operation that answers a bare array while a recall is suspended,
+    /// which is a window exactly one `resolve` wide.
+    fn recall_ring(&mut self, result: &Value) -> Option<Event> {
+        if !result.is_array() {
+            return None;
+        }
+        let key = self.history_reads.pop_front()?;
+        Some(Event::StorageLoaded {
+            key,
+            value: serde_json::to_string(result).ok(),
+        })
+    }
+
     /// Turns one `resolve` into the event the core is waiting for.
-    fn answer(&mut self, result: Value, error: Value) -> Option<Event> {
+    fn answer(&mut self, result: Value, error: Value, claimed: bool) -> Option<Event> {
         let failed = (!error.is_null()).then_some(error);
         let boot = result.get("sessionKey").is_some() && result.get("clientId").is_some();
         let named = identified(&result);
@@ -319,7 +358,10 @@ impl BridgeTranslator {
             if let Some(event) = self.storage_answers.pop_front() {
                 return Some(event);
             }
-            self.unmatched_answers += 1;
+            // The recall ring has already taken this record, so it is answered, not orphaned.
+            if !claimed {
+                self.unmatched_answers += 1;
+            }
             return None;
         };
         let pending = self.outstanding.remove(at)?;

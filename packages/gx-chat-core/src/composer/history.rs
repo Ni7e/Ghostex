@@ -1,6 +1,11 @@
-//! Up-arrow recall of what this composer sent.
+//! Up-arrow recall of what this machine's composers have sent.
 //!
-//! Port of `packages/core-ui/chat/session-chat-composer-state.ts`.
+//! Port of `packages/core-ui/chat/session-chat-composer-state.ts`, minus its
+//! `pushSessionChatComposerHistory`: the native host never pushes locally, it re-reads. The ring
+//! is filled by `composer('history')` alone (`native-host.ts:1210`), which the HOST answers from
+//! the `sentHistory` store `composer('submitted')` writes, so a prompt sent in another chat is in
+//! the ring here too and this crate has no writer for it by design. React's composer keeps the
+//! local push; when it moves onto this core it reads the same way.
 
 /// The recall ring: what was sent, and where the cursor sits in it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -8,17 +13,22 @@ pub struct ComposerHistory {
     pub entries: Vec<String>,
     /// `None` means the composer is showing its own text, not a recalled entry.
     pub index: Option<usize>,
+    /// The `recallHistory` arm is suspended on `await composer('history')`.
+    ///
+    /// The ring is read LAZILY, on the first Up arrow with no entry showing
+    /// (`native-host.ts:1209`), and never again while the cursor is inside it. The core has no
+    /// `await`, so the arm returns here and finishes in family d's settle when the read lands.
+    pub loading: bool,
 }
 
 impl ComposerHistory {
-    /// Records a send, unless it is blank or repeats the newest entry. The cursor always resets.
-    pub fn push(&mut self, sent: &str) {
-        if sent.trim().is_empty() || self.entries.last().is_some_and(|last| last == sent) {
-            self.index = None;
-            return;
-        }
-        self.entries.push(sent.to_string());
+    /// Adopts what `composer('history')` answered, which replaces the ring wholesale.
+    ///
+    /// `composerHistory = { entries: await composer('history'), index: null }`.
+    pub fn adopt(&mut self, entries: Vec<String>) {
+        self.entries = entries;
         self.index = None;
+        self.loading = false;
     }
 
     /// One entry older, or `None` when there is no history at all.
