@@ -259,6 +259,54 @@ pub(super) fn record_sent_prompt(
     Ok(true)
 }
 
+/// One stored sent prompt, reduced to what the ordering and the recall need.
+struct SentRow {
+    created_at: String,
+    prompt_id: String,
+    /// The record's own key, so a row past the cap can be deleted without re-deriving it.
+    suffix: String,
+    content: String,
+}
+
+/// Every stored sent prompt in `listSentSessionChatMessages`'s order: newest first.
+///
+/// The order is the TypeScript's: `createdAt` descending, then `promptId` descending. Both are
+/// compared byte by byte here where `localeCompare` compares them by collation, which agrees for
+/// the values these fields hold (an ISO-8601 stamp and `sent:` plus a UUID). A row whose payload no
+/// longer decodes is skipped, which is what the index's decoder returning `null` does.
+fn sorted_sent_prompts(now_ms: i64) -> Vec<SentRow> {
+    let Ok(rows) = storage::scan("sentHistory", "", now_ms) else {
+        return Vec::new();
+    };
+    let mut prompts: Vec<SentRow> = rows
+        .into_iter()
+        .filter_map(|(suffix, raw)| {
+            let value: Value = serde_json::from_str(&raw).ok()?;
+            Some(SentRow {
+                created_at: value.get("createdAt")?.as_str()?.to_string(),
+                prompt_id: value
+                    .get("promptId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                suffix,
+                content: value
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            })
+        })
+        .collect();
+    prompts.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| right.prompt_id.cmp(&left.prompt_id))
+    });
+    prompts
+}
+
 /// Keeps the newest `keep` sent prompts and deletes the rest, the way
 /// `listSentSessionChatMessages` does.
 ///
@@ -269,43 +317,46 @@ pub(super) fn record_sent_prompt(
 /// refused and the user's Up-arrow recall kept showing the OLDEST fifty rather than the newest. The
 /// TypeScript prunes after its write because its service made room; this prunes before it too, so
 /// the write is admitted at all.
-///
-/// The order is the TypeScript's: `createdAt` descending, then `promptId` descending. Both are
-/// compared byte by byte here where `localeCompare` compares them by collation, which agrees for
-/// the values these fields hold (an ISO-8601 stamp and `sent:` plus a UUID).
 fn prune_sent_history(keep: usize, now_ms: i64) {
-    let Ok(rows) = storage::scan("sentHistory", "", now_ms) else {
-        return;
-    };
-    if rows.len() <= keep {
+    let prompts = sorted_sent_prompts(now_ms);
+    if prompts.len() <= keep {
         return;
     }
-    let mut prompts: Vec<(String, String, String)> = rows
-        .into_iter()
-        .filter_map(|(suffix, raw)| {
-            let value: Value = serde_json::from_str(&raw).ok()?;
-            Some((
-                value.get("createdAt")?.as_str()?.to_string(),
-                value
-                    .get("promptId")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-                suffix,
-            ))
-        })
-        .collect();
-    prompts.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
-    for (_, _, suffix) in prompts.into_iter().skip(keep) {
+    for row in prompts.into_iter().skip(keep) {
         let _ = storage::write(
             &StorageKey {
                 store: "sentHistory".to_string(),
-                suffix,
+                suffix: row.suffix,
             },
             None,
             now_ms,
         );
     }
+}
+
+/// `composer('history')`: the last 50 sent prompts as plain text, OLDEST first.
+///
+/// CDXC:SavedPrompts 2026-09-22 WHY:
+/// This is a SCAN of a host-owned store, not a record read, which is why the core cannot answer it
+/// from anything the boot read carries. `native-composer.ts` is
+/// `listSentSessionChatMessages().map(message => message.content).reverse()`, and all three steps
+/// are load bearing: the list is sorted newest first and capped at 50, the `reverse()` is what makes
+/// the ring oldest-first so `recallPreviousSessionChatDraft` walks backwards from the end, and the
+/// listing PRUNES as a side effect, so the first Up-arrow of a session is also what trims a history
+/// that grew past the cap. A prompt with no `content` reads as the empty string, which is what
+/// `message.content` does for a record written before that field existed.
+///
+/// The host reads it lazily, exactly like `native-host.ts:1210`: the TypeScript asks only on the
+/// first Up of a chat, so a session that never recalls never touches the store.
+pub(super) fn sent_history_contents(now_ms: i64) -> Vec<String> {
+    let mut contents: Vec<String> = sorted_sent_prompts(now_ms)
+        .into_iter()
+        .take(MAX_SENT_MESSAGES)
+        .map(|row| row.content)
+        .collect();
+    prune_sent_history(MAX_SENT_MESSAGES, now_ms);
+    contents.reverse();
+    contents
 }
 
 /// Records a delivery the daemon reported, once.
