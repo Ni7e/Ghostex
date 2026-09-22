@@ -3108,8 +3108,7 @@ impl GhostexGpuiApp {
                     to the clipboard and say so instead of silently dropping
                     the selected prompt.
                     */
-                    cx.write_to_clipboard(ClipboardItem::new_string(content));
-                    gpui_play_copy_sound();
+                    gpui_copy_to_clipboard(ClipboardItem::new_string(content), cx);
                     self.dispatch_gpui_app_modal_toast(
                         "info",
                         "Prompt copied to clipboard",

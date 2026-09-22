@@ -328,7 +328,10 @@ fn table_actions(
             "titlebar/copy.svg",
             p,
             move |cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(markdown.clone()));
+                crate::app::helpers::gpui_copy_to_clipboard(
+                    ClipboardItem::new_string(markdown.clone()),
+                    cx,
+                );
             },
         ))
         .child(table_action(
@@ -336,7 +339,10 @@ fn table_actions(
             "titlebar/layout-columns.svg",
             p,
             move |cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(table_csv(&csv)));
+                crate::app::helpers::gpui_copy_to_clipboard(
+                    ClipboardItem::new_string(table_csv(&csv)),
+                    cx,
+                );
             },
         ))
         .into_any_element()

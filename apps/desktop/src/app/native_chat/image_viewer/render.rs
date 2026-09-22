@@ -216,8 +216,10 @@ impl ImageViewerWindow {
                 _ => None,
             });
         if let Some(bytes) = bytes {
-            cx.write_to_clipboard(gpui::ClipboardItem::new_image(&bytes));
-            crate::app::helpers::gpui_play_copy_sound();
+            crate::app::helpers::gpui_copy_to_clipboard(
+                gpui::ClipboardItem::new_image(&bytes),
+                cx,
+            );
             self.chat.update(cx, |chat, cx| {
                 chat.note_image_viewer_action("Image copied", cx)
             });
@@ -232,8 +234,7 @@ impl ImageViewerWindow {
         else {
             return;
         };
-        cx.write_to_clipboard(gpui::ClipboardItem::new_string(path));
-        crate::app::helpers::gpui_play_copy_sound();
+        crate::app::helpers::gpui_copy_to_clipboard(gpui::ClipboardItem::new_string(path), cx);
         self.chat.update(cx, |chat, cx| {
             chat.note_image_viewer_action("Path copied", cx)
         });

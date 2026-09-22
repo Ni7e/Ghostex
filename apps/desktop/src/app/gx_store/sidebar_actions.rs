@@ -23,7 +23,7 @@ use gpui::ClipboardItem;
 use serde_json::{Value, json};
 
 use crate::GhostexGpuiApp;
-use crate::app::helpers::gpui_play_copy_sound;
+use crate::app::helpers::gpui_copy_to_clipboard;
 
 /// What this app run did with the actions the store owns. Memory only; the record lines are built
 /// from it.
@@ -154,7 +154,6 @@ impl GhostexGpuiApp {
         if details_text.trim().is_empty() {
             return;
         }
-        cx.write_to_clipboard(ClipboardItem::new_string(details_text.to_string()));
-        gpui_play_copy_sound();
+        gpui_copy_to_clipboard(ClipboardItem::new_string(details_text.to_string()), cx);
     }
 }

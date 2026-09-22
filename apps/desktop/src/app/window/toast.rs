@@ -486,12 +486,12 @@ impl Render for GpuiAppToastWindow {
                                                             })
                                                             .on_click(move |_, _, cx| {
                                                                 cx.stop_propagation();
-                                                                cx.write_to_clipboard(
+                                                                gpui_copy_to_clipboard(
                                                                     ClipboardItem::new_string(
                                                                         report.clone(),
                                                                     ),
+                                                                    cx,
                                                                 );
-                                                                gpui_play_copy_sound();
                                                             })
                                                             .child("Copy diagnostics"),
                                                     )

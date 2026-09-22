@@ -158,6 +158,8 @@ pub(crate) enum ExportTranscriptModalCommand {
     StartConversation { agent_id: String },
     Cancel,
     Reveal,
+    /// The exported file's path was just written to the clipboard; the host gives the copy feedback.
+    PathCopied,
 }
 
 pub(crate) type ExportTranscriptModalHost = Rc<dyn Fn(ExportTranscriptModalCommand, &mut App)>;
@@ -415,6 +417,7 @@ impl GpuiExportTranscriptModalWindow {
             return;
         };
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(path.clone()));
+        (self.host)(ExportTranscriptModalCommand::PathCopied, cx);
         self.copied = true;
         self.copied_generation = self.copied_generation.wrapping_add(1);
         let generation = self.copied_generation;

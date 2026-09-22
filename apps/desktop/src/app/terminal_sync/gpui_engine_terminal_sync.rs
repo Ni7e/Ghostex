@@ -692,7 +692,7 @@ impl GhostexGpuiApp {
                 cx,
             );
             view.apply_settings(view_settings);
-            view.set_copy_handler(Box::new(gpui_play_copy_sound));
+            view.set_copy_handler(Box::new(gpui_copy_feedback));
             if uses_zmx_visibility_claims {
                 view.enable_zmx_visibility_claims();
             }

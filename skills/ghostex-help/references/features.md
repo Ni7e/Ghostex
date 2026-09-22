@@ -1001,10 +1001,11 @@ Claude progress updates do not trigger completion notifications while Claude
 reports background work still running. Completion notifications arrive when
 Claude finishes after that work completes; requests for your input or permission
 still get your attention.
-Copy Sound is off by default. Enable it under Settings > Notifications > Sounds
-to hear a short sound when copying from a terminal, a chat message, the chat
-composer (including its right-click Copy menu), a copy button, or a menu
-(`copySound`).
+Every copy shows a small "Copied!" bubble at the pointer for a moment, whether
+it came from a terminal, a chat message, a copy button, or a menu. Copy Sound is
+off by default. Enable it under Settings > Notifications > Sounds to also hear a
+short sound when copying from a terminal, a chat message, the chat composer
+(including its right-click Copy menu), a copy button, or a menu (`copySound`).
 
 The Notifications bell sits in the sidebar's top row, just before the sidebar
 menu button, and shows how many notifications are unread. Click it to open the Notifications

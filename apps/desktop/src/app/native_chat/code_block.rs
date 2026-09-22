@@ -172,7 +172,10 @@ pub(super) fn header(
                     ))
                 })
                 .child(action("copy-fence", "titlebar/copy.svg", p, move |cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
+                    crate::app::helpers::gpui_copy_to_clipboard(
+                        ClipboardItem::new_string(code.clone()),
+                        cx,
+                    );
                 })),
         )
         .into_any_element()

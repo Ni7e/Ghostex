@@ -91,7 +91,13 @@ impl NativeChatView {
                                     }
                                     let offset =
                                         -chat.list.scroll_px_offset_for_scrollbar().y.as_f32();
-                                    let maximum = chat.list.max_offset_for_scrollbar().y.as_f32();
+                                    // The list's end padding is the band a collapsed box left
+                                    // behind (`ComposerFrame::transcript_inset`), not transcript:
+                                    // the gesture measures to the last row's end, so a collapsed
+                                    // box expands again as soon as the rows are all in view.
+                                    let maximum = (chat.list.max_offset_for_scrollbar().y.as_f32()
+                                        - chat.composer_animation.current_transcript_inset())
+                                    .max(0.0);
                                     let end_distance = (maximum - offset).max(0.0);
                                     // CDXC:SessionChat 2026-09-21 WHY: An upward wheel that leaves the list inside the band the collapsed box would only fill with the held inset is not a collapse gesture. Collapsing there uncovers no rows, and with the box expanding again 10px from the end it let a small up and down wobble at the edge flip the box on every reversal.
                                     if delta > 0.0

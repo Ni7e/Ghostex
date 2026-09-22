@@ -355,8 +355,8 @@ impl GhostexGpuiApp {
             "toast" => {
                 self.receive_gpui_app_toast_bridge_message(&message, cx);
             }
-            // CDXC:Clipboard 2026-09-15 SEE-ALSO: packages/core-ui/copy-sound.ts posts this from every React copy site; Rust owns the sound and its setting (gpui_play_copy_sound).
-            "playCopySound" => gpui_play_copy_sound(),
+            // CDXC:Clipboard 2026-09-15 SEE-ALSO: packages/core-ui/copy-sound.ts posts this from every React copy site; Rust owns the sound and its setting, and since 2026-09-22 the "Copied!" bubble too (gpui_copy_feedback).
+            "playCopySound" => gpui_copy_feedback(cx),
             /*
             CDXC:Settings 2026-07-29:
             The shared React modal host already reports its uncaught renderer

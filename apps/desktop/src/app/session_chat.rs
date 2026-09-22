@@ -1219,8 +1219,7 @@ impl GhostexGpuiApp {
         plugin_name: &str,
         cx: &mut gpui::Context<Self>,
     ) {
-        cx.write_to_clipboard(ClipboardItem::new_string(path.to_string()));
-        gpui_play_copy_sound();
+        gpui_copy_to_clipboard(ClipboardItem::new_string(path.to_string()), cx);
         self.upsert_gpui_app_toast(
             GpuiAppToast {
                 copy_text: None,
@@ -1247,8 +1246,7 @@ impl GhostexGpuiApp {
         reason: &str,
         cx: &mut gpui::Context<Self>,
     ) {
-        cx.write_to_clipboard(ClipboardItem::new_string(path.to_string()));
-        gpui_play_copy_sound();
+        gpui_copy_to_clipboard(ClipboardItem::new_string(path.to_string()), cx);
         self.upsert_gpui_app_toast(
             GpuiAppToast {
                 copy_text: None,
@@ -1298,8 +1296,7 @@ impl GhostexGpuiApp {
         } else {
             "Couldn't find this file. Try searching in Code.".to_string()
         };
-        cx.write_to_clipboard(ClipboardItem::new_string(path.to_string()));
-        gpui_play_copy_sound();
+        gpui_copy_to_clipboard(ClipboardItem::new_string(path.to_string()), cx);
         self.upsert_gpui_app_toast(
             GpuiAppToast {
                 copy_text: None,

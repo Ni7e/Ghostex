@@ -234,10 +234,10 @@ impl NativeChatView {
                 )
                 .on_click(cx.listener(move |chat, _, _, cx| {
                     if action["type"] == "copyPrompt" {
-                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text(
-                            &action, "text",
-                        )));
-                        crate::app::helpers::gpui_play_copy_sound();
+                        crate::app::helpers::gpui_copy_to_clipboard(
+                            gpui::ClipboardItem::new_string(text(&action, "text")),
+                            cx,
+                        );
                     } else {
                         chat.invoke(action.clone(), cx);
                     }
@@ -296,8 +296,10 @@ impl NativeChatView {
     ) {
         match action {
             ReplyAction::Copy => {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(markdown.to_owned()));
-                crate::app::helpers::gpui_play_copy_sound();
+                crate::app::helpers::gpui_copy_to_clipboard(
+                    gpui::ClipboardItem::new_string(markdown.to_owned()),
+                    cx,
+                );
             }
             ReplyAction::SaveMarkdown => {
                 self.invoke(json!({"type":"markdownSaveOpen","markdown":markdown}), cx)

@@ -145,6 +145,7 @@ impl GhostexGpuiApp {
                 self.pending_export_transcript_reveal_path = None;
                 self.release_native_app_modal_window(kind, cx);
             }
+            ExportTranscriptModalCommand::PathCopied => gpui_copy_feedback(cx),
         }
     }
 

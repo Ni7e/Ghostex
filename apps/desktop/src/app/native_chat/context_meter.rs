@@ -296,10 +296,10 @@ impl NativeChatView {
                     .when_some(copy, |item, copy| {
                         item.chat_cursor_pointer()
                             .on_click(cx.listener(move |_, _, _, cx| {
-                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-                                    copy.clone(),
-                                ));
-                                crate::app::helpers::gpui_play_copy_sound();
+                                crate::app::helpers::gpui_copy_to_clipboard(
+                                    gpui::ClipboardItem::new_string(copy.clone()),
+                                    cx,
+                                );
                             }))
                     }),
             );

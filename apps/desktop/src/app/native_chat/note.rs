@@ -90,9 +90,10 @@ impl NativeChatView {
                                                 .size(px(14.0 * s)),
                                         )
                                         .on_click(move |_, _, cx| {
-                                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-                                                value.clone(),
-                                            ))
+                                            crate::app::helpers::gpui_copy_to_clipboard(
+                                                gpui::ClipboardItem::new_string(value.clone()),
+                                                cx,
+                                            );
                                         }),
                                 )
                                 .child(self.icon_command(

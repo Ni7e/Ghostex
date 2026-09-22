@@ -227,3 +227,41 @@ void GhostexGpuiPrepareTitlebarPopupWindow(void *nativeView) {
     [window orderFrontRegardless];
   }
 }
+
+// Where the pointer is, in GPUI's global space: points from the top-left corner of the primary
+// display (the one whose bottom-left corner is AppKit's origin), which is the space window frames
+// are opened in.
+bool GhostexGpuiPointerScreenLocation(double *x, double *y) {
+  NSScreen *primary = NSScreen.screens.firstObject;
+  if (primary == nil || x == NULL || y == NULL) {
+    return false;
+  }
+  NSPoint location = NSEvent.mouseLocation;
+  *x = location.x;
+  *y = NSMaxY(primary.frame) - location.y;
+  return true;
+}
+
+// The "Copied!" bubble's window (app/window/copied_indicator.rs): a borderless non-activating
+// panel that ignores the mouse, so a click made while it fades lands on whatever it floats over,
+// and that joins every Space, so it shows over a fullscreen window too.
+void GhostexGpuiPrepareCopiedIndicatorWindow(void *nativeView) {
+  @autoreleasepool {
+    NSView *view = (__bridge NSView *)nativeView;
+    NSWindow *window = view.window;
+    if (window == nil) {
+      return;
+    }
+    GhostexGpuiRemoveToastPopupWindowChrome(nativeView);
+    window.ignoresMouseEvents = YES;
+    window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                NSWindowCollectionBehaviorFullScreenAuxiliary |
+                                NSWindowCollectionBehaviorIgnoresCycle |
+                                NSWindowCollectionBehaviorTransient;
+    if ([window isKindOfClass:[NSPanel class]]) {
+      ((NSPanel *)window).becomesKeyOnlyIfNeeded = YES;
+      window.hidesOnDeactivate = NO;
+    }
+    [window orderFrontRegardless];
+  }
+}

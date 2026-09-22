@@ -288,8 +288,7 @@ impl GhostexGpuiApp {
         reason: &str,
         cx: &mut gpui::Context<Self>,
     ) {
-        cx.write_to_clipboard(ClipboardItem::new_string(content.to_string()));
-        gpui_play_copy_sound();
+        gpui_copy_to_clipboard(ClipboardItem::new_string(content.to_string()), cx);
         self.upsert_gpui_app_toast(
             GpuiAppToast {
                 id: DOCS_ANNOTATION_FEEDBACK_COPIED_TOAST_ID.to_string(),

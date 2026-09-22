@@ -8,6 +8,40 @@ use serde_json::Value;
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
+
+/// How many times one menu takes key status back before a key loss closes it after all, so a
+/// program that refocuses the main window on every change cannot keep the two fighting.
+const MAX_REKEYS: u32 = 20;
+/// How long after a panel opens its key status is checked once.
+const SETTLE_KEY_AFTER: Duration = Duration::from_millis(150);
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn GhostexGpuiPointerPressedRecently() -> bool;
+    fn GhostexGpuiApplicationIsActive() -> bool;
+}
+
+/// Whether the key status a menu just lost went where the user sent it: to a pointer press
+/// somewhere in the app, or away with the app itself. Anything else took it without the user.
+fn key_loss_is_dismissal() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe { GhostexGpuiPointerPressedRecently() || !GhostexGpuiApplicationIsActive() }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+/// Starts watching for presses before the first menu can lose key status to one.
+fn watch_pointer_presses() {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        GhostexGpuiPointerPressedRecently();
+    }
+}
 
 pub(in crate::app::native_chat) struct ChatOptionMenu {
     pub(super) chat: gpui::WeakEntity<NativeChatView>,
@@ -23,6 +57,8 @@ pub(in crate::app::native_chat) struct ChatOptionMenu {
     parent: *mut std::ffi::c_void,
     /// Opened at the pointer (right-click menus), drawn with `MenuMetrics::CONTEXT`.
     compact: bool,
+    /// How many times this menu has taken key status back (`retake_key`).
+    rekeys: u32,
 }
 
 pub(super) struct ChatOptionMenuPanel {
@@ -111,22 +147,58 @@ impl ChatOptionMenu {
         });
     }
 
-    fn check_active(&mut self, cx: &mut Context<Self>) {
-        if self.opening || self.closed {
-            return;
-        }
-        if !self.windows.iter().any(|handle| {
+    fn any_window_active(&self, cx: &mut Context<Self>) -> bool {
+        self.windows.iter().any(|handle| {
             handle
                 .update(cx, |_, window, _| window.is_window_active())
                 .unwrap_or(false)
-        }) {
-            // The press that took the window away is the one a trigger is about to report as a
-            // click, so the trigger it belonged to is remembered before the menu goes (menu_toggle.rs).
-            let _ = self
-                .chat
-                .update(cx, |chat, _| chat.menu_toggle.note_dismissed());
-            self.close_with_focus(None, false, cx);
+        })
+    }
+
+    /// CDXC:SessionChat 2026-09-22 WHY:
+    /// A key loss closes the menu only when the user caused it. On one customer's machine every
+    /// chat menu (model, mode, options) showed for a frame and closed, on the same code that works
+    /// elsewhere: the main window took key status back the moment the menu had it. AppKit does that
+    /// on its own when the app's activation is still completing as the menu opens (a press on an
+    /// inactive Ghostex both activates it and opens the menu), and window-focus utilities do it on
+    /// any focus change. Neither is a press, so unless a mouse button is down, a press was seen
+    /// within the last moments, or the app itself is no longer active, the menu takes key status
+    /// back instead of closing, up to `MAX_REKEYS` times.
+    fn check_active(&mut self, cx: &mut Context<Self>) {
+        if self.opening || self.closed || self.any_window_active(cx) {
+            return;
         }
+        if self.retake_key(cx) {
+            return;
+        }
+        // The press that took the window away is the one a trigger is about to report as a
+        // click, so the trigger it belonged to is remembered before the menu goes (menu_toggle.rs).
+        let _ = self
+            .chat
+            .update(cx, |chat, _| chat.menu_toggle.note_dismissed());
+        self.close_with_focus(None, false, cx);
+    }
+
+    /// Makes the deepest panel key again when nothing the user did took key status away.
+    fn retake_key(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.rekeys >= MAX_REKEYS || key_loss_is_dismissal() {
+            return false;
+        }
+        let Some(handle) = self.windows.last().copied() else {
+            return false;
+        };
+        self.rekeys += 1;
+        let _ = handle.update(cx, |_, window, _| window.activate_window());
+        true
+    }
+
+    /// A panel that opened while the app was still being activated never became key, and so was
+    /// never told it lost it: checked once after it opened, it takes key status the same way.
+    fn settle_key(&mut self, cx: &mut Context<Self>) {
+        if self.opening || self.closed || self.any_window_active(cx) {
+            return;
+        }
+        self.retake_key(cx);
     }
 
     /// Runs a chat command without closing the menu (Switch Account panel controls).
@@ -414,6 +486,12 @@ impl ChatOptionMenu {
                     }
                 },
             );
+            let settle = menu.clone();
+            cx.spawn(async move |cx| {
+                cx.background_executor().timer(SETTLE_KEY_AFTER).await;
+                let _ = cx.update(|cx| settle.update(cx, |menu, cx| menu.settle_key(cx)));
+            })
+            .detach();
             menu.update(cx, |menu, cx| {
                 menu.opening = false;
                 match result {
@@ -508,6 +586,7 @@ impl NativeChatView {
         if rows.is_empty() {
             return;
         }
+        watch_pointer_presses();
         if let Some(menu) = self.option_menu.take() {
             menu.update(cx, |menu, cx| menu.close_with_focus(None, false, cx));
         }
@@ -531,6 +610,7 @@ impl NativeChatView {
             anchors: vec![],
             parent,
             compact: below,
+            rekeys: 0,
         });
         let anchor = Bounds::new(source_bounds.origin + trigger.origin, trigger.size);
         menu.update(cx, |menu, cx| {

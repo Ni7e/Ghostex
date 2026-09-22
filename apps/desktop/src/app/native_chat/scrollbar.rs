@@ -41,6 +41,14 @@ impl NativeChatView {
     /// (a constant viewport against a content height that carries the composer inset), and it leaves
     /// the thumb still while the box resizes.
     ///
+    /// CDXC:SessionChat 2026-09-22 WHY:
+    /// That scroll size is handed to the component as a closure, read when the bar lays out, not
+    /// computed here while the pane builds its elements. Built here it was the previous frame's max
+    /// offset: a streaming reply is spliced out and remeasured every frame, so the list's content
+    /// height at build time lacked the row being remeasured while the offset the bar read after
+    /// the list's layout included it, and the thumb jumped down and back on every streamed line
+    /// while the reader sat at the end of the transcript.
+    ///
     /// CDXC:SessionChat 2026-09-21 DECISION:
     /// "We should only show it in the gpui chat view when the user scrolls", not when new messages
     /// appear. The component's own rule shows the bar on any offset change, and the offset of a list
@@ -55,10 +63,9 @@ impl NativeChatView {
             .scrollbar_show(ScrollbarShow::Scrolling)
             .shown_by_host_scroll(self.transcript_scrolled_at);
         if measured {
-            bar = bar.scroll_size(size(
-                px(0.0),
-                track + self.list.max_offset_for_scrollbar().y,
-            ));
+            let list = self.list.clone();
+            bar = bar
+                .scroll_size_with(move || size(px(0.0), track + list.max_offset_for_scrollbar().y));
         }
         let next_track = self.scrollbar_track.clone();
         let pane = self.bounds.clone();

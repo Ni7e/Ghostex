@@ -158,8 +158,7 @@ impl GpuiTitlebarReadingPanel {
             };
             gpui_resources_clean_ram_prompt(snapshot)
         };
-        cx.write_to_clipboard(ClipboardItem::new_string(prompt));
-        gpui_play_copy_sound();
+        gpui_copy_to_clipboard(ClipboardItem::new_string(prompt), cx);
         if let GpuiTitlebarReadingPanelState::Resources {
             clean_ram_copied, ..
         } = &mut self.state

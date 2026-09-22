@@ -41,6 +41,8 @@ impl GhostexGpuiApp {
             let Some(surface) = self.command_terminal_ghostty_surfaces.get(&slot_id) else {
                 continue;
             };
+            // The feedback needs the app after both closures have let go of it.
+            let mut copied = false;
             surface.drain_runtime_clipboard_requests(
                 true,
                 || {
@@ -52,10 +54,13 @@ impl GhostexGpuiApp {
                 |text| {
                     terminal_runtime_clipboard_write_standard_text(text, |item| {
                         cx.write_to_clipboard(item);
-                        gpui_play_copy_sound();
+                        copied = true;
                     });
                 },
             );
+            if copied {
+                gpui_copy_feedback(cx);
+            }
             let action_events = surface.drain_runtime_action_events();
             if !action_events.is_empty() {
                 let runtime_session_id = surface.runtime_session_id();

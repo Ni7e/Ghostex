@@ -672,8 +672,7 @@ impl NativeChatView {
                 }
                 Some("markdownSaved") => {
                     let path = request["params"]["path"].as_str().unwrap_or_default().to_string();
-                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(path.clone()));
-                    crate::app::helpers::gpui_play_copy_sound();
+                    crate::app::helpers::gpui_copy_to_clipboard(gpui::ClipboardItem::new_string(path.clone()), cx);
                     if let Some(main) = self.main_window {
                         cx.defer(move |cx| {
                             let _ = main.update(cx, |_, window, cx| {
@@ -690,8 +689,7 @@ impl NativeChatView {
                 // `markdownSaved`), so nothing here changes under `chatBrain: quickjs`.
                 Some("copy") => {
                     if let Some(text) = request["params"]["text"].as_str() {
-                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
-                        crate::app::helpers::gpui_play_copy_sound();
+                        crate::app::helpers::gpui_copy_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()), cx);
                     }
                 }
                 Some("toast") => {

@@ -538,8 +538,7 @@ impl GhostexGpuiApp {
                 .await;
             if let Err(message) = result {
                 let _ = this.update(cx, |this, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(failed_file_path));
-                    gpui_play_copy_sound();
+                    gpui_copy_to_clipboard(ClipboardItem::new_string(failed_file_path), cx);
                     let (id, title) = match origin {
                         PendingSourceFileOpenOrigin::AgentsHub => (
                             "gpui-agents-hub-source-open-failed",

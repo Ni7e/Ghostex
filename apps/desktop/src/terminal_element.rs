@@ -570,7 +570,7 @@ pub type TerminalContextMenuHandler = Box<dyn Fn(Point<Pixels>, bool, &mut Windo
 /// Called after this view writes the clipboard for the user (copy on select,
 /// Cmd+C, OSC 52). The element stays host-agnostic: the app installs the copy
 /// sound here, and the standalone demo binary installs nothing.
-pub type TerminalCopyHandler = Box<dyn Fn()>;
+pub type TerminalCopyHandler = Box<dyn Fn(&mut App)>;
 
 /// Entity that owns a live terminal: the P1b model, the latest snapshot, and
 /// the shaped-row cache. Rendered by [`TerminalElement`]; its own `Render`
@@ -861,9 +861,9 @@ impl TerminalView {
         self.copy_handler = Some(handler);
     }
 
-    fn notify_copied(&self) {
+    fn notify_copied(&self, cx: &mut App) {
         if let Some(handler) = &self.copy_handler {
-            handler();
+            handler(cx);
         }
     }
 
@@ -1030,7 +1030,7 @@ impl TerminalView {
             TerminalEvent::ClipboardWriteRequested => {
                 for text in self.model.take_clipboard_write_requests() {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
-                    self.notify_copied();
+                    self.notify_copied(cx);
                 }
             }
         }
@@ -1740,7 +1740,7 @@ impl TerminalView {
                 text.truncate(text.trim_end().len());
             }
             cx.write_to_clipboard(ClipboardItem::new_string(text));
-            self.notify_copied();
+            self.notify_copied(cx);
             if self.settings.selection_clear_on_copy {
                 self.selection = None;
                 cx.notify();

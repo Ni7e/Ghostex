@@ -244,6 +244,7 @@ fn open_export_transcript(demo: &DemoEnv, cx: &mut App) {
             eprintln!("reveal");
             cx.quit();
         }
+        ExportTranscriptModalCommand::PathCopied => eprintln!("path copied (copy feedback)"),
     });
     let config = ExportTranscriptModalConfig {
         agents,

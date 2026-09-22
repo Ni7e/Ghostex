@@ -59,7 +59,7 @@ impl GhostexGpuiApp {
                     .as_deref()
                     == Some("playCopySound") =>
             {
-                gpui_play_copy_sound();
+                gpui_copy_feedback(cx);
             }
             (
                 ProjectWorkareaCefSurfaceSlotKey::Manage,

@@ -203,6 +203,16 @@ impl ComposerAnimation {
         (self.expanded_natural - collapsed).max(0.0)
     }
 
+    /// The inset the last painted frame gave the transcript, for readers between frames.
+    pub(super) fn current_transcript_inset(&self) -> f32 {
+        let painted = if self.started.is_some() {
+            self.current.unwrap_or(self.target)
+        } else {
+            self.target
+        };
+        self.transcript_inset(painted)
+    }
+
     fn transcript_inset(&self, painted: f32) -> f32 {
         (self.expanded_natural - painted).max(0.0)
     }

@@ -243,6 +243,24 @@ pub(crate) fn gpui_play_copy_sound() {
     let _ = gpui_spawn_completion_sound_player(&sound_path);
 }
 
+/// CDXC:Clipboard 2026-09-22 DECISION:
+/// User: "We need to add copy indicators for every place that you copy in the app. We need to show
+/// a small tooltip whenever they copy that appears on screen that says 'Copied!'". Every copy site
+/// gives its feedback through this one function, after writing the clipboard itself or through
+/// `gpui_copy_to_clipboard`: the copy sound when that setting is on, and the "Copied!" bubble at
+/// the pointer (`app::window::copied_indicator`). The React pages inside the app reach it through
+/// the `playCopySound` bridge message they already post, so they need no second message.
+pub(crate) fn gpui_copy_feedback(cx: &mut gpui::App) {
+    gpui_play_copy_sound();
+    crate::app::window::copied_indicator::show_copied_indicator(cx);
+}
+
+/// Writes `item` to the clipboard with the feedback every copy in the app gives.
+pub(crate) fn gpui_copy_to_clipboard(item: gpui::ClipboardItem, cx: &mut gpui::App) {
+    cx.write_to_clipboard(item);
+    gpui_copy_feedback(cx);
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) fn gpui_request_macos_notification_permission()
 -> GpuiMacOSNotificationAuthorizationStatus {

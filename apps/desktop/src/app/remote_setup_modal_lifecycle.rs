@@ -100,7 +100,7 @@ impl GhostexGpuiApp {
                 );
             }
             RemoteSetupModalCommand::AndroidLinkCopied => {
-                gpui_play_copy_sound();
+                gpui_copy_feedback(cx);
             }
             RemoteSetupModalCommand::Connect => {
                 cx.spawn(async move |this, cx| {

@@ -457,8 +457,7 @@ impl Render for GpuiTitlebarPopupWindow {
                         else {
                             return;
                         };
-                        cx.write_to_clipboard(ClipboardItem::new_string(branch));
-                        gpui_play_copy_sound();
+                        gpui_copy_to_clipboard(ClipboardItem::new_string(branch), cx);
                     });
                 }),
             )
