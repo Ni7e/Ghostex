@@ -20,6 +20,9 @@ pub struct SessionState {
     pub boot_config: Option<crate::event::StartConfig>,
     /// The boot read in flight, so a late answer to a retired one is dropped.
     pub boot_read_request: Option<u64>,
+    /// The small cache the sidebar and the chat share, which is what a session switch restores its
+    /// account, context usage and status line from.
+    pub presentation: crate::session::presentation::PresentationCache,
     /// The transcript status the server reported, before the local working derivation.
     pub server_status: ChatStatus,
     /// The failure copy, or `None`. Set only by a read or a frame that says `error`.
@@ -93,6 +96,7 @@ impl Default for SessionState {
     fn default() -> Self {
         Self {
             boot_config: None,
+            presentation: Default::default(),
             boot_read_request: None,
             server_status: ChatStatus::Loading,
             error: None,

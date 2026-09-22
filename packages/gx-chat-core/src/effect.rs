@@ -46,6 +46,38 @@ pub enum Effect {
     ///
     /// A host performs the reads in the order given and answers once with the same order.
     ReadStorageBatch { keys: Vec<StorageKey> },
+    /// Read this session's retained transcript; answered by
+    /// [`crate::Event::RetainedSnapshotLoaded`].
+    ///
+    /// `readPersistedSessionChat` in
+    /// `apps/desktop/sidebar/session-chat-runtime/persistence.ts`: one record of the managed store
+    /// [`crate::session::persistence::SNAPSHOTS_STORE`], keyed by
+    /// [`crate::session::persistence::storage_key`], which the host builds because only it knows
+    /// the machine id. Its own effect rather than an [`Effect::ReadStorage`] for two reasons: the
+    /// core must not build a storage key string, and this round trip belongs to the STORE rather
+    /// than to an action, so it must not join `publish_awaits` and move a publish.
+    ReadRetainedSnapshot,
+    /// Write this session's retained transcript back. `value` of `None` deletes the record.
+    ///
+    /// `persistSessionChat`, which is `storage.update(key, previous => …)`: the host performs the
+    /// same read-modify-write, keeping `previous` when its `savedAt` is NEWER than this record's,
+    /// so two writers racing cannot roll the tail backwards. Nothing answers it; a failed cache
+    /// write is not a failure the chat reports, and the live stream stays authoritative.
+    WriteRetainedSnapshot { value: Option<String> },
+    /// The presentation cache the sidebar and the chat share was updated.
+    ///
+    /// `createSessionChatPresentationStore(…, (state) => requests.push({kind: 'broker', method:
+    /// 'presentation', params: {state}}))` in `native-host.ts:676`, which the desktop host already
+    /// dispatches (`relay_session_chat_runtime_request`, `method == "presentation"`). `state` is
+    /// the WHOLE merged snapshot, not the patch, because that is what the store's `onChange`
+    /// receives.
+    ///
+    /// CDXC:SessionChat 2026-09-14 DECISION:
+    /// User: returning to a chat should immediately restore its account, context usage and status
+    /// line, then refresh them in the background; initial waiting belongs only to a chat that has
+    /// not loaded yet. Without this effect the core could read the cache at boot and never write
+    /// it back, so the second visit was as empty as the first.
+    UpdatePresentation { state: Box<Value> },
     /// Read everything the chat needs at boot in one go; answered by
     /// [`crate::Event::ComposerBootRead`].
     ///

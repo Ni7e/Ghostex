@@ -35,6 +35,9 @@ pub fn apply_agent_identity(state: &mut ChatState, patch: &AgentIdentity) {
             &patch.session_agent_id.value().cloned(),
         );
     let changed = account_changed || differs(&session.agent_session_id, &patch.agent_session_id);
+    // `accountChanged ? {accounts: undefined} : {}` on the presentation write below: the cached
+    // account belongs to the account that is going away.
+    session.presentation.account_changed |= account_changed;
     if changed {
         // `setSelectedOptions(null)` bails out when it was already null, so only a real clear is
         // a new identity for family e1's detection dep.

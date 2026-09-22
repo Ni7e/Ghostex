@@ -19,6 +19,7 @@ pub mod merge;
 pub mod pagination;
 pub mod pending;
 pub mod persistence;
+pub mod presentation;
 pub mod reads;
 pub mod sends;
 pub mod settle;

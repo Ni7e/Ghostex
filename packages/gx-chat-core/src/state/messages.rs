@@ -66,6 +66,19 @@ pub struct MessagesState {
     pub seed_started_at_ms: f64,
     /// How many seed reads have been retried inside that window.
     pub seed_attempt: u32,
+    /// `JSON.stringify([machineId, projectId, sessionId])`, the retained record's own key.
+    ///
+    /// The host builds it (it is the one that knows the machine) and passes it in with
+    /// [`crate::event::StartConfig::retained_key`]; the core writes it back inside the record so
+    /// the bytes match what an installed Ghostex already has on disk.
+    pub retained_key: String,
+    /// `updatedAt`: when the fold the next write will carry was made.
+    pub retained_saved_at_ms: f64,
+    /// When the debounced retained write is due, or `None` when none is pending.
+    pub persist_due_ms: Option<f64>,
+    /// The fold the last [`crate::session::persistence::schedule`] was made for, so one fold asks
+    /// for one write.
+    pub persisted_revision: u64,
     /// Bumped whenever an authoritative frame or read replaces the folded snapshot.
     ///
     /// The composed list the projection reads is `useMemo`'d over that fold in the TypeScript, so

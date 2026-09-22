@@ -49,6 +49,15 @@ pub enum Event {
         keys: Vec<StorageKey>,
         error: Option<String>,
     },
+    /// The answer to [`crate::Effect::ReadRetainedSnapshot`], or `None` when nothing was stored.
+    RetainedSnapshotLoaded { value: Option<String> },
+    /// [`crate::Effect::ReadComposerBoot`] was refused.
+    ///
+    /// `start`'s own `.catch` in `native-host.ts:659`: the transcript list is emptied and the
+    /// document becomes `{status: 'error', error}`, whatever the chat had drawn. Without it a
+    /// refused `composer('read')` leaves the core with no controller, and therefore silent, for
+    /// ever.
+    ComposerBootFailed { error: String },
     /// The answer to [`crate::Effect::ReadComposerBoot`].
     ///
     /// One read rather than a dozen, because the host already performs it as one:
@@ -95,6 +104,14 @@ pub struct StartConfig {
     /// The Chat Lab's scenario, when this chat is a preview rather than a session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<Value>,
+    /// `JSON.stringify([machineId, projectId, sessionId])`, the key of this session's retained
+    /// transcript record.
+    ///
+    /// The host builds it with [`crate::session::persistence::storage_key`], because only it knows
+    /// the machine id, and the core writes it back inside the record. Empty when the host retains
+    /// nothing, which is what the Chat Lab and an old recording look like.
+    #[serde(default)]
+    pub retained_key: String,
 }
 
 /// Everything `composer('read')` answers with, in the order that host writes it.

@@ -249,6 +249,22 @@ impl ChatCore {
         // the snapshot it has (its `snapshot` variable is not refreshed without a publish).
         let requested = std::mem::take(&mut self.state.core.publish_requested);
         let chain_continued = std::mem::take(&mut self.state.core.chain_continued);
+        // `start`'s `.catch`: `transcriptItems = []; snapshot = {status: 'error', error};
+        // revision++`. It runs with no controller at all, so it is decided before the gate below
+        // and replaces the document rather than assembling one.
+        if let Some(error) = self.state.core.boot_error.take() {
+            self.document = crate::document::Document {
+                status: "error".to_string(),
+                error: ghostex_gx_protocol::Tri::Value(error),
+                ..Default::default()
+            };
+            self.parts = FrameParts::default();
+            self.state.transcript_view.projection_revision += 1;
+            self.parts_revision = self.state.transcript_view.projection_revision;
+            self.published_context = self.context.clone();
+            self.revision += 1;
+            return;
+        }
         // `if (controller) publish(...)`: before the boot read answers there is no controller, so
         // nothing the core has done can ship yet and the host's first drain is empty.
         if !self.state.core.controller_started {

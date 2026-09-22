@@ -44,7 +44,24 @@ pub fn handle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
 /// It owns the seam's own bookkeeping rather than a surface: the answer an in-flight action was
 /// waiting on is what ends that action's turn, and `action` in `native-host.ts` publishes there
 /// (`crate::dispatch::actions::dispatch`).
-pub fn settle(state: &mut ChatState, event: &Event, _context: &ChatContext) -> Vec<Effect> {
+pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Effect> {
+    let effects = settle_awaits(state, event);
+    // `schedulePersistence()` is called from every place `store.ts` replaces `this.snapshot`, which
+    // is every place the core bumps `authoritative_revision`. One check instead of six call sites,
+    // and the same decision.
+    if state.messages.persisted_revision != state.messages.authoritative_revision {
+        state.messages.persisted_revision = state.messages.authoritative_revision;
+        crate::session::persistence::schedule(state, context);
+    }
+    effects
+        .into_iter()
+        .chain(crate::session::persistence::flush_due(state, context))
+        .chain(crate::session::presentation::settle(state, context))
+        .collect()
+}
+
+/// The publish chain's own bookkeeping, which is what the settle above is mostly for.
+fn settle_awaits(state: &mut ChatState, event: &Event) -> Vec<Effect> {
     match event {
         Event::RpcSettled {
             request_id,
@@ -81,6 +98,11 @@ fn route(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Eff
     match event {
         Event::Start(config) => start(state, config, context),
         Event::ComposerBootRead(read) => boot_read(state, read, context),
+        Event::ComposerBootFailed { error } => boot_failed(state, error),
+        Event::RetainedSnapshotLoaded { value } => {
+            crate::session::persistence::adopt(state, value.as_deref(), context);
+            Vec::new()
+        }
         Event::Frame(frame) => frame_arrived(state, frame, context),
         Event::Connection(update) => connection(state, *update, context),
         Event::RpcSettled {
@@ -99,22 +121,45 @@ fn route(state: &mut ChatState, event: &Event, context: &ChatContext) -> Vec<Eff
 
 /// The host is opening this chat.
 ///
-/// Nothing the document can see moves here, and nothing is subscribed or read: `start` in
-/// `native-host.ts` asks for `composer('read')` and waits, so the first frame the host drains
-/// carries no snapshot at all. The identity, the retained transcript and the first two calls all
-/// land in [`boot_read`].
+/// Nothing the document can see moves here, and nothing is subscribed: `start` in `native-host.ts`
+/// asks for `composer('read')` and waits, so the first frame the host drains carries no snapshot at
+/// all. The identity, the cached transcript and the first two calls all land in [`boot_read`]. The
+/// one read that does go out here is the store's own hydration
+/// (`apps/desktop/sidebar/session-chat-runtime/store.ts:113`, in the `RetainedSession`
+/// constructor), which runs beside the boot read rather than after it.
 fn start(state: &mut ChatState, config: &StartConfig, context: &ChatContext) -> Vec<Effect> {
     state.identity.project_id = config.project_id.clone();
     state.identity.session_id = config.session_id.clone();
+    state.messages.retained_key = config.retained_key.clone();
     state.messages.generation += 1;
     state.messages.limit = state.messages.limit.max(INITIAL_LIMIT);
     state.messages.last_frame_at_ms = context.now_ms;
     state.messages.seed_started_at_ms = context.now_ms;
     state.messages.seed_attempt = 0;
     state.session.boot_config = Some(config.clone());
+    // `bootConfig = config; if (booting) return;` (`native-host.ts:640`): a second `start` while a
+    // boot read is still in flight replaces the config and asks for nothing.
+    if state.session.boot_read_request.is_some() {
+        return Vec::new();
+    }
     let request_id = state.core.allocate_request_id();
     state.session.boot_read_request = Some(request_id);
-    vec![Effect::ReadComposerBoot { request_id }]
+    vec![
+        Effect::ReadComposerBoot { request_id },
+        crate::session::persistence::read_at_boot(),
+    ]
+}
+
+/// `start`'s own `.catch`: the transcript is emptied and the document becomes the error state.
+///
+/// `booting` is cleared in the `.finally`, so a refused read leaves the chat retryable rather than
+/// wedged. Until 2026-09-22 the core cleared `boot_read_request` only on success and had no
+/// failure arm at all, so a refused `composer('read')` never started a controller and the core
+/// published nothing for the rest of the session.
+fn boot_failed(state: &mut ChatState, error: &str) -> Vec<Effect> {
+    state.session.boot_read_request = None;
+    state.core.boot_error = Some(error.to_string());
+    Vec::new()
 }
 
 /// The boot read answered: adopt the client id and the cached transcript, then subscribe and seed.
@@ -133,25 +178,21 @@ pub fn boot_read(
     state.identity.session_key = read.session_key.clone();
     let config = state.session.boot_config.clone().unwrap_or_default();
     state.core.preview_settings = config.preview.clone();
-    // CDXC:SessionChat 2026-09-22 WHY:
-    // `presentation.setWorkingDirectory(transport.presentation.getSnapshot().workingDirectory)`
-    // runs on every publish in `native-host.ts:415`, and it is what turns a diff card's absolute
-    // path into one relative to the project. `StartConfig::initial_presentation` carried the same
-    // cache into the core and was never read, so `TranscriptViewState::working_directory` had no
-    // writer and every file-change row drew a full path.
-    state.transcript_view.working_directory = config
-        .initial_presentation
-        .as_ref()
-        .and_then(|cache| cache.get("workingDirectory"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
+    // The `sessionChanged` branch of the subscribe effect (`controller.ts:853`): the agent
+    // identity, the status line's own options and the working directory come back from the shared
+    // cache before anything is read, which is what makes a return to a chat immediate.
+    // `setWorkingDirectory` is read again on every publish in `native-host.ts:415`, and it is what
+    // turns a diff card's absolute path into one relative to the project.
+    crate::session::presentation::seed(state, config.initial_presentation.as_ref());
 
     // Retained data is folded before the first paint, so a session switch never shows an empty
-    // transcript between mount and the subscription's first frame.
+    // transcript between mount and the subscription's first frame. `getCachedSnapshot` reads the
+    // store's own `this.snapshot`, so a hydration read that has already landed owns the tail and
+    // this must not roll it back.
     if let Some(cached) = config
         .initial_snapshot
         .as_ref()
+        .filter(|_| state.messages.snapshot.is_none())
         .and_then(|value| serde_json::from_value::<FoldedSnapshot>(value.clone()).ok())
     {
         state.messages.position.epoch = Some(cached.result.epoch);
@@ -161,10 +202,17 @@ pub fn boot_read(
             .limit
             .max(cached.result.messages.len() as u32)
             .min(MAX_LIMIT);
-        apply_draft_agent_carriage(state, &cached.result);
-        apply_authoritative(state, &cached.result, true, context);
+        // A retained fold whose identity contradicts the cache belongs to a conversation this one
+        // has moved on from, so its read-only draft-agent fields stay out.
+        let matching = crate::session::presentation::identity_matches(state, &cached.result);
+        if matching {
+            apply_draft_agent_carriage(state, &cached.result);
+        }
+        apply_authoritative(state, &cached.result, matching, context);
         state.messages.snapshot = Some(cached);
         state.messages.authoritative_revision += 1;
+        // The host handed this fold over; writing it straight back would only restamp it.
+        state.messages.persisted_revision = state.messages.authoritative_revision;
     }
 
     // The stall watchdog runs for as long as the chat is open. Nothing below the socket reports a

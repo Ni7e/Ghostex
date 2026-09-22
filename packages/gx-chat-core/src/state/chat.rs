@@ -130,6 +130,12 @@ pub struct CoreState {
     pub awaited_refusal: Option<(String, Option<String>)>,
     /// Set by a family that has put this dispatch's refusal somewhere of its own.
     pub refusal_claimed: bool,
+    /// The boot read was refused, and the document it leaves behind has not shipped yet.
+    ///
+    /// `start`'s `.catch` in `native-host.ts:659` replaces the whole snapshot with
+    /// `{status: 'error', error}` and bumps the revision, WITHOUT a controller: it is the one
+    /// document the core publishes that is not assembled from the families.
+    pub boot_error: Option<String>,
     /// The id the next request carries, for every family.
     ///
     /// One counter for the whole core, because [`crate::Event::RpcSettled`] routes by id alone: two

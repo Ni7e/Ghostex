@@ -71,6 +71,15 @@ pub struct BridgeTranslator {
     /// core's is an [`Effect`]. Delivering them there rather than immediately is what puts a
     /// `summaryMode = await composer('summary', …)` on the same turn in both brains.
     storage_answers: VecDeque<Event>,
+    /// Answers the OTHER brain never asked the bridge for, delivered on the same turn.
+    ///
+    /// The retained transcript is `store.ts`'s, not `native-host.ts`'s: its read and its write go
+    /// straight to the managed store and produce no `resolve` record at all. Queueing them with
+    /// the storage answers would consume a `resolve` that belongs to a real round trip and drift
+    /// every answer after it, so they are handed back at once instead.
+    direct_answers: VecDeque<Event>,
+    /// The retained record this run holds, so a core that writes one can read it back.
+    retained_snapshot: Option<String>,
     /// The revision the translator itself last drained, so a `take` asks "what changed since MY
     /// last drain" rather than replaying the other brain's counter.
     last_revision: u64,
@@ -114,6 +123,11 @@ impl BridgeTranslator {
                     self.record(&effects);
                     outcome.effects.extend(effects);
                     outcome.applied += 1;
+                    while let Some(answer) = self.direct_answers.pop_front() {
+                        let round = core.handle(answer, context.clone());
+                        self.record(&round);
+                        outcome.effects.extend(round);
+                    }
                 }
                 outcome
             }
@@ -235,6 +249,16 @@ impl BridgeTranslator {
                         key: key.clone(),
                         error: None,
                     });
+                }
+                // The store's own round trips, which the bridge never carried.
+                Effect::ReadRetainedSnapshot => {
+                    self.direct_answers
+                        .push_back(Event::RetainedSnapshotLoaded {
+                            value: self.retained_snapshot.clone(),
+                        });
+                }
+                Effect::WriteRetainedSnapshot { value } => {
+                    self.retained_snapshot.clone_from(value);
                 }
                 Effect::FlushStorage { store } => {
                     self.storage_answers.push_back(Event::StorageWritten {

@@ -28,7 +28,9 @@
 #  5. The per-family checks that cover ground no recording reaches (`js_number_check`'s 40 rows of
 #     `Number.prototype.toString()` taken from V8, `transcript_check`'s 58
 #     projection cases, `extras_parity`'s invented table, `extras_check`'s wiring, `e1_check`,
-#     `questions_check`, `question_exchange_check`, `composer_check`).
+#     `questions_check`, `question_exchange_check`, `composer_check`, and `persistence_check`,
+#     whose two round trips are `store.ts`'s rather than `native-host.ts`'s and never crossed the
+#     bridge a recording captures).
 #
 # Recordings hold the user's conversation. Nothing here prints a record's arguments or a
 # document's contents: the report is counts and JSON pointers only.
@@ -229,6 +231,7 @@ run "e1_check" cargo run --release --quiet --example e1_check
 run "questions_check" cargo run --release --quiet --example questions_check
 run "question_exchange_check" cargo run --release --quiet --example question_exchange_check
 run "composer_check" cargo run --release --quiet --example composer_check
+run "persistence_check" cargo run --release --quiet --example persistence_check
 
 # --- the table -------------------------------------------------------------
 printf '\n%-34s %-6s %s\n' "gate" "result" "detail"
