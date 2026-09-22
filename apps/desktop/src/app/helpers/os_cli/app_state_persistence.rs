@@ -197,10 +197,7 @@ pub(crate) fn restored_gpui_window_bounds_from_state(
     // window's last row and with it every pane's bottom border. The origin stays relative to the
     // display's own origin, which is what the saved state records.
     let visible = display.visible_bounds();
-    let width = px(state
-        .width
-        .max(min_width)
-        .min(visible.size.width.as_f32()));
+    let width = px(state.width.max(min_width).min(visible.size.width.as_f32()));
     let height = px(state
         .height
         .max(min_height)
