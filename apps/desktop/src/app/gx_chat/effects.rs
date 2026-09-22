@@ -44,10 +44,17 @@ pub(super) enum Routed {
 /// by name so a rise in `hostActionsDropped` is visible; the name is a code constant, never a
 /// user's data.
 ///
+/// `switchToTerminal` is here for a different reason: it IS an app-shell action and it reaches the
+/// app shell, which has no arm for it and returns. That is not a port gap, because the QuickJS
+/// brain pushes the identical request (`native-host.ts:946`) and it is dropped identically, so
+/// performing it here would be a behaviour change rather than a fix. It is counted so the gap is
+/// measurable: an option dispatch that has to reach the terminal view emits it, and the shell's
+/// own `terminalView` is what it wants.
+///
 /// `selectModel` and `switchDraftAgentForProvider` left this list on 2026-09-22: core agent 3
 /// resolved both inside the crate (`menus/picker/settle.rs`, `menus/picker/actions.rs`), so the
 /// model pick now goes down the durable outbox lane and the provider switch looks its own agent up.
-pub(super) const UNPERFORMED_HOST_ACTIONS: &[&str] = &["suggestionSend"];
+pub(super) const UNPERFORMED_HOST_ACTIONS: &[&str] = &["suggestionSend", "switchToTerminal"];
 
 /// Sorts one effect into its performer.
 ///
