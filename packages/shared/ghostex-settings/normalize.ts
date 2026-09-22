@@ -1,4 +1,5 @@
 import { normalizeProjectViewTemplates } from './project-views';
+import { normalizeProjectWebsiteSettings } from './project-websites';
 import { normalizeContentThemeSetting } from '../appearance';
 import { clampAgentManagerZoomPercent, clampSidebarThemeSetting } from '../session-grid-contract-session';
 import { normalizeSessionChatTheme } from '../session-chat';
@@ -42,10 +43,16 @@ import { normalizeTerminalDevServerIgnoredPortRules } from './terminal-dev-serve
 import { normalizeSessionCardHoverButtons, type SessionCardHoverButtonItem } from '../session-card-hover-actions';
 import {
   clampSidebarTitlebarBackgroundDarknessPercent,
+  clampSidebarTitlebarLightBackgroundLightnessPercent,
   getSidebarTitlebarBackgroundDarknessForColor,
   getSidebarTitlebarBackgroundForDarkness,
   getSidebarTitlebarForegroundForBackground,
+  getSidebarTitlebarLightBackgroundForLightness,
+  normalizeDarkThemePreset,
+  normalizeLightThemePreset,
   normalizeSidebarTitlebarHexColor,
+  resolveDarkChromeControls,
+  resolveLightChromeControls,
 } from './titlebar-color';
 import {
   type AppShotsHotkey,
@@ -155,9 +162,53 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor
   );
-  const customSidebarTitlebarBackgroundColor = getSidebarTitlebarBackgroundForDarkness(
+  /**
+   * CDXC:Theming 2026-09-22 WHY:
+   * A settings file saved before the preset dropdowns existed has no preset key. If its contrast or
+   * tint differs from the shipped default, the user tuned them, so the dark dropdown migrates to Custom
+   * and their chrome is unchanged; otherwise it lands on the Gray preset that resolves to the same color.
+   */
+  const darkThemePreset =
+    normalizeDarkThemePreset(source.darkThemePreset) ??
+    (customSidebarTitlebarBackgroundDarknessPercent !==
+      DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent ||
+    customSidebarTitlebarBackgroundTintColor !== DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor
+      ? 'custom'
+      : DEFAULT_ghostex_SETTINGS.darkThemePreset);
+  const darkChromeControls = resolveDarkChromeControls({
+    darkThemePreset,
     customSidebarTitlebarBackgroundDarknessPercent,
-    customSidebarTitlebarBackgroundTintColor
+    customSidebarTitlebarBackgroundTintColor,
+  });
+  const customSidebarTitlebarBackgroundColor = getSidebarTitlebarBackgroundForDarkness(
+    darkChromeControls.darknessPercent,
+    darkChromeControls.tintColor
+  );
+  const customSidebarTitlebarLightBackgroundLightnessPercent = clampSidebarTitlebarLightBackgroundLightnessPercent(
+    readNumber(
+      source,
+      'customSidebarTitlebarLightBackgroundLightnessPercent',
+      DEFAULT_ghostex_SETTINGS.customSidebarTitlebarLightBackgroundLightnessPercent
+    )
+  );
+  const customSidebarTitlebarLightBackgroundTintColor = normalizeSidebarTitlebarHexColor(
+    readString(
+      source,
+      'customSidebarTitlebarLightBackgroundTintColor',
+      DEFAULT_ghostex_SETTINGS.customSidebarTitlebarLightBackgroundTintColor
+    ),
+    DEFAULT_ghostex_SETTINGS.customSidebarTitlebarLightBackgroundTintColor
+  );
+  const lightThemePreset =
+    normalizeLightThemePreset(source.lightThemePreset) ?? DEFAULT_ghostex_SETTINGS.lightThemePreset;
+  const lightChromeControls = resolveLightChromeControls({
+    lightThemePreset,
+    customSidebarTitlebarLightBackgroundLightnessPercent,
+    customSidebarTitlebarLightBackgroundTintColor,
+  });
+  const customSidebarTitlebarLightBackgroundColor = getSidebarTitlebarLightBackgroundForLightness(
+    lightChromeControls.lightnessPercent,
+    lightChromeControls.tintColor
   );
   return {
     actionCompletionSound: clampCompletionSoundSetting(
@@ -224,6 +275,16 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     kanbanViewTabHidden: readBoolean(source, 'kanbanViewTabHidden', DEFAULT_ghostex_SETTINGS.kanbanViewTabHidden),
     automateViewTabHidden: readBoolean(source, 'automateViewTabHidden', DEFAULT_ghostex_SETTINGS.automateViewTabHidden),
     docsViewTabHidden: readBoolean(source, 'docsViewTabHidden', DEFAULT_ghostex_SETTINGS.docsViewTabHidden),
+    terminalViewTabHidden: readBoolean(source, 'terminalViewTabHidden', DEFAULT_ghostex_SETTINGS.terminalViewTabHidden),
+    linearViewTabHidden: readBoolean(source, 'linearViewTabHidden', DEFAULT_ghostex_SETTINGS.linearViewTabHidden),
+    jiraViewTabHidden: readBoolean(source, 'jiraViewTabHidden', DEFAULT_ghostex_SETTINGS.jiraViewTabHidden),
+    githubViewTabHidden: readBoolean(source, 'githubViewTabHidden', DEFAULT_ghostex_SETTINGS.githubViewTabHidden),
+    projectWebsiteViews: normalizeProjectWebsiteSettings(source.projectWebsiteViews),
+    storybookViewTabHidden: readBoolean(
+      source,
+      'storybookViewTabHidden',
+      DEFAULT_ghostex_SETTINGS.storybookViewTabHidden
+    ),
     tipsAndTricksTitlebarButtonHidden: readBoolean(
       source,
       'tipsAndTricksTitlebarButtonHidden',
@@ -664,6 +725,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     customSidebarTitlebarBackgroundTintColor,
     customSidebarTitlebarBackgroundDarknessPercent,
     customSidebarTitlebarBackgroundColor,
+    darkThemePreset,
+    lightThemePreset,
+    customSidebarTitlebarLightBackgroundTintColor,
+    customSidebarTitlebarLightBackgroundLightnessPercent,
+    customSidebarTitlebarLightBackgroundColor,
     terminalCursorStyle: normalizeTerminalCursorStyle(
       readString(source, 'terminalCursorStyle', DEFAULT_ghostex_SETTINGS.terminalCursorStyle)
     ),
@@ -891,11 +957,6 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       source,
       'clickToWakeSleepingSessions',
       DEFAULT_ghostex_SETTINGS.clickToWakeSleepingSessions
-    ),
-    showAgentsPaneTabBarWhenUnsplit: readBoolean(
-      source,
-      'showAgentsPaneTabBarWhenUnsplit',
-      DEFAULT_ghostex_SETTINGS.showAgentsPaneTabBarWhenUnsplit
     ),
     customViews: normalizeGhostexCustomViews(source.customViews),
     customViewTemplates: normalizeProjectViewTemplates(source.customViewTemplates),

@@ -335,3 +335,237 @@ export function getSidebarTitlebarGradientColors(backgroundColor: string): Sideb
     titlebarRight: formatSidebarTitlebarHexColor(sidebarBottom),
   };
 }
+
+/**
+ * CDXC:Theming 2026-09-22 DECISION:
+ * User: light mode gets the same background contrast and tint controls as dark mode. The light scale is the
+ * mirror of the dark one: 100 is pure white, the neutral tint at 96 resolves to the shipped #f4f4f5 light
+ * chrome, and calibrated pale tints stand in for the very dark ones. The stored key says lightness so it
+ * cannot be confused with the dark darkness key. 2026-09-22: User: the light slider goes down to 60, not 85.
+ * SEE-ALSO: apps/desktop/src/app/helpers/titlebar.rs ports this for the native chrome.
+ */
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR = '#808080';
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT = 96;
+export const MIN_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT = 60;
+export const MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT = 100;
+const CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_SCALE_REFERENCE_LIGHTNESS_PERCENT = 95;
+const CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_CALIBRATION_COLOR = '#f1f1f2';
+const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_LIGHT_TINTS: ReadonlyMap<string, string> = new Map([
+  ['#000000', '#f1f1f2'],
+  ['#ffffff', '#f1f1f2'],
+  ['#808080', '#f1f1f2'],
+  ['#88d7ff', '#edf4fa'],
+  ['#4f6672', '#eef1f3'],
+  ['#884444', '#f7ecec'],
+  ['#8a5330', '#f8f0e9'],
+  ['#8a6a2f', '#f7f3e8'],
+  ['#657a3f', '#f1f5ea'],
+  ['#3f7a5f', '#ecf4ee'],
+  ['#2f7d66', '#eaf4f0'],
+  ['#287c7f', '#eaf4f4'],
+  ['#336699', '#ecf1f7'],
+  ['#4f5f96', '#eff0f7'],
+  ['#6c4f8f', '#f2edf7'],
+  ['#854f7a', '#f7ecf3'],
+  ['#8a4f5f', '#f7ecef'],
+]);
+
+export function clampSidebarTitlebarLightBackgroundLightnessPercent(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT;
+  }
+  return Math.min(
+    MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
+    Math.max(MIN_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT, Math.round(value))
+  );
+}
+
+function getSidebarTitlebarDefaultLightTintBackground(tint: string): SidebarTitlebarRgbColor {
+  const calibratedTintBackground = CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_LIGHT_TINTS.get(tint);
+  if (calibratedTintBackground) {
+    return parseSidebarTitlebarHexColor(calibratedTintBackground);
+  }
+
+  const color = parseSidebarTitlebarHexColor(tint);
+  const base = parseSidebarTitlebarHexColor(CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_CALIBRATION_COLOR);
+  if (isNeutralSidebarTitlebarColor(color)) {
+    return base;
+  }
+
+  const direction = normalizedSidebarTitlebarTintDirection(color);
+  return addSidebarTitlebarColors(base, scaleSidebarTitlebarVector(direction, 6));
+}
+
+export function getSidebarTitlebarLightBackgroundForLightness(
+  lightnessPercent: number,
+  tintColor = DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR
+): string {
+  const lightness = clampSidebarTitlebarLightBackgroundLightnessPercent(lightnessPercent);
+  if (lightness === MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT) {
+    return '#ffffff';
+  }
+  const tint = normalizeSidebarTitlebarHexColor(tintColor, DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR);
+  const calibrated = getSidebarTitlebarDefaultLightTintBackground(tint);
+  const scale =
+    (MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT - lightness) /
+    (MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT -
+      CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_SCALE_REFERENCE_LIGHTNESS_PERCENT);
+  return formatSidebarTitlebarHexColor({
+    red: 255 - (255 - calibrated.red) * scale,
+    green: 255 - (255 - calibrated.green) * scale,
+    blue: 255 - (255 - calibrated.blue) * scale,
+  });
+}
+
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_COLOR = getSidebarTitlebarLightBackgroundForLightness(
+  DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
+  DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR
+);
+
+/**
+ * CDXC:Theming 2026-09-22 DECISION:
+ * User: the Light theme and Dark theme dropdowns offer preset themes, and the contrast and tint controls
+ * only appear when a dropdown is set to Custom. A preset is a fixed (contrast, tint) pair fed through the
+ * same resolution as the custom controls, so presets and custom chrome can never drift apart. Choosing a
+ * preset leaves the saved custom values alone; they come back unchanged when Custom is selected again.
+ * 2026-09-22: User: all the colored dark presets default to 96 contrast.
+ */
+export type DarkThemePreset = 'gray' | 'black' | 'blue' | 'green' | 'red' | 'purple' | 'custom';
+export type LightThemePreset = 'gray' | 'white' | 'blue' | 'green' | 'pink' | 'orange' | 'custom';
+export type DarkChromeControls = { darknessPercent: number; tintColor: string };
+export type LightChromeControls = { lightnessPercent: number; tintColor: string };
+
+export const DEFAULT_DARK_THEME_PRESET: DarkThemePreset = 'gray';
+export const DEFAULT_LIGHT_THEME_PRESET: LightThemePreset = 'gray';
+
+export const DARK_THEME_PRESET_CONTROLS: Readonly<Record<Exclude<DarkThemePreset, 'custom'>, DarkChromeControls>> = {
+  gray: {
+    darknessPercent: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+    tintColor: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
+  },
+  black: { darknessPercent: 100, tintColor: '#000000' },
+  blue: { darknessPercent: 96, tintColor: '#336699' },
+  green: { darknessPercent: 96, tintColor: '#3f7a5f' },
+  red: { darknessPercent: 96, tintColor: '#884444' },
+  purple: { darknessPercent: 96, tintColor: '#6c4f8f' },
+};
+
+export const LIGHT_THEME_PRESET_CONTROLS: Readonly<Record<Exclude<LightThemePreset, 'custom'>, LightChromeControls>> = {
+  gray: {
+    lightnessPercent: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
+    tintColor: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR,
+  },
+  white: { lightnessPercent: 100, tintColor: '#ffffff' },
+  blue: { lightnessPercent: 95, tintColor: '#336699' },
+  green: { lightnessPercent: 95, tintColor: '#3f7a5f' },
+  pink: { lightnessPercent: 95, tintColor: '#854f7a' },
+  orange: { lightnessPercent: 95, tintColor: '#8a5330' },
+};
+
+export function normalizeDarkThemePreset(value: unknown): DarkThemePreset | undefined {
+  return value === 'custom' || (typeof value === 'string' && value in DARK_THEME_PRESET_CONTROLS)
+    ? (value as DarkThemePreset)
+    : undefined;
+}
+
+export function normalizeLightThemePreset(value: unknown): LightThemePreset | undefined {
+  return value === 'custom' || (typeof value === 'string' && value in LIGHT_THEME_PRESET_CONTROLS)
+    ? (value as LightThemePreset)
+    : undefined;
+}
+
+export function resolveDarkChromeControls(settings: {
+  darkThemePreset: DarkThemePreset;
+  customSidebarTitlebarBackgroundDarknessPercent: number;
+  customSidebarTitlebarBackgroundTintColor: string;
+}): DarkChromeControls {
+  if (settings.darkThemePreset !== 'custom') {
+    return DARK_THEME_PRESET_CONTROLS[settings.darkThemePreset];
+  }
+  return {
+    darknessPercent: clampSidebarTitlebarBackgroundDarknessPercent(
+      settings.customSidebarTitlebarBackgroundDarknessPercent
+    ),
+    tintColor: normalizeSidebarTitlebarHexColor(
+      settings.customSidebarTitlebarBackgroundTintColor,
+      DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR
+    ),
+  };
+}
+
+export function resolveLightChromeControls(settings: {
+  lightThemePreset: LightThemePreset;
+  customSidebarTitlebarLightBackgroundLightnessPercent: number;
+  customSidebarTitlebarLightBackgroundTintColor: string;
+}): LightChromeControls {
+  if (settings.lightThemePreset !== 'custom') {
+    return LIGHT_THEME_PRESET_CONTROLS[settings.lightThemePreset];
+  }
+  return {
+    lightnessPercent: clampSidebarTitlebarLightBackgroundLightnessPercent(
+      settings.customSidebarTitlebarLightBackgroundLightnessPercent
+    ),
+    tintColor: normalizeSidebarTitlebarHexColor(
+      settings.customSidebarTitlebarLightBackgroundTintColor,
+      DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR
+    ),
+  };
+}
+
+/** The accent follows the tint the dark chrome actually paints: the preset's, or the custom one. */
+export function getAccentColorForSettings(
+  settings:
+    | {
+        darkThemePreset: DarkThemePreset;
+        customSidebarTitlebarBackgroundDarknessPercent: number;
+        customSidebarTitlebarBackgroundTintColor: string;
+      }
+    | undefined
+): string {
+  return getAccentColorForBackgroundTint(
+    settings ? resolveDarkChromeControls(settings).tintColor : DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR
+  );
+}
+
+/** The resolved chrome background for one appearance, light or dark, from normalized settings. */
+export function getSidebarTitlebarBackgroundForVariant(
+  settings: { customSidebarTitlebarBackgroundColor: string; customSidebarTitlebarLightBackgroundColor: string },
+  variant: 'light' | 'dark'
+): string {
+  return variant === 'light'
+    ? settings.customSidebarTitlebarLightBackgroundColor
+    : settings.customSidebarTitlebarBackgroundColor;
+}
+
+function blendSidebarTitlebarTowardWhite(color: string, amount: number): string {
+  const base = parseSidebarTitlebarHexColor(color);
+  return formatSidebarTitlebarHexColor({
+    red: base.red + (255 - base.red) * amount,
+    green: base.green + (255 - base.green) * amount,
+    blue: base.blue + (255 - base.blue) * amount,
+  });
+}
+
+function isLightSidebarTitlebarBackground(color: string): boolean {
+  return getSidebarTitlebarForegroundForBackground(color) === DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_DARK_FOREGROUND_COLOR;
+}
+
+/**
+ * CDXC:Theming 2026-09-22 DECISION:
+ * User: the theme also colors the sidebar's dropdown menus and the chat view background. Both are a fixed
+ * step off the resolved chrome background so a tinted chrome carries its hue into them: the menu sits 5%
+ * toward white on dark chrome and 70% on light chrome, the chat 1% on dark chrome and 25% on light
+ * (2026-09-22: User: keep the dark mode's two tones in light mode too, the sidebar a tiny bit more
+ * contrast than the rest; this replaces the same-day exact match and the earlier 70% / 40% steps). With
+ * the shipped neutral chrome these land next to the previous fixed menu colours (#171717 for #191919 /
+ * #ffffff), exactly on the previous #0d0d0d dark chat, and on #f7f7f7 for the light chat.
+ * SEE-ALSO: apps/desktop/src/app/helpers/titlebar.rs and apps/desktop/src/app/native_chat/appearance.rs
+ * paint the native menu and chat; packages/core-ui/styles/chat.css reads the published chat variables.
+ */
+export function getSidebarTitlebarMenuBackgroundForChrome(chromeColor: string): string {
+  return blendSidebarTitlebarTowardWhite(chromeColor, isLightSidebarTitlebarBackground(chromeColor) ? 0.7 : 0.05);
+}
+
+export function getSessionChatBackgroundForChrome(chromeColor: string): string {
+  return blendSidebarTitlebarTowardWhite(chromeColor, isLightSidebarTitlebarBackground(chromeColor) ? 0.25 : 0.01);
+}

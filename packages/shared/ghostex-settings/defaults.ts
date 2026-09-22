@@ -15,6 +15,11 @@ import {
   DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
   DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
   DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR,
+  DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_COLOR,
+  DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
+  DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR,
+  DEFAULT_DARK_THEME_PRESET,
+  DEFAULT_LIGHT_THEME_PRESET,
   getSidebarTitlebarBackgroundForDarkness,
 } from './titlebar-color';
 import {
@@ -116,6 +121,12 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   kanbanViewTabHidden: false,
   automateViewTabHidden: false,
   docsViewTabHidden: false,
+  terminalViewTabHidden: false,
+  storybookViewTabHidden: false,
+  linearViewTabHidden: false,
+  jiraViewTabHidden: false,
+  githubViewTabHidden: false,
+  projectWebsiteViews: {},
   tipsAndTricksTitlebarButtonHidden: false,
   notificationsTitlebarButtonHidden: false,
   helpTitlebarButtonHidden: false,
@@ -460,6 +471,12 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
     DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
     DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR
   ),
+  darkThemePreset: DEFAULT_DARK_THEME_PRESET,
+  lightThemePreset: DEFAULT_LIGHT_THEME_PRESET,
+  customSidebarTitlebarLightBackgroundTintColor: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR,
+  customSidebarTitlebarLightBackgroundLightnessPercent:
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
+  customSidebarTitlebarLightBackgroundColor: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_COLOR,
   /**
    * CDXC:Terminal 2026-05-22-12:29:
    * New Ghostex terminals should default to the requested GitHub Dark terminal
@@ -537,7 +554,6 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   workspaceBackgroundColor: '#010101',
   clickToWakeSleepingSessions: true,
-  showAgentsPaneTabBarWhenUnsplit: false,
   customViews: [],
   customViewTemplates: [],
   viewScopes: {},

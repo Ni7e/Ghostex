@@ -350,11 +350,8 @@ pub(crate) fn gpui_effective_preferred_agent_interface_for_agent_icon(
 }
 
 pub(crate) fn gpui_session_chat_background_color() -> Hsla {
-    if gpui_session_chat_uses_light_theme(
+    rgb(gpui_session_chat_background_rgb(
         shared_settings::shared_sidebar_settings_snapshot().object(),
-    ) {
-        rgb(0xfdfdfd).into()
-    } else {
-        rgb(0x0d0d0d).into()
-    }
+    ))
+    .into()
 }

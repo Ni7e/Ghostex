@@ -1519,16 +1519,13 @@ pub(crate) fn titlebar_active_segment_color() -> Hsla {
     titlebar_overlay_base().opacity(0.11).into()
 }
 
-pub(crate) static GPUI_MENU_DARK_BACKGROUND_RGB: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(0x0e0e0e);
+/// The popup menu fill for the current appearance, derived from the resolved chrome background by
+/// `refresh_gpui_visual_settings` (see `sidebar_titlebar_menu_background_for_chrome`).
+pub(crate) static GPUI_MENU_BACKGROUND_RGB: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0x171717);
 
 pub(crate) fn titlebar_popup_menu_background() -> Hsla {
-    rgb(if titlebar_uses_light_theme() {
-        0xffffff
-    } else {
-        GPUI_MENU_DARK_BACKGROUND_RGB.load(Ordering::Relaxed)
-    })
-    .into()
+    rgb(GPUI_MENU_BACKGROUND_RGB.load(Ordering::Relaxed)).into()
 }
 
 pub(crate) fn titlebar_popup_menu_foreground() -> Hsla {
@@ -1786,32 +1783,267 @@ pub(crate) fn sidebar_titlebar_background_for_darkness(darkness_percent: f64, ti
     ])
 }
 
-/// Mirror of the effective-settings resolution in packages/shared/ghostex-settings.ts:
-/// the darkness slider (seeded from a valid legacy saved background color when
-/// the slider key is missing) plus the tint choice produce the chrome
-/// background; the stored `customSidebarTitlebarBackgroundColor` hex itself is
-/// never the applied color.
-/// CDXC:Theming 2026-09-14 DECISION:
-/// User: use #f4f4f5 for the sidebar and titlebar backgrounds in light mode, superseding full white while still ignoring the dark-theme color controls.
-/// SEE-ALSO: packages/core-ui/styles/theme.css.
-pub(crate) fn resolved_custom_sidebar_titlebar_background(
-    object: &serde_json::Map<String, serde_json::Value>,
-) -> u32 {
-    if sidebar_uses_light_theme(object) {
-        return 0xf4f4f5;
+/// CDXC:Theming 2026-09-22 SEE-ALSO:
+/// Rust port of the light chrome scale in packages/shared/ghostex-settings/titlebar-color.ts
+/// (`getSidebarTitlebarLightBackgroundForLightness`): 100 is white, the neutral tint at 96 is the
+/// #f4f4f5 light chrome, and the calibrated pale tint table mirrors `CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_LIGHT_TINTS`.
+pub(crate) const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_RGB: u32 = 0x808080;
+pub(crate) const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT: f64 = 96.0;
+pub(crate) const MIN_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT: f64 = 60.0;
+pub(crate) const MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT: f64 = 100.0;
+const CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_SCALE_REFERENCE_LIGHTNESS_PERCENT: f64 = 95.0;
+const CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_CALIBRATION_RGB: u32 = 0xf1f1f2;
+const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_LIGHT_TINTS: [(u32, u32); 17] = [
+    (0x000000, 0xf1f1f2),
+    (0xffffff, 0xf1f1f2),
+    (0x808080, 0xf1f1f2),
+    (0x88d7ff, 0xedf4fa),
+    (0x4f6672, 0xeef1f3),
+    (0x884444, 0xf7ecec),
+    (0x8a5330, 0xf8f0e9),
+    (0x8a6a2f, 0xf7f3e8),
+    (0x657a3f, 0xf1f5ea),
+    (0x3f7a5f, 0xecf4ee),
+    (0x2f7d66, 0xeaf4f0),
+    (0x287c7f, 0xeaf4f4),
+    (0x336699, 0xecf1f7),
+    (0x4f5f96, 0xeff0f7),
+    (0x6c4f8f, 0xf2edf7),
+    (0x854f7a, 0xf7ecf3),
+    (0x8a4f5f, 0xf7ecef),
+];
+
+pub(crate) fn clamp_sidebar_titlebar_light_background_lightness_percent(value: f64) -> f64 {
+    if !value.is_finite() {
+        return DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT;
     }
+    (value + 0.5).floor().clamp(
+        MIN_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
+        MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
+    )
+}
+
+pub(crate) fn sidebar_titlebar_light_background_for_lightness(
+    lightness_percent: f64,
+    tint: u32,
+) -> u32 {
+    let lightness = clamp_sidebar_titlebar_light_background_lightness_percent(lightness_percent);
+    if lightness == MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT {
+        return 0xffffff;
+    }
+    let calibrated = CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_LIGHT_TINTS
+        .iter()
+        .find(|(key, _)| *key == tint)
+        .map(|(_, value)| sidebar_titlebar_rgb_channels(*value))
+        .unwrap_or_else(|| {
+            let color = sidebar_titlebar_rgb_channels(tint);
+            let base = sidebar_titlebar_rgb_channels(
+                CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_CALIBRATION_RGB,
+            );
+            let spread = color.iter().fold(0.0f32, |max, value| max.max(*value))
+                - color.iter().fold(255.0f32, |min, value| min.min(*value));
+            if spread < 1.0 {
+                return base;
+            }
+            let direction = sidebar_titlebar_tint_direction(color);
+            [
+                base[0] + direction[0] * 6.0,
+                base[1] + direction[1] * 6.0,
+                base[2] + direction[2] * 6.0,
+            ]
+        });
+    let scale = ((MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT - lightness)
+        / (MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT
+            - CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_SCALE_REFERENCE_LIGHTNESS_PERCENT))
+        as f32;
+    sidebar_titlebar_pack_rgb([
+        255.0 - (255.0 - calibrated[0]) * scale,
+        255.0 - (255.0 - calibrated[1]) * scale,
+        255.0 - (255.0 - calibrated[2]) * scale,
+    ])
+}
+
+/// CDXC:Theming 2026-09-22 SEE-ALSO:
+/// Mirror of `DARK_THEME_PRESET_CONTROLS` / `LIGHT_THEME_PRESET_CONTROLS` in
+/// packages/shared/ghostex-settings/titlebar-color.ts: each preset is a (contrast, tint) pair fed
+/// through the same scale as the custom controls. Keep the tables in sync.
+const DARK_THEME_PRESET_CONTROLS: [(&str, f64, u32); 6] = [
+    (
+        "gray",
+        DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+        DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_RGB,
+    ),
+    ("black", 100.0, 0x000000),
+    ("blue", 96.0, 0x336699),
+    ("green", 96.0, 0x3f7a5f),
+    ("red", 96.0, 0x884444),
+    ("purple", 96.0, 0x6c4f8f),
+];
+const LIGHT_THEME_PRESET_CONTROLS: [(&str, f64, u32); 6] = [
+    (
+        "gray",
+        DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
+        DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_RGB,
+    ),
+    ("white", 100.0, 0xffffff),
+    ("blue", 95.0, 0x336699),
+    ("green", 95.0, 0x3f7a5f),
+    ("pink", 95.0, 0x854f7a),
+    ("orange", 95.0, 0x8a5330),
+];
+
+/// The saved custom dark controls: the darkness slider (seeded from a valid legacy saved
+/// background color when the slider key is missing) plus the tint choice. The stored
+/// `customSidebarTitlebarBackgroundColor` hex itself is never the applied color.
+fn custom_dark_chrome_controls(object: &serde_json::Map<String, serde_json::Value>) -> (f64, u32) {
     let legacy_background =
         gpui_settings_hex_rgb(object.get("customSidebarTitlebarBackgroundColor"));
     let darkness_fallback = legacy_background
         .map(sidebar_titlebar_background_darkness_for_color)
         .unwrap_or(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT);
-    let darkness = object
-        .get("customSidebarTitlebarBackgroundDarknessPercent")
-        .and_then(serde_json::Value::as_f64)
-        .unwrap_or(darkness_fallback);
+    let darkness = clamp_sidebar_titlebar_background_darkness_percent(
+        object
+            .get("customSidebarTitlebarBackgroundDarknessPercent")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(darkness_fallback),
+    );
     let tint = gpui_settings_hex_rgb(object.get("customSidebarTitlebarBackgroundTintColor"))
         .unwrap_or(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_RGB);
-    sidebar_titlebar_background_for_darkness(darkness, tint)
+    (darkness, tint)
+}
+
+/// Mirror of `resolveDarkChromeControls` plus the preset migration in
+/// packages/shared/ghostex-settings/normalize.ts: a missing or unknown preset with non-default
+/// custom values means the user tuned them before the dropdown existed, so they stay in force.
+pub(crate) fn dark_chrome_controls(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> (f64, u32) {
+    let custom = custom_dark_chrome_controls(object);
+    let preset = object
+        .get("darkThemePreset")
+        .and_then(serde_json::Value::as_str);
+    if preset == Some("custom") {
+        return custom;
+    }
+    if let Some((_, darkness, tint)) = preset.and_then(|name| {
+        DARK_THEME_PRESET_CONTROLS
+            .iter()
+            .find(|(key, _, _)| *key == name)
+    }) {
+        return (*darkness, *tint);
+    }
+    if custom
+        != (
+            DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+            DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_RGB,
+        )
+    {
+        return custom;
+    }
+    let (_, darkness, tint) = DARK_THEME_PRESET_CONTROLS[0];
+    (darkness, tint)
+}
+
+/// Mirror of `resolveLightChromeControls` in packages/shared/ghostex-settings/titlebar-color.ts.
+pub(crate) fn light_chrome_controls(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> (f64, u32) {
+    let preset = object
+        .get("lightThemePreset")
+        .and_then(serde_json::Value::as_str);
+    if preset == Some("custom") {
+        let lightness = clamp_sidebar_titlebar_light_background_lightness_percent(
+            object
+                .get("customSidebarTitlebarLightBackgroundLightnessPercent")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT),
+        );
+        let tint =
+            gpui_settings_hex_rgb(object.get("customSidebarTitlebarLightBackgroundTintColor"))
+                .unwrap_or(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_RGB);
+        return (lightness, tint);
+    }
+    let (_, lightness, tint) = preset
+        .and_then(|name| {
+            LIGHT_THEME_PRESET_CONTROLS
+                .iter()
+                .find(|(key, _, _)| *key == name)
+        })
+        .copied()
+        .unwrap_or(LIGHT_THEME_PRESET_CONTROLS[0]);
+    (lightness, tint)
+}
+
+/// The chrome background one appearance resolves to from the saved settings, whichever
+/// appearance the app is currently on. Chat uses this with its own theme's variant.
+pub(crate) fn resolved_custom_sidebar_titlebar_background_for_variant(
+    object: &serde_json::Map<String, serde_json::Value>,
+    light: bool,
+) -> u32 {
+    if light {
+        let (lightness, tint) = light_chrome_controls(object);
+        sidebar_titlebar_light_background_for_lightness(lightness, tint)
+    } else {
+        let (darkness, tint) = dark_chrome_controls(object);
+        sidebar_titlebar_background_for_darkness(darkness, tint)
+    }
+}
+
+/// CDXC:Theming 2026-09-22 DECISION:
+/// User: light mode has its own background contrast and tint, and both appearances pick a preset theme
+/// or Custom. This supersedes the 2026-09-14 fixed #f4f4f5 light chrome: that colour is now what the
+/// default Light Gray preset resolves to.
+/// SEE-ALSO: packages/shared/ghostex-settings/normalize.ts computes the same two effective colours.
+pub(crate) fn resolved_custom_sidebar_titlebar_background(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> u32 {
+    resolved_custom_sidebar_titlebar_background_for_variant(
+        object,
+        sidebar_uses_light_theme(object),
+    )
+}
+
+fn sidebar_titlebar_blend_toward_white(color: u32, amount: f32) -> u32 {
+    let channels = sidebar_titlebar_rgb_channels(color);
+    sidebar_titlebar_pack_rgb([
+        channels[0] + (255.0 - channels[0]) * amount,
+        channels[1] + (255.0 - channels[1]) * amount,
+        channels[2] + (255.0 - channels[2]) * amount,
+    ])
+}
+
+/// Mirror of the luminance split in `getSidebarTitlebarForegroundForBackground`.
+fn sidebar_titlebar_background_is_light(color: u32) -> bool {
+    let [red, green, blue] = sidebar_titlebar_rgb_channels(color);
+    f64::from(0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0 > 0.54
+}
+
+/// CDXC:Theming 2026-09-22 DECISION:
+/// User: the theme also colours the sidebar's dropdown menus and the chat view background. Mirror of
+/// `getSidebarTitlebarMenuBackgroundForChrome` / `getSessionChatBackgroundForChrome` in
+/// packages/shared/ghostex-settings/titlebar-color.ts: a fixed step toward white off the resolved chrome
+/// (menu 5% on dark chrome, 70% on light; chat 1% on dark and 25% on light, the same two-tone split
+/// in both appearances), so the neutral defaults land on the previous #0d0d0d dark chat and #f7f7f7.
+pub(crate) fn sidebar_titlebar_menu_background_for_chrome(chrome: u32) -> u32 {
+    sidebar_titlebar_blend_toward_white(
+        chrome,
+        if sidebar_titlebar_background_is_light(chrome) {
+            0.7
+        } else {
+            0.05
+        },
+    )
+}
+
+pub(crate) fn session_chat_background_for_chrome(chrome: u32) -> u32 {
+    sidebar_titlebar_blend_toward_white(
+        chrome,
+        if sidebar_titlebar_background_is_light(chrome) {
+            0.25
+        } else {
+            0.01
+        },
+    )
 }
 
 pub(crate) fn command_pane_titlebar_separator_color() -> Hsla {
@@ -2765,49 +2997,53 @@ pub(crate) struct GpuiCustomView {
 }
 
 pub(crate) fn gpui_custom_views_from_settings() -> Vec<GpuiCustomView> {
-    shared_settings::shared_sidebar_settings_snapshot()
-        .object()
-        .get("customViews")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|value| {
-            let object = value.as_object()?;
-            let id = object.get("id")?.as_str()?.trim();
-            if !id.starts_with("custom-view-") {
-                return None;
-            }
-            let id = ExtensionId::new(id)?;
-            let title = object.get("name")?.as_str()?.trim();
-            let url = object
-                .get("url")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .trim();
-            if title.is_empty() {
-                return None;
-            }
-            if object.get("source").is_none() {
-                let (scheme, rest) = url.split_once("://")?;
-                let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-                if !matches!(scheme, "http" | "https")
-                    || authority.is_empty()
-                    || url.chars().any(char::is_whitespace)
-                {
-                    return None;
-                }
-            }
-            Some(GpuiCustomView {
-                enabled: object
-                    .get("enabled")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(true),
-                id,
-                title: title.to_string(),
-                url: url.to_string(),
-                definition: value.clone(),
-            })
-        })
+    std::iter::once(crate::app::storybook::storybook_view())
+        .chain(crate::app::project_websites::website_views())
+        .chain(
+            shared_settings::shared_sidebar_settings_snapshot()
+                .object()
+                .get("customViews")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|value| {
+                    let object = value.as_object()?;
+                    let id = object.get("id")?.as_str()?.trim();
+                    if !id.starts_with("custom-view-") {
+                        return None;
+                    }
+                    let id = ExtensionId::new(id)?;
+                    let title = object.get("name")?.as_str()?.trim();
+                    let url = object
+                        .get("url")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .trim();
+                    if title.is_empty() {
+                        return None;
+                    }
+                    if object.get("source").is_none() {
+                        let (scheme, rest) = url.split_once("://")?;
+                        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+                        if !matches!(scheme, "http" | "https")
+                            || authority.is_empty()
+                            || url.chars().any(char::is_whitespace)
+                        {
+                            return None;
+                        }
+                    }
+                    Some(GpuiCustomView {
+                        enabled: object
+                            .get("enabled")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(true),
+                        id,
+                        title: title.to_string(),
+                        url: url.to_string(),
+                        definition: value.clone(),
+                    })
+                }),
+        )
         .collect()
 }
 
@@ -2862,11 +3098,16 @@ pub(crate) fn titlebar_mode_view_tab_hidden_settings_key(
     mode: TitlebarMode,
 ) -> Option<&'static str> {
     match mode {
+        mode if mode.website_provider().is_some() => mode
+            .website_provider()
+            .map(|provider| provider.hidden_settings_key.as_str()),
+        mode if mode.is_storybook() => Some("storybookViewTabHidden"),
         TitlebarMode::Source => Some(SOURCE_CODE_VIEW_TAB_HIDDEN_SETTINGS_KEY),
         TitlebarMode::Browser => Some(BROWSER_VIEW_TAB_HIDDEN_SETTINGS_KEY),
         TitlebarMode::Kanban => Some(KANBAN_VIEW_TAB_HIDDEN_SETTINGS_KEY),
         TitlebarMode::Automate => Some(AUTOMATE_VIEW_TAB_HIDDEN_SETTINGS_KEY),
         TitlebarMode::Manage => Some(DOCS_VIEW_TAB_HIDDEN_SETTINGS_KEY),
+        TitlebarMode::Terminal => Some(TERMINAL_VIEW_TAB_HIDDEN_SETTINGS_KEY),
         TitlebarMode::Agents | TitlebarMode::Extension(_) => None,
     }
 }
@@ -2885,6 +3126,7 @@ pub(crate) fn gpui_titlebar_mode_plugin_display_name(mode: TitlebarMode) -> &'st
         TitlebarMode::Kanban => "Kanban",
         TitlebarMode::Automate => "Automate",
         TitlebarMode::Manage => "Docs",
+        TitlebarMode::Terminal => "Terminal",
         TitlebarMode::Extension(id) => id.as_str(),
     }
 }

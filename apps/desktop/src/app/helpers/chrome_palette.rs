@@ -28,12 +28,15 @@ pub(crate) fn chrome_uses_light_appearance() -> bool {
 
 /// CDXC:Theming 2026-09-13 SEE-ALSO:
 /// apps/desktop/views/workarea-theme.ts consumes this appearance-only event in Docs, Kanban and Automate.
-pub(crate) fn workarea_theme_script(light: bool) -> &'static str {
-    if light {
-        "window.ghostexGpui = window.ghostexGpui || {}; window.ghostexGpui.workareaTheme = 'light'; window.dispatchEvent(new CustomEvent('ghostex-workarea-theme-changed', {detail: 'light'}));"
-    } else {
-        "window.ghostexGpui = window.ghostexGpui || {}; window.ghostexGpui.workareaTheme = 'dark'; window.dispatchEvent(new CustomEvent('ghostex-workarea-theme-changed', {detail: 'dark'}));"
-    }
+/// CDXC:Theming 2026-09-22 DECISION:
+/// User: the theme also colours the Docs, Kanban and Automate views. The event now carries the
+/// resolved chrome colour and the content colour (the chat's step off it) next to the appearance,
+/// and the pages publish them as `--app-chrome-background` / `--app-background`.
+pub(crate) fn workarea_theme_script(light: bool, chrome: u32, content: u32) -> String {
+    let theme = if light { "light" } else { "dark" };
+    format!(
+        "window.ghostexGpui = window.ghostexGpui || {{}}; window.ghostexGpui.workareaTheme = '{theme}'; window.ghostexGpui.workareaChrome = '#{chrome:06x}'; window.ghostexGpui.workareaContent = '#{content:06x}'; window.dispatchEvent(new CustomEvent('ghostex-workarea-theme-changed', {{detail: {{theme: '{theme}', chrome: '#{chrome:06x}', content: '#{content:06x}'}}}}));"
+    )
 }
 
 /// CDXC:Theming 2026-09-13 DECISION:

@@ -71,7 +71,7 @@ import {
 import { useSidebarStore } from '@/packages/core-ui/sidebar-store';
 import {
   DEFAULT_ghostex_SETTINGS,
-  getAccentColorForBackgroundTint,
+  getAccentColorForSettings,
   isDiagnosticLoggingScenarioEnabled,
   SETTINGS_MODAL_NAVIGATION_TABS,
   type DiagnosticLoggingScenarioId,
@@ -1935,10 +1935,7 @@ function AppModalHost() {
      * theme variables. Before the HUD settings arrive the default tint's accent
      * is the correct value.
      */
-    document.body.style.setProperty(
-      '--ghostex-accent',
-      getAccentColorForBackgroundTint(settings?.customSidebarTitlebarBackgroundTintColor)
-    );
+    document.body.style.setProperty('--ghostex-accent', getAccentColorForSettings(settings));
     const normalizedThemeColor = normalizeWorkspaceThemeColor(customThemeColor);
     if (normalizedThemeColor) {
       document.body.dataset.sidebarCustomTheme = 'true';
@@ -1960,7 +1957,13 @@ function AppModalHost() {
       document.body.style.removeProperty('--workspace-sidebar-theme-foreground');
       document.body.style.removeProperty('--ghostex-accent');
     };
-  }, [customThemeColor, isOnboardingModal, settings?.customSidebarTitlebarBackgroundTintColor, theme]);
+  }, [
+    customThemeColor,
+    isOnboardingModal,
+    settings?.customSidebarTitlebarBackgroundTintColor,
+    settings?.darkThemePreset,
+    theme,
+  ]);
 
   return (
     <>

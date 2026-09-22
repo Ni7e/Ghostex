@@ -31,25 +31,21 @@ struct Palette {
 impl Palette {
     fn of(p: &ChatAppearance) -> Self {
         Self {
-            surface: if p.light {
-                p.input
-            } else {
-                rgb(0x141414).into()
-            },
-            code: if p.light {
-                p.input
-            } else {
-                rgb(0x151515).into()
-            },
+            // CDXC:Theming 2026-09-22 DECISION:
+            // User: the diff cards take from the theme colour too. The surfaces read the chat's
+            // derived input fill and the lines are the muted tone at the opacities that give the
+            // old #2b2b2e border and #747475 rail over the neutral dark chat.
+            surface: p.input,
+            code: p.input,
             border: if p.light {
                 p.border
             } else {
-                rgb(0x2b2b2e).into()
+                p.muted.opacity(0.2)
             },
             rail: if p.light {
                 p.border
             } else {
-                rgb(0x747475).into()
+                p.muted.opacity(0.7)
             },
             added: rgb(if p.light { 0x16803d } else { 0x94caaa }).into(),
             removed: rgb(if p.light { 0xc53030 } else { 0xe5a0a4 }).into(),
@@ -272,6 +268,14 @@ impl NativeChatView {
         // the code, the footer and the empty space between them all toggle the diff from here, so
         // no two listeners can flip the same row twice. Only the path stops the press to open the file.
         let card_key = key.clone();
+        // CDXC:SessionChat 2026-09-22 DECISION:
+        // User: hovering a file's card lightens it to show a click collapses or expands it. The fill
+        // sits in a 6px inset the card takes from the stack's padding, so the layout does not move.
+        let hover_fill: Hsla = if p.light {
+            gpui::white().opacity(0.6)
+        } else {
+            p.foreground.opacity(0.05)
+        };
         let mut card = div()
             .id(format!("card:{key}"))
             .on_click(cx.listener(move |view, _, _, cx| {
@@ -284,6 +288,12 @@ impl NativeChatView {
             .w_full()
             .min_w_0()
             .relative()
+            .mx(px(-6.0 * s))
+            .px(px(6.0 * s))
+            .rounded(px(6.0 * s))
+            .when(can_expand, |this| {
+                this.hover(move |style| style.bg(hover_fill))
+            })
             // The hairline React draws down the marker column joining one circle to the next
             // (`.ghostex-chat-file-change-card::before`); visual only, and it reaches into the
             // gap below every card but the last. A collapsed preview draws no rail through its code.
@@ -291,7 +301,7 @@ impl NativeChatView {
                 this.child(
                     div()
                         .absolute()
-                        .left(px(8.0 * s))
+                        .left(px(14.0 * s))
                         .top(px(22.0 * s))
                         .bottom(px(if last { 0.0 } else { -12.0 * s }))
                         .w(px(1.0))

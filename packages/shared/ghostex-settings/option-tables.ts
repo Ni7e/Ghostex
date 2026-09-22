@@ -2,6 +2,7 @@ import { formatSidebarHotkeyLabel } from '../hotkey-label';
 import { type SidebarThemeSetting } from '../session-grid-contract-core';
 import { type SessionChatThemeSetting } from '../session-chat';
 import { GHOSTTY_THEME_OPTIONS } from '../ghostty-theme-options';
+import type { DarkThemePreset, LightThemePreset } from './titlebar-color';
 import {
   type AppShotsHotkey,
   type AutoSleepIdleMinutes,
@@ -44,9 +45,40 @@ export const SIDEBAR_THEME_SETTING_OPTIONS: ReadonlyArray<{
   label: string;
   value: SidebarThemeSetting;
 }> = [
-  { label: 'Dark Gray', value: 'dark-2' },
+  { label: 'Dark', value: 'dark-2' },
   { label: 'Light', value: 'plain-light' },
   { label: 'System', value: 'system' },
+];
+
+/**
+ * CDXC:Theming 2026-09-22 DECISION:
+ * User: two Theme dropdowns, one for the light theme and one for the dark theme, list preset themes plus
+ * Custom; Custom reveals that appearance's background contrast and tint controls.
+ */
+export const DARK_THEME_PRESET_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: DarkThemePreset;
+}> = [
+  { label: 'Dark Gray', value: 'gray' },
+  { label: 'Black', value: 'black' },
+  { label: 'Blue', value: 'blue' },
+  { label: 'Green', value: 'green' },
+  { label: 'Red', value: 'red' },
+  { label: 'Purple', value: 'purple' },
+  { label: 'Custom', value: 'custom' },
+];
+
+export const LIGHT_THEME_PRESET_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: LightThemePreset;
+}> = [
+  { label: 'Light Gray', value: 'gray' },
+  { label: 'White', value: 'white' },
+  { label: 'Blue', value: 'blue' },
+  { label: 'Green', value: 'green' },
+  { label: 'Pink', value: 'pink' },
+  { label: 'Orange', value: 'orange' },
+  { label: 'Custom', value: 'custom' },
 ];
 
 export const SESSION_CHAT_THEME_OPTIONS: ReadonlyArray<{

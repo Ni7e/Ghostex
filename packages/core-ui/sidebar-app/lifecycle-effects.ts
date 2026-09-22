@@ -3,7 +3,9 @@ import type { ExtensionToSidebarMessage } from '../../shared/session-grid-contra
 import type { ghostexSettings } from '../../shared/ghostex-settings';
 import {
   getSidebarTitlebarForegroundForBackground,
-  getAccentColorForBackgroundTint,
+  getAccentColorForSettings,
+  getSessionChatBackgroundForChrome,
+  getSidebarTitlebarMenuBackgroundForChrome,
   getSidebarTitlebarGradientColors,
 } from '../../shared/ghostex-settings';
 import { getWorkspaceThemeForeground, normalizeWorkspaceThemeColor } from '../../shared/workspace-project-appearance';
@@ -319,12 +321,38 @@ export function useSidebarDocumentChromeEffects({
      * The accent color is a plain always-on chrome token, so publish it next to
      * the theme variables instead of gating it behind the custom chrome toggle.
      */
+    document.body.style.setProperty('--ghostex-accent', getAccentColorForSettings(effectiveSettings));
+
+    /**
+     * CDXC:Theming 2026-09-22 DECISION:
+     * User: light mode has its own contrast and tint, and the theme also colours the sidebar's dropdowns
+     * and the chat background. The dark custom-chrome variables and gradient stay dark-only (the light
+     * chrome is flat); light mode publishes its resolved colour for theme.css to use as the app
+     * background, and both appearances publish the dropdown and per-variant chat backgrounds.
+     * SEE-ALSO: packages/core-ui/styles/theme.css and packages/core-ui/styles/chat.css read these.
+     */
+    const isLightTheme = theme === 'plain-light' || theme.startsWith('light-');
+    const chromeBackground = isLightTheme
+      ? effectiveSettings.customSidebarTitlebarLightBackgroundColor
+      : effectiveSettings.customSidebarTitlebarBackgroundColor;
     document.body.style.setProperty(
-      '--ghostex-accent',
-      getAccentColorForBackgroundTint(effectiveSettings.customSidebarTitlebarBackgroundTintColor)
+      '--custom-sidebar-titlebar-light-background-color',
+      effectiveSettings.customSidebarTitlebarLightBackgroundColor
+    );
+    document.body.style.setProperty(
+      '--app-dropdown-background',
+      getSidebarTitlebarMenuBackgroundForChrome(chromeBackground)
+    );
+    document.body.style.setProperty(
+      '--ghostex-session-chat-dark-background',
+      getSessionChatBackgroundForChrome(effectiveSettings.customSidebarTitlebarBackgroundColor)
+    );
+    document.body.style.setProperty(
+      '--ghostex-session-chat-light-background',
+      getSessionChatBackgroundForChrome(effectiveSettings.customSidebarTitlebarLightBackgroundColor)
     );
 
-    document.body.dataset.customSidebarTitlebarColors = String(theme !== 'plain-light' && !theme.startsWith('light-'));
+    document.body.dataset.customSidebarTitlebarColors = String(!isLightTheme);
     document.body.style.setProperty('--custom-sidebar-titlebar-foreground-color', customSidebarTitlebarForegroundColor);
     document.body.style.setProperty(
       '--custom-sidebar-titlebar-background-color',
@@ -350,11 +378,17 @@ export function useSidebarDocumentChromeEffects({
       document.body.style.removeProperty('--custom-sidebar-titlebar-background-color');
       document.body.style.removeProperty('--custom-sidebar-titlebar-gradient-top-color');
       document.body.style.removeProperty('--custom-sidebar-titlebar-gradient-bottom-color');
+      document.body.style.removeProperty('--custom-sidebar-titlebar-light-background-color');
+      document.body.style.removeProperty('--app-dropdown-background');
+      document.body.style.removeProperty('--ghostex-session-chat-dark-background');
+      document.body.style.removeProperty('--ghostex-session-chat-light-background');
     };
   }, [
     customThemeColor,
     effectiveSettings.customSidebarTitlebarBackgroundColor,
     effectiveSettings.customSidebarTitlebarBackgroundTintColor,
+    effectiveSettings.customSidebarTitlebarLightBackgroundColor,
+    effectiveSettings.darkThemePreset,
     theme,
   ]);
 

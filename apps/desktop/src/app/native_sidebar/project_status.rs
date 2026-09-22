@@ -30,7 +30,11 @@ pub(crate) fn project_status(
                 .text_size(px(10.0 * scale))
                 .text_color(appearance.foreground)
                 .when(working > 0, |row| {
-                    row.child(count_badge(working, rgb(super::status::WORKING_COLOR), true))
+                    row.child(count_badge(
+                        working,
+                        rgb(super::status::WORKING_COLOR),
+                        true,
+                    ))
                 })
                 .when(attention > 0, |row| {
                     row.child(count_badge(attention, rgb(0x95d7f6), true))
@@ -54,21 +58,21 @@ pub(crate) fn project_status(
     if additions == 0 && deletions == 0 {
         return None;
     }
-    // CDXC:Theming 2026-09-21 DECISION: User: make them darker in light mode theme and lighter in dark mode theme (as they were before).
-    // This supersedes the earlier same-day instruction to darken the dark-theme git +/- counts.
-    // SEE-ALSO: packages/core-ui/styles/groups.css `.group-project-diff-stat-additions` / `.group-project-diff-stat-deletions`, packages/core-ui/styles/sidebar-light.css.
-    let additions_color = chrome_color(0x9bbf8d, 0x125a29);
-    let deletions_color = chrome_color(0xc58b8b, 0xa11922);
+    // CDXC:Theming 2026-09-22 DECISION: User: make the text have 70% opacity.
+    // This supersedes the earlier same-day instruction not to use opacity on these numbers. The theme colors stay solid underneath.
+    // SEE-ALSO: packages/core-ui/styles/groups.css `.group-project-diff-stats`, packages/core-ui/styles/sidebar-light.css.
+    let additions_color = chrome_color(0x9cc894, 0x2a7a3a);
+    let deletions_color = chrome_color(0xdca8a4, 0xc43a42);
     Some(
         h_flex()
             .gap(px(8.0 * scale))
             .text_size(px(13.55 * scale))
-            .opacity(0.32)
+            .opacity(0.7)
             .when(
                 hud["settings"]["showProjectEditorDiffFileCount"] == true,
                 |row| {
                     row.child(
-                        div().text_color(chrome_color(0xb4b8c0, 0x0969da)).child(
+                        div().text_color(chrome_color(0x8aa0b8, 0x3b7cc4)).child(
                             stats["files"]
                                 .as_u64()
                                 .unwrap_or_default()

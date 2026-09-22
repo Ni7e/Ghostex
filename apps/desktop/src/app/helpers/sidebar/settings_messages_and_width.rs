@@ -254,6 +254,20 @@ pub(crate) fn gpui_session_chat_uses_light_theme(
     }
 }
 
+/// CDXC:Theming 2026-09-22 DECISION:
+/// User: the workarea header (the top bar) matches the theme too. Every surface that backs a GPUI
+/// chat, the transcript, the header band over it, its fade ramp and the chat placeholders, reads
+/// this one colour: the chat's own theme variant's chrome stepped toward white by
+/// `session_chat_background_for_chrome`, so a tinted preset carries into all of them at once.
+pub(crate) fn gpui_session_chat_background_rgb(
+    settings: &serde_json::Map<String, serde_json::Value>,
+) -> u32 {
+    let light = gpui_session_chat_uses_light_theme(settings);
+    session_chat_background_for_chrome(resolved_custom_sidebar_titlebar_background_for_variant(
+        settings, light,
+    ))
+}
+
 pub(crate) fn gpui_session_chat_font_family_from_settings(
     settings: &serde_json::Map<String, serde_json::Value>,
 ) -> String {

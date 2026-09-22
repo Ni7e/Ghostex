@@ -19,6 +19,8 @@ import {
   PREFERRED_AGENT_INTERFACE_OPTIONS,
   PROMPT_EDITOR_BACKEND_OPTIONS,
   SESSION_CHAT_THEME_OPTIONS,
+  DARK_THEME_PRESET_OPTIONS,
+  LIGHT_THEME_PRESET_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   SIDEBAR_SPACES_ENABLED_OPTIONS,
@@ -400,7 +402,7 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'sidebarCollapseAnimationDurationMs',
           subtitle:
-            'Set how quickly sidebar sections, groups, and projects expand or collapse. Set to 0 for no animation.',
+            'Set how quickly sidebar sections, groups, and projects expand or collapse, and how quickly the floating sidebar and sessions column slide in from the window edge. Set to 0 for no animation.',
           title: 'Collapse animation speed',
         },
         {
@@ -488,8 +490,40 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'sidebarTheme',
           options: SIDEBAR_THEME_SETTING_OPTIONS,
-          subtitle: 'Follow the system appearance by default, or choose Light or Dark Gray.',
+          subtitle: 'Follow the system appearance by default, or choose Light or Dark.',
           title: 'App theme',
+        },
+        {
+          key: 'darkThemePreset',
+          options: DARK_THEME_PRESET_OPTIONS,
+          subtitle: 'Preset dark chrome for the sidebar and window, or Custom to tune its contrast and tint.',
+          title: 'Dark theme',
+        },
+        {
+          key: 'customSidebarTitlebarBackgroundDarknessPercent',
+          subtitle: 'Contrast of the dark sidebar and window chrome background while Dark theme is Custom.',
+          title: 'Dark theme background contrast',
+        },
+        {
+          key: 'customSidebarTitlebarBackgroundTintColor',
+          subtitle: 'Subtle tint of the dark sidebar and window chrome background while Dark theme is Custom.',
+          title: 'Dark theme background tint',
+        },
+        {
+          key: 'lightThemePreset',
+          options: LIGHT_THEME_PRESET_OPTIONS,
+          subtitle: 'Preset light chrome for the sidebar and window, or Custom to tune its contrast and tint.',
+          title: 'Light theme',
+        },
+        {
+          key: 'customSidebarTitlebarLightBackgroundLightnessPercent',
+          subtitle: 'Contrast of the light sidebar and window chrome background while Light theme is Custom.',
+          title: 'Light theme background contrast',
+        },
+        {
+          key: 'customSidebarTitlebarLightBackgroundTintColor',
+          subtitle: 'Subtle tint of the light sidebar and window chrome background while Light theme is Custom.',
+          title: 'Light theme background tint',
         },
         {
           key: 'sessionChatTheme',
@@ -516,18 +550,6 @@ export function getSettingsSearchSectionDefinitions() {
           options: GHOSTTY_THEME_SETTING_OPTIONS,
           subtitle: 'Uses your configured Ghostty dark theme, or GitHub Dark when no theme is configured.',
           title: 'Terminal dark palette',
-        },
-        {
-          key: 'customSidebarTitlebarBackgroundDarknessPercent',
-          subtitle:
-            'Contrast level for the sidebar and window chrome background in dark mode. Light mode stays light gray.',
-          title: 'Dark theme background contrast',
-        },
-        {
-          key: 'customSidebarTitlebarBackgroundTintColor',
-          subtitle:
-            'Subtle tint color for the sidebar and window chrome background in dark mode. Light mode stays light gray.',
-          title: 'Dark theme background tint',
         },
         {
           key: 'showActivePaneOutline',
@@ -773,11 +795,6 @@ export function getSettingsSearchSectionDefinitions() {
           key: 'clickToWakeSleepingSessions',
           subtitle: 'Select sleeping pane tabs without waking them until the empty pane is clicked.',
           title: 'Click to Wake Sleeping Panes',
-        },
-        {
-          key: 'showAgentsPaneTabBarWhenUnsplit',
-          subtitle: 'Keep the tabs bar above the agents pane even when the screen is not split.',
-          title: 'Show tabs bar when not split',
         },
         {
           key: 'showQuickModelPickerInTerminal',

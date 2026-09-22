@@ -1,5 +1,6 @@
 import { type SidebarThemeSetting } from '../session-grid-contract-core';
 import type { ContentThemeSetting } from '../appearance';
+import type { DarkThemePreset, LightThemePreset } from './titlebar-color';
 import { DEFAULT_COMMANDS_PANEL_HEIGHT_PX } from '../session-grid-contract-session';
 import { type SessionChatThemeSetting } from '../session-chat';
 import { type CompletionSoundPreference, type CompletionSoundSetting } from '../completion-sound';
@@ -9,6 +10,7 @@ import { type PetId } from '../pets';
 import { type SidebarSessionTagListItem } from '../session-tags';
 import { type SessionCardHoverButtonItem } from '../session-card-hover-actions';
 import type { ProjectViewTemplate } from './project-views';
+import type { ProjectWebsiteSettings } from './project-websites';
 import { type GhostexCustomView } from './custom-views';
 import { type GhostexViewScopes } from './view-scopes';
 import { type DiagnosticLoggingSettings } from './diagnostic-logging';
@@ -307,6 +309,12 @@ export type ghostexSettings = {
   kanbanViewTabHidden: boolean;
   automateViewTabHidden: boolean;
   docsViewTabHidden: boolean;
+  terminalViewTabHidden: boolean;
+  storybookViewTabHidden: boolean;
+  linearViewTabHidden: boolean;
+  jiraViewTabHidden: boolean;
+  githubViewTabHidden: boolean;
+  projectWebsiteViews: ProjectWebsiteSettings;
   /**
    * Quick-access switches affect only the matching right-side titlebar button.
    * The menus and commands remain available through their other entry points.
@@ -523,7 +531,7 @@ export type ghostexSettings = {
    * view the user never chose.
    */
   preferredAgentInterfaceOverrides: Readonly<Record<string, PreferredAgentInterface>>;
-  /** Duration for sidebar section, group, and project disclosure animations. */
+  /** Duration for sidebar section, group, and project disclosure animations, and for the floating sidebar's slide. */
   sidebarCollapseAnimationDurationMs: number;
   /** Delay before sidebar hover tooltips appear. */
   sidebarTooltipDelayMs: number;
@@ -651,6 +659,19 @@ export type ghostexSettings = {
   customSidebarTitlebarBackgroundTintColor: string;
   customSidebarTitlebarBackgroundDarknessPercent: number;
   customSidebarTitlebarBackgroundColor: string;
+  /**
+   * CDXC:Theming 2026-09-22 DECISION:
+   * User: add contrast and tint for light mode like dark mode, and show each pair only when its new
+   * Light theme / Dark theme dropdown is set to Custom; the dropdowns otherwise offer preset themes.
+   * The dark preset field defaults to Gray, but a saved settings file without it that already carries
+   * non-default contrast or tint values migrates to Custom so the chrome it produced does not change.
+   * The two background color fields hold the effective (preset or custom) chrome for each appearance.
+   */
+  darkThemePreset: DarkThemePreset;
+  lightThemePreset: LightThemePreset;
+  customSidebarTitlebarLightBackgroundTintColor: string;
+  customSidebarTitlebarLightBackgroundLightnessPercent: number;
+  customSidebarTitlebarLightBackgroundColor: string;
   terminalCursorStyle: TerminalCursorStyle;
   terminalCursorStyleBlink: boolean;
   /**
@@ -733,12 +754,6 @@ export type ghostexSettings = {
    * pane body.
    */
   clickToWakeSleepingSessions: boolean;
-  /**
-   * CDXC:Workarea 2026-09-04 DECISION:
-   * User: hide the tabs bar above the agents pane when the screen is not split; split panes always show it.
-   * Off by default; the setup wizard offers it right below Terminal Width.
-   */
-  showAgentsPaneTabBarWhenUnsplit: boolean;
   customViews: GhostexCustomView[];
   customViewTemplates: ProjectViewTemplate[];
   /**

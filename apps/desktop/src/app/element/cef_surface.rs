@@ -11,7 +11,7 @@ pub(crate) struct CefSurface {
     pub(crate) focus_handle: FocusHandle,
     id: String,
     visible: bool,
-    workarea_light_theme: Option<bool>,
+    workarea_theme: Option<(bool, u32)>,
 }
 
 impl CefSurface {
@@ -148,7 +148,7 @@ impl CefSurface {
             focus_handle: cx.focus_handle().tab_stop(false),
             id,
             visible,
-            workarea_light_theme: None,
+            workarea_theme: None,
         }
     }
 
@@ -161,11 +161,14 @@ impl CefSurface {
     }
 
     pub(crate) fn refresh_workarea_theme(&mut self, light: bool) {
-        if self.workarea_light_theme != Some(light)
-            && self.execute_app_owned_script(workarea_theme_script(light))
+        let chrome = crate::app::consts::GPUI_TITLEBAR_BACKGROUND_RGB
+            .load(std::sync::atomic::Ordering::Relaxed) as u32;
+        let content = session_chat_background_for_chrome(chrome);
+        if self.workarea_theme != Some((light, chrome))
+            && self.execute_app_owned_script(&workarea_theme_script(light, chrome, content))
         {
-            self.workarea_light_theme = Some(light);
-            self.background = chrome_color(0x0e0e0e, 0xffffff).into();
+            self.workarea_theme = Some((light, chrome));
+            self.background = gpui::rgb(content).into();
         }
     }
 

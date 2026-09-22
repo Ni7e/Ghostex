@@ -523,7 +523,6 @@
    * CDXC:Git 2026-05-15-13:58:
    * Project git line deltas moved from the former sidebar Code launcher to the
    * project row.
-   * Keep them low-opacity so project names remain the primary scan target.
    *
    * CDXC:Git 2026-05-15-14:26:
    * Project git stats should sit in the same right-side visual slot as session
@@ -547,24 +546,17 @@
   line-height: 1.2;
   margin-left: auto;
   min-height: calc(14px * var(--sidebar-density-scale));
-  opacity: 0.32;
+  /*
+   * CDXC:Theming 2026-09-22 DECISION:
+   * User: make the text have 70% opacity.
+   * This supersedes the earlier same-day instruction not to use opacity on these numbers.
+   * SEE-ALSO: apps/desktop/src/app/native_sidebar/project_status.rs.
+   */
+  opacity: 0.7;
   overflow: visible;
   pointer-events: none;
-  transition:
-    opacity 120ms ease,
-    visibility 0s linear 0s;
   visibility: visible;
   white-space: nowrap;
-}
-
-.group[data-project-group='true'][data-active='true'] .group-project-diff-stats {
-  /*
-   * CDXC:Git 2026-06-09-17:10:
-   * The active project's header git stats must read brighter than non-active
-   * project stats, because active project names are brighter and the git
-   * numbers should not become the dimmest part of the active row.
-   */
-  opacity: 0.72;
 }
 
 .group-title-row:has(.group-project-diff-stats) .group-header-actions:not([data-open='true']) {
@@ -577,7 +569,7 @@
 }
 
 .group-project-diff-files {
-  color: color-mix(in srgb, #8ec7ff 84%, var(--app-foreground) 16%);
+  color: #8aa0b8;
   flex: none;
 }
 
@@ -586,18 +578,17 @@
 }
 
 .group-project-diff-stat-additions {
-  color: color-mix(in srgb, #9ee6b2 84%, var(--app-foreground) 16%);
+  color: #9cc894;
 }
 
 .group-project-diff-stat-deletions {
-  color: color-mix(in srgb, #ffaaa6 84%, var(--app-foreground) 16%);
+  color: #dca8a4;
 }
 
 .group-head:hover .group-project-diff-stats,
 .group-head:has(:focus-visible) .group-project-diff-stats,
 .group-title-row:has(.group-header-actions[data-open='true']) .group-project-diff-stats {
   display: none;
-  opacity: 0;
   visibility: hidden;
 }
 

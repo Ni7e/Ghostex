@@ -20,8 +20,8 @@ export const MANAGE_STYLES = `
     --sidebar-context-menu-backdrop-z-index: 749;
     --sidebar-context-menu-z-index: 750;
     --sidebar-context-menu-submenu-z-index: 751;
-    --manage-bg: light-dark(#f7f7f8, #0e0e0e);
-    --manage-panel: light-dark(#f7f7f8, #0e0e0e);
+    --manage-bg: var(--app-background, light-dark(#f7f7f8, #0e0e0e));
+    --manage-panel: var(--app-background, light-dark(#f7f7f8, #0e0e0e));
     --manage-panel-strong: light-dark(#ffffff, #161616);
     --manage-panel-raised: light-dark(#f2f2f3, #1d1d1d);
     --manage-border: light-dark(rgba(0, 0, 0, 0.11), rgba(255, 255, 255, 0.11));
@@ -205,7 +205,7 @@ export const MANAGE_STYLES = `
    * Dark mode keeps the 2026-09-07 decision (files sidebar, search row, and header rows use #0b0b0b) until the user shares dark colours.
    */
   .manage-sidebar {
-    background: light-dark(#f4f4f5, #0b0b0b);
+    background: var(--app-chrome-background, light-dark(#f4f4f5, #0b0b0b));
     color: var(--app-foreground);
     box-sizing: border-box;
     display: flex;
@@ -544,7 +544,7 @@ export const MANAGE_STYLES = `
   .manage-search {
     /* CDXC:Docs 2026-09-06 DECISION: User: make the Docs file search bar 3px taller. */
     align-items: center;
-    background: light-dark(#f4f4f5, #0b0b0b);
+    background: var(--app-chrome-background, light-dark(#f4f4f5, #0b0b0b));
     border: 0;
     border-bottom: 1px solid light-dark(#e5e5e5, #292929);
     box-sizing: border-box;
@@ -1003,7 +1003,7 @@ export const MANAGE_STYLES = `
   .manage-preview-header {
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
     align-items: center;
-    background: light-dark(#f4f4f5, #0b0b0b);
+    background: var(--app-chrome-background, light-dark(#f4f4f5, #0b0b0b));
     border-bottom: 1px solid var(--manage-border);
     box-sizing: border-box;
     display: flex;
@@ -1354,7 +1354,7 @@ export const MANAGE_STYLES = `
    */
   .manage-shell .find-panel,
   .manage-meo-markdown-editor .mode-toolbar {
-    background: light-dark(#f4f4f5, #0b0b0b);
+    background: var(--app-chrome-background, light-dark(#f4f4f5, #0b0b0b));
     border: 1px solid var(--manage-border);
     border-radius: 10px;
     box-shadow:

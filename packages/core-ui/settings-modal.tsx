@@ -52,6 +52,7 @@ import {
   MAX_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
   MAX_SESSION_CHAT_ZOOM_PERCENT,
   MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+  MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
   MAX_TERMINAL_PANE_PADDING_PX,
   MAX_TERMINAL_VIEW_WIDTH_PERCENT,
   MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
@@ -61,6 +62,7 @@ import {
   getGhosttyThemeSettingOptions,
   KEEP_AWAKE_DURATION_OPTIONS,
   MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+  MIN_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
   MIN_TERMINAL_PANE_PADDING_PX,
   MIN_TERMINAL_VIEW_WIDTH_PERCENT,
   MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
@@ -71,6 +73,8 @@ import {
   type PromptEditorBackend,
   SIDEBAR_THEME_SETTING_OPTIONS,
   SESSION_CHAT_THEME_OPTIONS,
+  DARK_THEME_PRESET_OPTIONS,
+  LIGHT_THEME_PRESET_OPTIONS,
   SIDEBAR_SPACE_SWITCH_BEHAVIOR_OPTIONS,
   SIDEBAR_VISIBILITY_MEMORY_OPTIONS,
   WEB_LINK_OPEN_TARGET_OPTIONS,
@@ -1146,7 +1150,7 @@ export function SettingsModal({
                          */}
                         {mainSubsectionVisible('theming', settingsSearch.theming) ? (
                           <SettingsSection
-                            description='Choose the app appearance. Chat and terminal follow it unless you set an override below.'
+                            description='Choose the app appearance and a preset for each of its light and dark themes. Chat and terminal follow it unless you set an override below.'
                             sectionRef={themingSectionRef}
                             title='Theme'
                           >
@@ -1183,13 +1187,114 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.theming, 'sidebarTheme') ? (
                               <SelectField
                                 label='App theme'
-                                description='Choose Light, Dark Gray, or System to follow your computer’s appearance.'
+                                description='Choose Light, Dark, or System to follow your computer’s appearance.'
                                 {...getSettingModificationProps('sidebarTheme')}
                                 onChange={(value) =>
                                   updateDraft('sidebarTheme', value as ghostexSettings['sidebarTheme'])
                                 }
                                 options={SIDEBAR_THEME_SETTING_OPTIONS}
                                 value={draft.sidebarTheme}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.theming, 'darkThemePreset') ? (
+                              <SelectField
+                                description='Preset dark chrome for the sidebar and window, or Custom to tune its contrast and tint.'
+                                label='Dark theme'
+                                {...getSettingModificationProps('darkThemePreset')}
+                                onChange={(value) =>
+                                  updateDraft('darkThemePreset', value as ghostexSettings['darkThemePreset'])
+                                }
+                                options={DARK_THEME_PRESET_OPTIONS}
+                                value={draft.darkThemePreset}
+                              />
+                            ) : null}
+                            {draft.darkThemePreset === 'custom' &&
+                            mainSettingVisible(
+                              settingsSearch.theming,
+                              'customSidebarTitlebarBackgroundDarknessPercent'
+                            ) ? (
+                              <SliderNumberField
+                                dependent
+                                description='85 is softer gray; 100 is black. Text and icons adjust automatically.'
+                                label='Dark theme background contrast'
+                                {...getSettingModificationProps('customSidebarTitlebarBackgroundDarknessPercent')}
+                                max={MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
+                                min={MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
+                                onCommit={(value) =>
+                                  updateDraft('customSidebarTitlebarBackgroundDarknessPercent', value)
+                                }
+                                onChange={(value) =>
+                                  updateDraftDebounced('customSidebarTitlebarBackgroundDarknessPercent', value)
+                                }
+                                step={1}
+                                value={draft.customSidebarTitlebarBackgroundDarknessPercent}
+                              />
+                            ) : null}
+                            {draft.darkThemePreset === 'custom' &&
+                            mainSettingVisible(settingsSearch.theming, 'customSidebarTitlebarBackgroundTintColor') ? (
+                              <WebColorPickerField
+                                dependent
+                                description='Applies a subtle hue to the dark sidebar and window chrome background.'
+                                label='Dark theme background tint'
+                                {...getSettingModificationProps('customSidebarTitlebarBackgroundTintColor')}
+                                onChange={(value) =>
+                                  updateDraftDebounced('customSidebarTitlebarBackgroundTintColor', value)
+                                }
+                                onCommit={(value) => updateDraft('customSidebarTitlebarBackgroundTintColor', value)}
+                                value={draft.customSidebarTitlebarBackgroundTintColor}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.theming, 'lightThemePreset') ? (
+                              <SelectField
+                                description='Preset light chrome for the sidebar and window, or Custom to tune its contrast and tint.'
+                                label='Light theme'
+                                {...getSettingModificationProps('lightThemePreset')}
+                                onChange={(value) =>
+                                  updateDraft('lightThemePreset', value as ghostexSettings['lightThemePreset'])
+                                }
+                                options={LIGHT_THEME_PRESET_OPTIONS}
+                                value={draft.lightThemePreset}
+                              />
+                            ) : null}
+                            {draft.lightThemePreset === 'custom' &&
+                            mainSettingVisible(
+                              settingsSearch.theming,
+                              'customSidebarTitlebarLightBackgroundLightnessPercent'
+                            ) ? (
+                              <SliderNumberField
+                                dependent
+                                description='60 is a deeper gray; 100 is white. Text and icons adjust automatically.'
+                                label='Light theme background contrast'
+                                {...getSettingModificationProps('customSidebarTitlebarLightBackgroundLightnessPercent')}
+                                max={MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT}
+                                min={MIN_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT}
+                                onCommit={(value) =>
+                                  updateDraft('customSidebarTitlebarLightBackgroundLightnessPercent', value)
+                                }
+                                onChange={(value) =>
+                                  updateDraftDebounced('customSidebarTitlebarLightBackgroundLightnessPercent', value)
+                                }
+                                step={1}
+                                value={draft.customSidebarTitlebarLightBackgroundLightnessPercent}
+                              />
+                            ) : null}
+                            {draft.lightThemePreset === 'custom' &&
+                            mainSettingVisible(
+                              settingsSearch.theming,
+                              'customSidebarTitlebarLightBackgroundTintColor'
+                            ) ? (
+                              <WebColorPickerField
+                                dependent
+                                description='Applies a subtle hue to the light sidebar and window chrome background.'
+                                label='Light theme background tint'
+                                {...getSettingModificationProps('customSidebarTitlebarLightBackgroundTintColor')}
+                                onChange={(value) =>
+                                  updateDraftDebounced('customSidebarTitlebarLightBackgroundTintColor', value)
+                                }
+                                onCommit={(value) =>
+                                  updateDraft('customSidebarTitlebarLightBackgroundTintColor', value)
+                                }
+                                value={draft.customSidebarTitlebarLightBackgroundTintColor}
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.theming, 'sessionChatTheme') ? (
@@ -1245,38 +1350,6 @@ export function SettingsModal({
                                 options={getGhosttyThemeSettingOptions(draft.terminalGhosttyTheme)}
                                 showScrollButtons={false}
                                 value={draft.terminalGhosttyTheme || GHOSTTY_THEME_UNMANAGED_VALUE}
-                              />
-                            ) : null}
-                            {mainSettingVisible(
-                              settingsSearch.theming,
-                              'customSidebarTitlebarBackgroundDarknessPercent'
-                            ) ? (
-                              <SliderNumberField
-                                description='Dark mode: 85 is softer gray; 100 is black. Text and icons adjust automatically.'
-                                label='Dark theme background contrast'
-                                {...getSettingModificationProps('customSidebarTitlebarBackgroundDarknessPercent')}
-                                max={MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
-                                min={MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
-                                onCommit={(value) =>
-                                  updateDraft('customSidebarTitlebarBackgroundDarknessPercent', value)
-                                }
-                                onChange={(value) =>
-                                  updateDraftDebounced('customSidebarTitlebarBackgroundDarknessPercent', value)
-                                }
-                                step={1}
-                                value={draft.customSidebarTitlebarBackgroundDarknessPercent}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'customSidebarTitlebarBackgroundTintColor') ? (
-                              <WebColorPickerField
-                                description='Applies a subtle hue to the sidebar and window chrome background in dark mode.'
-                                label='Dark theme background tint'
-                                {...getSettingModificationProps('customSidebarTitlebarBackgroundTintColor')}
-                                onChange={(value) =>
-                                  updateDraftDebounced('customSidebarTitlebarBackgroundTintColor', value)
-                                }
-                                onCommit={(value) => updateDraft('customSidebarTitlebarBackgroundTintColor', value)}
-                                value={draft.customSidebarTitlebarBackgroundTintColor}
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.theming, 'showActivePaneOutline') ? (
@@ -1498,7 +1571,7 @@ export function SettingsModal({
                             ) : null}
                             {mainSettingVisible(settingsSearch.sidebar, 'sidebarCollapseAnimationDurationMs') ? (
                               <SliderNumberField
-                                description='Duration in milliseconds for expanding and collapsing sidebar sections, groups, and projects. Set to 0 for instant changes.'
+                                description='Duration in milliseconds for expanding and collapsing sidebar sections, groups, and projects, and for the floating sidebar and sessions column sliding in from the window edge. Set to 0 for instant changes.'
                                 label='Collapse Animation Duration'
                                 {...getSettingModificationProps('sidebarCollapseAnimationDurationMs')}
                                 max={MAX_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS}
@@ -2277,15 +2350,6 @@ export function SettingsModal({
                                 label='Click to wake sleeping panes'
                                 {...getSettingModificationProps('clickToWakeSleepingSessions')}
                                 onChange={(checked) => updateDraft('clickToWakeSleepingSessions', checked)}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.terminal, 'showAgentsPaneTabBarWhenUnsplit') ? (
-                              <ToggleField
-                                checked={draft.showAgentsPaneTabBarWhenUnsplit}
-                                description='Keep the tabs bar above the agents pane even when the screen is not split. Split panes always show it; use Advanced > Split Right in a session menu to split.'
-                                label='Show tabs bar when not split'
-                                {...getSettingModificationProps('showAgentsPaneTabBarWhenUnsplit')}
-                                onChange={(checked) => updateDraft('showAgentsPaneTabBarWhenUnsplit', checked)}
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.terminal, 'showQuickModelPickerInTerminal') ? (

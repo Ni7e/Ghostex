@@ -1,4 +1,7 @@
-use crate::app::helpers::gpui_session_chat_uses_light_theme;
+use crate::app::helpers::{
+    gpui_session_chat_background_rgb, gpui_session_chat_uses_light_theme,
+    sidebar_titlebar_pack_rgb, sidebar_titlebar_rgb_channels,
+};
 use gpui::{Hsla, rgb};
 
 #[derive(Clone)]
@@ -11,6 +14,9 @@ pub(crate) struct ChatAppearance {
     pub(crate) input_border: Hsla,
     pub(crate) ring: Hsla,
     pub(crate) card_background: Hsla,
+    /// The status-card shell tones (cards.rs): a panel and a footer band stepped off the background.
+    pub(crate) card_panel: Hsla,
+    pub(crate) card_footer: Hsla,
     pub(crate) prose: Hsla,
     pub(crate) card_muted: Hsla,
     pub(crate) muted: Hsla,
@@ -59,30 +65,79 @@ impl ChatAppearance {
         let light = gpui_session_chat_uses_light_theme(settings);
         let color = |dark, light_color| rgb(if light { light_color } else { dark }).into();
         let enabled = |name| settings.get(name).and_then(serde_json::Value::as_bool) == Some(true);
+        // The transcript and its cards share one backing tone derived from the chat's own theme
+        // variant (the chat may be dark while the app is light), see session_chat_background_for_chrome.
+        let background_rgb = gpui_session_chat_background_rgb(settings);
+        let background: Hsla = rgb(background_rgb).into();
+        /*
+        CDXC:Theming 2026-09-22 DECISION:
+        User: the user's message bubble and the composer must take from the theme colour too; they were
+        fixed grays that never changed. In dark mode the opaque fills are fixed steps toward white off
+        the chat background (3% for the bubble/composer/input, 6% for the border, 8% for the composer
+        border), which land on the old #141414 / #1c1c1c / #202020 over the neutral #0d0d0d and carry a
+        tinted preset's hue otherwise. Light mode does the same with steps toward black (2026-09-22:
+        User: "in the light one too"), so a tinted light preset carries into the bubble and composer.
+        */
+        let toward = |target: f32, amount: f32| -> Hsla {
+            let [red, green, blue] = sidebar_titlebar_rgb_channels(background_rgb);
+            rgb(sidebar_titlebar_pack_rgb([
+                red + (target - red) * amount,
+                green + (target - green) * amount,
+                blue + (target - blue) * amount,
+            ]))
+            .into()
+        };
+        // Dark fills step toward white, light fills toward black, by amounts that land on the old
+        // fixed values over the neutral defaults (#141414 / #1c1c1c / #202020 dark, #f4f4f5 /
+        // #e4e4e7 / #ebebeb light); the composer and cards in light mode step a little toward white.
+        let lifted = |dark_amount: f32, light_amount: f32| -> Hsla {
+            if light {
+                toward(0.0, light_amount)
+            } else {
+                toward(255.0, dark_amount)
+            }
+        };
+        let raised = |amount: f32| -> Hsla { toward(255.0, amount) };
         Self {
-            background: color(0x0d0d0d, 0xfcfcfc),
+            background,
             foreground: color(0xfcfcfc, 0x27272a),
             primary: color(0xb4b8c0, 0x27272a),
             control_primary: color(0xe5e5e5, 0x18181b),
             control_border: if light {
-                rgb(0xe4e4e7).into()
+                toward(0.0, 0.095)
             } else {
                 gpui::Hsla::from(rgb(0xffffff)).opacity(0.06)
             },
             input_border: if light {
-                rgb(0xe4e4e7).into()
+                toward(0.0, 0.095)
             } else {
                 gpui::Hsla::from(rgb(0xffffff)).opacity(0.08)
             },
-            card_background: color(0x0d0d0d, 0xffffff),
+            card_background: if light { raised(0.3) } else { background },
+            // Mirrors --chat-card-panel / --chat-card-footer in session-chat-status-card.css: over the
+            // neutral defaults these are the old #1e1e1e / #151515 dark and #fbfbfb / #f5f5f6 light tones.
+            card_panel: if light {
+                raised(0.6)
+            } else {
+                lifted(0.07, 0.0)
+            },
+            card_footer: if light {
+                raised(0.1)
+            } else {
+                lifted(0.033, 0.0)
+            },
             ring: color(0x737373, 0x9f9fa9),
             prose: color(0xb4b8c0, 0x4d4d50),
             card_muted: color(0xb4b8bf, 0x71717b),
             muted: color(0x9e9e9e, 0x71717b),
-            border: color(0x1c1c1c, 0xe4e4e7),
-            input: color(0x141414, 0xf4f4f5),
-            composer_border: color(0x202020, 0xebebeb),
-            composer_background: color(0x141414, 0xffffff),
+            border: lifted(0.062, 0.095),
+            input: lifted(0.03, 0.032),
+            composer_border: lifted(0.08, 0.067),
+            composer_background: if light {
+                raised(0.3)
+            } else {
+                lifted(0.03, 0.0)
+            },
             scale: super::zoom::keyboard_zoom_percent(state)
                 .unwrap_or_else(|| Self::settings_zoom_percent(settings))
                 / 100.0,

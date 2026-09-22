@@ -966,7 +966,7 @@ describe('normalizeghostexSettings', () => {
       sidebarTheme: 'system',
     });
     expect(SIDEBAR_THEME_SETTING_OPTIONS).toEqual([
-      { label: 'Dark Gray', value: 'dark-2' },
+      { label: 'Dark', value: 'dark-2' },
       { label: 'Light', value: 'plain-light' },
       { label: 'System', value: 'system' },
     ]);

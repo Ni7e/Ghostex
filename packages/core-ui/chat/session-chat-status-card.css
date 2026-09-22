@@ -18,11 +18,11 @@ Every knob below is a custom property on the chat scope so a future retune is on
   --chat-card-hairline: color-mix(in srgb, var(--border) 65%, transparent);
 }
 
-/* CDXC:SessionChat 2026-09-16 DECISION: User: the light tones from the mix were still too dark, so light mode pins the panel to #fdfdfd and the footer band to #f5f5f5 instead of mixing. The descendant selector keeps the override when a scope is nested inside a light one, which otherwise re-declares the dark formula. */
+/* CDXC:Theming 2026-09-22 DECISION: User: the cards must take the theme's tint in the blueish light theme; they were not tinted at all. Light mode now mixes toward white off the chat background (60% for the panel, 10% for the footer band) instead of the fixed #fdfdfd / #f5f5f5 pinned on 2026-09-16, which this supersedes; over the neutral light chrome that lands on #fbfbfb / #f5f5f6, keeping the lighter-than-page reading that decision asked for. The descendant selector keeps the override when a scope is nested inside a light one. Mirrors apps/desktop/src/app/native_chat/cards.rs. */
 .ghostex-session-chat-scope[data-chat-theme='light'],
 [data-chat-theme='light'] .ghostex-session-chat-scope {
-  --chat-card-panel: #fdfdfd;
-  --chat-card-footer: #f5f5f5;
+  --chat-card-panel: color-mix(in srgb, #ffffff 60%, var(--background));
+  --chat-card-footer: color-mix(in srgb, #ffffff 10%, var(--background));
 }
 
 /* --- Shell ------------------------------------------------------------------ */

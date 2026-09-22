@@ -37,8 +37,8 @@ impl NativeChatView {
     ) -> AnyElement {
         let s = p.scale;
         let has_actions = !actions.is_empty();
-        let panel_color = gpui::rgb(if p.light { 0xfdfdfd } else { 0x1e1e1e });
-        let footer_color = gpui::rgb(if p.light { 0xf5f5f5 } else { 0x151515 });
+        let panel_color = p.card_panel;
+        let footer_color = p.card_footer;
         div()
             .w_full()
             .min_w_0()

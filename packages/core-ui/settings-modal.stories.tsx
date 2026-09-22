@@ -500,7 +500,7 @@ export const Theming: Story = {
     <SettingsModalStory
       initialSettings={{
         ...modalSettings,
-        showAdvancedSettings: true,
+        darkThemePreset: 'custom',
       }}
     />
   ),
@@ -512,7 +512,9 @@ export const CustomColorPicker: Story = {
 
     await step('open the nested color picker dialog', async () => {
       await userEvent.click(await body.findByRole('button', { name: 'Appearance' }));
-      await userEvent.click(await body.findByRole('button', { name: 'Dark theme background tint custom color picker' }));
+      await userEvent.click(
+        await body.findByRole('button', { name: 'Dark theme background tint custom color picker' })
+      );
       await body.findByRole('dialog', { name: 'Pick Color' });
     });
   },
@@ -520,7 +522,7 @@ export const CustomColorPicker: Story = {
     <SettingsModalStory
       initialSettings={{
         ...modalSettings,
-        showAdvancedSettings: true,
+        darkThemePreset: 'custom',
       }}
     />
   ),

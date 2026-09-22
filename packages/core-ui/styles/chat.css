@@ -227,9 +227,11 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 .ghostex-session-chat-popup[data-chat-theme='light'],
 body[data-session-chat-theme='light'] .ghostex-session-chat-popup:not([data-chat-theme]) {
   color-scheme: light;
-  --background: oklch(99.2% 0 0);
+  /* The chat background follows the light chrome colour when the host publishes it (lifecycle-effects.ts). */
+  --background: var(--ghostex-session-chat-light-background, oklch(99.2% 0 0));
   --foreground: oklch(27.4% 0.006 286.033);
-  --card: oklch(100% 0 0);
+  /* Cards sit a little lighter than the tinted page rather than on fixed white, so the theme reaches them. */
+  --card: color-mix(in srgb, #ffffff 60%, var(--background));
   --card-foreground: var(--foreground);
   --popover: oklch(100% 0 0);
   --popover-foreground: var(--foreground);
@@ -294,7 +296,7 @@ body[data-session-chat-theme='dark'] .ghostex-session-chat-popup:not([data-chat-
    * difference between the document, the transcript, and the native host is
    * visible as horizontal strips while Chromium composites the page.
    */
-  --background: #0d0d0d;
+  --background: var(--ghostex-session-chat-dark-background, #0d0d0d);
   --foreground: #fcfcfc;
   --card: var(--background);
   --card-foreground: var(--foreground);

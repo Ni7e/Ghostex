@@ -64,7 +64,7 @@ impl NativeChatView {
             .rounded(px(16.0 * s))
             .border_1()
             .border_color(p.input_border)
-            .bg(gpui::rgb(if p.light { 0xfdfdfd } else { 0x1e1e1e }))
+            .bg(p.card_panel)
             .overflow_hidden();
         for (index, question) in questions.iter().enumerate() {
             let answer = answers

@@ -21,9 +21,12 @@
   border-radius: 10px;
   margin-bottom: calc(0.375rem + 7px);
 }
-/* CDXC:SessionChat 2026-09-12 DECISION: User wants the whole chat diff component background to get slightly lighter on hover, replacing the line-count button's separate hover fill. The card uses the default cursor. */
-.ghostex-chat-file-changes:hover {
-  background: color-mix(in srgb, var(--muted-foreground) 8%, transparent);
+/* CDXC:SessionChat 2026-09-22 DECISION: User: hovering each file's card lightens it to show a click collapses or expands it. This supersedes the 2026-09-12 whole-component hover. The fill spreads 6px past the card through a box-shadow so the layout does not move. The card keeps the default cursor. */
+.ghostex-chat-file-change-card.is-expandable:hover {
+  --file-change-card-hover: color-mix(in srgb, #ffffff 60%, transparent);
+  background: var(--file-change-card-hover);
+  box-shadow: 0 0 0 6px var(--file-change-card-hover);
+  border-radius: 6px;
 }
 .ghostex-chat-file-changes:has(+ .ghostex-chat-file-changes),
 [data-slot='message-content'] > .ghostex-chat-file-changes:last-child,
@@ -31,16 +34,17 @@
   > .ghostex-chat-file-changes:last-child {
   margin-bottom: 0;
 }
+/* CDXC:Theming 2026-09-22 DECISION: User: the diff cards take from the theme colour too. Steps off the chat background and the muted tone that land on the old #141414 surface, #151515 code, #2b2b2e border and #747475 rail over the neutral dark chat; a tinted preset carries its hue. Mirrors apps/desktop/src/app/native_chat/file_change_card.rs. */
 [data-chat-theme='dark'] .ghostex-chat-file-changes {
-  --file-change-code-background: #151515;
-  --file-change-border: #2b2b2e;
-  --file-change-rail: #747475;
+  --file-change-code-background: color-mix(in srgb, #ffffff 3.5%, var(--background));
+  --file-change-border: color-mix(in srgb, var(--muted-foreground) 20%, transparent);
+  --file-change-rail: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
   --file-change-added: #94caaa;
   --file-change-removed: #e5a0a4;
-  background: #141414;
+  background: color-mix(in srgb, #ffffff 3%, var(--background));
 }
-[data-chat-theme='dark'] .ghostex-chat-file-changes:hover {
-  background: #1b1b1b;
+[data-chat-theme='dark'] .ghostex-chat-file-change-card.is-expandable:hover {
+  --file-change-card-hover: color-mix(in srgb, var(--foreground) 5%, transparent);
 }
 .ghostex-chat-file-change-card {
   display: grid;

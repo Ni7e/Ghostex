@@ -197,8 +197,8 @@ body[data-sidebar-theme='plain-light'],
   --ghostex-tooltip-strong-foreground: #18181b;
   --ghostex-tooltip-border: rgba(0, 0, 0, 0.14);
   --ghostex-tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
-  /* CDXC:Theming 2026-09-14 SEE-ALSO: apps/desktop/src/app/helpers/titlebar.rs owns the matching #f4f4f5 light-mode chrome decision. */
-  --app-background: #f4f4f5;
+  /* CDXC:Theming 2026-09-22 SEE-ALSO: the light chrome colour comes from the Light theme preset or custom contrast/tint (packages/shared/ghostex-settings/titlebar-color.ts, published by sidebar-app/lifecycle-effects.ts); #f4f4f5 is the Light Gray default and the pre-hydration paint. apps/desktop/src/app/helpers/titlebar.rs resolves the same colour natively. */
+  --app-background: var(--custom-sidebar-titlebar-light-background-color, #f4f4f5);
   --app-modal-background: #ffffff;
   --app-dropdown-background: #ffffff;
   --app-foreground: #262626;
@@ -482,7 +482,7 @@ body[data-sidebar-custom-theme='true']:is([data-sidebar-theme='plain-light'], [d
 .ghostex-root[data-sidebar-custom-theme='true']:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']),
 .stack[data-sidebar-custom-theme='true']:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) {
   color-scheme: light;
-  --app-background: #f4f4f5;
+  --app-background: var(--custom-sidebar-titlebar-light-background-color, #f4f4f5);
   --app-card: color-mix(in srgb, var(--workspace-sidebar-theme-color) 5%, #ffffff 95%);
   --app-card-active: color-mix(in srgb, var(--workspace-sidebar-theme-color) 12%, #f1f5fb 88%);
   --app-border: color-mix(in srgb, var(--workspace-sidebar-theme-color) 30%, #000000 12%);
