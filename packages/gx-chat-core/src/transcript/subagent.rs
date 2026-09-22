@@ -6,7 +6,7 @@
 
 use serde_json::{Map, Value};
 
-use crate::transcript::jsstr::{ascii_lower, js_trim};
+use crate::transcript::jsstr::js_trim;
 use crate::transcript::tool_fold::ToolPair;
 
 const SUBAGENT_TOOL_NAMES: [&str; 5] = [
@@ -18,11 +18,15 @@ const SUBAGENT_TOOL_NAMES: [&str; 5] = [
 ];
 
 /// A value that is an object, or a JSON string that parses into one.
+///
+/// `record` in `subagent.ts:20` calls ITSELF on the parse result, so a double-encoded input (a
+/// JSON string whose text is another JSON string) unwraps all the way down. Parsing once and
+/// refusing anything that is not an object dropped the whole target.
 fn record(value: Option<&Value>) -> Option<Value> {
     match value? {
         Value::String(text) => match serde_json::from_str::<Value>(text) {
-            Ok(parsed) if parsed.is_object() => Some(parsed),
-            _ => None,
+            Ok(parsed) => record(Some(&parsed)),
+            Err(_) => None,
         },
         other if other.is_object() => Some(other.clone()),
         _ => None,
@@ -68,7 +72,14 @@ fn agent_id_in_output(output: &str) -> Option<String> {
 /// The subagent a tool row links to, as both renderers read it.
 pub fn tool_subagent(pair: &ToolPair<'_>, agent_path: &str) -> Option<Value> {
     let name = pair.call_name()?;
-    let tool = ascii_lower(name.split(['.', ':']).next_back().unwrap_or(name));
+    // `.toLowerCase()` is a FULL Unicode fold here, not an ASCII one: it is a plain method call
+    // rather than a non-`u` regex, so U+212A KELVIN SIGN really does become `k` and `TAS\u{212a}`
+    // really is the `task` tool.
+    let tool = name
+        .split(['.', ':'])
+        .next_back()
+        .unwrap_or(name)
+        .to_lowercase();
     if tool.is_empty() || !SUBAGENT_TOOL_NAMES.contains(&tool.as_str()) {
         return None;
     }
@@ -82,8 +93,13 @@ pub fn tool_subagent(pair: &ToolPair<'_>, agent_path: &str) -> Option<Value> {
     if tool == "send_message" || tool == "followup_task" {
         let id = text(input.as_ref(), "id");
         let selector_source = text(input.as_ref(), "target").or_else(|| id.clone())?;
-        let selector = if selector_source.starts_with('/') || Some(&selector_source) == id.as_ref()
-        {
+        // `target === input?.id` compares against the RAW field, not the trimmed one: an id of
+        // `" abc "` is not equal to the target `"abc"`, so the selector gets the agent path.
+        let raw_id = input
+            .as_ref()
+            .and_then(|input| input.get("id"))
+            .and_then(Value::as_str);
+        let selector = if selector_source.starts_with('/') || raw_id == Some(&selector_source) {
             selector_source.clone()
         } else {
             format!("{agent_path}/{selector_source}")

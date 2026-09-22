@@ -128,7 +128,7 @@ const IMAGE_EXTENSIONS: &[&str] = &[
 
 /// `/\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i`, the plain form.
 pub fn ends_with_image_extension(path: &str) -> bool {
-    let lowered = path.to_lowercase();
+    let lowered = crate::transcript::jsstr::ascii_lower(path);
     IMAGE_EXTENSIONS
         .iter()
         .any(|extension| lowered.ends_with(extension))
@@ -136,7 +136,7 @@ pub fn ends_with_image_extension(path: &str) -> bool {
 
 /// `/(?:^|[\\/])SKILL\.md$/i`.
 fn is_skill_file(path: &str) -> bool {
-    let lowered = path.to_lowercase();
+    let lowered = crate::transcript::jsstr::ascii_lower(path);
     if lowered == "skill.md" {
         return true;
     }
@@ -145,7 +145,7 @@ fn is_skill_file(path: &str) -> bool {
 
 /// `/^https?:\/\//i`.
 pub fn is_web_url(path: &str) -> bool {
-    let lowered = path.to_lowercase();
+    let lowered = crate::transcript::jsstr::ascii_lower(path);
     lowered.starts_with("http://") || lowered.starts_with("https://")
 }
 
@@ -202,7 +202,7 @@ pub fn reference_pill_text(label: &str, kind: ReferenceKind) -> String {
 
 /// `/\b(?:folder|directory)\b/i` over a label.
 fn mentions_folder(label: &str) -> bool {
-    let lowered = label.to_lowercase();
+    let lowered = crate::transcript::jsstr::ascii_lower(label);
     let bytes = lowered.as_bytes();
     for word in ["folder", "directory"] {
         let mut from = 0;
@@ -266,7 +266,9 @@ fn has_file_extension(basename: &str) -> bool {
 
 /// Classifies any rendered machine-path link for the shared pill styling.
 pub fn reference_kind(label: &str, path: &str) -> ReferenceKind {
-    let explicit = explicit_reference_kind(label.trim());
+    // `explicitReferenceKind(label.trim())`: `String.prototype.trim` strips U+FEFF and leaves
+    // U+0085, and Rust's `str::trim` does the exact opposite.
+    let explicit = explicit_reference_kind(crate::transcript::jsstr::js_trim(label));
     if let Some(kind) = explicit {
         if kind != ReferenceKind::Skill || is_skill_file(path) {
             return kind;
@@ -428,7 +430,7 @@ fn has_uri_scheme(value: &str) -> bool {
 
 /// `/^(?:[a-z]:[\\/]|file:\/\/|https?:\/\/)/i`.
 fn is_openable_scheme(value: &str) -> bool {
-    let lowered = value.to_lowercase();
+    let lowered = crate::transcript::jsstr::ascii_lower(value);
     if lowered.starts_with("file://") || is_web_url(&lowered) {
         return true;
     }

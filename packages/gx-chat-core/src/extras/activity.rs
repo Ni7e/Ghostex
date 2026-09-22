@@ -110,6 +110,9 @@ pub fn compute_activity(activity: Option<&Value>, context: &ChatContext) -> Opti
 }
 
 /// `Math.round`: halves go towards positive infinity, not away from zero.
-pub fn js_round(value: f64) -> f64 {
-    (value + 0.5).floor()
-}
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// This was `(value + 0.5).floor()`, which is not `Math.round`: the addition rounds first, so
+/// `0.49999999999999994 + 0.5` is exactly `1.0` and the answer came back 1 where JavaScript
+/// answers 0. `crate::jsnum::js_round` compares against the floor instead and never adds.
+pub use crate::jsnum::js_round;

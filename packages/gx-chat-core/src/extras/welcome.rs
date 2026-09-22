@@ -125,19 +125,10 @@ pub fn empty_state_copy(kind: &str, agent_label: Option<&str>) -> EmptyState {
 /// CDXC:SessionChat 2026-09-08 WHY:
 /// The context row catalog and agent rows both use this formatter; importing it from the catalog
 /// created a runtime cycle that prevented chat from loading.
-pub fn format_duration(milliseconds: f64) -> String {
-    let total_seconds = crate::extras::activity::js_round(milliseconds / 1000.0).max(0.0) as i64;
-    let hours = total_seconds / 3600;
-    let minutes = (total_seconds % 3600) / 60;
-    let seconds = total_seconds % 60;
-    if hours > 0 {
-        return format!("{hours}h {minutes:02}m");
-    }
-    if minutes > 0 {
-        return format!("{minutes}m");
-    }
-    format!("{seconds}s")
-}
+/// It existed twice until 2026-09-22, over two different `Math.round` ports, and the other copy
+/// (`menus/context/usage.rs`) is the faithful one. This is now that copy under family f's name,
+/// which is where `session-chat-duration.ts` belongs.
+pub use crate::menus::context::usage::format_duration;
 
 /// `.replace(/[-_]+/g, ' ')`.
 fn replace_separators(value: &str) -> String {

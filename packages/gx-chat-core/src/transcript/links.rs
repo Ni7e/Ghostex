@@ -14,8 +14,14 @@ pub enum LinkTarget {
     Inert,
 }
 
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// `value[..prefix.len()]` panics whenever the cut falls inside a character, and `value` here is
+/// an href out of the agent's own Markdown: `file:/` followed by any multi-byte character was
+/// enough to take the host thread down. `get` answers `None` there instead.
 fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
-    value.len() >= prefix.len() && value[..prefix.len()].eq_ignore_ascii_case(prefix)
+    value
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
 /// `^[a-z][a-z0-9+.-]*:` case-insensitively: any URI scheme at all (`mailto:`, `vscode:`, `data:`).

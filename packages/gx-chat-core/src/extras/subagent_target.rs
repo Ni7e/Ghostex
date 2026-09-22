@@ -123,7 +123,9 @@ fn record(value: Option<&Value>) -> Option<Map<String, Value>> {
 /// `text`: a non-blank string, trimmed.
 fn text(value: Option<&Value>) -> Option<String> {
     let text = value?.as_str()?;
-    let trimmed = crate::extras::agent_tasks::js_trim(text);
+    // `String.prototype.trim` strips U+FEFF and leaves U+0085; `extras::agent_tasks::js_trim`
+    // does the opposite of that on U+0085.
+    let trimmed = crate::transcript::jsstr::js_trim(text);
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
@@ -141,9 +143,8 @@ fn agent_id_in_text(output: &str) -> Option<String> {
             at == 0 || !(bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_');
         if word_boundary {
             let rest = &output[at + "agentId:".len()..];
-            let body = rest.trim_start_matches(|character: char| {
-                character.is_whitespace() || character == '\u{feff}'
-            });
+            // JavaScript's `\s` does NOT include U+0085, so a `agentId:\u{85}abc` matches no id.
+            let body = rest.trim_start_matches(crate::transcript::jsstr::is_js_space);
             let id: String = body
                 .chars()
                 .take_while(|character| {

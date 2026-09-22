@@ -10,10 +10,10 @@ use markdown::mdast::Node;
 use markdown::ParseOptions;
 use serde_json::{Map, Value};
 
+use crate::composer::reference_pills::reference_kind;
 use crate::transcript::file_position::file_position_suffix;
 use crate::transcript::jsstr::{is_js_space, js_trim};
 use crate::transcript::links::{classify_link_href, file_position_from_href, LinkTarget};
-use crate::transcript::reference_kind::reference_kind;
 
 /// One Markdown reference as the renderer looks it up.
 pub fn markdown_link(href: &str, label: &str) -> Option<Value> {
@@ -65,7 +65,7 @@ pub fn markdown_reference(href: &str, label: &str) -> Option<Value> {
     entry.insert("title".to_string(), format!("{path}{suffix}").into());
     entry.insert(
         "kind".to_string(),
-        reference_kind(source_label, &path).into(),
+        reference_kind(source_label, &path).as_str().into(),
     );
     entry.insert("path".to_string(), path.into());
     // `position` is `undefined` when there is none, which `JSON.stringify` drops.
