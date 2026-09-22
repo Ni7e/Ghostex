@@ -14,6 +14,7 @@ pub mod constants;
 pub mod document;
 pub mod events;
 pub mod fold;
+pub mod frame_publish;
 pub mod markers;
 pub mod merge;
 pub mod pagination;

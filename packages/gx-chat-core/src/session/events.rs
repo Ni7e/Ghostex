@@ -15,6 +15,7 @@ use crate::session::constants::{
     TIMER_RESYNC_RETRY, TIMER_SEED_RETRY, TIMER_STALL, TIMER_TERMINAL_TOOL_HOLD,
 };
 use crate::session::fold::{fold_append, fold_state, FoldedSnapshot, StateCarrier};
+use crate::session::frame_publish::{side_state_moves, FrameIdentity};
 use crate::session::pagination::{page_has_more, PageBoundary};
 use crate::session::reads::{
     arm_read_deadline, expire_overdue_reads, fail_read, inside_seed_window, issue_read, parse_read,
@@ -324,6 +325,8 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
             // that synthesizes snapshots from reads does, including a cleared one on promotion, so
             // a frame that carries any of them carries all three (`controller.ts`, the
             // `'sessionAgentId' in event` test).
+            let before = FrameIdentity::capture(state);
+            let moved = side_state_moves(state, snapshot.lifecycle.as_ref(), true, &snapshot.state);
             if snapshot.session_agent_id.is_some()
                 || snapshot.available_agents.is_some()
                 || snapshot.switchable_agents.is_some()
@@ -333,6 +336,9 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
             apply_authoritative(state, &own, true, context);
             state.messages.snapshot = Some(folded);
             state.messages.authoritative_revision += 1;
+            if moved || before != FrameIdentity::capture(state) {
+                state.core.request_publish();
+            }
             Vec::new()
         }
         ChatFrame::Appended(appended) => {
@@ -376,6 +382,8 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                     }
                     if let Some(lifecycle) = appended.lifecycle.clone() {
                         state.session.lifecycle = Some(lifecycle);
+                        // `setLifecycle(event.lifecycle)`: a new object, so a publish.
+                        state.core.request_publish();
                     }
                     state.messages.snapshot = Some(folded);
                     state.messages.authoritative_revision += 1;
@@ -397,7 +405,13 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                     let folded =
                         fold_state(state.messages.snapshot.as_ref(), StateCarrier::State(frame));
                     state.messages.snapshot = Some(folded);
+                    let before = FrameIdentity::capture(state);
+                    let moved =
+                        side_state_moves(state, frame.lifecycle.as_ref(), false, &frame.state);
                     crate::session::apply::apply_state_frame(state, frame, context);
+                    if moved || before != FrameIdentity::capture(state) {
+                        state.core.request_publish();
+                    }
                     Vec::new()
                 }
             }
