@@ -7,11 +7,19 @@ const SHORT_MODEL_LABELS: Record<string, string> = {
   'gpt-5.6-terra': 'Terra',
   'gpt-5.6-luna': 'Luna',
   fable: 'Fable',
-  'opus[1m]': 'Opus (1m)',
-  opus: 'Opus',
+  'opus[1m]': 'Opus 5.5',
+  opus: 'Opus 5.5 (200K)',
+  'claude-opus-5': 'Opus 5',
   sonnet: 'Sonnet',
   haiku: 'Haiku',
 };
+
+/**
+ * CDXC:SessionChat 2026-09-22 DECISION: User: no 200K Opus card in the quick picker, only the 1M one.
+ * Opus 5.5 ships as the `opus` (200K) and `opus[1m]` (1M) aliases and the older Opus 5 is 200K only,
+ * so both 200K rows are dropped here and stay in the full model menu.
+ */
+const CLAUDE_QUICK_PICKER_EXCLUDED = new Set(['opus', 'claude-opus-5']);
 
 /** CDXC:SessionChat 2026-09-22 DECISION: User chose this exact top-to-bottom Cursor overlay order, keeping related models together; Grok 4.7 (added 2026-09-22) sits directly above Grok 4.6. */
 const CURSOR_MODEL_ORDER = [
@@ -63,7 +71,7 @@ export function createModelPickerRequest(
   const modelRank = MODEL_RANKS[provider];
   const models = agent.models
     // CDXC:SessionChat 2026-09-09 DECISION: User: keep only the selected models in the quick picker, exclude Cursor Composer too, and retain every other model under Legacy in the normal picker.
-    .filter((model) => !model.group)
+    .filter((model) => !model.group && !(provider === 'claude' && CLAUDE_QUICK_PICKER_EXCLUDED.has(model.value)))
     .sort((a, b) =>
       modelRank ? (modelRank.get(a.value) ?? modelRank.size) - (modelRank.get(b.value) ?? modelRank.size) : 0
     )
