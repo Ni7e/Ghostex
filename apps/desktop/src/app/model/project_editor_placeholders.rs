@@ -91,7 +91,7 @@ impl ProjectEditorSleepingPlaceholderSignature {
     pub(crate) fn for_mode(mode: TitlebarMode) -> Option<Self> {
         /*
         CDXC:CodeEditor 2026-06-28-17:09:
-        Sleeping/restored Source, Browser, Kanban, Automate, and Docs visible copy is private-detail-free shell state. It must not include project/session/URL details, create CEF views, mount bridges, replace placeholders, or introduce WKWebView/WebKit paths.
+        Sleeping/restored Source, Browser, Kanban, Automate, and Docs visible copy is private-detail-free shell state. It must not include project/session/URL details, create CEF views, mount bridges, replace placeholders, or introduce WKWebView/WebKit paths. Since 2026-09-22 the Browser draws its sleeping tab's favicon, title and host instead of this copy (see `render/browser_sleeping_placeholder.rs`); the Browser line here is unused.
         */
         let (title, message) = match mode {
             TitlebarMode::Source => (

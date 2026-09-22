@@ -23,6 +23,7 @@ use crate::app::consts::*;
 use crate::app::element::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
+use crate::app::render::browser_sleeping_placeholder::BROWSER_SLEEPING_PLACEHOLDER_GROUP;
 use crate::*;
 
 impl GhostexGpuiApp {
@@ -342,33 +343,14 @@ impl GhostexGpuiApp {
                     cx.notify();
                 }),
             )
-            .child(
-                v_flex()
-                    .max_w(px(430.0))
-                    .min_w_0()
-                    .items_center()
-                    .justify_center()
-                    .px(px(24.0))
-                    .text_center()
-                    .child(
-                        div()
-                            .text_center()
-                            .text_size(px(12.5))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(chrome_color(0xe5e8ec, 0x111111).opacity(0.64))
-                            .child(signature.title),
-                    )
-                    .child(
-                        div()
-                            .mt(px(5.0))
-                            .max_w(px(430.0))
-                            .text_center()
-                            .text_size(px(12.0))
-                            .line_height(px(17.0))
-                            .text_color(chrome_color(0xe5e8ec, 0x111111).opacity(0.64))
-                            .child(signature.message),
-                    ),
-            )
+            .when(mode == TitlebarMode::Browser, |this| {
+                this.group(BROWSER_SLEEPING_PLACEHOLDER_GROUP)
+                    .cursor_pointer()
+                    .child(self.render_browser_sleeping_placeholder_content())
+            })
+            .when(mode != TitlebarMode::Browser, |this| {
+                this.child(project_editor_sleeping_placeholder_copy(signature))
+            })
             .into_any_element()
     }
 
@@ -568,4 +550,34 @@ impl GhostexGpuiApp {
             )
             .into_any_element()
     }
+}
+
+fn project_editor_sleeping_placeholder_copy(
+    signature: ProjectEditorSleepingPlaceholderSignature,
+) -> impl IntoElement {
+    v_flex()
+        .max_w(px(430.0))
+        .min_w_0()
+        .items_center()
+        .justify_center()
+        .px(px(24.0))
+        .text_center()
+        .child(
+            div()
+                .text_center()
+                .text_size(px(12.5))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(chrome_color(0xe5e8ec, 0x111111).opacity(0.64))
+                .child(signature.title),
+        )
+        .child(
+            div()
+                .mt(px(5.0))
+                .max_w(px(430.0))
+                .text_center()
+                .text_size(px(12.0))
+                .line_height(px(17.0))
+                .text_color(chrome_color(0xe5e8ec, 0x111111).opacity(0.64))
+                .child(signature.message),
+        )
 }

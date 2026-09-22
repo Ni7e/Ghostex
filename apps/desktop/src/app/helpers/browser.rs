@@ -766,10 +766,23 @@ pub(crate) fn browser_tab_icon_element(
         runtime_favicon_image.filter(|_| chrome_status.allows_runtime_favicon());
     let runtime_favicon_fetch =
         runtime_favicon_fetch.filter(|_| chrome_status.allows_runtime_favicon());
+    browser_favicon_element(
+        BROWSER_TAB_ICON_SIZE,
+        runtime_favicon_image,
+        runtime_favicon_fetch,
+    )
+}
+
+/// A page's favicon at `size`: the live fetch when there is one, else the icon cached for the site, else the default browser icon.
+pub(crate) fn browser_favicon_element(
+    size: f32,
+    runtime_favicon_image: Option<&BrowserFaviconImage>,
+    runtime_favicon_fetch: Option<&BrowserFaviconFetchSource>,
+) -> AnyElement {
     let base = div()
         .flex()
         .flex_shrink_0()
-        .size(px(BROWSER_TAB_ICON_SIZE))
+        .size(px(size))
         .items_center()
         .justify_center();
 
@@ -782,38 +795,42 @@ pub(crate) fn browser_tab_icon_element(
                 img(move |window: &mut Window, cx: &mut App| {
                     window.use_asset::<BrowserFaviconHttpImageAsset>(&favicon_fetch_source, cx)
                 })
-                .size(px(BROWSER_TAB_ICON_SIZE))
+                .size(px(size))
                 .with_loading(move || {
-                    browser_tab_favicon_pending_element(loading_favicon_image.as_ref())
+                    browser_tab_favicon_pending_element(size, loading_favicon_image.as_ref())
                 })
                 .with_fallback(move || {
-                    browser_tab_favicon_pending_element(fallback_favicon_image.as_ref())
+                    browser_tab_favicon_pending_element(size, fallback_favicon_image.as_ref())
                 }),
             )
             .into_any_element();
     }
 
-    base.child(browser_tab_favicon_pending_element(runtime_favicon_image))
-        .into_any_element()
+    base.child(browser_tab_favicon_pending_element(
+        size,
+        runtime_favicon_image,
+    ))
+    .into_any_element()
 }
 
 /// What the icon slot shows while the page's own favicon is not drawable: the icon cached for the site, else the default browser icon.
 pub(crate) fn browser_tab_favicon_pending_element(
+    size: f32,
     cached_favicon_image: Option<&BrowserFaviconImage>,
 ) -> AnyElement {
     let Some(favicon_image) = cached_favicon_image else {
-        return browser_tab_default_icon_element();
+        return browser_tab_default_icon_element(size);
     };
     img(favicon_image.image.clone())
-        .size(px(BROWSER_TAB_ICON_SIZE))
-        .with_fallback(browser_tab_default_icon_element)
+        .size(px(size))
+        .with_fallback(move || browser_tab_default_icon_element(size))
         .into_any_element()
 }
 
-pub(crate) fn browser_tab_default_icon_element() -> AnyElement {
+pub(crate) fn browser_tab_default_icon_element(size: f32) -> AnyElement {
     svg()
         .path(BROWSER_ICON_WORLD)
-        .size(px(BROWSER_TAB_ICON_SIZE))
+        .size(px(size))
         .text_color(chrome_color(0xc7c7c7, 0x525252))
         .into_any_element()
 }
