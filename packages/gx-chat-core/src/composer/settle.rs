@@ -277,7 +277,9 @@ fn adopt_boot_read(state: &mut ChatState, read: &ComposerBootRead) {
 /// list and the error, the way `publish({loading: true})` replaces the whole record.
 pub fn load_skills(state: &mut ChatState) -> Vec<Effect> {
     let sources = &mut state.composer.sources;
-    if sources.skills_loading || sources.skills.is_some() {
+    // `loading` is the closure's own latch, NOT the published `skillsLoading`: the published one
+    // starts true (`skills.ts:62`) and a guard on it would refuse the very first read.
+    if sources.skills_request.is_some() || sources.skills.is_some() {
         return Vec::new();
     }
     sources.skills = None;
@@ -310,11 +312,15 @@ fn request_catalogs(state: &mut ChatState) -> Vec<Effect> {
     let agent = state.session.session_agent_id.clone();
     let sources = &mut state.composer.sources;
     if sources.skills_agent != agent || !sources.skills_asked {
-        // The `useEffect` re-ran, so its `loaded` and `loading` latches are fresh closures again.
+        // The `useEffect` re-ran, so its `loaded` and `loading` latches are fresh closures again
+        // and the read in flight is `active = false`: its answer publishes nothing.
         sources.skills_asked = true;
         sources.skills_agent.clone_from(&agent);
         sources.skills = None;
-        sources.skills_loading = false;
+        sources.skills_request = None;
+        // `current` is undefined for the new (transport, agentId), so the published value falls
+        // back to `Boolean(transport.readSkills)` until `load()` publishes its own `{loading:true}`.
+        sources.skills_loading = true;
         effects.extend(load_skills(state));
     }
     let (skill_active, file_active) = crate::composer::suggestions::picker_edges(

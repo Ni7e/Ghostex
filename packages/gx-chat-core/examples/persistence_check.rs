@@ -1,4 +1,4 @@
-//! What survives a restart: the retained transcript record and the shared presentation cache.
+//! The cold start: what a chat knows before its first read answers, and what survives a restart.
 //!
 //! No recording can grade this. The two round trips are `store.ts`'s and
 //! `session-chat-presentation-cache.ts`'s, not `native-host.ts`'s: they never crossed the bridge,
@@ -15,6 +15,8 @@
 //!     bound, are refused and deleted respectively.
 //!  4. The presentation cache is restored at boot and written back when the identity or the status
 //!     line's options move.
+//!  5. The one document a host draws before anything has answered, which is where `skillsLoading`
+//!     is measured.
 //!
 //! ```text
 //! cargo run --example persistence_check
@@ -40,6 +42,7 @@ fn main() -> ExitCode {
     restart(&mut checks, record);
     bounds(&mut checks);
     presentation(&mut checks);
+    first_paint(&mut checks);
 
     println!("checks      {} run", checks.run);
     println!("failures    {}", checks.failures.len());
@@ -249,6 +252,27 @@ fn presentation(checks: &mut Checks) {
         "an identity change drops the options the previous account detected",
         json!(written.get("selectedOptions").is_none()),
         json!(true),
+    );
+}
+
+/// The document a host draws before any read has answered.
+fn first_paint(checks: &mut Checks) {
+    let core = ChatCore::new();
+    let document = serde_json::to_value(core.document()).expect("the document is JSON");
+    // `skillsLoading: current?.loading ?? Boolean(transport.readSkills)` (`skills.ts:62`). Every
+    // transport this crate serves has a `readSkills`, so a `$` typed in the window between mount
+    // and the first answer draws "Loading skills…" rather than "No skills".
+    checks.eq(
+        "a chat that has read nothing is still loading its skills",
+        document["skillsLoading"].clone(),
+        json!(true),
+    );
+    // Its counterpart is the opposite: `computeSessionChatFiles` reads nothing on mount and hands
+    // back a callback the `@` list calls the first time it opens.
+    checks.eq(
+        "and is not loading its files, which nothing has asked for yet",
+        document["filesLoading"].clone(),
+        json!(false),
     );
 }
 

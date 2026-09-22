@@ -73,7 +73,7 @@ pub fn suggestion_row_corners(index: usize, count: usize) -> (bool, bool) {
 }
 
 /// What the composer knows about the two catalogs it can offer.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SuggestionSources {
     pub agent: Option<String>,
     pub session_agent_id: Option<String>,
@@ -95,6 +95,32 @@ pub struct SuggestionSources {
     pub files_asked: bool,
     /// The skills read has gone out for this agent at least once.
     pub skills_asked: bool,
+}
+
+/// CDXC:AgentSkills 2026-09-22 WHY:
+/// `skillsLoading` starts TRUE. `useSessionChatSkills` publishes
+/// `current?.loading ?? Boolean(transport.readSkills)` (`skills.ts:62`) and every transport this
+/// crate serves has a `readSkills`, so a `$` typed before the first read has answered draws
+/// "Loading skills…" rather than "No skills". It was false here until 2026-09-22, which is the
+/// whole window between mount and the boot read.
+impl Default for SuggestionSources {
+    fn default() -> Self {
+        Self {
+            agent: None,
+            session_agent_id: None,
+            available_agents: Vec::new(),
+            skills: None,
+            skills_loading: true,
+            skills_error: None,
+            files: None,
+            files_loading: false,
+            skills_agent: None,
+            skills_request: None,
+            files_request: None,
+            files_asked: false,
+            skills_asked: false,
+        }
+    }
 }
 
 /// One row of the draft session's agent list, as far as the `$` heading needs it.
