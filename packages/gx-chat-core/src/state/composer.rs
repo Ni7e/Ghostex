@@ -13,7 +13,6 @@
 //! optimistic echoes; a send adds one through family a's helper rather than by pushing here).
 
 use crate::composer::history::ComposerHistory;
-use crate::composer::keys::KeyPlatform;
 use crate::composer::layout::ComposerScrollGesture;
 use crate::composer::note::{ComposerChromeState, NoteState};
 use crate::composer::queue::{DraftVersion, TransportQueueMethods};
@@ -65,8 +64,6 @@ pub struct ComposerState {
     pub transport: TransportQueueMethods,
     /// Whether this host can offer the session note, the stash, attachments and the terminal.
     pub actions: ComposerActionAvailability,
-    /// The renderer's platform, for the editing chords.
-    pub platform: KeyPlatform,
     /// A send is in flight and the composer is holding its text.
     pub submitting: Option<Submission>,
     /// The keystroke `sendKey` is waiting on: the request id, the key, and the marker to record

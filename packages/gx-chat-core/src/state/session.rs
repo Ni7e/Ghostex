@@ -65,6 +65,11 @@ pub struct SessionState {
     /// The session activity gxserver presents, which is what the sidebar spinner reads.
     pub session_activity_working: bool,
     /// The host's own live-work signal, merged with the server's.
+    ///
+    /// It is `options.working` in `controller.ts`, which only a Storybook story ever passes: the
+    /// product's own caller (`native-host.ts`) leaves it out, so it is inert on both sides and has
+    /// no writer here on purpose. Kept because it is the seam a host WOULD push a live-work signal
+    /// through, and the five readers that merge it are the shipped rule.
     pub external_working: bool,
     /// The local Stop suppression: the user pressed Escape and the spinner is held down.
     pub interrupted: bool,
