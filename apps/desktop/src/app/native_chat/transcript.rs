@@ -301,6 +301,9 @@ impl NativeChatView {
         let s = p.scale;
         div()
             .id(id.clone())
+            .role(gpui::Role::Button)
+            .aria_label(label.clone())
+            .aria_expanded(expanded)
             .flex()
             .items_start()
             .w_full()
@@ -370,8 +373,12 @@ impl NativeChatView {
         let s = p.scale;
         let reply_focus = self.reply_focus(message, window, cx);
         let reply_focused = reply_focus.as_ref().is_some_and(|(_, focused)| *focused);
+        // The whole text as the label: an assistive client or an e2e run reads a message in one node instead of walking its markdown blocks (native_sidebar and the terminal do the same).
+        let a11y_label = format!("{} message: {}", text(message, "role"), a11y_excerpt(&body));
         let mut row = div()
             .id(format!("message:{id}"))
+            .role(gpui::Role::Article)
+            .aria_label(a11y_label)
             .group("native-chat-message")
             .flex()
             .flex_col()
@@ -597,5 +604,14 @@ impl NativeChatView {
             row = row.child(self.reply_actions(message, reply_focused, p, cx));
         }
         row.into_any_element()
+    }
+}
+
+/// The first part of a message for its accessibility label: long enough to identify and read the message, short enough that a frame's tree stays cheap to build and to send.
+pub(super) fn a11y_excerpt(body: &str) -> String {
+    const LIMIT: usize = 2000;
+    match body.char_indices().nth(LIMIT) {
+        Some((end, _)) => format!("{}\u{2026}", &body[..end]),
+        None => body.to_string(),
     }
 }

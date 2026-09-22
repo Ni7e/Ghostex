@@ -33,7 +33,12 @@ impl GhostexGpuiApp {
         let indicator = h_flex()
             .gap(px(4.0 * scale))
             .when(summarize && section.working_count > 0, |row| {
-                row.child(div().size(px(8.0 * scale)).rounded_full().bg(rgb(super::status::WORKING_COLOR)))
+                row.child(
+                    div()
+                        .size(px(8.0 * scale))
+                        .rounded_full()
+                        .bg(rgb(super::status::WORKING_COLOR)),
+                )
             })
             .when(summarize && section.attention_count > 0, |row| {
                 row.child(div().size(px(8.0 * scale)).rounded_full().bg(rgb(0x95d7f6)))
@@ -58,6 +63,9 @@ impl GhostexGpuiApp {
         // This supersedes the 2026-09-16 rule of letting the heading run through the sidebar's right edge for the native sidebar.
         h_flex()
             .id(format!("native-sidebar-section-{key}"))
+            .role(gpui::Role::Button)
+            .aria_label(format!("{} section", section.id))
+            .aria_expanded(!section.collapsed)
             .mx(px(3.0 * scale))
             .h(px(20.0 * scale))
             .py(px(3.0 * scale))

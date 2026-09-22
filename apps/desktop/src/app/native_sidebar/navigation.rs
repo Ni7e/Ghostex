@@ -159,6 +159,8 @@ impl GhostexGpuiApp {
             .child(if compact {
                 div()
                     .id(format!("native-sidebar-{label}"))
+                    .role(gpui::Role::Button)
+                    .aria_label(tooltip_label.clone())
                     .h(px(28.0 * scale))
                     .w(px(34.0 * scale))
                     .rounded(px(5.0 * scale))
@@ -189,6 +191,8 @@ impl GhostexGpuiApp {
             } else {
                 h_flex()
                     .id(format!("native-sidebar-{label}"))
+                    .role(gpui::Role::Button)
+                    .aria_label(tooltip_label.clone())
                     .flex_1()
                     .h(px((if footer { 28.0 } else { 27.0 }) * scale))
                     .min_w_0()
@@ -248,6 +252,9 @@ impl GhostexGpuiApp {
                 row.child(
                     div()
                         .id("native-sidebar-more")
+                        .role(gpui::Role::Button)
+                        .aria_label("Sidebar menu")
+                        .aria_expanded(more_open)
                         .h_full()
                         .w(px((if compact { 34.0 } else { 40.0 }) * scale))
                         .rounded(px(5.0 * scale))
@@ -300,6 +307,8 @@ impl GhostexGpuiApp {
                 row.child(
                     div()
                         .id("native-sidebar-settings")
+                        .role(gpui::Role::Button)
+                        .aria_label("Settings")
                         .h(px(28.0 * scale))
                         .w(px(34.0 * scale))
                         // The compact row already insets its trailing edge like the Search row.

@@ -146,6 +146,9 @@ impl NativeChatView {
         let s = p.scale;
         div()
             .id(key.clone())
+            .role(gpui::Role::Button)
+            .aria_label(label.clone())
+            .aria_expanded(expanded)
             .flex()
             .items_center()
             .gap(px(6.0 * s))
@@ -196,8 +199,17 @@ impl NativeChatView {
         let subagent = text(&tool["subagent"], "name");
         let heading = if failed { p.error() } else { p.primary };
         let toggle_key = key.clone();
+        let a11y_label = match (subagent.is_empty(), preview.is_empty()) {
+            (true, true) => format!("Tool {name}"),
+            (true, false) => format!("Tool {name}: {preview}"),
+            (false, _) => format!("Tool {name} ({subagent}): {preview}"),
+        };
         let mut trigger = div()
             .id(key.clone())
+            .role(gpui::Role::Button)
+            .aria_label(a11y_label)
+            .aria_expanded(expanded)
+            .when(failed, |this| this.aria_description("failed"))
             .flex()
             .items_center()
             .min_w_0()

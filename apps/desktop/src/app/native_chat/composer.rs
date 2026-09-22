@@ -440,6 +440,8 @@ impl NativeChatView {
             .child(
                 div()
                     .id("composer-editor")
+                    .role(gpui::Role::Group)
+                    .aria_label("Message composer")
                     .min_w_0()
                     .w_full()
                     // React's floating input thumb stops 2px short of the viewport's right edge
@@ -477,7 +479,6 @@ impl NativeChatView {
                     )
                     .child(
                         Input::new(&input)
-                            .disabled(!self.composer_ready)
                             .placeholder_color(p.muted.opacity(0.6))
                             .appearance(false)
                             .bordered(false)

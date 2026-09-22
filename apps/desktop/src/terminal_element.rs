@@ -61,12 +61,14 @@ use std::sync::Arc;
 use std::{
     ops::Range,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 use futures::StreamExt as _;
 use image::Frame;
 
+use gpui::StatefulInteractiveElement as _;
 use gpui::{
     App, BorderStyle, Bounds, BoxShadow, ClipboardItem, ContentMask, Context, Corners, CursorStyle,
     DevicePixels, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
@@ -645,7 +647,7 @@ pub struct TerminalView {
     /// A parked or chat-mode terminal only marks its snapshot stale; the next prepaint of a displayed slot takes the fresh frame. Titles and pwd still sync so the sidebar stays current.
     displayed: bool,
     snapshot_stale: bool,
-    last_prepaint: Option<std::time::Instant>,
+    last_prepaint: Option<web_time::Instant>,
 }
 
 pub(crate) use crate::hotkey_label::terminal_overlay_hotkey_chord_label;
@@ -2424,7 +2426,7 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> TerminalLayout {
         self.terminal_bounds = Some(bounds);
-        self.last_prepaint = Some(std::time::Instant::now());
+        self.last_prepaint = Some(web_time::Instant::now());
         if self.snapshot_stale {
             self.snapshot_stale = false;
             self.refresh_snapshot();
@@ -2585,7 +2587,26 @@ fn hide_mouse_cursor_until_mouse_moves() {}
 
 impl Render for TerminalView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The screen as text, one node per row, so a screen reader or an e2e run reads what the
+        // terminal shows without pixels. Built only while an assistive client is connected: gpui
+        // calls the closure only then, and the row strings are made inside it.
+        let a11y_rows: Vec<String> = self
+            .frame
+            .as_ref()
+            .map(|frame| frame.rows.iter().map(SnapshotRow::text).collect())
+            .unwrap_or_default();
+        let a11y_label = self.title.clone().unwrap_or_else(|| "Terminal".to_string());
         let mut root = div()
+            .id("terminal-view")
+            .role(gpui::Role::Terminal)
+            .aria_label(a11y_label)
+            .a11y_synthetic_children(move |builder| {
+                for (index, row) in a11y_rows.iter().enumerate() {
+                    let mut node = gpui::accesskit::Node::new(gpui::Role::Label);
+                    node.set_label(row.trim_end().to_string());
+                    builder.push_child(builder.synthetic_node_id(index), node);
+                }
+            })
             .relative()
             .size_full()
             .can_drop(|value, _window, _cx| value.is::<ExternalPaths>())

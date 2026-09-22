@@ -52,6 +52,8 @@ impl GhostexGpuiApp {
                 let storage_id = group.storage_id.clone();
                 div()
                     .id(format!("native-sidebar-hover-{id}-{index}"))
+                    .role(gpui::Role::Button)
+                    .aria_label(label.clone())
                     .size(px(20.0 * scale))
                     .flex()
                     .items_center()

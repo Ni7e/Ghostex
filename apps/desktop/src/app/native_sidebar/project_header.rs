@@ -131,6 +131,9 @@ impl GhostexGpuiApp {
         // User: the project header row has the same insets, side padding, rounding, and hover fill as a session card.
         h_flex()
             .id(format!("native-sidebar-project-{id}"))
+            .role(gpui::Role::TreeItem)
+            .aria_label(group.title.clone())
+            .aria_expanded(!group.collapsed)
             .relative()
             .h(px(30.0 * scale))
             .mx(px(3.0 * scale))
@@ -147,6 +150,12 @@ impl GhostexGpuiApp {
             .child(
                 div()
                     .id(format!("native-project-chevron-{id}"))
+                    .role(gpui::Role::Button)
+                    .aria_label(if group.collapsed {
+                        "Expand project"
+                    } else {
+                        "Collapse project"
+                    })
                     .absolute()
                     .left(px(-18.0 * scale))
                     .top(px(7.0 * scale))
@@ -237,6 +246,8 @@ impl GhostexGpuiApp {
                             };
                             div()
                                 .id(format!("native-project-action-{id}-{index}"))
+                                .role(gpui::Role::Button)
+                                .aria_label(label.clone())
                                 .h(px(22.0 * scale))
                                 .w(px(match split {
                                     Some("start") => 24.0,

@@ -63,7 +63,17 @@ impl GhostexGpuiApp {
                 }
             })
             .id("native-sidebar-root")
+            // CDXC:Accessibility 2026-09-22 DECISION:
+            // User: "add full accessibility to the sidebar, the button at the bottom, and the chat view so that we can drive this UI using AI", for "an e2e tester or an engineer to debug issues", without going "overboard with it if it would affect performance". Every row, header, section and button carries a role, a label and its state words; gpui builds the tree only while an assistive client (a screen reader, cua-driver, the web build's DOM mirror) is connected, so an idle desktop pays nothing.
+            .role(gpui::Role::Navigation)
+            .aria_label("Sidebar")
             .relative()
+            .on_drag_move::<super::drag::SidebarDrag>(cx.listener(|app, event, _, cx| {
+                app.clear_native_sidebar_drop_outside(event, cx);
+            }))
+            .on_drop::<super::drag::SidebarDrag>(cx.listener(|app, _, _, cx| {
+                app.finish_native_sidebar_drop(cx);
+            }))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|app, event: &gpui::MouseDownEvent, window, cx| {
@@ -277,6 +287,7 @@ impl GhostexGpuiApp {
                 .inset_0(),
             )
             .children(self.render_native_sticky_project(&content, &appearance, cx))
+            .children(self.render_native_sidebar_usage_peek(&appearance, window, cx))
             .children(self.render_native_sidebar_menu(cx))
             .into_any_element()
     }
