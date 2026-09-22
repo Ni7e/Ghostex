@@ -85,12 +85,12 @@ fn normalize_line_endings(text: &str) -> String {
     out
 }
 
-/// What Add to Chat appends: the selection quoted, then one newline for the caret.
+/// What Add to Chat appends: the selection quoted, then a blank line before the caret.
 ///
-/// CDXC:SessionChat 2026-09-07 DECISION:
-/// User: Add to Chat leaves the caret on its own line under the quote.
+/// CDXC:SessionChat 2026-09-22 DECISION:
+/// User: Add to Chat adds one more newline between the quoted message and my text so Markdown renders correctly. This supersedes the 2026-09-07 single-newline decision (`sessionChatTranscriptQuote` in `transcript-menu.ts` carries the same one).
 pub fn transcript_quote(selection: &str) -> String {
-    format!("{}\n", markdown_quote(selection))
+    format!("{}\n\n", markdown_quote(selection))
 }
 
 /// The composer after appending `text` to `current`: a blank line separates it from earlier text,
