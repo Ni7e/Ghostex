@@ -13,9 +13,10 @@ const SHORT_MODEL_LABELS: Record<string, string> = {
   haiku: 'Haiku',
 };
 
-/** CDXC:SessionChat 2026-09-11 DECISION: User chose this exact top-to-bottom Cursor overlay order, keeping related models together. */
+/** CDXC:SessionChat 2026-09-22 DECISION: User chose this exact top-to-bottom Cursor overlay order, keeping related models together; Grok 4.7 (added 2026-09-22) sits directly above Grok 4.6. */
 const CURSOR_MODEL_ORDER = [
   'auto',
+  'grok-4.7',
   'cursor-grok-4.6',
   'gemini-3.8-flash',
   'claude-fable-5-1',
