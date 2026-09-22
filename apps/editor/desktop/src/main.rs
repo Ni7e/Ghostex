@@ -26,6 +26,8 @@ use tao::{
 };
 use tempfile::NamedTempFile;
 use uuid::Uuid;
+#[cfg(target_os = "windows")]
+use wry::WebContext;
 use wry::{
     WebView, WebViewBuilder,
     http::{Request, Response, header::CONTENT_TYPE},
@@ -92,6 +94,8 @@ struct SocketEndpoint {
 struct EditorApp {
     socket_cleanup_path: Option<PathBuf>,
     web_root: Arc<PathBuf>,
+    #[cfg(target_os = "windows")]
+    web_context: WebContext,
     proxy: EventLoopProxy<DaemonEvent>,
     windows: HashMap<WindowId, EditorWindow>,
     sessions: HashMap<String, EditorSession>,
@@ -183,6 +187,8 @@ fn run() -> Result<(), String> {
     let mut app = EditorApp {
         socket_cleanup_path: endpoint.cleanup_path,
         web_root,
+        #[cfg(target_os = "windows")]
+        web_context: WebContext::new(Some(windows_webview_data_directory())),
         proxy,
         windows: HashMap::new(),
         sessions: HashMap::new(),
@@ -867,7 +873,11 @@ impl EditorApp {
         let proxy = self.proxy.clone();
         let web_root = self.web_root.clone();
         let protocol_root = self.web_root.clone();
-        let webview_builder = WebViewBuilder::new()
+        #[cfg(target_os = "windows")]
+        let webview_builder = WebViewBuilder::new_with_web_context(&mut self.web_context);
+        #[cfg(not(target_os = "windows"))]
+        let webview_builder = WebViewBuilder::new();
+        let webview_builder = webview_builder
             .with_initialization_script(
                 r#"
 Object.defineProperty(window, "__require", {
@@ -1419,6 +1429,24 @@ fn resolved_state_directory() -> PathBuf {
     absolute_environment_path("LOCALAPPDATA")
         .unwrap_or_else(|| user_home.join("AppData/Local"))
         .join("Ghostex/State")
+}
+
+/// CDXC:PromptEditor 2026-09-22 WHY:
+/// Without an explicit user data folder WebView2 writes its profile next to the executable
+/// (`GhostexEditor.exe.WebView2`), which fails under `C:\Program Files` with the Edge dialog
+/// "We couldn't create the data directory". The profile is a cache, so it lives under the
+/// per-user `GhostexData` root that the installer never replaces, beside the component store,
+/// rather than under `%LOCALAPPDATA%\Ghostex` which Velopack swaps out while the daemon may
+/// still hold WebView2 file locks.
+#[cfg(target_os = "windows")]
+fn windows_webview_data_directory() -> PathBuf {
+    if let Some(ghostex_home) = absolute_environment_path("GHOSTEX_HOME") {
+        return ghostex_home.join("state/editor-webview2");
+    }
+    let user_home = absolute_environment_path("USERPROFILE").unwrap_or_else(|| PathBuf::from("."));
+    absolute_environment_path("LOCALAPPDATA")
+        .unwrap_or_else(|| user_home.join("AppData/Local"))
+        .join("GhostexData/editor-webview2")
 }
 
 fn load_saved_window_frame() -> Option<WindowFrame> {

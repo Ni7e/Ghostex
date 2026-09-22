@@ -575,7 +575,9 @@ pub fn read_zmx_session_process_identities(
     )
     .map_err(ZmxEndpointError::DependencyUnavailable)?;
     if result.exit_code != 0 {
-        return Ok(HashMap::new());
+        return Err(ZmxEndpointError::DependencyUnavailable(
+            "Could not read the session process snapshot.".to_string(),
+        ));
     }
     let (ps_output, zmx_list_output) = parse_zmx_process_snapshot_sections(&result.stdout);
     let mut identities =
