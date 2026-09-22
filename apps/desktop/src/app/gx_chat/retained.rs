@@ -53,13 +53,23 @@ pub(super) fn read(key: &str, now_ms: i64) -> Result<Option<String>, &'static st
 /// stays authoritative), so the caller counts it and moves on.
 pub(super) fn write(key: &str, value: Option<&str>, now_ms: i64) -> Result<(), &'static str> {
     let record = record_key(key);
+    let stored = storage::read(&record, now_ms)?.filter(|raw| !raw.is_empty());
+    // `(previous?.savedAt ?? 0) > savedAt`, which the TypeScript tests BEFORE the size check, so a
+    // record written by a newer writer survives even a delete. The core keeps the stamp inside the
+    // encoded record and has none to send for a delete, so this reads the clock instead: the core
+    // stamps the fold with the same `now_ms` it would have written, and the only difference the
+    // substitution can make is to a record stamped in the future, which is a second writer's or a
+    // clock that moved.
+    let stamp = match value {
+        Some(value) => saved_at(Some(value)),
+        None => now_ms as f64,
+    };
+    if saved_at(stored.as_deref()) > stamp {
+        return Ok(());
+    }
     let Some(value) = value else {
         return storage::write(&record, None, now_ms);
     };
-    let stored = storage::read(&record, now_ms)?.filter(|raw| !raw.is_empty());
-    if saved_at(stored.as_deref()) > saved_at(Some(value)) {
-        return Ok(());
-    }
     if stored.is_none() {
         prune(MAX_ENTRIES - 1, now_ms);
     }
