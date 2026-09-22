@@ -88,6 +88,8 @@ pub struct BridgeTranslator {
     /// the FIFO above: inserting one answer there delays every answer after it by one `resolve`,
     /// which drifts the pairing for the rest of the run.
     history_reads: VecDeque<StorageKey>,
+    /// Chunked broker payloads being reassembled, by transfer id: `(total, parts)`.
+    transfers: BTreeMap<String, (usize, Vec<String>)>,
     /// The revision the translator itself last drained, so a `take` asks "what changed since MY
     /// last drain" rather than replaying the other brain's counter.
     last_revision: u64,
@@ -303,21 +305,96 @@ impl BridgeTranslator {
                 .unwrap_or_default(),
             BridgeCall::Tick => vec![Event::Tick],
             BridgeCall::Frame(frame) => chat_frame(&frame),
-            BridgeCall::BrokerMessage(message) => broker_events(&message),
-            BridgeCall::Resolve { value, error, .. } => {
-                // The recall ring is answered BESIDE whatever this `resolve` was already paired
-                // with, never instead of it. `composer('history')` is a bridge round trip on the
-                // other side and an out-of-band read here, so consuming a FIFO slot for it (or
-                // freeing one) would move every storage answer after it by one record and drift
-                // the pairing for the rest of the run.
-                let ring = self.recall_ring(&value);
-                let claimed = ring.is_some();
-                let mut events: Vec<Event> = ring.into_iter().collect();
-                events.extend(self.answer(value, error, claimed));
-                events
-            }
+            BridgeCall::BrokerMessage(message) => self.broker(&message),
+            BridgeCall::Resolve { value, error, .. } => self.settled(value, error),
             BridgeCall::Query { .. } | BridgeCall::Take { .. } => Vec::new(),
         }
+    }
+
+    /// One `brokerMessage`, which in the real app carries more than the five state kinds.
+    ///
+    /// CDXC:SessionChat 2026-09-22 WHY:
+    /// A gxserver answer reaches the shipped brain as `brokerMessage {kind: 'response', requestId,
+    /// result}` (`native-host.ts:1674`), NOT as `resolve`: `resolve` is how the native side answers
+    /// the `composer(...)` operations. Only the synthetic generators call `resolve` for everything,
+    /// so a translator that modelled `resolve` alone dropped every real gxserver answer on the
+    /// floor, left every read in flight, and made a real recording incomparable from its first
+    /// read onwards.
+    fn broker(&mut self, message: &Value) -> Vec<Event> {
+        match message.get("kind").and_then(Value::as_str) {
+            // A payload over 96 KiB arrives in pieces; the assembled value is an ordinary broker
+            // message of one of the kinds below.
+            Some("chunk") => match self.accept_chunk(message) {
+                Some(assembled) => self.broker(&assembled),
+                None => Vec::new(),
+            },
+            Some("response") => {
+                let result = message
+                    .get("result")
+                    .or_else(|| message.get("snapshot"))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                // `call.reject(new Error(message.error))`: the broker spells a failure as a plain
+                // string where a `resolve` spells it as `{code, message}`.
+                let error = match message.get("error") {
+                    Some(Value::String(text)) => {
+                        serde_json::json!({ "message": text })
+                    }
+                    Some(other) => other.clone(),
+                    None => Value::Null,
+                };
+                self.settled(result, error)
+            }
+            _ => broker_events(message),
+        }
+    }
+
+    /// `ChatTransfers.accept`: one chunk in, the assembled message out once the last one lands.
+    ///
+    /// The bounds are the TypeScript's, and a violation clears the table the way its `fail` does;
+    /// the retry it also asks for is the live brain's, not the core's.
+    fn accept_chunk(&mut self, message: &Value) -> Option<Value> {
+        let transfer_id = message.get("transferId").and_then(Value::as_str)?;
+        let index = message.get("index").and_then(Value::as_u64)? as usize;
+        let total = message.get("total").and_then(Value::as_u64)? as usize;
+        let data = message.get("data").and_then(Value::as_str)?;
+        if !(1..=683).contains(&total) || data.len() > 96 * 1024 {
+            self.transfers.clear();
+            return None;
+        }
+        if index == 0 && !self.transfers.contains_key(transfer_id) && self.transfers.is_empty() {
+            self.transfers
+                .insert(transfer_id.to_string(), (total, Vec::new()));
+        }
+        let Some((known_total, parts)) = self.transfers.get_mut(transfer_id) else {
+            self.transfers.clear();
+            return None;
+        };
+        if *known_total != total || parts.len() != index {
+            self.transfers.clear();
+            return None;
+        }
+        parts.push(data.to_string());
+        if parts.len() != total {
+            return None;
+        }
+        let assembled = parts.concat();
+        self.transfers.remove(transfer_id);
+        serde_json::from_str(&assembled).ok()
+    }
+
+    /// One answer, from either channel: the recall ring first, then whatever it was paired with.
+    ///
+    /// The recall ring is answered BESIDE the pairing, never instead of it. `composer('history')`
+    /// is a bridge round trip on the other side and an out-of-band read here, so consuming a FIFO
+    /// slot for it (or freeing one) would move every storage answer after it by one record and
+    /// drift the pairing for the rest of the run.
+    fn settled(&mut self, result: Value, error: Value) -> Vec<Event> {
+        let ring = self.recall_ring(&result);
+        let claimed = ring.is_some();
+        let mut events: Vec<Event> = ring.into_iter().collect();
+        events.extend(self.answer(result, error, claimed));
+        events
     }
 
     /// The `composer('history')` answer, when this `resolve` is one and the core asked for it.
