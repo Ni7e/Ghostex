@@ -21,7 +21,6 @@ import {
   IconInfoCircle,
   IconLayoutDashboard,
   IconLayoutKanban,
-  IconLayoutNavbar,
   IconMessageCircle,
   IconMoon,
   IconPencil,
@@ -1232,7 +1231,6 @@ export function FirstLaunchSetupModal({
               onChangePreferredInterface={(preferredAgentInterface) => updateSettings({ preferredAgentInterface })}
               onChangeAgentAcceptAllEnabled={(agentAcceptAllEnabled) => updateSettings({ agentAcceptAllEnabled })}
               onChangeTerminalWidthMode={(terminalViewWidthMode) => updateSettings({ terminalViewWidthMode })}
-              onToggleAgentsPaneTabBar={(enabled) => updateSettings({ showAgentsPaneTabBarWhenUnsplit: enabled })}
               onSelectBackgroundAgent={(agentId) => {
                 setBackgroundAgentChoice(agentId);
                 updateSettings(settingsForDefaultAgent(agentId));
@@ -1242,7 +1240,6 @@ export function FirstLaunchSetupModal({
                 updateSettings({ completionSound: enabled ? DEFAULT_COMPLETION_SOUND : 'off' })
               }
               preferredInterface={settings.preferredAgentInterface}
-              showAgentsPaneTabBar={settings.showAgentsPaneTabBarWhenUnsplit}
               terminalWidthMode={settings.terminalViewWidthMode}
               defaultAgentCandidates={defaultAgentCandidates}
               titleGenerationAgentLabel={titleGenerationAgentLabel}
@@ -1732,11 +1729,9 @@ function FirstLaunchProjectPage({
   onChangePreferredInterface,
   onChangeTerminalWidthMode,
   onSelectBackgroundAgent,
-  onToggleAgentsPaneTabBar,
   onToggleAttentionNotifications,
   onToggleCompletionSound,
   preferredInterface,
-  showAgentsPaneTabBar,
   terminalWidthMode,
   defaultAgentCandidates,
   titleGenerationAgentLabel,
@@ -1750,11 +1745,9 @@ function FirstLaunchProjectPage({
   onChangePreferredInterface: (preferredInterface: PreferredAgentInterface) => void;
   onChangeTerminalWidthMode: (terminalWidthMode: TerminalViewWidthMode) => void;
   onSelectBackgroundAgent: (agentId: string) => void;
-  onToggleAgentsPaneTabBar: (enabled: boolean) => void;
   onToggleAttentionNotifications: (enabled: boolean) => void;
   onToggleCompletionSound: (enabled: boolean) => void;
   preferredInterface: PreferredAgentInterface;
-  showAgentsPaneTabBar: boolean;
   terminalWidthMode: TerminalViewWidthMode;
   defaultAgentCandidates: readonly FirstLaunchSidebarAgent[];
   /** Set when the chosen default agent cannot generate titles itself; names the agent that does. */
@@ -1899,17 +1892,6 @@ function FirstLaunchProjectPage({
           <SegmentedControlItem value='full'>Full</SegmentedControlItem>
           <SegmentedControlItem value='match-chat'>Match Chat</SegmentedControlItem>
         </SegmentedControl>
-      </div>
-
-      <div className='first-launch-onb-row'>
-        <span className='first-launch-onb-row-icon'>
-          <IconLayoutNavbar aria-hidden='true' size={16} />
-        </span>
-        <span className='first-launch-onb-row-main'>
-          <strong>Tabs bar</strong>
-          <span>Show the tabs bar above the agents pane even when the screen is not split.</span>
-        </span>
-        <Switch aria-label='Tabs bar' checked={showAgentsPaneTabBar} onCheckedChange={onToggleAgentsPaneTabBar} />
       </div>
 
       {/*

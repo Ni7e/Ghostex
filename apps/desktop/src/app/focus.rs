@@ -1019,28 +1019,6 @@ impl GhostexGpuiApp {
         }
     }
 
-    pub(crate) fn double_click_agents_workspace_tab(
-        &mut self,
-        pane_id: WorkspacePaneId,
-        session_id: TerminalSessionId,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if self
-            .agents_workspace
-            .toggle_focus_mode_from_tab_double_click(pane_id, session_id)
-        {
-            self.dispatch_gpui_workspace_session_attention_acknowledge(session_id, cx);
-            self.focus_shell_target(
-                ShellFocusTarget::AgentsPane(self.agents_workspace.focused_pane),
-                cx,
-            );
-            self.scroll_workspace_pane_active_tab(pane_id);
-            self.scroll_workspace_pane_active_tab(self.agents_workspace.focused_pane);
-            self.persist_shell_layout_state();
-        }
-        cx.notify();
-    }
-
     pub(crate) fn activate_agents_terminal_placeholder(
         &mut self,
         pane_id: WorkspacePaneId,

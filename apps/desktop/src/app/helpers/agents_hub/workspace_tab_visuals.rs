@@ -138,28 +138,6 @@ pub(crate) fn workspace_tab_agent_icon_accent_color(agent_icon: &str) -> u32 {
     }
 }
 
-pub(crate) fn workspace_tab_agent_icon_opacity(
-    visual_tone: WorkspaceTabLifecycleVisualTone,
-) -> f32 {
-    if visual_tone.uses_selected_treatment() {
-        1.0
-    } else if visual_tone.uses_inactive_running_treatment() {
-        0.78
-    } else {
-        debug_assert!(visual_tone.uses_subdued_non_running_treatment());
-        0.46
-    }
-}
-
-pub(crate) fn workspace_tab_agent_icon_text_color(
-    agent_icon: &str,
-    visual_tone: WorkspaceTabLifecycleVisualTone,
-) -> Hsla {
-    chrome_agent_icon_color(agent_icon)
-        .opacity(workspace_tab_agent_icon_opacity(visual_tone))
-        .into()
-}
-
 /// The same agent glyph on a chrome surface rather than a workspace tab: several agents' accent is
 /// white or near-white, which is invisible on a light popup or page, so those two turn to ink.
 pub(crate) fn chrome_agent_icon_color(agent_icon: &str) -> gpui::Rgba {
@@ -167,26 +145,6 @@ pub(crate) fn chrome_agent_icon_color(agent_icon: &str) -> gpui::Rgba {
     match accent {
         0xffffff | 0xedecec => chrome_color(accent, 0x262626),
         _ => rgb(accent),
-    }
-}
-
-pub(crate) fn agent_terminal_tab_status_color(tab_status: AgentTerminalTabStatus) -> u32 {
-    match tab_status {
-        AgentTerminalTabStatus::Idle => 0x67d886,
-        AgentTerminalTabStatus::Working => 0xf59e0b,
-        AgentTerminalTabStatus::Attention => 0x95d7f6,
-        AgentTerminalTabStatus::DelayedSend => 0xffcf5a,
-    }
-}
-
-pub(crate) fn agent_terminal_tab_status_inactive_opacity(
-    tab_status: AgentTerminalTabStatus,
-) -> f32 {
-    match tab_status {
-        AgentTerminalTabStatus::Idle => 0.58,
-        AgentTerminalTabStatus::Working => 0.52,
-        AgentTerminalTabStatus::Attention => 0.52,
-        AgentTerminalTabStatus::DelayedSend => 0.50,
     }
 }
 

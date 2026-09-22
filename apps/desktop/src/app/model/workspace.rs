@@ -1734,28 +1734,6 @@ impl WorkspaceModel {
         }
     }
 
-    pub(crate) fn reorder_tab_within_pane(
-        &mut self,
-        pane_id: WorkspacePaneId,
-        session_id: TerminalSessionId,
-        insertion_index: usize,
-    ) -> bool {
-        /*
-        CDXC:Workarea 2026-06-22-05:31:
-        Same-strip Agents tab drops are reorder-only. They must stay inside the source tab group, keep the dragged session identity, and leave the session presentation record untouched so sleeping, restored, mounting, and popped-out placeholders survive the reorder.
-        */
-        let Some(leaf) = self.find_leaf_mut(pane_id) else {
-            return false;
-        };
-        let active_tab = leaf.tab_group.active_tab;
-        let Some(tab) = leaf.tab_group.remove_session(session_id) else {
-            return false;
-        };
-        leaf.tab_group.insert_session_at(tab, insertion_index);
-        leaf.tab_group.active_tab = active_tab;
-        true
-    }
-
     pub(crate) fn group_tab_into_pane(
         &mut self,
         source_pane_id: WorkspacePaneId,

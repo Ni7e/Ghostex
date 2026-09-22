@@ -63,16 +63,6 @@ pub(crate) struct CommandPaneDropFeedback {
 }
 
 /*
-CDXC:Workarea 2026-06-26-06:34:
-Native Agents pane tabs select on same-gesture mouse-up, not on mouse-down. Keep this pending tab click as runtime-only pane/session identity so drag start, mouse-up-out, and double-click Focus can share AppKit's gesture ownership without adding overlays, broad hit-test routing, persistence, terminal lifecycle changes, or synthetic input paths.
-*/
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct WorkspacePendingTabClick {
-    pub(crate) pane_id: WorkspacePaneId,
-    pub(crate) session_id: TerminalSessionId,
-}
-
-/*
 CDXC:CommandPane 2026-06-25-19:14:
 Native AppKit command tabs arm a potential tab selection on left mouse-down, but commit selection only on the matching mouse-up while the gesture stayed a click. Keep GPUI's pending state as a runtime-only tab id token so a command-tab drag start can cancel selection without overlays, root hit-test routing, synthetic coordinates, persistence, or logging.
 */

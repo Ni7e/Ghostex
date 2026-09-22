@@ -109,7 +109,6 @@ pub(crate) fn app_modal_host_url() -> Result<String> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommandToAgentsDropPlacement {
     PaneBody(WorkspaceDropZone),
-    TabStrip(usize),
 }
 
 pub(crate) fn apply_gpui_terminal_runtime_action_events(
