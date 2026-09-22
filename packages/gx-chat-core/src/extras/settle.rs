@@ -93,6 +93,12 @@ fn settle_with_ids(
             if state.core.timer_fired(FLEET_CLOCK) {
                 state.core.request_publish();
             }
+            // `setInterval(() => setNow(Date.now()), ACTIVITY_CLOCK_TICK_MS)`: a new clock, so a
+            // state change the lifecycle publishes on.
+            if state.core.timer_fired(ACTIVITY_CLOCK) {
+                state.extras.activity_now_ms = Some(state.core.timer_now(ACTIVITY_CLOCK, context));
+                state.core.request_publish();
+            }
         }
         _ => {}
     }
@@ -115,8 +121,45 @@ fn settle_with_ids(
         terminal_tail::retire(&mut state.extras.terminal_tail);
     }
     search::settle(&mut state.extras.search, &items);
+    settle_activity_clock(state, context);
     arm_timers(state, context);
     effects
+}
+
+/// `computeSessionChatActivity`'s clock: the initializer on the first render, then
+/// `useEffect(() => { if (!hasClock) return; setNow(Date.now()); setInterval(...) },
+/// [activity?.detectedAt, hasClock])`. A new sample restarts the interval from its own moment,
+/// which is what puts the strip's ticks on the same records as the live brain's.
+fn settle_activity_clock(state: &mut ChatState, context: &ChatContext) {
+    if !state.core.controller_started {
+        return;
+    }
+    let activity = state.session.terminal_activity.as_ref();
+    let has_clock = activity.is_some_and(|activity| activity.get("elapsedSeconds").is_some());
+    let detected_at = activity
+        .and_then(|activity| activity.get("detectedAt"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if state.extras.activity_now_ms.is_none() {
+        state.extras.activity_now_ms = Some(context.now_ms);
+    }
+    let deps = (detected_at, has_clock);
+    if state.extras.activity_clock_deps.as_ref() == Some(&deps) {
+        return;
+    }
+    state.extras.activity_clock_deps = Some(deps);
+    state.core.timers.cancel(ACTIVITY_CLOCK);
+    if has_clock {
+        if state.extras.activity_now_ms != Some(context.now_ms) {
+            state.extras.activity_now_ms = Some(context.now_ms);
+            state.core.request_publish();
+        }
+        state.core.timers.arm_interval(
+            ACTIVITY_CLOCK,
+            context.now_ms,
+            crate::extras::activity::ACTIVITY_CLOCK_TICK_MS as f64,
+        );
+    }
 }
 
 /// The one live-work flag the strip keys off, which family a folds.
@@ -198,18 +241,12 @@ fn transcript_items(state: &ChatState, context: &ChatContext) -> Vec<Value> {
 
 /// Keeps family f's rows in the core's timer table, which is what the frame's `nextWakeMs` reads.
 ///
-/// The five clocks the TypeScript arms are all here: the fleet's once a second while any row's
-/// clock is moving, the terminal activity's once a second while the CLI painted one, the two
-/// loading stages, the subagent viewer's poll, and its settle hold. Each is a key, so re-arming is
+/// The fleet's once a second while any row's clock is moving, the two loading stages, the
+/// subagent viewer's poll, and its settle hold. The terminal activity's clock restarts with every
+/// sample, so it is armed by `settle_activity_clock` instead. Each is a key, so re-arming is
 /// idempotent and a surface that goes away cancels its own row.
 fn arm_timers(state: &mut ChatState, context: &ChatContext) {
     let (_, _, fleet_ticking) = panels::project(state, context);
-    let activity_ticking = state
-        .session
-        .terminal_activity
-        .as_ref()
-        .and_then(|activity| activity.get("elapsedSeconds"))
-        .is_some();
     let loading = state.extras.loading_started_at_ms;
     let poll = state.extras.subagent.poll_at_ms;
     let hold = state.extras.subagent.hold_until_ms;
@@ -217,13 +254,6 @@ fn arm_timers(state: &mut ChatState, context: &ChatContext) {
     let timers = &mut state.core.timers;
 
     interval(timers, FLEET_CLOCK, fleet_ticking, now, FLEET_CLOCK_TICK_MS);
-    interval(
-        timers,
-        ACTIVITY_CLOCK,
-        activity_ticking,
-        now,
-        crate::extras::activity::ACTIVITY_CLOCK_TICK_MS as f64,
-    );
     let armed_at = state.extras.loading_timers_armed_at_ms;
     let timers = &mut state.core.timers;
     match loading {

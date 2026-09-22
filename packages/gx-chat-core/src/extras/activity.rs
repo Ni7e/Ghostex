@@ -53,6 +53,16 @@ pub fn activity_elapsed_seconds(
 /// activity's own fields first, exactly as the TypeScript's `{...activity, ...}` does, so an
 /// unmodelled field survives.
 pub fn compute_activity(activity: Option<&Value>, context: &ChatContext) -> Option<Value> {
+    compute_activity_at(activity, context.now_ms, context)
+}
+
+/// [`compute_activity`] at the clock the strip LATCHED (`const [now, setNow] = useState(...)`),
+/// which only the effect and the one-second interval move.
+pub fn compute_activity_at(
+    activity: Option<&Value>,
+    now_ms: f64,
+    context: &ChatContext,
+) -> Option<Value> {
     let activity = activity?;
     let record = activity.as_object().cloned().unwrap_or_default();
     let detected_at = record
@@ -62,7 +72,7 @@ pub fn compute_activity(activity: Option<&Value>, context: &ChatContext) -> Opti
     let elapsed = activity_elapsed_seconds(
         record.get("elapsedSeconds").and_then(Value::as_f64),
         detected_at,
-        context.now_ms,
+        now_ms,
         context.utc_offset_minutes,
     );
     let percent = record

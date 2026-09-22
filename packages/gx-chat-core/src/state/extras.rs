@@ -42,6 +42,11 @@ pub struct ExtrasState {
     pub loading_started_at_ms: Option<f64>,
     /// The stage the empty region is showing while a read runs: `blank`, `indicator` or `retry`.
     pub loading_stage: String,
+    /// The working strip's activity clock, `const [now, setNow] = useState(() => Date.now())` in
+    /// `activity.ts`: latched, and moved only by its effect and its one-second interval.
+    pub activity_now_ms: Option<f64>,
+    /// The `[activity?.detectedAt, hasClock]` the activity clock's effect last ran for.
+    pub activity_clock_deps: Option<(Option<String>, bool)>,
 }
 
 /// The stint word the pinned strip shows.

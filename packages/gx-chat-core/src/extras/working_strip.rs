@@ -6,7 +6,7 @@
 //! visual dimensions and spark artwork live in session-chat-presentation/working-strip.json.
 
 use crate::document::WorkingStrip;
-use crate::extras::activity::compute_activity;
+use crate::extras::activity::compute_activity_at;
 use crate::extras::working_words::pick_working_word;
 use crate::state::{ChatContext, ChatState, WorkingWordState};
 
@@ -49,7 +49,11 @@ pub fn working_strip(state: &ChatState, context: &ChatContext, working: bool) ->
             (None, true) => Some(format!("{}\u{2026}", state.extras.working_word.word)),
             _ => None,
         },
-        presentation: compute_activity(activity.as_ref(), context),
+        presentation: compute_activity_at(
+            activity.as_ref(),
+            state.extras.activity_now_ms.unwrap_or(context.now_ms),
+            context,
+        ),
         activity,
         extra: serde_json::Map::new(),
     }
