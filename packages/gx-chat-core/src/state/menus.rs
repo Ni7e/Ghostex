@@ -92,8 +92,9 @@ pub struct MenusState {
     pub accounts_generation: u64,
     /// The accounts read in flight, so its answer reaches family e and nothing else.
     pub accounts_request: Option<u64>,
-    /// When the last periodic account read started, for the 30 second poll.
-    pub accounts_polled_at_ms: Option<i64>,
+    /// When the 30 second poll's `setInterval` next fires (its `timer.at`), or `None` while no
+    /// provider is known and the effect armed nothing.
+    pub accounts_poll_due_ms: Option<i64>,
     /// What the poll was keyed on, so a provider or switch change re-reads at once.
     pub accounts_key: Option<String>,
     /// The account-switch card's own machine.
@@ -136,7 +137,7 @@ impl Default for MenusState {
             accounts_busy: false,
             accounts_generation: 0,
             accounts_request: None,
-            accounts_polled_at_ms: None,
+            accounts_poll_due_ms: None,
             accounts_key: None,
             account_switch: AccountSwitchState::default(),
             option_dispatch_id: None,

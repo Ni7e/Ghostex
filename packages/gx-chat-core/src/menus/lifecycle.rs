@@ -36,7 +36,7 @@ pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
     // `persistence.write` runs inside the store's own `publish`, which the layout effect above
     // reaches before any passive effect, so the write goes out ahead of the accounts poll.
     effects.extend(persist_options(state));
-    effects.extend(poll_accounts(state, now_ms));
+    effects.extend(poll_accounts(state, context, now_ms));
     let progress = switch_progress(state);
     let ready = switch_ready(state);
     // The switch card's own clock starts when the controller first renders, which is the frame
@@ -58,11 +58,8 @@ pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
     arm(state, "menus.switchCard", switch_wake, context);
     let option_wake = state.menus.options.next_wake_ms();
     arm(state, "menus.optionGrace", option_wake, context);
-    let accounts_wake = state
-        .menus
-        .accounts_polled_at_ms
-        .map(|at| at + ACCOUNTS_POLL_MS);
-    arm(state, "menus.accountsPoll", accounts_wake, context);
+    let accounts_wake = state.menus.accounts_poll_due_ms;
+    arm(state, ACCOUNTS_POLL_TIMER, accounts_wake, context);
     // CDXC:SessionChat 2026-09-22 WHY:
     // `setInterval(() => setNow(Date.now()), 30_000)` on a `useEffect` with no dependencies
     // (`native-context.ts:63`): the meter's countdown labels (five-hour reset, seven-day reset,
@@ -205,33 +202,51 @@ fn persist_options(state: &mut ChatState) -> Vec<Effect> {
     effects
 }
 
+/// The key of the poll's `setInterval` in the timer table.
+const ACCOUNTS_POLL_TIMER: &str = "menus.accountsPoll";
+
 /// The `useEffect` that reads the session's accounts on mount and every 30 seconds.
 ///
 /// One request path for the periodic read and the panel's own requests: a newer request wins, and
 /// polls skip while one is pending so an older read cannot land after a switch or policy change.
-fn poll_accounts(state: &mut ChatState, now_ms: i64) -> Vec<Effect> {
+///
+/// The interval is the host's own timer: it fires on a `tick`, re-anchors at that tick's clock
+/// (`timer.at = now + timer.interval`) whether or not it read, and its first deadline is the clock
+/// `setInterval` itself read, which is past the render's reads rather than the call's first.
+/// Measured from the call's first read, the first poll after every restart went out one host tick
+/// early on a large frame, and `accountPanel.busy` moved a document ahead of the live brain.
+fn poll_accounts(state: &mut ChatState, context: &ChatContext, now_ms: i64) -> Vec<Effect> {
     let key = accounts_poll_key(state);
     let Some(key) = key else {
         // `if (!provider && !panelProvider) { setAccounts(undefined); return; }`
         state.menus.accounts = None;
         state.menus.accounts_key = None;
-        state.menus.accounts_polled_at_ms = None;
+        state.menus.accounts_poll_due_ms = None;
         return Vec::new();
     };
-    let restarted = state.menus.accounts_key.as_deref() != Some(key.as_str());
-    let due = match state.menus.accounts_polled_at_ms {
-        None => true,
-        Some(at) => now_ms - at >= ACCOUNTS_POLL_MS,
-    };
-    if restarted {
-        // The cleanup bumps the generation, so an answer to the previous key is dropped.
+    if state.menus.accounts_key.as_deref() != Some(key.as_str()) {
+        // The cleanup bumps the generation, so an answer to the previous key is dropped, and
+        // clears `pending`; the effect then reads at once and arms the interval.
         state.menus.accounts_generation += 1;
         state.menus.accounts_busy = false;
         state.menus.accounts_key = Some(key);
-    } else if !due || state.menus.accounts_busy {
+        let armed_at = context.clock_read(effect_clock_index(state)).round() as i64;
+        state.menus.accounts_poll_due_ms = Some(armed_at + ACCOUNTS_POLL_MS);
+        return request_session_accounts(state);
+    }
+    if !state.core.timer_fired(ACCOUNTS_POLL_TIMER) {
         return Vec::new();
     }
-    state.menus.accounts_polled_at_ms = Some(now_ms);
+    state.menus.accounts_poll_due_ms = Some(now_ms + ACCOUNTS_POLL_MS);
+    // `if (!pending.current) void requestAccounts({ operation: 'session' })`
+    if state.menus.accounts_busy {
+        return Vec::new();
+    }
+    request_session_accounts(state)
+}
+
+/// `requestAccounts({ operation: 'session' })`.
+fn request_session_accounts(state: &mut ChatState) -> Vec<Effect> {
     state.menus.accounts_generation += 1;
     state.menus.accounts_busy = true;
     state.menus.account_error = None;
@@ -242,6 +257,41 @@ fn poll_accounts(state: &mut ChatState, now_ms: i64) -> Vec<Effect> {
         method: ChatRpcMethod::AgentAccounts,
         params: Box::new(session_accounts_request()),
     }]
+}
+
+/// Which of this call's clock reads a passive effect of the controller's first render takes.
+///
+/// The recordings show the order: the call's own read (a frame's or a read's liveness stamp,
+/// the tick's own), then the render's (`useRef(Date.now())` at the top of `computeSessionChat` on
+/// every render; `workingStartedAtRef.current ??= Date.now()` when work starts; the switch
+/// card's `Date.now() - Date.parse(updatedAt)` for a success it did not watch; the account
+/// panel's own `Date.now()`), then the effects in declaration order. Timers other effects arm
+/// earlier in the same render are not counted, so this can land one read early; within one call
+/// the reads are almost always the same millisecond, and the ones that are not are the large
+/// first frames this is for.
+fn effect_clock_index(state: &ChatState) -> usize {
+    let mut index = 2;
+    if crate::session::working::working_signal(state)
+        && state.session.working_started_at_ms.is_none()
+    {
+        index += 1;
+    }
+    if let Some(progress) = switch_progress(state) {
+        let switch = &state.menus.account_switch;
+        if progress.phase == "success"
+            && switch.dismissed.as_deref() != Some(progress.id.as_str())
+            && switch.observed.as_deref() != Some(progress.id.as_str())
+        {
+            index += 1;
+        }
+    }
+    if crate::menus::controls::account_providers(state)
+        .panel
+        .is_some()
+    {
+        index += 1;
+    }
+    index
 }
 
 /// The composer boot read, as `start`'s `.then(...)` in `native-host.ts` adopts it.
