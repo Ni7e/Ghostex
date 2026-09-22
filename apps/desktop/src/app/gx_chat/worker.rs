@@ -847,12 +847,15 @@ fn perform(
             };
             answers.push(Event::RetainedSnapshotLoaded { value });
         }
-        // Nothing answers this one. A refused cache write is not a failure the chat reports: the
-        // live stream stays authoritative and the next fold writes again.
-        Effect::WriteRetainedSnapshot { value } => {
-            let written = retained::write(key, value.as_deref(), now_ms);
-            world.counters.storage_refused += u64::from(written.is_err());
-        }
+        // CDXC:SessionChat 2026-09-23 WHY:
+        // Not written here. The Rust brain's subscription still goes through the app runtime's
+        // retained store (`apps/desktop/sidebar/session-chat-runtime/store.ts`, via the broker's
+        // `subscribe`), and that store folds every frame and persists this same record on its own
+        // one-second throttle. With both writing, the record had two writers racing each other and
+        // each second serialized up to 2 MiB twice, so the host must not write it while the app
+        // runtime's store owns the subscription: one writer, as under the QuickJS brain. The read
+        // above stays. Nothing answers the effect, so dropping it leaves the core waiting on nothing.
+        Effect::WriteRetainedSnapshot { .. } => {}
         Effect::SetTimer { delay_ms } => match delay_ms {
             Some(delay) => {
                 world.wakes.insert(
