@@ -60,7 +60,7 @@ pub(super) fn submitted(
     {
         let cleared = StoredDraftRecord {
             text: String::new(),
-            updated_at: Some(now_ms),
+            updated_at: Some(now_ms as f64),
             version: current.version.clone(),
             submitted: true,
             parked: false,
@@ -115,12 +115,12 @@ pub(super) fn park(
     else {
         return Err("The draft changed during transfer. It has been kept in Chat.");
     };
-    let updated_at = current.updated_at.unwrap_or(now_ms);
+    let updated_at = current.updated_at.unwrap_or(now_ms as f64);
     host_records::preserve_draft_revision(
         &RecoveryCheckpoint {
             session_key: session_key.to_string(),
             text: current.text.clone(),
-            updated_at,
+            updated_at: updated_at as i64,
             version: host_version(current.version.as_ref()),
             dismissed: None,
         },
