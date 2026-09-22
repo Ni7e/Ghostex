@@ -118,6 +118,10 @@ pub fn model_menu_projection(
         &context.descriptors,
         context.provider.map(|provider| provider.as_str()),
         context.model_value.as_deref(),
+        context
+            .raw
+            .pointer("/state/fastMode/value")
+            .and_then(Value::as_str),
         catalog,
     );
     let rows = model_menu_rows(

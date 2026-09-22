@@ -17,7 +17,13 @@ import type { ModelPickerProvider } from './model-picker';
  * React and GPUI both draw what this module decides, so tabs, row order, search ranking, favorites and the footer can never differ between them.
  * SEE-ALSO: packages/core-ui/chat/session-chat-model-menu.tsx, apps/desktop/src/app/native_chat/option_menu/model_menu/, packages/shared/session-chat-controller/model-menu.ts.
  */
-export const MODEL_MENU_PROVIDERS: readonly ModelPickerProvider[] = ['claude', 'codex', 'cursor', 'grok', 'antigravity'];
+export const MODEL_MENU_PROVIDERS: readonly ModelPickerProvider[] = [
+  'claude',
+  'codex',
+  'cursor',
+  'grok',
+  'antigravity',
+];
 export const MODEL_MENU_FAVORITES_TAB = 'favorites';
 export type ModelMenuTabId = typeof MODEL_MENU_FAVORITES_TAB | ModelPickerProvider;
 export const MODEL_MENU_SEARCH_PLACEHOLDER = 'Search models…';
@@ -251,7 +257,11 @@ export function modelMenuEffortFor(provider: ModelPickerProvider, model: string,
 }
 
 const TRAIT_LABELS: Record<string, string> = { effort: 'Reasoning' };
-const TRAIT_ICONS: Record<string, ModelMenuTrait['icon']> = { effort: 'reasoning', context: 'context', fastMode: 'fast' };
+const TRAIT_ICONS: Record<string, ModelMenuTrait['icon']> = {
+  effort: 'reasoning',
+  context: 'context',
+  fastMode: 'fast',
+};
 
 /**
  * CDXC:SessionChat 2026-09-21 DECISION:
@@ -265,6 +275,16 @@ const TRAIT_ICONS: Record<string, ModelMenuTrait['icon']> = { effort: 'reasoning
  */
 function unavailable(id: string, label: string, valueLabel: string): Omit<ModelMenuTrait, 'icon' | 'toggle'> {
   return { id, label, valueLabel, disabled: true, choices: [] };
+}
+
+/**
+ * CDXC:SessionChat 2026-09-22 DECISION:
+ * User: a Cursor session running Grok 4.7 in Fast mode must show Fast as on. Cursor sets Fast from a checkbox inside its
+ * own /model panel, so chat has no toggle for it, but gxserver reads "Fast" off the footer; the disabled button reports
+ * that detected state instead of a fixed Off.
+ */
+function detectedFastLabel(state: SessionChatOptionState): string {
+  return state.fastMode?.value === 'on' ? 'On' : 'Off';
 }
 
 function asButton(trait: Omit<ModelMenuTrait, 'icon' | 'toggle'>): ModelMenuTrait {
@@ -348,7 +368,7 @@ export function modelMenuTraits(
           })),
         }
       : unavailable('context', 'Context Window', 'Default'),
-    (fast && option(fast)) || unavailable('fastMode', 'Fast mode', 'Off')
+    (fast && option(fast)) || unavailable('fastMode', 'Fast mode', detectedFastLabel(params.state))
   );
   for (const descriptor of others) {
     if (descriptor === effort || descriptor === fast) continue;

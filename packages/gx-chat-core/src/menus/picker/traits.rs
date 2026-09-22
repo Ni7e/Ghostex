@@ -263,6 +263,7 @@ pub fn model_menu_traits(
     others: &[ResolvedOptionDescriptor],
     provider: Option<&str>,
     model: Option<&str>,
+    detected_fast: Option<&str>,
     catalog: &AgentModelCatalog,
 ) -> Vec<ModelMenuTrait> {
     let entry = model_menu_entry_for(entries, provider, model);
@@ -303,7 +304,16 @@ pub fn model_menu_traits(
     });
     traits.push(
         fast.and_then(|index| option(&others[index], catalog))
-            .unwrap_or_else(|| unavailable("fastMode", "Fast mode", "Off")),
+            .unwrap_or_else(|| {
+                // `detectedFastLabel`: Cursor has no Fast toggle in chat, but gxserver reads
+                // "Fast" off its footer, so the disabled button reports that state.
+                let label = if detected_fast == Some("on") {
+                    "On"
+                } else {
+                    "Off"
+                };
+                unavailable("fastMode", "Fast mode", label)
+            }),
     );
     for (index, descriptor) in others.iter().enumerate() {
         if Some(index) == effort || Some(index) == fast {
