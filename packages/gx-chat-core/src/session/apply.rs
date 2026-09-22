@@ -22,6 +22,76 @@ pub struct AgentIdentity {
     pub session_agent_id: Tri<String>,
 }
 
+/// The `sessionChatState` arm of the controller's `onEvent` (`controller.ts:1010`), field by field.
+///
+/// A state frame carries no transcript, and the controller never runs it through
+/// `applyAuthoritative`: it sets the status, the working flags, the lifecycle, the prompt, the
+/// identity and the carriage keys the frame names, and touches nothing else. The core used to fold
+/// the frame onto the retained snapshot and apply THAT as if a read had landed, which replaced the
+/// list with the fold's window, re-derived `hasMore` and the cursor from it, and reset the history
+/// prefix on every frame (a page read per frame on a real chat, none of which the live brain made),
+/// and read `working` from the fold's previous value where the controller reads the frame alone.
+pub fn apply_state_frame(
+    state: &mut ChatState,
+    frame: &ghostex_gx_protocol::ChatStateFrame,
+    context: &crate::state::ChatContext,
+) {
+    state.session.server_status = crate::session::view_state::transcript_status_after_state(
+        state.session.server_status.clone(),
+        frame.status.clone(),
+    );
+    state.session.server_working =
+        frame.working == Some(true) || matches!(frame.status, ChatStatus::Working);
+    if let Some(working) = frame.working {
+        state.session.session_activity_working = working;
+    }
+    if let Some(lifecycle) = frame.lifecycle.clone() {
+        state.session.lifecycle = Some(lifecycle);
+    }
+    state.session.prompt = frame.state.prompt.clone();
+    apply_agent_identity(
+        state,
+        &AgentIdentity {
+            agent: None,
+            agent_session_id: frame.state.agent_session_id.clone(),
+            session_agent_id: Tri::Absent,
+        },
+    );
+    if let Tri::Value(since) = frame.state.async_questions_since {
+        state.session.async_questions_since = Some(since);
+    } else if matches!(frame.state.async_questions_since, Tri::Null) {
+        state.session.async_questions_since = None;
+    }
+    if let Some(ids) = frame.state.retired_async_question_ids.clone() {
+        state.session.retired_async_question_ids = ids;
+    }
+    apply_selected_options(state, frame.state.selected_options.as_ref());
+    state.session.terminal_notice = frame.state.terminal_notice.clone();
+    crate::session::terminal::apply_terminal_activity(
+        state,
+        frame.state.terminal_activity.as_ref(),
+        context,
+    );
+    state.session.agent_fleet = frame.state.agent_fleet.clone();
+    state.session.agent_tasks = frame.state.agent_tasks.clone();
+    if let Some(commands) = frame.state.app_commands.clone() {
+        state.session.app_commands = commands;
+    }
+    if let Some(prompt) = frame.state.returned_prompt.clone() {
+        apply_returned_prompt(state, &prompt);
+    }
+    if frame.state.screen_probed == Some(true) {
+        state.session.screen_probed = true;
+    }
+    apply_queue_carriage(
+        state,
+        &frame.state.account_switch,
+        &frame.state.pending_model_selection,
+        frame.state.queue.as_ref(),
+        frame.state.draft.as_ref(),
+    );
+}
+
 /// CDXC:AgentProviders 2026-09-14 WHY:
 /// Invalidate retained usage before folding a replacement agent's options, so an options-only
 /// reply cannot inherit the previous provider's usage.

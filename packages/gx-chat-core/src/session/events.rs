@@ -361,11 +361,12 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                 Verdict::Drop => Vec::new(),
                 Verdict::Resync => request_resync(state, context),
                 Verdict::Apply => {
+                    // The retained fold still absorbs the frame (that is what the host persists
+                    // and what a reopen seeds from); the VIEW takes the frame's own fields.
                     let folded =
                         fold_state(state.messages.snapshot.as_ref(), StateCarrier::State(frame));
-                    apply_authoritative(state, &folded.result, true, context);
                     state.messages.snapshot = Some(folded);
-                    state.messages.authoritative_revision += 1;
+                    crate::session::apply::apply_state_frame(state, frame, context);
                     Vec::new()
                 }
             }
