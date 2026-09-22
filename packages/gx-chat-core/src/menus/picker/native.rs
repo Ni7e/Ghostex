@@ -261,7 +261,8 @@ impl ModelPickerState {
         }
     }
 
-    /// `finish`: start the close animation. `scope` of `None` means the default scope.
+    /// `finish`: start the close animation, which only a save plays; a cancel closes on the next
+    /// tick (native-model-picker.ts). `scope` of `None` means the default scope.
     pub fn finish(&mut self, save: bool, scope: Option<ModelSelectionScope>, now_ms: f64) {
         if self.closing {
             return;
@@ -269,7 +270,7 @@ impl ModelPickerState {
         self.closing = true;
         self.saving = save;
         self.close_scope = scope.unwrap_or_else(|| self.default_scope());
-        self.close_deadline = Some(now_ms + CLOSE_MS);
+        self.close_deadline = Some(now_ms + if save { CLOSE_MS } else { 0.0 });
     }
 
     fn layout(&self) -> crate::menus::picker::model_picker::ModelPickerLayout {

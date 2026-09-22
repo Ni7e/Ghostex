@@ -167,11 +167,18 @@ export class NativeModelPicker {
     if (control) this.navigate(control);
   }
 
+  /**
+   * CDXC:SessionChat 2026-09-23 DECISION:
+   * User: Escape closes the quick model picker instantly instead of waiting, then closing. Only a
+   * save plays the 190ms close animation; every cancel (Escape, a click outside, the hotkey again)
+   * closes on the next tick. SEE-ALSO: session-chat-model-picker.tsx and gx-chat-core's
+   * menus/picker/native.rs keep the same rule.
+   */
   finish(save: boolean, scope: SessionChatModelSelectionScope = this.defaultScope) {
     if (this.closing) return;
     this.closing = true;
     this.saving = save;
-    this.closeTimer = setTimeout(() => this.finished(save ? this.selection : null, scope), 190);
+    this.closeTimer = setTimeout(() => this.finished(save ? this.selection : null, scope), save ? 190 : 0);
   }
 
   dispose() {

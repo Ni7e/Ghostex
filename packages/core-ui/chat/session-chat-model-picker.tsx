@@ -134,7 +134,8 @@ export function SessionChatModelPicker({
       setClosing(true);
       timer.current = setTimeout(
         () => (save ? onSave(choice, scope) : onClose()),
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 190
+        // A cancel closes at once (native-model-picker.ts `finish`); only a save animates out.
+        !save || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 190
       );
     };
     // The terminal host must receive durable acceptance before its native window can close.
