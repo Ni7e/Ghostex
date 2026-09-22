@@ -87,6 +87,18 @@ impl MessagesState {
         apply_incoming(&mut list, &mut index, incoming);
         self.list = list;
         self.index_by_id = index;
+        // The merger put the incoming OBJECT in the list wherever it replaced or appended, so a
+        // row that landed carries a new `deferredWork`.
+        for message in incoming {
+            let landed = self
+                .index_by_id
+                .get(&message.id)
+                .and_then(|at| self.list.get(*at))
+                .is_some_and(|stored| stored == message);
+            if landed {
+                self.note_new_deferred_object(message);
+            }
+        }
     }
 
     /// Drops rows the server retracted (abandoned prompts), returning whether anything went.

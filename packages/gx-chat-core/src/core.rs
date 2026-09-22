@@ -64,6 +64,7 @@ struct SentFrame {
     /// channels and a drain without one ships none.
     parts_revision: u64,
     items: Option<Vec<TranscriptItem>>,
+    item_identities: Vec<u64>,
     subagent_items: Option<Vec<TranscriptItem>>,
     minimap: Option<Vec<MinimapMarker>>,
     row_details: Option<RowDetails>,
@@ -170,8 +171,15 @@ impl ChatCore {
         self.sent.parts_revision = self.parts_revision;
         let mut items_splice = None;
         if rebuilt {
-            items_splice = Some(splice(self.sent.items.as_deref(), &self.parts.items));
+            items_splice = Some(splice(
+                self.sent
+                    .items
+                    .as_deref()
+                    .map(|items| (items, self.sent.item_identities.as_slice())),
+                (&self.parts.items, &self.parts.item_identities),
+            ));
             self.sent.items = Some(self.parts.items.clone());
+            self.sent.item_identities = self.parts.item_identities.clone();
         }
         // The other three keep their identity when their content does: the minimap rail caches its
         // own projection, the subagent viewer hands back one stable list, and `rowDetails` is a
@@ -181,8 +189,11 @@ impl ChatCore {
                 None
             } else {
                 let splice = splice(
-                    self.sent.subagent_items.as_deref(),
-                    &self.parts.subagent_items,
+                    self.sent
+                        .subagent_items
+                        .as_deref()
+                        .map(|items| (items, &[][..])),
+                    (&self.parts.subagent_items, &[]),
                 );
                 self.sent.subagent_items = Some(self.parts.subagent_items.clone());
                 Some(splice)
@@ -349,8 +360,15 @@ fn expand(event: Event) -> Vec<Event> {
 /// of JSON per frame on a 139-message session. Only the changed window crosses the bridge; GPUI
 /// splices its item list and list state the same way.
 /// SEE-ALSO: apps/desktop/src/app/native_chat/state.rs (pump).
-fn splice(previous: Option<&[TranscriptItem]>, next: &[TranscriptItem]) -> ItemsSplice {
-    let Some(previous) = previous else {
+///
+/// Each side is the items and their identities ([`FrameParts::item_identities`]): an item is the
+/// same object only when its value AND its identity are unchanged.
+fn splice(
+    previous: Option<(&[TranscriptItem], &[u64])>,
+    next: (&[TranscriptItem], &[u64]),
+) -> ItemsSplice {
+    let (next, next_identities) = next;
+    let Some((previous, previous_identities)) = previous else {
         return ItemsSplice {
             start: 0,
             delete_count: 0,
@@ -358,13 +376,18 @@ fn splice(previous: Option<&[TranscriptItem]>, next: &[TranscriptItem]) -> Items
             length: next.len(),
         };
     };
+    let identity = |identities: &[u64], at: usize| identities.get(at).copied().unwrap_or_default();
+    let same = |left: usize, right: usize| {
+        previous[left] == next[right]
+            && identity(previous_identities, left) == identity(next_identities, right)
+    };
     let limit = previous.len().min(next.len());
     let mut start = 0;
-    while start < limit && previous[start] == next[start] {
+    while start < limit && same(start, start) {
         start += 1;
     }
     let mut end = 0;
-    while end < limit - start && previous[previous.len() - 1 - end] == next[next.len() - 1 - end] {
+    while end < limit - start && same(previous.len() - 1 - end, next.len() - 1 - end) {
         end += 1;
     }
     ItemsSplice {

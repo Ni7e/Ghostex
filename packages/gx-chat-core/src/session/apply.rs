@@ -289,6 +289,19 @@ pub fn apply_authoritative(
         state.messages.history_prefix_count = 0;
         state.messages.boundary_attempt = None;
     }
+    // Every result row is a new object, except the `deferredWork` carried over from the old row.
+    for message in &result.messages {
+        let carried = keep_history
+            && state
+                .messages
+                .index_by_id
+                .get(&message.id)
+                .and_then(|at| state.messages.list.get(*at))
+                .is_some_and(|old| old.deferred_work.is_some());
+        if !carried {
+            state.messages.note_new_deferred_object(message);
+        }
+    }
     state.messages.replace_list(&next_messages);
     state.session.lifecycle = result.lifecycle.clone();
     if !keep_history {

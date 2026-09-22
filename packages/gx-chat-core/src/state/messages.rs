@@ -109,12 +109,32 @@ pub struct MessagesState {
     /// Bumped every time the composed list is rebuilt: the memo's output is a new array whenever
     /// it re-ran, equal rows or not, and the projection compares that identity.
     pub compose_generation: u64,
+    /// Which `deferredWork` OBJECT each user message carries, by message id.
+    ///
+    /// A completed turn's item holds `deferred: item.turn.user.deferredWork` by reference, and
+    /// `reuseItems` keeps the previous item only when every field is the same object, so a read or
+    /// frame that hands the controller a new user message with an equal but new `deferredWork`
+    /// ships that turn in the splice again. A value compare cannot see that; this token can. It
+    /// moves when a message arrives carrying its own `deferredWork` and stays when
+    /// `applyAuthoritative` carries the old object over (`{ ...message, deferredWork: old... }`).
+    pub deferred_objects: BTreeMap<String, u64>,
+    /// The last token handed out in `deferred_objects`.
+    pub deferred_object_counter: u64,
 }
 
 impl MessagesState {
     /// The TypeScript handed a setter the composition depends on a new object.
     pub fn new_composition_identity(&mut self) {
         self.composition_identity = self.composition_identity.wrapping_add(1);
+    }
+
+    /// `message` arrived as a new object: its `deferredWork`, if it has one, is a new one too.
+    pub fn note_new_deferred_object(&mut self, message: &ChatMessage) {
+        if message.deferred_work.is_some() {
+            self.deferred_object_counter += 1;
+            self.deferred_objects
+                .insert(message.id.clone(), self.deferred_object_counter);
+        }
     }
 }
 

@@ -38,12 +38,37 @@ pub struct FrameParts {
     pub minimap: Vec<MinimapMarker>,
     /// Details for the rows the renderer draws open. Family b.
     pub row_details: RowDetails,
+    /// One identity per entry of `items`, compared beside the value when the splice is cut.
+    ///
+    /// `take` compares items by object identity, and a completed turn's item is a new object
+    /// whenever its `deferred` is a new object with the same value
+    /// ([`crate::state::MessagesState::deferred_objects`]); every other field is reused by value.
+    /// Zero for an item with no such reference.
+    pub item_identities: Vec<u64>,
 }
 
 /// Everything a frame carries beside the document.
 pub fn frame_parts(state: &ChatState, context: &ChatContext) -> FrameParts {
+    let items = transcript::rows(state, context);
+    let item_identities = items
+        .iter()
+        .map(|item| match item {
+            TranscriptItem::CompletedWork {
+                id,
+                deferred: Some(_),
+                ..
+            } => state
+                .messages
+                .deferred_objects
+                .get(id)
+                .copied()
+                .unwrap_or_default(),
+            _ => 0,
+        })
+        .collect();
     FrameParts {
-        items: transcript::rows(state, context),
+        items,
+        item_identities,
         subagent_items: extras::subagent_rows(state, context),
         minimap: extras::markers(state, context),
         row_details: transcript::row_details(state, context),
