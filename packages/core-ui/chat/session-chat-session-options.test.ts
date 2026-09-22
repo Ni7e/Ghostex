@@ -34,7 +34,7 @@ describe('pending session chat options', () => {
     store.applyDetected({ model: { value: 'sonnet', label: 'Sonnet 5' }, detectedAt: new Date().toISOString() });
     const changed = vi.fn();
     const unsubscribe = store.subscribe(changed);
-    const request = store.beginDispatch({ model: 'opus' });
+    const request = store.beginDispatch({ model: 'opus[1m]' });
     expect(changed).toHaveBeenCalledOnce();
     expect(sessionChatOptionValueLabel(catalog.model, store.getSnapshot())).toBe('Opus 5.5');
     expect(store.getSnapshot().model?.source).toBe('dispatched');
@@ -128,8 +128,7 @@ describe('session chat session-option catalogs', () => {
   it('shows the claude model lineup from the published agent model catalog', () => {
     expect(catalogFor('claude').model.choices?.map(({ value, label }) => ({ value, label }))).toEqual([
       { value: 'fable', label: 'Fable 5.1' },
-      { value: 'opus[1m]', label: 'Opus 5.5 (1M)' },
-      { value: 'opus', label: 'Opus 5.5' },
+      { value: 'opus[1m]', label: 'Opus 5.5' },
       { value: 'sonnet', label: 'Sonnet 5' },
       { value: 'haiku', label: 'Haiku 4.5' },
     ]);
@@ -150,7 +149,7 @@ describe('session chat session-option catalogs', () => {
     // available and sorts last.
     expect(ids('sonnet')).toEqual(['effort', 'mode']);
     expect(ids('haiku')).toEqual(['mode']);
-    expect(ids('opus')).toEqual(['effort', 'fastMode', 'mode']);
+    expect(ids('opus[1m]')).toEqual(['effort', 'fastMode', 'mode']);
   });
 
   it('delivers claude values as slash commands', () => {
@@ -159,7 +158,7 @@ describe('session chat session-option catalogs', () => {
     if (model.dispatch.kind !== 'command') {
       throw new Error('claude model must dispatch a command');
     }
-    expect(model.dispatch.build('opus')).toBe('/model opus');
+    expect(model.dispatch.build('opus[1m]')).toBe('/model opus[1m]');
     const effort = catalog.optionsForModel('sonnet').find((descriptor) => descriptor.id === 'effort');
     if (effort?.dispatch.kind !== 'command') {
       throw new Error('claude effort must dispatch a command');
@@ -173,7 +172,7 @@ describe('session chat session-option catalogs', () => {
       'max',
       'ultracode',
     ]);
-    const fast = catalog.optionsForModel('opus').find((descriptor) => descriptor.id === 'fastMode');
+    const fast = catalog.optionsForModel('opus[1m]').find((descriptor) => descriptor.id === 'fastMode');
     expect(fast?.dispatch).toEqual({ kind: 'toggle-command', command: '/fast' });
   });
 
@@ -293,7 +292,7 @@ describe('session chat session-option catalogs', () => {
       ];
       const commands: string[] = [];
       if (catalog.model.dispatch.kind === 'command') {
-        commands.push(catalog.model.dispatch.build('opus'));
+        commands.push(catalog.model.dispatch.build('opus[1m]'));
       }
       for (const choice of catalog.model.choices ?? []) {
         for (const descriptor of catalog.optionsForModel(choice.value)) {
@@ -314,8 +313,8 @@ describe('session chat session-option catalogs', () => {
   it('reconciles a hand-typed command into the pills', () => {
     const catalog = catalogFor('claude');
     const seeded = seedSessionChatOptionState(catalog);
-    const afterModel = reconcileSessionChatOptionsFromCommand(catalog, seeded, '/model opus');
-    expect(afterModel.model).toMatchObject({ value: 'opus', source: 'dispatched' });
+    const afterModel = reconcileSessionChatOptionsFromCommand(catalog, seeded, '/model opus[1m]');
+    expect(afterModel.model).toMatchObject({ value: 'opus[1m]', source: 'dispatched' });
     // Dispatches are stamped so a later detection can tell a just-sent value
     // from one the agent has been running for a while.
     expect(Number.isFinite(Date.parse(afterModel.model?.dispatchedAt ?? ''))).toBe(true);
@@ -329,8 +328,8 @@ describe('session chat session-option catalogs', () => {
   it('labels the options pill with known values joined by a middle dot', () => {
     const catalog = catalogFor('claude');
     let state = seedSessionChatOptionState(catalog);
-    state = setSessionChatOptionValue(state, 'model', 'opus', 'dispatched');
-    const descriptors = catalog.optionsForModel('opus');
+    state = setSessionChatOptionValue(state, 'model', 'opus[1m]', 'dispatched');
+    const descriptors = catalog.optionsForModel('opus[1m]');
     expect(sessionChatOptionsPillLabel(descriptors, state)).toBeNull();
     state = setSessionChatOptionValue(state, 'effort', 'xhigh', 'dispatched');
     expect(sessionChatOptionsPillLabel(descriptors, state)).toBe('xHigh');

@@ -16,7 +16,7 @@ use crate::menus::picker::model_picker::{
 /// customers without an app release. Card order, card names and hidden cards come from the
 /// catalog (`quickPickerOrder`, `quickPickerLabel`, `quickPickerHidden`), which is where the
 /// earlier decisions now live: Cursor's hand-picked order with Grok 4.7 above Grok 4.6,
-/// Antigravity's Gemini-first order, the short Claude and Codex names, and no 200K Opus card.
+/// Antigravity's Gemini-first order, and the short Claude and Codex names.
 fn quick_picker_rank(order: &[String], value: &str) -> usize {
     order
         .iter()

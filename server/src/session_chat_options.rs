@@ -640,7 +640,13 @@ fn claude_model_value(family_value: &str, version: &str) -> &'static str {
 }
 
 fn match_claude_model(segment: &str) -> Option<SessionChatDetectedChoice> {
-    if let Some(value) = crate::agent_model_catalog::model_value_for_label("claude", segment) {
+    let says_long_context = segment.ends_with(" (1M)") || segment.ends_with(" (1M context)");
+    // Opus 5.5 is one catalog row whose value is `opus[1m]` and whose label is
+    // the bare "Opus 5.5", so a footer without the 1M marker (a session started
+    // with `--model opus`) must not be read as that row.
+    if let Some(value) = crate::agent_model_catalog::model_value_for_label("claude", segment)
+        .filter(|value| says_long_context || !value.ends_with("[1m]"))
+    {
         return Some(SessionChatDetectedChoice {
             value,
             label: segment.to_string(),

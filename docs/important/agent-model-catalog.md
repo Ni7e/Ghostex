@@ -52,7 +52,7 @@ Top level:
 | Field           | Meaning                                                                                                  |
 | --------------- | -------------------------------------------------------------------------------------------------------- |
 | `schemaVersion` | Must be `1`. A document with another version is rejected by every client, so never bump it casually.    |
-| `updatedAt`     | ISO date. Bump it on every edit; it decides between the bundled and cached copies.                       |
+| `updatedAt`     | UTC timestamp (`2026-09-22T17:48:00Z`). Set it to the current time on every edit; the later one wins between the bundled, cached and pushed copies, so a bare date lets two edits on the same day tie and a stale copy win. |
 | `effortLabels`  | Effort id to display label (`xhigh` to "Extra high"). Add an entry for every effort id used below.       |
 | `agents`        | Keyed by Ghostex agent id: `claude`, `codex`, `cursor`, `grok`, `antigravity`. Other keys are ignored.   |
 
@@ -93,9 +93,10 @@ Label conventions already applied, keep them:
 - Codex ids read as words: "GPT 5.6 Sol", "GPT 5.4 Mini", "GPT 5.3 Codex Spark".
 - Cursor rows drop the "Claude" and "Cursor" words ("Opus 5", "Grok 4.6") and
   keep the literal row text in `pickerLabel`.
-- Claude's picker has TWO Opus rows, "Opus (1M context)" and "Opus", which are
-  the aliases `opus[1m]` and `opus`; its "Default (recommended)" row is the
-  same model as the 1M one, so only that one is listed. `claude --model` also
+- Claude 2.1.280's picker has ONE Opus row, "Opus (1M context)" (`opus[1m]`),
+  and its "Default (recommended)" row is the same Opus 5.5 with 1M context,
+  so the catalog lists a single "Opus 5.5" row with no 200K `opus` twin (a
+  twin is what makes the menu offer a 200K/1M Context Window choice). `claude --model` also
   accepts `sonnet[1m]` and `fable[1m]`, but the picker offers no row for them,
   so the catalog does not either. Haiku 4.5 is given `efforts: []`.
 - Antigravity's `value` is the MODEL part of the ids `agy models` prints
@@ -130,7 +131,7 @@ Grok (2) stay flat: a group header would cost more than it saves.
 ## Editing the file
 
 1. Edit `agent-model-catalog.json` at the repo root.
-2. Bump `updatedAt`.
+2. Set `updatedAt` to the current UTC time (`date -u +%Y-%m-%dT%H:%M:%SZ`).
 3. Validate: `bun run test -- packages/core-ui/chat/session-chat-session-options.test.ts`
    and `bun run typecheck` (the bundled import fails the build if the document
    does not parse).

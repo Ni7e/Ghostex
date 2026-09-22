@@ -5,8 +5,7 @@ import type { ModelPickerRequest, ModelPickerProvider } from '@/packages/shared/
  * CDXC:SessionChat 2026-09-22 DECISION: User: new models and quick picker changes must reach customers without an app release.
  * Card order, card names and hidden cards come from the catalog (`quickPickerOrder`, `quickPickerLabel`, `quickPickerHidden`),
  * which is where the earlier decisions now live: Cursor's hand-picked order with Grok 4.7 above Grok 4.6, Antigravity's
- * Gemini-first order, the short Claude and Codex names, and no 200K Opus card (it stays in the full model menu as that
- * row's Context Window choice).
+ * Gemini-first order, and the short Claude and Codex names.
  */
 function quickPickerRank(order: readonly string[] | undefined, value: string): number {
   const index = order?.indexOf(value) ?? -1;

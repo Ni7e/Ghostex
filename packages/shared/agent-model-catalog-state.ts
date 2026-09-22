@@ -72,11 +72,22 @@ function writeCachedCatalog(catalog: AgentModelCatalog): void {
 }
 
 let current: AgentModelCatalog = bundledCatalog;
+/**
+ * CDXC:AgentProviders 2026-09-22 WHY:
+ * Set once this runtime holds a catalog from a live source (the desktop
+ * service's hand-off, a GitHub fetch, or a gxserver push). Each runtime reads
+ * a storage snapshot taken when it started, so a chat view's cached copy can
+ * be older than the lineup the service has just handed it; with both dated the
+ * same day, the tie went to the cache and a chat kept showing "Opus 5" after
+ * the published file had moved on. The cache only ever fills the gap before
+ * a live copy arrives.
+ */
+let adoptedLive = false;
 if (typeof window !== 'undefined')
   void initializeClientStorage()
     .then(() => {
       const cached = readCachedCatalog();
-      if (cached) replaceCatalog(newerAgentModelCatalog(current, cached));
+      if (cached && !adoptedLive) replaceCatalog(newerAgentModelCatalog(current, cached));
     })
     .catch(() => {});
 
@@ -100,6 +111,7 @@ export function currentAgentModelCatalog(): AgentModelCatalog {
 export function adoptAgentModelCatalog(value: unknown): void {
   const catalog = parseAgentModelCatalog(value);
   if (!catalog) throw new Error('The shared agent model catalog is invalid.');
+  adoptedLive = true;
   replaceCatalog(catalog);
 }
 
@@ -140,6 +152,7 @@ function sameCatalog(a: AgentModelCatalog, b: AgentModelCatalog): boolean {
 }
 
 function adoptRemoteCatalog(next: AgentModelCatalog): void {
+  adoptedLive = true;
   if (sameCatalog(next, current)) {
     return;
   }
