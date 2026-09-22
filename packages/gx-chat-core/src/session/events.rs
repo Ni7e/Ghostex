@@ -20,7 +20,9 @@ use crate::session::reads::{
     arm_read_deadline, expire_overdue_reads, fail_read, inside_seed_window, issue_read, parse_read,
     request_resync, schedule_resync_follow_up, schedule_seed_retry, take_read,
 };
-use crate::session::stream::{accept_authoritative_frame, accept_sequenced_frame, Verdict};
+use crate::session::stream::{
+    accept_authoritative_frame, accept_sequenced_frame, snapshot_is_stale, Verdict,
+};
 use crate::session::view_state::select_view_state;
 use crate::session::working::{is_working, publish_status, working_signal};
 use crate::state::{ChatContext, ChatState, PublishAwait, ReadKind};
@@ -187,6 +189,23 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
     // Liveness is "a frame reached us", not "a frame changed something": a dropped or duplicate
     // frame still proves the stream is alive.
     state.messages.last_frame_at_ms = context.now_ms;
+    // CDXC:SessionChat 2026-09-22 WHY:
+    // An authoritative frame behind the one already accepted, on the same daemon generation, is a
+    // late duplicate and rolls the whole transcript backwards for one frame. `snapshot_is_stale`
+    // was written for this and had NO CALLER, so every out-of-order snapshot folded. The store
+    // drops it before its listeners ever see it (`store.ts:200`), which is why the check belongs
+    // ahead of the in-flight bookkeeping below rather than inside the fold.
+    if let ChatFrame::Snapshot(snapshot) | ChatFrame::Replaced(snapshot) = frame {
+        if snapshot_is_stale(
+            &state.messages.position,
+            state.messages.position.frame_arrived,
+            &snapshot.base.server_id,
+            snapshot.base.epoch,
+            snapshot.base.seq,
+        ) {
+            return Vec::new();
+        }
+    }
     let position = frame.position();
     if state.messages.resync.in_flight {
         // Remember how far the live stream ran while the read was in flight; the read answers from
@@ -204,15 +223,22 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
 
     match frame {
         ChatFrame::Snapshot(snapshot) | ChatFrame::Replaced(snapshot) => {
+            // `const previous = this.serverId && this.serverId !== event.serverId ? undefined :
+            // this.snapshot` (`store.ts:208`): a different daemon restarts the numbering, so
+            // nothing of the old one's state may carry into the new one's fold.
+            let carried = if state.messages.position.server_id.is_empty()
+                || state.messages.position.server_id == snapshot.base.server_id
+            {
+                state.messages.snapshot.as_ref()
+            } else {
+                None
+            };
+            let folded = fold_state(carried, StateCarrier::Snapshot(snapshot));
             accept_authoritative_frame(
                 &mut state.messages.position,
                 &snapshot.base.server_id,
                 snapshot.base.epoch,
                 snapshot.base.seq,
-            );
-            let folded = fold_state(
-                state.messages.snapshot.as_ref(),
-                StateCarrier::Snapshot(snapshot),
             );
             // Ordinary daemon frames do not own the three read-only draft-agent fields; a host
             // that synthesizes snapshots from reads does, including a cleared one on promotion, so
