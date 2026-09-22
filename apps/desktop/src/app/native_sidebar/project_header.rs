@@ -10,7 +10,7 @@ use gpui::{
     AnyElement, InteractiveElement, IntoElement, MouseButton, ParentElement,
     StatefulInteractiveElement, Styled, div, img, px,
 };
-use gpui_component::tooltip::ManagedTooltipExt as _;
+use gpui_component::tooltip::{ManagedTooltipExt as _, ManagedTooltipPlacement};
 use gpui_component::{ElementExt as _, h_flex};
 use serde_json::{Value, json};
 use std::{cell::Cell, rc::Rc};
@@ -277,7 +277,10 @@ impl GhostexGpuiApp {
                                         && self.native_sidebar.menu.is_none()
                                         && !cx.has_active_drag(),
                                     |row| {
-                                        row.tooltip_show_delay(appearance.tooltip_delay).tooltip(
+                                        // CDXC:Sidebar 2026-09-23 DECISION: User: header button tooltips "appear below and aligned to the left not to the right (so they stay within the bounds of the sidebar)". The bubble's right edge lines up with the button and it grows leftward; the session card's buttons (hover_actions.rs) do the same.
+                                        row.managed_discrete_tooltip_with_placement(
+                                            ManagedTooltipPlacement::BelowLeft,
+                                            appearance.tooltip_delay,
                                             move |window, cx| {
                                                 titlebar_tooltip(label.clone(), window, cx)
                                             },

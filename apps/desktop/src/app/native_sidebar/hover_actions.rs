@@ -8,7 +8,10 @@ use gpui::{
     AnyElement, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled,
     div, px,
 };
-use gpui_component::h_flex;
+use gpui_component::{
+    h_flex,
+    tooltip::{ManagedTooltipExt as _, ManagedTooltipPlacement},
+};
 use serde_json::{Value, json};
 
 impl GhostexGpuiApp {
@@ -79,7 +82,9 @@ impl GhostexGpuiApp {
                             && self.native_sidebar.menu.is_none()
                             && !cx.has_active_drag(),
                         |row| {
-                            row.tooltip_show_delay(appearance.tooltip_delay).tooltip(
+                            row.managed_discrete_tooltip_with_placement(
+                                ManagedTooltipPlacement::BelowLeft,
+                                appearance.tooltip_delay,
                                 move |window, cx| titlebar_tooltip(label.clone(), window, cx),
                             )
                         },
