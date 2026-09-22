@@ -137,6 +137,7 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
     let mut run_has_records = false;
     let mut refusals = Refusals::default();
     let log_refusals = std::env::var("GX_CHAT_REFUSALS").is_ok();
+    let log_rpc = std::env::var("GX_CHAT_RPC").is_ok();
 
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let Ok(record) = serde_json::from_str::<Value>(line) else {
@@ -180,7 +181,19 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
         // `ms` is the record's own `now_ms` and `r` is every `Math.random()` the live run read
         // during this call, in order: the two queues the core draws from instead of reading a
         // clock or a random source (`docs/2026-09-21/rust-chat/REPLAY.md`).
-        let mut context = ChatContext::at(record.get("ms").and_then(Value::as_f64).unwrap_or(0.0));
+        // The record's `ms` is the RECORDER's clock read just before the call; `c[0]` is the
+        // brain's own first read inside it, which is the value every rule in that call used
+        // (`tick` fires timers against it, `useState(Date.now)` latches it). They differ by a
+        // millisecond about two percent of the time, and that millisecond is the whole of the
+        // `accountStatus.now` difference on a real recording, so the brain's read is the event's
+        // clock when the record carries one.
+        let recorded_ms = record.get("ms").and_then(Value::as_f64).unwrap_or(0.0);
+        let first_read_ms = record
+            .get("c")
+            .and_then(Value::as_array)
+            .and_then(|reads| reads.first())
+            .and_then(Value::as_f64);
+        let mut context = ChatContext::at(first_read_ms.unwrap_or(recorded_ms));
         context.utc_offset_minutes = utc_offset_minutes;
         if let Some(draws) = record.get("r").and_then(Value::as_array) {
             for (slot, draw) in draws.iter().take(context.random_units.len()).enumerate() {
@@ -206,6 +219,31 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
         };
         let before_queue = translator.queued_storage_answers();
         let outcome = translator.feed(&mut core, call, context);
+        // `GX_CHAT_RPC=1` names every gxserver call the core makes, by run, record and METHOD, so
+        // the two brains' request sequences can be lined up against the `requests` the expected
+        // file carries. Method names only.
+        if log_rpc {
+            let number = record.get("n").and_then(Value::as_u64).unwrap_or_default();
+            for effect in &outcome.effects {
+                match effect {
+                    ghostex_gx_chat_core::Effect::SendRpc { method, params, .. } => {
+                        let keys: Vec<&str> = params
+                            .as_object()
+                            .map(|object| object.keys().map(String::as_str).collect())
+                            .unwrap_or_default();
+                        eprintln!(
+                            "rpc run={run} n={number} method={} params={{{}}}",
+                            method.as_str(),
+                            keys.join(",")
+                        );
+                    }
+                    ghostex_gx_chat_core::Effect::ReadComposerBoot { .. } => {
+                        eprintln!("rpc run={run} n={number} method=composerBoot");
+                    }
+                    _ => {}
+                }
+            }
+        }
         if std::env::var("GX_CHAT_STORAGE").is_ok() {
             let number = record.get("n").and_then(Value::as_u64).unwrap_or_default();
             let stores: Vec<String> = outcome
