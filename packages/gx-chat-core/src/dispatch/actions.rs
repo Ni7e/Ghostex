@@ -175,6 +175,17 @@ pub fn owner(kind: &ActionKind) -> Option<Family> {
 /// the closing publish; only the first of them is conditional, and its condition is a state change
 /// the core's own republish rule already catches.
 pub fn dispatch(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
+    // `if (!controller) { if (command.type === 'retry') start(bootConfig); return; }`
+    // (`native-host.ts`, the top of `action`): until the boot read answers there is no controller,
+    // so every gesture is dropped. The renderer's first `measureContextStatus` lands in that
+    // window on every real chat, which is why the TypeScript keeps its `[0]` and the core must too.
+    if !state.core.controller_started {
+        return if matches!(action.kind, ActionKind::Retry) {
+            crate::session::events::restart_boot(state)
+        } else {
+            Vec::new()
+        };
+    }
     // `const clearedError = operationError !== undefined`, read just above the clear because two
     // arms publish only when it was true.
     state.core.cleared_error = state.core.operation_error.is_some();

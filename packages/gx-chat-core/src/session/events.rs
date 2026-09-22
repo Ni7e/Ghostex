@@ -173,6 +173,17 @@ fn start(state: &mut ChatState, config: &StartConfig, context: &ChatContext) -> 
     ]
 }
 
+/// `start(bootConfig)` from a `retry` that arrives before the controller exists: a boot read that
+/// failed is asked for again, one still in flight is left alone (`if (booting) return`).
+pub fn restart_boot(state: &mut ChatState) -> Vec<Effect> {
+    if state.session.boot_config.is_none() || state.session.boot_read_request.is_some() {
+        return Vec::new();
+    }
+    let request_id = state.core.allocate_request_id();
+    state.session.boot_read_request = Some(request_id);
+    vec![Effect::ReadComposerBoot { request_id }]
+}
+
 /// `start`'s own `.catch`: the transcript is emptied and the document becomes the error state.
 ///
 /// `booting` is cleared in the `.finally`, so a refused read leaves the chat retryable rather than

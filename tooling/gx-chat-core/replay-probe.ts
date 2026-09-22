@@ -116,7 +116,8 @@ function describe(left: { present: boolean; value: unknown }, right: { present: 
     return `numbers, actual - expected = ${b - a}${Number.isInteger(a) && Number.isInteger(b) ? '' : ' (fractional)'}`;
   }
   if (typeof a !== typeof b || Array.isArray(a) !== Array.isArray(b) || (a === null) !== (b === null)) {
-    const only = typeof a === 'string' ? `expected shape ${shape(a)}` : typeof b === 'string' ? `actual shape ${shape(b)}` : '';
+    const only =
+      typeof a === 'string' ? `expected shape ${shape(a)}` : typeof b === 'string' ? `actual shape ${shape(b)}` : '';
     return `types ${kindOf(a)} vs ${kindOf(b)}${only ? `; ${only}` : ''}`;
   }
   if (Array.isArray(a) && Array.isArray(b)) {
@@ -182,7 +183,9 @@ function main(): void {
       collectPointers(documentOf(expected[index]), documentOf(actual[index]), '', found);
       console.log(`record ${options.record}: ${found.length} pointers`);
       for (const pointer of found.slice(0, options.limit * 8)) {
-        console.log(`  ${pointer}  ${describe(at(documentOf(expected[index]), pointer), at(documentOf(actual[index]), pointer))}`);
+        console.log(
+          `  ${pointer}  ${describe(at(documentOf(expected[index]), pointer), at(documentOf(actual[index]), pointer))}`
+        );
       }
       return;
     }
