@@ -650,7 +650,10 @@ fn tick(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
 
 /// The stall watchdog, from the `setInterval` at the end of the subscribe effect.
 fn stall_watchdog(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
-    let now = context.now_ms;
+    // `const now = Date.now()` at the top of the callback: a read of its own, one past the tick's.
+    // A resync read that answered inside the same millisecond as the previous check makes the
+    // 20 s threshold a matter of that millisecond, and on a real chat it is, every fourth tick.
+    let now = state.core.timer_now(TIMER_STALL, context);
     // Initial window: the working gate below cannot protect it, because a session that never
     // resolved its transcript may never report work. A silent socket here leaves the view in its
     // blank loading hold forever, and only a new subscription can re-request the snapshot that was

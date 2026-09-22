@@ -164,6 +164,17 @@ pub fn switch_settled(
     }
     state.menus.draft_agent_switch = None;
     let effects = crate::session::reads::request_resync(state, context);
+    // `for (const delay of [2000, 6000]) schedule(() => chat.refresh(), delay)`: two more reads
+    // follow, because the daemon settles the switched agent a moment after the call answers.
+    for (key, delay) in [
+        crate::menus::lifecycle::REFRESH_AFTER_SWITCH_SOON,
+        crate::menus::lifecycle::REFRESH_AFTER_SWITCH_LATER,
+    ]
+    .into_iter()
+    .zip(crate::menus::lifecycle::REFRESH_AFTER_SWITCH_DELAYS_MS)
+    {
+        state.core.timers.arm(key, context.now_ms, delay);
+    }
     state.core.publish_after(&effects);
     effects
 }

@@ -89,6 +89,8 @@ impl ChatCore {
     /// makes a replay reproducible.
     pub fn handle(&mut self, event: Event, context: ChatContext) -> Vec<Effect> {
         self.context = context;
+        // Index zero of the turn's clock reads is `now_ms` itself.
+        self.state.core.clock_cursor = 1;
         // `dispatch` routes the event to its owner and then runs the six per-family settle hooks
         // in a fixed order, which is where every `useMemo` and `useEffect` of the TypeScript lives.
         //

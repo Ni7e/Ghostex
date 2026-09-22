@@ -42,6 +42,12 @@ pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
     // The switch card's own clock starts when the controller first renders, which is the frame
     // after the composer boot read lands; before that there is nothing to draw a card from.
     let switch_wake = if state.menus.options_seeded {
+        // `useState(Date.now)` in `computeAccountSwitchStatus`: the first render's second read,
+        // after the controller's own `useRef(Date.now())`, and the number `accountStatus.now`
+        // then carries until a card is up.
+        if state.menus.account_switch.now_ms.is_none() {
+            state.menus.account_switch.now_ms = Some(state.core.read_clock(context).round() as i64);
+        }
         state
             .menus
             .account_switch
@@ -68,22 +74,42 @@ pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
     if state.core.controller_started {
         // `useState(Date.now)` on the first render; `setNow(Date.now())` when the interval fires.
         // The setter is a state change, so the live brain publishes on it even when no label
-        // moved, which is what `request_publish` reproduces.
+        // moved, which is what `request_publish` reproduces. Both are reads of their own, past
+        // the turn's first: the initializer runs after the switch card's, the callback's is the
+        // one the drain assigned it.
         if state.menus.meter_now_ms.is_none() {
-            state.menus.meter_now_ms = Some(context.now_ms);
+            state.menus.meter_now_ms = Some(state.core.read_clock(context));
         }
         if state.core.timer_fired("menus.contextMeter") {
-            state.menus.meter_now_ms = Some(context.now_ms);
+            state.menus.meter_now_ms = Some(state.core.timer_now("menus.contextMeter", context));
             state.core.request_publish();
         }
-        state.core.timers.arm_once(
-            "menus.contextMeter",
-            context.now_ms,
-            crate::menus::context::meter::CONTEXT_METER_REFRESH_MS,
-        );
+        // One `setInterval` from a `useEffect` with no dependencies: armed once, and it keeps its
+        // place in the table across fires, which is the order the host runs coincident callbacks
+        // in. A one-shot re-armed after every fire moved to the end of the table instead.
+        if !state.core.timers.is_armed("menus.contextMeter") {
+            state.core.timers.arm_interval(
+                "menus.contextMeter",
+                context.now_ms,
+                crate::menus::context::meter::CONTEXT_METER_REFRESH_MS,
+            );
+        }
+        if state.core.timer_fired(REFRESH_AFTER_SWITCH_SOON)
+            || state.core.timer_fired(REFRESH_AFTER_SWITCH_LATER)
+        {
+            effects.extend(crate::session::reads::request_resync(state, context));
+        }
     }
     effects
 }
+
+/// The two `schedule(() => chat.refresh(), delay)` after a draft-agent switch
+/// (`native-host.ts`, the `switchDraftAgent` arm's `finally`): the daemon settles the new agent
+/// a moment after the call answers, so the session is re-read at once, then again 2 and 6
+/// seconds later.
+pub const REFRESH_AFTER_SWITCH_SOON: &str = "menus.refreshAfterSwitch.2000";
+pub const REFRESH_AFTER_SWITCH_LATER: &str = "menus.refreshAfterSwitch.6000";
+pub const REFRESH_AFTER_SWITCH_DELAYS_MS: [f64; 2] = [2_000.0, 6_000.0];
 
 /// Moves one of family e1's rows in the core's timer table, or drops it.
 fn arm(state: &mut ChatState, key: &str, due_at_ms: Option<i64>, context: &ChatContext) {

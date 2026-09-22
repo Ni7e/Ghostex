@@ -61,6 +61,19 @@ pub struct CoreState {
     /// The timer keys that came due during the dispatch running right now, cleared before the next
     /// one. A family reads its own keys out of this rather than being called back.
     pub fired_timers: Vec<String>,
+    /// The clock each fired timer's callback read, assigned in fire order at the drain.
+    ///
+    /// `tick()` in `native-host.ts` reads `Date.now()` once to decide what is due and then runs
+    /// the callbacks in the order they were armed; a callback that begins with its own
+    /// `Date.now()` (the stall watchdog, `setNow` inside an interval) therefore sees a LATER read
+    /// than the tick's. [`CoreState::timer_now`] answers that read, and the same clock when the
+    /// host recorded none.
+    pub timer_clocks: Vec<(String, f64)>,
+    /// How many of this turn's clock reads have been taken ([`CoreState::read_clock`]).
+    ///
+    /// Reset to one by `ChatCore::handle`: index zero is `now_ms`, the read every rule measures
+    /// against by default.
+    pub clock_cursor: usize,
     /// Set for this dispatch when a family's TypeScript calls `publish(controller.current())`
     /// unconditionally rather than through a state change.
     ///
@@ -239,6 +252,25 @@ impl CoreState {
     /// Whether one of this dispatch's due timers is `key`.
     pub fn timer_fired(&self, key: &str) -> bool {
         self.fired_timers.iter().any(|fired| fired == key)
+    }
+
+    /// The clock the callback of a timer that fired this dispatch read, or the turn's clock.
+    pub fn timer_now(&self, key: &str, context: &crate::state::ChatContext) -> f64 {
+        self.timer_clocks
+            .iter()
+            .find(|(fired, _)| fired == key)
+            .map(|(_, at)| *at)
+            .unwrap_or(context.now_ms)
+    }
+
+    /// The next clock read of this turn, where the TypeScript calls `Date.now()` a further time.
+    ///
+    /// Only the sites whose value is LATCHED past the turn need this (a `useState` initializer,
+    /// a `setNow` inside a callback); a read that is compared and forgotten keeps `now_ms`.
+    pub fn read_clock(&mut self, context: &crate::state::ChatContext) -> f64 {
+        let value = context.clock_read(self.clock_cursor);
+        self.clock_cursor += 1;
+        value
     }
 
     /// Ships a snapshot this turn even when nothing the document can see changed, for the places

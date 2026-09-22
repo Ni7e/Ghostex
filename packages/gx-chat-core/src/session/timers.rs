@@ -12,6 +12,26 @@
 //! removed before its handler runs and an interval is re-armed from `now` rather than from its own
 //! deadline, so a late wake never fires the same interval twice.
 
+/// The timers whose TypeScript callback begins with a `Date.now()` of its own.
+///
+/// `tick()` reads the clock once to decide what is due and then runs each due callback; the ones
+/// listed here read it again as their first statement (`const now = Date.now()` in the stall
+/// watchdog, `setNow(Date.now())` inside the meter, activity and fleet intervals,
+/// `readStartedAt = Date.now()` at the top of a seed retry), so on a recorded turn their value is
+/// the NEXT read after the tick's, in fire order. The drain in `crate::dispatch::events` assigns
+/// those reads; a key not listed here sees the tick's clock. SEE-ALSO: the timer keys in
+/// `session/constants.rs`, `menus/lifecycle.rs` and `extras/settle.rs`.
+pub fn callback_reads_clock(key: &str) -> bool {
+    matches!(
+        key,
+        "a:stall"
+            | "a:seed-retry"
+            | "menus.contextMeter"
+            | "extras.activityClock"
+            | "extras.fleetClock"
+    )
+}
+
 /// One armed timer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimerEntry {

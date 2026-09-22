@@ -79,6 +79,19 @@ pub struct ChatContext {
     /// anything it leaves out falls back.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub formatted_times: Vec<FormattedTime>,
+    /// Every clock value the brain read during this turn, in order, when the host knows them.
+    ///
+    /// The TypeScript reads `Date.now()` more than once inside one call, and some of those reads
+    /// are LATCHED: the stall watchdog's `now`, a `setNow(Date.now())` inside an interval's
+    /// callback, the `useState(Date.now)` of the first render. They are not the first read of the
+    /// call, so a core that measures everything against [`ChatContext::now_ms`] lands a
+    /// millisecond early on a fraction of turns, and a latched millisecond is republished for the
+    /// rest of the session. A replay passes the recording's `c` queue here (index 0 is `now_ms`
+    /// itself) and the core takes the k-th read where the TypeScript took it
+    /// ([`crate::state::CoreState::read_clock`]). Empty for a live host, whose reads all answer
+    /// `now_ms`: nothing here changes behaviour, only the millisecond.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clock_reads: Vec<f64>,
 }
 
 impl ChatContext {
@@ -95,7 +108,28 @@ impl ChatContext {
             random_units: [0.0; 2],
             random_ids: [0; 2],
             formatted_times: Vec::new(),
+            clock_reads: Vec::new(),
         }
+    }
+
+    /// The same context with every clock read of this turn, in order, `now_ms` first.
+    #[must_use]
+    pub fn with_clock_reads(mut self, reads: Vec<f64>) -> Self {
+        self.clock_reads = reads;
+        self
+    }
+
+    /// The `index`-th clock read of this turn.
+    ///
+    /// Past the end of what the host recorded, the LAST read: it is the latest clock the turn
+    /// saw, which is what a read the TypeScript made after it would have returned. With no reads
+    /// at all (a live host), `now_ms`.
+    pub fn clock_read(&self, index: usize) -> f64 {
+        self.clock_reads
+            .get(index)
+            .or_else(|| self.clock_reads.last())
+            .copied()
+            .unwrap_or(self.now_ms)
     }
 
     /// The same context with the host's offset east of UTC, in minutes.

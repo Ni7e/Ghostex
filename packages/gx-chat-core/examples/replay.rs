@@ -195,6 +195,13 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
             .and_then(Value::as_f64);
         let mut context = ChatContext::at(first_read_ms.unwrap_or(recorded_ms));
         context.utc_offset_minutes = utc_offset_minutes;
+        // The whole `c` queue, so a rule that latches a LATER read of the call (the watchdog's
+        // `now`, a `setNow` inside an interval) takes the one the brain took.
+        context.clock_reads = record
+            .get("c")
+            .and_then(Value::as_array)
+            .map(|reads| reads.iter().filter_map(Value::as_f64).collect())
+            .unwrap_or_default();
         if let Some(draws) = record.get("r").and_then(Value::as_array) {
             for (slot, draw) in draws.iter().take(context.random_units.len()).enumerate() {
                 context.random_units[slot] = draw.as_f64().unwrap_or(0.0);

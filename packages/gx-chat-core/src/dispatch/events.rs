@@ -25,6 +25,19 @@ pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> 
     } else {
         Vec::new()
     };
+    // Each due callback that reads the clock itself gets the next recorded read, in the order the
+    // host would have run them, before any family handles its own key.
+    state.core.timer_clocks = state
+        .core
+        .fired_timers
+        .clone()
+        .into_iter()
+        .filter(|key| crate::session::timers::callback_reads_clock(key))
+        .map(|key| {
+            let at = state.core.read_clock(context);
+            (key, at)
+        })
+        .collect();
     let mut effects = route(state, event, context);
     // Every family carries state a pure `document` cannot derive, and every family has `try`,
     // `catch` and `finally` bodies that run when a call it started answers. That is the mutating
