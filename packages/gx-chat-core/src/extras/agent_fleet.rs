@@ -357,12 +357,26 @@ fn strip_bracketed(value: &str) -> String {
     out
 }
 
+/// Whether `value`'s bytes at `at` spell `needle`, case-insensitively and in ASCII.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// A byte range, not a `&str` slice. A model name is whatever the agent fleet frame carries, and
+/// `&value[at..at + 6]` panics when that range ends inside a multi-byte character: `a😀😀` took
+/// the whole chat window down on the second emoji. The comparison itself is ASCII either way,
+/// because the needle is.
+fn matches_ascii_at(value: &str, at: usize, needle: &str) -> bool {
+    value
+        .as_bytes()
+        .get(at..at + needle.len())
+        .is_some_and(|slice| slice.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
 /// `/^gpt-/i` replaced with `GPT `.
 fn strip_gpt_prefix(value: &str) -> String {
-    if value.len() >= 4 && value[..4].eq_ignore_ascii_case("gpt-") {
-        format!("GPT {}", &value[4..])
-    } else {
-        value.to_string()
+    match matches_ascii_at(value, 0, "gpt-") {
+        // The four bytes matched ASCII, so byte 4 is a character boundary.
+        true => format!("GPT {}", &value[4..]),
+        false => value.to_string(),
     }
 }
 
@@ -370,20 +384,20 @@ fn strip_gpt_prefix(value: &str) -> String {
 fn strip_codex(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let bytes = value.as_bytes();
-    let mut at = 0;
-    while at < value.len() {
-        let matched = at + 6 <= value.len()
-            && value[at..at + 6].eq_ignore_ascii_case("-codex")
+    let mut characters = value.char_indices();
+    while let Some((at, character)) = characters.next() {
+        let matched = matches_ascii_at(value, at, "-codex")
             && bytes
                 .get(at + 6)
                 .is_none_or(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_');
         if matched {
             out.push_str(" Codex");
-            at += 6;
+            // `-codex` is six ASCII bytes, so five more characters are consumed with it.
+            for _ in 0..5 {
+                characters.next();
+            }
         } else {
-            let character = value[at..].chars().next().expect("at is a char boundary");
             out.push(character);
-            at += character.len_utf8();
         }
     }
     out

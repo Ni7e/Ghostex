@@ -420,6 +420,44 @@ async function main(): Promise<number> {
   await pump();
 
   phase('nasty text');
+  // 4b. The same text where a NAME is read rather than a body: the agent fleet's model and
+  //     nickname, the task list, the terminal activity. `subagentModelLabel` walks a model name
+  //     byte by byte looking for `gpt-` and `-codex`, which is where `a😀😀` panicked the core
+  //     on 2026-09-22.
+  for (const text of NASTY_TEXT) {
+    frame(
+      envelope('sessionChatSnapshot', {
+        messages: [
+          {
+            id: 'h1',
+            role: 'user',
+            blocks: [{ type: 'text', text: 'start' }],
+            timestamp: CLOCK_START,
+            source: 'transcript',
+            byteOffset: 10,
+          },
+        ],
+        status: 'ready',
+        agentFleet: {
+          detectedAt: text,
+          agents: [
+            { id: text, name: text, model: text, effort: text, status: text, elapsedSeconds: 1e308 },
+            { id: null, name: 7, model: [], effort: {}, status: null, startedAt: 'soon' },
+          ],
+        },
+        agentTasks: { tasks: [{ id: text, title: text, status: text }, null, 7] },
+        terminalActivity: { kind: text, label: text, detail: text },
+        selectedOptions: {
+          detectedAt: text,
+          model: { value: text, label: text, source: text },
+          effort: { value: text, label: text, source: text },
+        },
+      })
+    );
+    await settle();
+  }
+  await pump();
+
   // 5. The three other frame types, malformed.
   frame(envelope('sessionChatState', { working: null, queue: 'none', prompt: [] }));
   frame(envelope('sessionChatReplaced', { messages: null }));
