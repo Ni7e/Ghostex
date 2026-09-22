@@ -119,7 +119,11 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
         .and_then(|value| value.to_str())
         .unwrap_or("recording")
         .to_string();
-    let directory = PathBuf::from("/tmp/gx-chat/actual");
+    // `GX_CHAT_ACTUAL_DIR` moves the output, so an agent iterating on the core does not share
+    // (and race) the one directory every gate run rewrites.
+    let directory = std::env::var_os("GX_CHAT_ACTUAL_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp/gx-chat/actual"));
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let output = directory.join(format!("{name}.jsonl"));
     let mut sink = fs::File::create(&output).map_err(|error| error.to_string())?;
