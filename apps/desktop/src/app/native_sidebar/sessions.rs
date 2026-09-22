@@ -52,10 +52,10 @@ impl GhostexGpuiApp {
             title: session.title().to_owned(),
             scale: appearance.scale,
         };
-        let can_drag = !session.is_browser()
-            && !group.is_stale
-            && group.remote_machine_context.is_none()
-            && (session.is_pinned || hud["activeSessionsSortMode"] == "manual");
+        // Every local row drags: a drop on an Agents pane splits it (session_pane_placement.rs),
+        // and the reorder drop line still shows only when the sort mode allows a reorder.
+        let can_drag =
+            !session.is_browser() && !group.is_stale && group.remote_machine_context.is_none();
         let selected = session
             .details
             .get("isMultiSelected")
@@ -88,7 +88,9 @@ impl GhostexGpuiApp {
                 left: card.left().as_f32(),
                 right: card.right().as_f32(),
             })
-            .unwrap_or_else(|| super::tooltips::SidebarTooltipSpan::sidebar(self.sidebar_width, scale));
+            .unwrap_or_else(|| {
+                super::tooltips::SidebarTooltipSpan::sidebar(self.sidebar_width, scale)
+            });
         let tooltip = session
             .details
             .get("titleTooltip")
@@ -116,9 +118,26 @@ impl GhostexGpuiApp {
             })
             .unwrap_or("")
             .to_owned();
+        // What an assistive client or an e2e run reads after the title: the row's state words, which the pixels convey by colour and glyph.
+        let a11y_description = [
+            session.lifecycle_state.as_deref().unwrap_or(""),
+            session.activity.as_str(),
+            if session.is_pinned { "pinned" } else { "" },
+            if session.is_draft { "draft" } else { "" },
+            if question { "needs an answer" } else { "" },
+            time.as_str(),
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ");
         div().on_children_prepainted(move |bounds, window, cx| { if completion.is_some_and(|start| start.elapsed().as_secs_f32() < 3.0) { window.request_animation_frame(); cx.notify(view.entity_id()); } if let Some(bounds) = bounds.first() { view.update(cx, |app, cx| { if app.native_sidebar.session_card_bounds.get(&reveal_id) != Some(bounds) { app.native_sidebar.session_card_bounds.insert(reveal_id.clone(), *bounds); } app.reveal_native_session_bounds(&reveal_id, *bounds, scale, window, cx) }); } }).w_full().pb(px(SESSION_SPACING * scale)).px(px(SESSION_INSET_X * scale))
             .child(h_flex()
                 .id(format!("native-sidebar-session-{session_id}"))
+                .role(gpui::Role::TreeItem)
+                .aria_label(session.title().to_owned())
+                .aria_description(a11y_description)
+                .aria_selected(focused)
                 .relative().h(px(SESSION_HEIGHT * scale)).w_full().min_w_0().pl(px(5.0 * scale)).pr(px(6.0 * scale)).gap(px(6.0 * scale)).rounded(px(5.0 * scale))
                 .cursor_default()
                 .when(stale, |row| row.opacity(0.55))
@@ -136,8 +155,8 @@ impl GhostexGpuiApp {
                 .children(self.render_native_session_decorations(session, appearance, cx))
                 .when_some(self.native_sidebar.reveal_flash.as_ref().filter(|(id, _)| id == &session.session_id).map(|(_, start)| *start), |row, start| row.child(super::scroll::reveal_flash(start, scale)))
                 .child(div().id(format!("native-session-title-{session_id}")).flex_1().min_w_0().h_full().flex().items_center().child(div().min_w_0().truncate().child(session.title().to_owned())).when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.managed_discrete_tooltip_with_placement(tooltip_span.placement(), appearance.tooltip_delay, move |window, cx| super::tooltips::sidebar_tooltip(tooltip.clone(), tooltip_span, scale, window, cx))))
-                .when(!hovered && !question, |row| row.children(super::status::activity_indicator(&session.activity, scale)))
-                .when(!hovered && !question && (timer.is_some() || (show_time && session.activity != "working" && session.activity != "attention")), |row| row.child(div().text_size(px(13.55 * scale)).text_color(if sleeping { chrome_color(0x686868, 0x959595) } else { chrome_color(0xa6a6a6, 0x424242) }).child(time)))
+                .when(!hovered && !question, |row| row.children(super::status::activity_indicator(&session.activity, session.has_background_work, scale)))
+                .when(!hovered && !question && (timer.is_some() || (show_time && session.activity != "working" && session.activity != "attention" && !session.has_background_work)), |row| row.child(div().text_size(px(13.55 * scale)).text_color(if sleeping { chrome_color(0x686868, 0x959595) } else { chrome_color(0xa6a6a6, 0x424242) }).child(time)))
                 .when(hovered, |row| row.child(self.render_native_session_hover_actions(group, session, appearance, cx)))
                 .when(question, |row| row.child(super::status::question_indicator(session.activity == "working", scale)))
                 .when(can_drag && self.native_sidebar.menu.is_none(), |row| row.sidebar_drag_source(dragged, cx))

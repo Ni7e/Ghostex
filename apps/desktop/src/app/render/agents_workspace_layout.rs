@@ -151,7 +151,7 @@ impl GhostexGpuiApp {
     pub(crate) fn main_workspace_outer_rail_edges(&self, window: &Window) -> RailFacingEdges {
         let layout_plan = command_pane_workspace_layout_plan(
             self.command_pane.mode,
-            self.command_pane.has_sessions(),
+            self.command_pane.has_panel_sessions(),
             command_pane_content_height(window),
             self.command_pane.height_ratio,
             self.command_pane_side,
@@ -388,9 +388,11 @@ impl GhostexGpuiApp {
                     }
                 }),
             )
-            .when(self.agents_workspace_tab_bar_visible(), |this| {
-                this.child(self.render_workspace_tab_bar(leaf, cx))
-            })
+            // CDXC:Workarea 2026-09-22 DECISION:
+            // User: the Agents pane has no tab bar any more. The sidebar is the list of sessions,
+            // selecting one shows it in the focused pane, and dragging a row onto a pane splits it
+            // (session_pane_placement.rs). This supersedes the 2026-09-04 rule that hid the bar
+            // only while the workspace was not split, and its setting is gone with it.
             .when_some(
                 self.render_agents_terminal_search_bar(leaf, cx),
                 |this, surface| this.child(surface),

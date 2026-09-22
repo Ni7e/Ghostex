@@ -179,10 +179,27 @@ impl GhostexGpuiApp {
         }
     }
 
+    /// CDXC:Sidebar 2026-09-22 WHY:
+    /// The drop line is drawn in the gap between two rows, which is where a user aiming "between" them releases, and a release there is over no row, so no row's drop ran and the drag moved nothing while the line was still showing. The sidebar itself takes those releases and performs the drop the line shows; a row under the pointer still answers first. The line goes away once the pointer leaves the sidebar, so a release elsewhere drops nothing.
+    pub(crate) fn clear_native_sidebar_drop_outside(
+        &mut self,
+        event: &DragMoveEvent<SidebarDrag>,
+        cx: &mut Context<Self>,
+    ) {
+        if !event.bounds.contains(&event.event.position)
+            && self.native_sidebar.drop_command.take().is_some()
+        {
+            cx.notify();
+        }
+    }
+
     pub(crate) fn finish_native_sidebar_drop(&mut self, cx: &mut Context<Self>) {
         if let Some(command) = self.native_sidebar.drop_command.take() {
             self.dispatch_native_sidebar_ui(command, cx);
         }
+        // A row drag that crossed an Agents pane hid the pane surfaces for its drop zones; a drop
+        // back in the sidebar is the release the window root never sees.
+        self.finish_workspace_tab_drag(cx);
         cx.notify();
     }
 

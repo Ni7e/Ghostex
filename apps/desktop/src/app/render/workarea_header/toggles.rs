@@ -135,6 +135,52 @@ impl GhostexGpuiApp {
         })
     }
 
+    /// CDXC:Workarea 2026-09-22 DECISION:
+    /// User: "a new button with a chat icon to the top left that allows just toggling the agents
+    /// area", right of the Toggle sidebar button, and the Expand side panel and Expand side panel
+    /// fully buttons stay "in sync with the current state as much as possible". There is one state
+    /// for all three, not a fourth flag: `view_panel_maximized` (the sessions column is folded
+    /// away) and `sidebar_collapsed`. Expand shows as on when the column is folded and the sidebar
+    /// is not, Expand fully when both are, and this button when the column is on screen. It flips
+    /// only the column, so a fully expanded view keeps its hidden sidebar and Expand fully simply
+    /// stops reading as on; the Toggle sidebar button beside it owns the sidebar. Without an open
+    /// view the column is the whole workarea and there is nothing to fold it behind, so the button
+    /// is disabled the way Expand is, and says so.
+    pub(crate) fn render_workarea_header_agents_toggle(
+        &self,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
+        let enabled = self.open_view_mode().is_some();
+        let shown = !self.view_panel_maximized();
+        let tooltip = if enabled {
+            titlebar_tooltip_label("Toggle sessions column", "expandViewPanel")
+        } else {
+            "Open a view to hide the sessions column".into()
+        };
+        header_panel_toggle_button(
+            "ghostex-gpui-workarea-header-agents-toggle",
+            TITLEBAR_ICON_MESSAGE,
+            0.0,
+            enabled,
+        )
+        .when(enabled && shown, |this| {
+            this.bg(titlebar_active_segment_color())
+        })
+        .when(enabled, |this| {
+            this.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.toggle_view_panel_maximized(cx);
+                }),
+            )
+        })
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, move |window, cx| {
+            titlebar_tooltip(tooltip.clone(), window, cx)
+        })
+    }
+
     /// CDXC:CommandPane 2026-09-20 DECISION:
     /// User: the header carries a command-terminal toggle beside the view-panel toggle, so the
     /// command pane can be opened and closed without reaching for its collapsed strip.

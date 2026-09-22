@@ -19,16 +19,12 @@ impl GhostexGpuiApp {
     a native terminal that reached the top of the column would cover the header
     instead of fading under it. A terminal grid is also sized from its
     body, so two of its rows would sit behind the header where a full-screen TUI needs them. That
-    leaves the GPUI chat transcript, which is a scrolling document, and only while the pane tab bar
-    is hidden: the tab bar is chrome, and chrome under the header would be chrome the user cannot
-    see or click. Every other column keeps its old top edge, one header height below the window.
+    leaves the GPUI chat transcript, which is a scrolling document. Every other column keeps its
+    old top edge, one header height below the window.
     */
     pub(crate) fn agents_column_solo_gpui_chat(
         &self,
     ) -> Option<&gpui::Entity<crate::app::native_chat::state::NativeChatView>> {
-        if self.agents_workspace_tab_bar_visible() {
-            return None;
-        }
         let leaves = self.agents_workspace.rendered_leaf_order();
         let [pane_id] = leaves[..] else {
             return None;

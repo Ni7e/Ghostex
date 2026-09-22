@@ -20,6 +20,7 @@ use gpui_component::v_flex;
 use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
+use crate::app::native_sidebar::drag::SidebarDrag;
 use crate::*;
 
 impl GhostexGpuiApp {
@@ -259,14 +260,24 @@ impl GhostexGpuiApp {
                     this.update_command_tab_over_workspace_pane_drag_feedback(event, pane_id, cx);
                 },
             ))
+            .on_drag_move::<SidebarDrag>(cx.listener(
+                move |this, event: &gpui::DragMoveEvent<SidebarDrag>, _window, cx| {
+                    this.update_sidebar_session_pane_drag_feedback(event, pane_id, cx);
+                },
+            ))
             .can_drop(|value, _window, _cx| {
-                value.is::<DraggedWorkspaceTab>() || value.is::<DraggedCommandTab>()
+                value.is::<DraggedWorkspaceTab>()
+                    || value.is::<DraggedCommandTab>()
+                    || value.is::<SidebarDrag>()
             })
             .on_drop(
                 cx.listener(move |this, dragged: &DraggedWorkspaceTab, window, cx| {
                     this.handle_workspace_pane_body_drop(pane_id, dragged, window, cx);
                 }),
             )
+            .on_drop(cx.listener(move |this, dragged: &SidebarDrag, window, cx| {
+                this.handle_sidebar_session_pane_body_drop(pane_id, dragged, window, cx);
+            }))
             .on_drop(
                 cx.listener(move |this, dragged: &DraggedCommandTab, window, cx| {
                     this.handle_command_tab_workspace_pane_body_drop(pane_id, dragged, window, cx);

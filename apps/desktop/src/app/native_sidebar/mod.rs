@@ -23,7 +23,7 @@ pub(crate) mod project_hover;
 mod project_status;
 mod rename;
 pub(crate) mod render;
-mod row_drag;
+pub(crate) mod row_drag;
 pub(crate) mod rows;
 mod scroll;
 mod scroll_fade;

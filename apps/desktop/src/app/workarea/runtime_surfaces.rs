@@ -162,8 +162,17 @@ impl GhostexGpuiApp {
         let parent_ns_view = self.parent_ns_view;
         let surface_id = slot_key.cef_surface_id();
         let mut profile = slot_key.cef_profile_id();
+        let website_view = slot_key.titlebar_mode().website_provider().is_some();
+        if website_view {
+            profile = self
+                .browser_profiles
+                .active_profile_id()
+                .cef_profile_string();
+        }
         if let ProjectWorkareaCefSurfaceSlotKey::Extension(id) = slot_key {
-            if gpui_custom_view(id).is_some_and(|v| v.definition.get("source").is_some()) {
+            if !website_view
+                && gpui_custom_view(id).is_some_and(|v| v.definition.get("source").is_some())
+            {
                 if let Some(remote) = self
                     .latest_sidebar_project_snapshot
                     .as_ref()
@@ -315,6 +324,18 @@ impl GhostexGpuiApp {
         let creation_result = match slot_key {
             ProjectWorkareaCefSurfaceSlotKey::Extension(id) => {
                 if gpui_custom_view(id).is_some() {
+                    // CDXC:Browser 2026-09-22 DECISION:
+                    // User: middle-click and Cmd-click in project website views open other tickets in new Browser tabs. Reuse the project-owned popup route, including its background placement and parked-project handling.
+                    let popup_remote = if website_view {
+                        None
+                    } else {
+                        self.active_project_id_for_view_scope()
+                            .and_then(|project| {
+                                gpui_remote_project_reference_from_project_id(&project)
+                            })
+                            .map(|remote| remote.remote_machine_id)
+                    };
+                    let popup_handler = self.browser_popup_open_handler(popup_remote, cx);
                     CefSurface::try_new(
                         surface_id,
                         parent_ns_view,
@@ -325,7 +346,7 @@ impl GhostexGpuiApp {
                         surface_background,
                         None,
                         true,
-                        None,
+                        Some(popup_handler),
                         None,
                         None,
                         None,
