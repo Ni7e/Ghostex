@@ -479,12 +479,26 @@ fn finish(state: &mut ChatState) -> Vec<Effect> {
 }
 
 /// A phase refused: the text goes back to the composer and the submission is over.
+///
+/// CDXC:Drafts 2026-09-22 WHY:
+/// A refused handoff also has to tell the app shell, because the terminal side is already waiting
+/// for a draft that is never coming (`native-host.ts:1642`, the `catch` around the whole arm).
+/// Without it the terminal composer sits on a transfer that silently died.
 fn fail(state: &mut ChatState, message: &str) -> Vec<Effect> {
     let Some(submission) = state.composer.submitting.take() else {
         return Vec::new();
     };
     state.core.fail(message.to_string(), None);
-    vec![submission_failed(submission.mode, &submission.text)]
+    let mut effects = Vec::new();
+    if submission.handoff {
+        effects.push(Effect::HostAction {
+            action: "draftHandoffToTerminalFailed".to_string(),
+            // `params: { error: operationError }`, which is the message the bar now carries.
+            params: Box::new(json!({ "error": message })),
+        });
+    }
+    effects.push(submission_failed(submission.mode, &submission.text));
+    effects
 }
 
 /// The echo and the marker go with a call that never reached the agent.
