@@ -418,6 +418,13 @@ bool GhostexGpuiNativeSidebarRevealUpdate(void *root, void *popup, bool enabled,
   return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, leftInset, requested, sticky, slideSeconds);
 }
 
+// True while the panel slides out, so Rust can take down the chat windows that sit over it.
+bool GhostexGpuiNativeSidebarRevealLeaving(void *popupPtr) {
+  NSView *popup = (__bridge NSView *)popupPtr;
+  GhostexGpuiSidebarReveal *state = objc_getAssociatedObject(popup, GhostexGpuiSidebarRevealKey);
+  return state.attached && state.revealTarget == 0;
+}
+
 // CDXC:Sidebar 2026-09-20 DECISION:
 // User (ruling 7B, screen 10): edge-hover floating works on macOS, Windows and Linux, and its hot
 // zone is a real edge strip rather than an invisible layer over the content. The strip is a GPUI

@@ -31,6 +31,7 @@ unsafe extern "C" {
         sticky: bool,
         slide_seconds: f64,
     ) -> bool;
+    fn GhostexGpuiNativeSidebarRevealLeaving(popup: *mut c_void) -> bool;
 }
 
 impl GhostexGpuiApp {
@@ -56,6 +57,8 @@ impl GhostexGpuiApp {
             };
             if !visible {
                 self.close_floating_reveal(cx);
+            } else if unsafe { GhostexGpuiNativeSidebarRevealLeaving(panel.native_view) } {
+                self.dismiss_floating_reveal_chat_windows(cx);
             }
             return;
         }

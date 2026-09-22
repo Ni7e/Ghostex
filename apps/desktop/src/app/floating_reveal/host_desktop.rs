@@ -82,6 +82,9 @@ impl GhostexGpuiApp {
             let since = *self.floating_reveal.outside_since.get_or_insert(now);
             if now.duration_since(since) >= Duration::from_millis(FLOATING_REVEAL_DISMISS_DELAY_MS)
             {
+                if self.floating_reveal.slide.target != 0.0 {
+                    self.dismiss_floating_reveal_chat_windows(cx);
+                }
                 self.set_floating_reveal_slide_target(0.0);
             }
         }

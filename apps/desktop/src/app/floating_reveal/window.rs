@@ -236,6 +236,24 @@ impl GhostexGpuiApp {
         });
     }
 
+    /// CDXC:Sidebar 2026-09-23 DECISION:
+    /// User: the quick model picker goes away instantly when the floating panel is no longer
+    /// hovered and is going away. The picker (and an image preview) is a window of its own over
+    /// the chat's pane, so it used to stay up for the whole slide and only closed once the panel
+    /// was gone. The hosts call this the moment the panel starts to leave.
+    pub(super) fn dismiss_floating_reveal_chat_windows(&mut self, cx: &mut gpui::Context<Self>) {
+        if !self
+            .floating_reveal
+            .panel
+            .as_ref()
+            .is_some_and(|panel| panel.content.agents_column)
+        {
+            return;
+        }
+        // The panel hosts the only Agents Panel on screen, so every visible chat is in it.
+        self.dismiss_native_chat_windows_leaving_view(&std::collections::HashSet::new(), cx);
+    }
+
     /// CDXC:Sidebar 2026-09-22 WHY:
     /// GPUI learns a window's new size only from the platform's resize callback, and that callback
     /// re-enters the app through `AsyncApp::update_window`, which gives up when the app is already
