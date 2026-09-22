@@ -61,7 +61,19 @@ pub(super) fn route(effect: Effect) -> Routed {
         | Effect::WriteStorageBatch { .. }
         | Effect::ReadComposerBoot { .. }
         | Effect::FlushStorage { .. }
+        | Effect::ReadRetainedSnapshot
+        | Effect::WriteRetainedSnapshot { .. }
         | Effect::SetTimer { .. } => Routed::Host(effect),
+        // `{kind: 'broker', method: 'presentation', params: {state}}`, which is what
+        // `native-host.ts:676` pushes and what `relay_session_chat_runtime_request` already reads
+        // (`message["method"] == "presentation"` takes `params.state`). It goes to the renderer
+        // rather than being performed here because the cache it feeds is the SIDEBAR's, owned by
+        // the app runtime beside the socket; this host has no door onto it.
+        Effect::UpdatePresentation { state } => {
+            let mut params = Map::new();
+            params.insert("state".into(), *state);
+            Routed::Renderer(Box::new(broker("presentation", params)))
+        }
         Effect::SendRpc {
             request_id,
             method,

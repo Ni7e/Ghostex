@@ -217,6 +217,23 @@ const STORES: &[ChatStore] = &[
         collection: true,
         backend: protected_disk("deliveryReceipts"),
     },
+    // The retained transcript cache (`persistence.ts`), keyed by the retention key rather than by
+    // the storage session key. Its catalog `retainedAt` reads the record's own `savedAt`, which is
+    // also when the record is written, so the write stamp this door keeps instead means the same
+    // thing here; `sentHistory`'s does not, which is why that one has a note of its own.
+    ChatStore {
+        id: "chatSnapshots",
+        prefix: "ghostex.sessionChat.snapshot.",
+        collection: true,
+        backend: Backend::Records(RecordStore {
+            id: "chatSnapshots",
+            version: 1,
+            max_entry_bytes: 2 * MIB,
+            max_bytes: 32 * MIB,
+            max_entries: 24,
+            max_age_ms: Some(7 * DAY_MS),
+        }),
+    },
 ];
 
 /// The catalog row for a store id, or `None` for a store this build does not own.

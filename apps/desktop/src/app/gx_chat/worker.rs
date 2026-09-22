@@ -28,6 +28,7 @@ use super::identity::ChatIdentity;
 use super::locale;
 use super::outbox::{self, Workers};
 use super::queries;
+use super::retained;
 use super::saves;
 use super::storage;
 use super::store::ChatStore;
@@ -56,6 +57,15 @@ pub(crate) enum ChatHostOutput {
 /// label, so the sentence can be followed without translating it.
 const HOST_PANIC_MESSAGE: &str =
     "Chat could not be shown. Set Chat brain back to QuickJS in Settings, or restart Ghostex.";
+
+/// What a chat draws when client storage answered none of its boot read.
+///
+/// It goes into the DOCUMENT rather than into the view's error banner, because it is the core's
+/// `{status: 'error', error}` and the whole transcript is emptied with it. A sentence, and a
+/// constant one: the reason a store refused is a path and a SQLite message, neither of which
+/// belongs in a pane.
+const BOOT_READ_FAILURE: &str =
+    "Chat could not read its saved drafts and settings on this computer.";
 
 /// How deep a storage answer may feed back into the core within one drive pass.
 ///
@@ -117,10 +127,16 @@ impl ChatHostHandle {
     ///
     /// `config` is the same object `ChatRuntimeWorker::start` takes, so the two brains are picked
     /// from one call site.
-    pub(crate) fn start(config: Value, wake: impl Fn() + Send + Sync + 'static) -> Self {
+    pub(crate) fn start(mut config: Value, wake: impl Fn() + Send + Sync + 'static) -> Self {
         let commands = COMMANDS.get_or_init(spawn).clone();
         let identity = ChatIdentity::from_config(&config);
         let key = identity.retention_key();
+        // `StartConfig::retained_key`. The core writes it back inside the retained record's own
+        // `key` field and cannot build it, because the machine id is the host's half of the
+        // identity; the view's config does not carry it either, so it is added on the way past.
+        if let Some(config) = config.as_object_mut() {
+            config.insert("retainedKey".into(), Value::String(key.clone()));
+        }
         let id = NEXT_SINK.fetch_add(1, Ordering::Relaxed);
         let (outputs, receiver) = mpsc::channel();
         let _ = commands.send(HostCommand::Attach {
@@ -773,9 +789,19 @@ fn perform(
             });
         }
         Effect::ReadComposerBoot { .. } => {
-            let mut errors = 0usize;
+            let mut errors = boot::BootReads::default();
             let read = boot::read(session_key, now_ms, &mut errors);
-            world.counters.storage_refused += errors as u64;
+            world.counters.storage_refused += errors.errors as u64;
+            // Client storage answered nothing at all, which is `composer('read')` rejecting rather
+            // than a profile with nothing saved. The core empties the transcript and draws
+            // `{status: 'error'}`; without this arm it never starts a controller and therefore
+            // never publishes again, so the pane stays blank with no explanation.
+            if errors.all_refused() {
+                answers.push(Event::ComposerBootFailed {
+                    error: BOOT_READ_FAILURE.to_string(),
+                });
+                return;
+            }
             // `start` in `native-host.ts` pushes `{kind: 'composerInit', method: 'restore', params:
             // result}` from the same answer. It is the ONLY path that gives the view its client id,
             // its draft id and its draft revision, so without it every save is refused with "Two
@@ -790,6 +816,26 @@ fn perform(
                 },
             });
             answers.push(Event::ComposerBootRead(Box::new(read)));
+        }
+        // The retained transcript cache, keyed by this chat's RETENTION key, which is what `key`
+        // already is (`identity.rs`: `JSON.stringify([machineId, projectId, sessionId])`, the same
+        // string `session::persistence::storage_key` builds).
+        Effect::ReadRetainedSnapshot => {
+            let value = match retained::read(key, now_ms) {
+                Ok(value) => value,
+                Err(_) => {
+                    world.counters.storage_refused += 1;
+                    None
+                }
+            };
+            answers.push(Event::RetainedSnapshotLoaded { value });
+        }
+        // Nothing answers this one. A refused cache write is not a failure the chat reports: the
+        // live stream stays authoritative and the next fold writes again.
+        Effect::WriteRetainedSnapshot { value } => {
+            if retained::write(key, value.as_deref(), now_ms).is_err() {
+                world.counters.storage_refused += 1;
+            }
         }
         Effect::SetTimer { delay_ms } => match delay_ms {
             Some(delay) => {
@@ -967,6 +1013,9 @@ fn effect_name(effect: &Effect) -> &'static str {
         Effect::ReadStorage { .. } => "readStorage",
         Effect::ReadStorageBatch { .. } => "readStorageBatch",
         Effect::ReadComposerBoot { .. } => "readComposerBoot",
+        Effect::ReadRetainedSnapshot => "readRetainedSnapshot",
+        Effect::WriteRetainedSnapshot { .. } => "writeRetainedSnapshot",
+        Effect::UpdatePresentation { .. } => "updatePresentation",
         Effect::WriteStorage { .. } => "writeStorage",
         Effect::WriteStorageBatch { .. } => "writeStorageBatch",
         Effect::FlushStorage { .. } => "flushStorage",

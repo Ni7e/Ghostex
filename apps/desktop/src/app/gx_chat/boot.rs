@@ -14,11 +14,44 @@ use serde_json::{Map, Value, json};
 
 use super::storage;
 
+/// What the boot read's records did, which is how the caller tells a refusal from an empty profile.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// `native-host.ts`'s `start` has a `.catch` that empties the transcript and publishes
+/// `{status: 'error'}`, and it fires when `composer('read')` REJECTS, not when a record is absent:
+/// every accessor inside that operation catches for itself. The one thing that makes all of them
+/// fail at once is client storage being unavailable (`initializeClientStorage()` throwing), so the
+/// host's equivalent test is "every read this pass attempted refused". A profile that has simply
+/// never opened chat refuses nothing and boots normally, which is the case that must not be
+/// mistaken for the failure.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct BootReads {
+    /// Reads that refused, which the caller adds to `storageRefused`.
+    pub(super) errors: usize,
+    /// Reads attempted, refused or not.
+    pub(super) attempts: usize,
+}
+
+impl BootReads {
+    /// Whether client storage answered nothing at all, which is the boot read failing.
+    pub(super) fn all_refused(&self) -> bool {
+        self.attempts > 0 && self.errors == self.attempts
+    }
+
+    fn attempt(&mut self) {
+        self.attempts += 1;
+    }
+
+    fn refused(&mut self) {
+        self.errors += 1;
+    }
+}
+
 /// Reads everything the chat needs at boot for one session.
 ///
 /// Every read that fails is treated as "nothing stored", which is what the TypeScript's `catch`
-/// around each accessor does; the caller counts the refusals.
-pub(super) fn read(session_key: &str, now_ms: i64, errors: &mut usize) -> ComposerBootRead {
+/// around each accessor does; the caller counts the refusals and tests [`BootReads::all_refused`].
+pub(super) fn read(session_key: &str, now_ms: i64, errors: &mut BootReads) -> ComposerBootRead {
     let client_id = client_id(now_ms, errors);
     let stored = load("drafts", session_key, now_ms, errors).map(|raw| decode_stored_draft(&raw));
     let entry = entry_with_version(stored.as_ref());
@@ -60,7 +93,7 @@ pub(super) fn read(session_key: &str, now_ms: i64, errors: &mut usize) -> Compos
 /// shape is `packages/shared/session-chat-controller/client-id.ts`'s, `gx-` then two base-36 runs,
 /// because an id is compared and stored but never parsed. A refused write is counted and the
 /// in-memory id is used anyway, which is what the TypeScript's `catch` does for private mode.
-fn client_id(now_ms: i64, errors: &mut usize) -> String {
+fn client_id(now_ms: i64, errors: &mut BootReads) -> String {
     let key = StorageKey {
         store: "chatClient".to_string(),
         suffix: String::new(),
@@ -77,8 +110,9 @@ fn client_id(now_ms: i64, errors: &mut usize) -> String {
         )),
         base36(now_ms.max(0) as u64)
     );
+    errors.attempt();
     if storage::write(&key, Some(&created), now_ms).is_err() {
-        *errors += 1;
+        errors.refused();
     }
     created
 }
@@ -99,7 +133,8 @@ fn base36(mut value: u64) -> String {
 }
 
 /// One stored record, or `None` when it is absent, empty or unreadable.
-fn load(store: &str, suffix: &str, now_ms: i64, errors: &mut usize) -> Option<String> {
+fn load(store: &str, suffix: &str, now_ms: i64, errors: &mut BootReads) -> Option<String> {
+    errors.attempt();
     match storage::read(
         &StorageKey {
             store: store.to_string(),
@@ -109,7 +144,7 @@ fn load(store: &str, suffix: &str, now_ms: i64, errors: &mut usize) -> Option<St
     ) {
         Ok(value) => value.filter(|raw| !raw.is_empty()),
         Err(_) => {
-            *errors += 1;
+            errors.refused();
             None
         }
     }
@@ -165,11 +200,12 @@ pub(super) fn next_draft_version() -> Value {
 /// session key itself or start with `<sessionKey>#`, and hand back the part after the store's own
 /// prefix. The `#` scope is how one session's pills are remembered per worktree or per draft agent,
 /// so a session with scopes whose unscoped row alone was read opened on another scope's options.
-fn scoped(store: &str, session_key: &str, now_ms: i64, errors: &mut usize) -> Value {
+fn scoped(store: &str, session_key: &str, now_ms: i64, errors: &mut BootReads) -> Value {
+    errors.attempt();
     let rows = match storage::scan(store, session_key, now_ms) {
         Ok(rows) => rows,
         Err(_) => {
-            *errors += 1;
+            errors.refused();
             return Value::Object(Map::new());
         }
     };

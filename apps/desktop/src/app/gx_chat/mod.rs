@@ -21,6 +21,7 @@
 //! - `storage.rs` is the chat half of `packages/client-storage/catalog.ts` and the two doors into
 //!   the one client-storage database; `host_records.rs` owns the four records the core left to the
 //!   host; `boot.rs` answers `Effect::ReadComposerBoot`.
+//! - `retained.rs` is the transcript cache a reopened chat draws before its snapshot arrives.
 //! - `draft_ops.rs` performs the three draft operations the core names as stores, `outbox.rs` is
 //!   the durable save outbox and its retry ladder, `saves.rs` connects that queue to a chat,
 //!   `dismissals.rs` folds the recovery markers a retirement leaves into ranges, `locale.rs` the
@@ -39,6 +40,7 @@ mod identity;
 mod locale;
 mod outbox;
 mod queries;
+mod retained;
 mod saves;
 mod storage;
 mod store;
