@@ -57,6 +57,21 @@ pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
         .accounts_polled_at_ms
         .map(|at| at + ACCOUNTS_POLL_MS);
     arm(state, "menus.accountsPoll", accounts_wake, context);
+    // CDXC:SessionChat 2026-09-22 WHY:
+    // `setInterval(() => setNow(Date.now()), 30_000)` on a `useEffect` with no dependencies
+    // (`native-context.ts:63`): the meter's countdown labels (five-hour reset, seven-day reset,
+    // cache time left) have no other reason to redraw. `CONTEXT_METER_REFRESH_MS` was written and
+    // never read, so they froze at whatever clock the last unrelated event carried. `arm_once`,
+    // because re-arming on every event would push the deadline forward for ever.
+    // `observe` runs on every event, and the drain removes a one-shot before any family sees it,
+    // so re-arming here is the interval's next period.
+    if state.core.controller_started {
+        state.core.timers.arm_once(
+            "menus.contextMeter",
+            context.now_ms,
+            crate::menus::context::meter::CONTEXT_METER_REFRESH_MS,
+        );
+    }
     effects
 }
 

@@ -125,8 +125,6 @@ pub struct ContextState {
     pub editor: Option<ContextEditorState>,
     /// Where the status line wraps, as the renderer measured it. `[0]` until it reports.
     pub status_rows: Vec<u32>,
-    /// When the meter's countdown labels are next re-rendered (`native-context.ts`, 30 s).
-    pub next_meter_refresh_ms: Option<f64>,
 }
 
 impl Default for ContextState {
@@ -137,7 +135,6 @@ impl Default for ContextState {
             // `let contextStatusRows = [0]`: one row from the first frame, before the renderer
             // has measured anything, so the status line never starts unwrapped.
             status_rows: vec![0],
-            next_meter_refresh_ms: None,
         }
     }
 }
