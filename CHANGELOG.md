@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+## 10.1.0 - 2026-09-23
+
+**Ghostex 10.1.0 is out.** Linear, Jira, GitHub, Storybook and Terminal views, light and dark theme presets, a Trust and Remember answer for folder trust prompts, drag a session onto a pane to split, account usage that peeks on hover, and the newest Claude, Codex, Cursor and Grok models.
+
+### 🧭 New views beside your sessions
+- **Linear and Jira open as views.** Pick one from the + menu, paste the workspace, team, or board address you want as its home, and Ghostex keeps it per project; worktrees follow their parent project until you give them their own. Middle-click or Cmd-click a link to open it in a background Browser tab.
+- **A GitHub view opens your repository with no setup.** It appears whenever the project has a GitHub origin, including in worktrees.
+- **Storybook is built in.** Projects with Storybook get a Storybook view (press S in the view picker) that builds and serves the component workshop without keeping a server running, with Rebuild Storybook and Annotate with Agentation.
+- **A Terminal view puts command terminals on the right.** It has its own tabs and splits, runs Actions, and keeps its terminals alive when you close it; the Commands pane under your sessions still works as before.
+- **The view picker shows real icons.** Installed extensions use their own icon and description, and website views show their mark.
+- **Sleeping browser tabs show what they hold.** The card shows the page's icon, title and site, and a Resume button wakes it.
+
+### 🎨 Theme presets
+- **Pick a preset for each appearance.** Dark theme offers Dark Gray, Black, Blue, Green, Red, Purple, or Custom, and Light theme offers Light Gray, White, Blue, Green, Pink, Orange, or Custom, under Settings > Appearance.
+- **The theme reaches more of the app.** The sidebar, window chrome, sidebar menus, chat background, and chat and file change cards all follow the chosen preset, and Custom keeps your own contrast and tint.
+
+### 🗂 The Agents Panel and sidebar
+- **The sessions column is now the Agents Panel.** Its toggle sits beside Hide sidebar, even while the sidebar is collapsed.
+- **Drag a session onto a pane to split.** Drop a sidebar row on the left, right, top or bottom edge of a terminal or chat pane to open it in a new split there.
+- **Account usage peeks on hover.** Hover the chart button in the sidebar's Commands row to float your starred accounts' meters over the list, and click the pin to keep them there.
+- **Sleep Inactive on the Space menu.** Right-click a Space icon to sleep only its sessions that are awake but neither working nor waiting on you.
+- **The floating sidebar and Agents Panel slide at your chosen speed.** They follow the sidebar's Collapse animation setting, and 0 turns the slide off.
+- **Quick Access opens a session in the floating panel** while chat is collapsed, and your configured hotkeys now work from the floating sessions panel.
+- **Sessions with background shells or monitors still running show as working.**
+
+### 💬 Chat
+- **Trust and Remember answers folder trust prompts for good.** Choose it on the trust card once and Ghostex answers that project's trust prompt by itself from then on, for every agent.
+- **Every copy says Copied!** A small bubble appears at the pointer whenever you copy something anywhere in the app.
+- **The chat box stays expanded while you scroll.** Turn off Settings > Chat > Keep chat box expanded while scrolling to get the collapsing box back.
+- **Switching a draft's agent keeps your model and effort.** The picked model and reasoning carry into the new agent's launch.
+- **Switching accounts is safer for Claude background sessions.** Ghostex stops the conversation and its remaining jobs, then resumes it on the selected account.
+- **The model picker explains itself.** Hover a row's eye to read what the model is for, unavailable buttons are dimmed and say Default or Off, Auto sits first, and a detected Fast mode shows as on.
+
+### 🤖 Newest models, without waiting for a release
+- **New models reach your open app within minutes.** The model list updates on its own, so a new model shows up and can be picked without installing a new Ghostex.
+- **Claude matches Claude Code's own picker.** Opus 5.5 is the Opus model with 1M context, Opus 5 leaves the list, and the quick picker shows every Claude model with its version.
+- **Codex gets GPT 6 Sol and GPT 6 Luna.** Older GPT 5.6 models move under Legacy, and titles and commit messages are now written with GPT 6 Luna.
+- **Grok 4.7 and Grok 4.7 Fast for Grok Build and Cursor.**
+
+### 🩹 Fixes
+- **Linux shows new versions in the Update window.** Open download page takes you to the release; install it the same way you installed Ghostex.
+- **Windows chat sends reach the terminal again,** and the prompt editor starts correctly on Windows.
+- **The transcript scrollbar no longer jumps while a reply streams.**
+- **A new usage limit shows even right after the old one cleared.**
+- **Worktree dialogs explain why a list failed,** and pick the right source project.
+- **Remote sessions attach more reliably,** retrying each session on its own.
+- **The GitHub button opens the right repository** as soon as a project loads.
+- **Agents Hub sync is easier to read.** It says how many agents are out of sync and lists each fix in plain words, with a To fix and In sync filter.
+- **Better screen reader support** for the sidebar, chat box, transcript and terminal.
+
 ## 10.0.1 - 2026-09-22
 
 **Ghostex 10.0.1 is out.** A new layout: the titlebar row is gone, views open as tabs beside your sessions instead of over them, and browser pages share the same tab strip. The sidebar now runs fully natively, the chat model picker gains favorites and one-click settings, and the accent color follows your background tint.
