@@ -155,70 +155,13 @@ pub fn is_newer_draft_stamp(candidate: &str, reference: Option<&str>) -> bool {
     }
 }
 
-/// `Date.parse` for the ISO-8601 stamps gxserver writes.
+/// `Date.parse` for the ISO-8601 stamps gxserver writes, in whole milliseconds.
 ///
-/// Only the shape gxserver produces is accepted (`YYYY-MM-DDTHH:MM:SS[.sss]Z` and the same with a
-/// numeric offset); anything else answers `None`, which is what `Number.isNaN(Date.parse(...))`
-/// means at every call site here.
+/// One rule for the whole crate since 2026-09-22 (`crate::jstime`). This copy accepted hour 99,
+/// which silently won the "is this draft newer" comparison; the shared one answers `None`, which
+/// is what `Number.isNaN(Date.parse(...))` means at every call site here.
 pub fn parse_iso_millis(value: &str) -> Option<i64> {
-    let bytes = value.as_bytes();
-    if bytes.len() < 19 || bytes[4] != b'-' || bytes[7] != b'-' {
-        return None;
-    }
-    if bytes[10] != b'T' && bytes[10] != b't' && bytes[10] != b' ' {
-        return None;
-    }
-    let year: i64 = value.get(0..4)?.parse().ok()?;
-    let month: i64 = value.get(5..7)?.parse().ok()?;
-    let day: i64 = value.get(8..10)?.parse().ok()?;
-    let hour: i64 = value.get(11..13)?.parse().ok()?;
-    let minute: i64 = value.get(14..16)?.parse().ok()?;
-    let second: i64 = value.get(17..19)?.parse().ok()?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let mut rest = &value[19..];
-    let mut millis = 0_i64;
-    if let Some(fraction) = rest.strip_prefix('.') {
-        let digits: String = fraction.chars().take_while(char::is_ascii_digit).collect();
-        if digits.is_empty() {
-            return None;
-        }
-        let padded = format!("{digits:0<3}");
-        millis = padded.get(0..3)?.parse().ok()?;
-        rest = &rest[1 + digits.len()..];
-    }
-    let offset_minutes = if rest.is_empty() || rest == "Z" || rest == "z" {
-        0
-    } else {
-        let sign = match rest.as_bytes().first() {
-            Some(b'+') => 1,
-            Some(b'-') => -1,
-            _ => return None,
-        };
-        let hours: i64 = rest.get(1..3)?.parse().ok()?;
-        let minutes: i64 = match rest.len() {
-            5 => rest.get(3..5)?.parse().ok()?,
-            6 => rest.get(4..6)?.parse().ok()?,
-            _ => return None,
-        };
-        sign * (hours * 60 + minutes)
-    };
-    let days = days_from_civil(year, month, day);
-    Some(
-        ((days * 86_400 + hour * 3_600 + minute * 60 + second - offset_minutes * 60) * 1_000)
-            + millis,
-    )
-}
-
-/// Days since 1970-01-01, from Howard Hinnant's civil-date algorithm.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = year - i64::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
+    crate::jstime::parse_iso_millis_utc(value).map(|millis| millis as i64)
 }
 
 /// Whether the saved-draft bar should offer `incoming`.

@@ -94,74 +94,8 @@ pub fn decode_dismissed_notice(raw: &str) -> Option<DismissedNotice> {
 
 /// `Date.parse` for the ISO-8601 stamps gxserver writes, in epoch milliseconds.
 ///
-/// The core reads no timezone, so a stamp without an offset is taken as UTC. gxserver always
-/// writes `Z`, which is the only form this has to agree with the TypeScript on.
+/// One rule for the whole crate since 2026-09-22 (`crate::jstime`). The core reads no timezone
+/// here, so a stamp without an offset is still taken as UTC; gxserver always writes `Z`.
 fn parse_iso_millis(text: &str) -> Option<i64> {
-    let bytes = text.as_bytes();
-    if bytes.len() < 19 || bytes[4] != b'-' || bytes[7] != b'-' {
-        return None;
-    }
-    if bytes[10] != b'T' && bytes[10] != b't' && bytes[10] != b' ' {
-        return None;
-    }
-    if bytes[13] != b':' || bytes[16] != b':' {
-        return None;
-    }
-    let year: i64 = text.get(0..4)?.parse().ok()?;
-    let month: i64 = text.get(5..7)?.parse().ok()?;
-    let day: i64 = text.get(8..10)?.parse().ok()?;
-    let hour: i64 = text.get(11..13)?.parse().ok()?;
-    let minute: i64 = text.get(14..16)?.parse().ok()?;
-    let second: i64 = text.get(17..19)?.parse().ok()?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 {
-        return None;
-    }
-    let mut rest = text.get(19..)?;
-    let mut millis = 0i64;
-    if let Some(fraction) = rest.strip_prefix('.') {
-        let digits: String = fraction.chars().take_while(char::is_ascii_digit).collect();
-        if digits.is_empty() {
-            return None;
-        }
-        let mut scaled = digits.clone();
-        scaled.truncate(3);
-        while scaled.len() < 3 {
-            scaled.push('0');
-        }
-        millis = scaled.parse().ok()?;
-        rest = &fraction[digits.len()..];
-    }
-    let offset_minutes = match rest {
-        "" | "Z" | "z" => 0,
-        other => {
-            let sign = match other.as_bytes().first() {
-                Some(b'+') => 1,
-                Some(b'-') => -1,
-                _ => return None,
-            };
-            let body = &other[1..];
-            let (hours, minutes) = match body.len() {
-                5 if body.as_bytes()[2] == b':' => (body.get(0..2)?, body.get(3..5)?),
-                4 => (body.get(0..2)?, body.get(2..4)?),
-                2 => (body, "00"),
-                _ => return None,
-            };
-            sign * (hours.parse::<i64>().ok()? * 60 + minutes.parse::<i64>().ok()?)
-        }
-    };
-    let days = days_from_civil(year, month, day);
-    Some(
-        ((days * 86_400 + hour * 3_600 + minute * 60 + second) - offset_minutes * 60) * 1_000
-            + millis,
-    )
-}
-
-/// Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's `days_from_civil`).
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
+    crate::jstime::parse_iso_millis_utc(text).map(|millis| millis as i64)
 }

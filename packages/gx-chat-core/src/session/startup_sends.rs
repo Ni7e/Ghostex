@@ -133,43 +133,9 @@ pub fn full_queue_order(queue: &[Value], visible_ids: &[String]) -> Vec<String> 
 
 /// `Date.parse` of an ISO 8601 stamp in epoch milliseconds.
 ///
-/// gxserver writes every queue stamp with `toISOString()`, so the shape is fixed: four-digit year,
-/// UTC, and an optional fractional second. Anything else parses as `NaN` there, which is `None`
-/// here and becomes the zero the TypeScript's arithmetic produces.
+/// One rule for the whole crate since 2026-09-22 (`crate::jstime`). This copy ignored a numeric
+/// offset outright and returned a whole second for a one- or two-digit fraction, so a `+04:00`
+/// stamp was read four hours late and `.5` lost half a second.
 pub fn parse_iso_ms(value: Option<&str>) -> Option<i64> {
-    let value = value?;
-    let bytes = value.as_bytes();
-    if value.len() < 20 || bytes[4] != b'-' || bytes[7] != b'-' || bytes[10] != b'T' {
-        return None;
-    }
-    let year: i64 = value.get(0..4)?.parse().ok()?;
-    let month: i64 = value.get(5..7)?.parse().ok()?;
-    let day: i64 = value.get(8..10)?.parse().ok()?;
-    let hour: i64 = value.get(11..13)?.parse().ok()?;
-    let minute: i64 = value.get(14..16)?.parse().ok()?;
-    let second: i64 = value.get(17..19)?.parse().ok()?;
-    let millis: i64 = match value.get(19..20) {
-        Some(".") => value
-            .get(20..23)
-            .and_then(|digits| digits.parse().ok())
-            .unwrap_or(0),
-        _ => 0,
-    };
-    Some(
-        days_from_civil(year, month, day) * 86_400_000
-            + hour * 3_600_000
-            + minute * 60_000
-            + second * 1_000
-            + millis,
-    )
-}
-
-/// Days since the Unix epoch, Howard Hinnant's civil calendar algorithm.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
+    crate::jstime::parse_iso_millis_utc(value?).map(|millis| millis as i64)
 }

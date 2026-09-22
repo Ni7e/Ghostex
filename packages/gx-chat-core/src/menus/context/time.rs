@@ -13,94 +13,10 @@
 
 /// `Date.parse(value)`: epoch milliseconds, or `None` for a stamp this parser does not recognise.
 ///
-/// Only the ISO-8601 forms gxserver and the agents emit are accepted: `YYYY-MM-DD`, optionally
-/// `THH:MM[:SS[.fff]]`, optionally `Z` or `+HH:MM`. A date-only stamp is UTC, which is what the
-/// specification says.
+/// One rule for the whole crate since 2026-09-22 (`crate::jstime`). This copy used to accept
+/// trailing junk after the `Z`, where `Date.parse` answers NaN.
 pub fn date_parse(value: &str) -> Option<f64> {
-    let bytes = value.as_bytes();
-    if bytes.len() < 10 {
-        return None;
-    }
-    let year: i64 = value.get(0..4)?.parse().ok()?;
-    if bytes[4] != b'-' {
-        return None;
-    }
-    let month: i64 = value.get(5..7)?.parse().ok()?;
-    if bytes[7] != b'-' {
-        return None;
-    }
-    let day: i64 = value.get(8..10)?.parse().ok()?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let mut hour = 0i64;
-    let mut minute = 0i64;
-    let mut second = 0i64;
-    let mut millis = 0i64;
-    let mut offset_minutes = 0i64;
-    let rest = &value[10..];
-    if !rest.is_empty() {
-        let rest = match rest.as_bytes()[0] {
-            b'T' | b't' | b' ' => &rest[1..],
-            _ => return None,
-        };
-        if rest.len() < 5 {
-            return None;
-        }
-        hour = rest.get(0..2)?.parse().ok()?;
-        if rest.as_bytes()[2] != b':' {
-            return None;
-        }
-        minute = rest.get(3..5)?.parse().ok()?;
-        let mut cursor = 5;
-        if rest.as_bytes().get(cursor) == Some(&b':') {
-            second = rest.get(cursor + 1..cursor + 3)?.parse().ok()?;
-            cursor += 3;
-            if rest.as_bytes().get(cursor) == Some(&b'.') {
-                let start = cursor + 1;
-                let mut end = start;
-                while rest.as_bytes().get(end).is_some_and(u8::is_ascii_digit) {
-                    end += 1;
-                }
-                let fraction = rest.get(start..end)?;
-                let padded = format!("{fraction:0<3}");
-                millis = padded.get(0..3)?.parse().ok()?;
-                cursor = end;
-            }
-        }
-        match rest.as_bytes().get(cursor) {
-            None => {}
-            Some(b'Z') | Some(b'z') => {}
-            Some(sign @ (b'+' | b'-')) => {
-                let sign = if *sign == b'-' { -1 } else { 1 };
-                let hours: i64 = rest.get(cursor + 1..cursor + 3)?.parse().ok()?;
-                let minutes: i64 = match rest.as_bytes().get(cursor + 3) {
-                    Some(b':') => rest.get(cursor + 4..cursor + 6)?.parse().ok()?,
-                    Some(_) => rest.get(cursor + 3..cursor + 5)?.parse().ok()?,
-                    None => 0,
-                };
-                offset_minutes = sign * (hours * 60 + minutes);
-            }
-            Some(_) => return None,
-        }
-    }
-    if hour > 24 || minute > 59 || second > 59 {
-        return None;
-    }
-    let days = days_from_civil(year, month, day);
-    let millis = days * 86_400_000 + hour * 3_600_000 + minute * 60_000 + second * 1_000 + millis
-        - offset_minutes * 60_000;
-    Some(millis as f64)
-}
-
-/// Howard Hinnant's `days_from_civil`: days since 1970-01-01, for any proleptic Gregorian date.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = year - i64::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
+    crate::jstime::parse_iso_millis_utc(value)
 }
 
 /// The inverse: the civil date of a day count since the epoch.
