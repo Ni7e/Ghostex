@@ -110,23 +110,21 @@ impl GhostexGpuiApp {
 
     /// CDXC:Workarea 2026-09-22 DECISION:
     /// User: each project and worktree can have a different website home, with worktrees following the parent until customized. Infer the workspace from the URL, preserve the entire home URL including filters, and resolve GitHub automatically from the repository.
+    /// CDXC:Workarea 2026-09-23 WHY:
+    /// Git origin is a live presentation fact, absent from the saved project records used by extension metadata. Use the active project's sanitized repository URL so GitHub appears as soon as its origin arrives, including remote projects and worktrees.
     pub(crate) fn website_home(
         &self,
         provider: &WebsiteProvider,
         project_id: &str,
     ) -> Option<String> {
         if provider.automatic() {
-            let project = self.extension_projects.get(project_id)?;
-            let remote = project.git_remote_origin_url.as_deref().or_else(|| {
-                let parent = self.website_parent_project_id(project_id)?;
-                self.extension_projects
-                    .get(&parent)?
-                    .git_remote_origin_url
-                    .as_deref()
-            })?;
-            let home = browser_remote_web_url(remote)?;
-            let url = gpui::http_client::Url::parse(&home).ok()?;
-            return (url.host_str() == Some("github.com")).then_some(home);
+            let snapshot = self.latest_sidebar_project_snapshot.as_ref()?;
+            if snapshot.active_project_id.as_ref()?.0 != project_id {
+                return None;
+            }
+            let home = snapshot.browser_home_url.as_ref()?;
+            let url = gpui::http_client::Url::parse(home).ok()?;
+            return (url.host_str() == Some("github.com")).then(|| home.clone());
         }
         let settings = shared_settings::shared_sidebar_settings_snapshot();
         let homes = settings
