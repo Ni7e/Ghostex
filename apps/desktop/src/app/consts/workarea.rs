@@ -57,9 +57,9 @@ pub(crate) const VIEW_PICKER_CARD_GAP: f32 = 8.0;
 /// counts every open view, extension views included, because an extension page costs the same.
 pub(crate) const PROJECT_EDITOR_AWAKE_MODE_CAP: usize = 3;
 
-/// The view panel's tab strip, the same height as the work area header so the two read as one band
-/// of chrome.
-pub(crate) const WORKAREA_VIEW_TAB_STRIP_HEIGHT: f32 = 36.0;
+/// CDXC:Workarea 2026-09-23 DECISION:
+/// User: the views tab strip is 1px shorter than the work area header. The view panel's content, its rail and the strip's half of the header band all start and end at this height, so the panel moves up with it.
+pub(crate) const WORKAREA_VIEW_TAB_STRIP_HEIGHT: f32 = WORKAREA_HEADER_HEIGHT - 1.0;
 
 pub(crate) const WORKAREA_VIEW_TAB_HEIGHT: f32 = 26.0;
 

@@ -91,7 +91,7 @@ impl GhostexGpuiApp {
                 v_flex()
                     .flex_shrink_0()
                     .h_full()
-                    .pt(px(WORKAREA_HEADER_HEIGHT))
+                    .pt(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
                     .child(self.render_workarea_split_divider("body", cx)),
             )
             .child(
@@ -100,7 +100,7 @@ impl GhostexGpuiApp {
                 // Keep those borders inside the flex allocation so switching views cannot change the
                 // Agents column's width.
                 v_flex()
-                    .pt(px(WORKAREA_HEADER_HEIGHT))
+                    .pt(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
                     .flex_grow(1.0 - split_ratio)
                     .flex_shrink_1()
                     .flex_basis(relative(0.0))
@@ -176,7 +176,7 @@ impl GhostexGpuiApp {
         let draws_top_line = mode != TitlebarMode::Browser;
         v_flex()
             .id(format!("ghostex-gpui-workarea-maximized-{}", mode_slug))
-            .pt(px(WORKAREA_HEADER_HEIGHT))
+            .pt(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
             .flex_1()
             .min_w_0()
             .min_h_0()

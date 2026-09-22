@@ -41,16 +41,19 @@ impl GhostexGpuiApp {
         let split_ratio = workarea_split_ratio(self.project_editor_shell.workarea_split_ratio);
         let trailing_reserve = self.workarea_header_trailing_dock_reserve(window);
         let strip_mode = self.open_view_mode().unwrap_or(TitlebarMode::Agents);
+        // An expanded panel runs under the header row too, so the whole band shrinks to the strip.
+        let band_height = if hosts_tab_strip && self.view_panel_maximized() {
+            WORKAREA_VIEW_TAB_STRIP_HEIGHT
+        } else {
+            WORKAREA_HEADER_HEIGHT
+        };
         h_flex()
             .absolute()
             .top_0()
             .left_0()
             .right_0()
-            .h(px(WORKAREA_HEADER_HEIGHT))
-            .items_stretch()
-            // The band's own fill shows only in the gaps its children leave: the split divider's
-            // column, and the width a right-docked command pane keeps for itself.
-            .bg(workspace_background_color())
+            .h(px(band_height))
+            .items_start()
             .child(
                 div()
                     .flex()
@@ -73,12 +76,16 @@ impl GhostexGpuiApp {
                     if self.view_panel_maximized() {
                         div()
                             .flex_shrink_0()
-                            .h_full()
+                            .h(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
                             .w(px(WORKSPACE_SPLIT_HANDLE_THICKNESS))
                             .bg(project_editor_companion_divider_background_color())
                             .into_any_element()
                     } else {
-                        self.render_workarea_split_divider("header", cx)
+                        div()
+                            .flex_shrink_0()
+                            .h(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
+                            .child(self.render_workarea_split_divider("header", cx))
+                            .into_any_element()
                     },
                 )
                 .child(
@@ -87,7 +94,7 @@ impl GhostexGpuiApp {
                         .flex_grow(1.0 - split_ratio)
                         .flex_shrink(1.0)
                         .flex_basis(relative(0.0))
-                        .h_full()
+                        .h(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
                         .min_h_0()
                         .min_w(px(WORKAREA_VIEW_PANEL_MIN_WIDTH))
                         .overflow_hidden()
@@ -95,7 +102,15 @@ impl GhostexGpuiApp {
                 )
             })
             .when(trailing_reserve > 0.0, |band| {
-                band.child(div().flex_shrink_0().h_full().w(px(trailing_reserve)))
+                // The band paints no fill of its own, so the 1px under the shorter tab strip shows
+                // the panel beneath; the command pane's reserved width keeps the workspace colour.
+                band.child(
+                    div()
+                        .flex_shrink_0()
+                        .h_full()
+                        .w(px(trailing_reserve))
+                        .bg(workspace_background_color()),
+                )
             })
     }
 
