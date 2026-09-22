@@ -44,45 +44,88 @@ export interface ReplayRecord {
   len?: number;
 }
 
-export interface Recording {
+/**
+ * One run of the brain: a header and the records that followed it until the next header.
+ *
+ * The app writes a header each time it starts a chat runtime for the session, and a runtime is a
+ * fresh QuickJS context: module state, timers and the record counter (`n` restarts at 1) all begin
+ * again. A recording of a session whose chat was reopened therefore holds several runs, and each
+ * one must be replayed into a fresh brain, on both sides.
+ */
+export interface ReplayRun {
+  /** 1-based position of the run in the file, which the output lines carry as `run`. */
+  index: number;
   header: ReplayHeader;
   records: ReplayRecord[];
+}
+
+export interface Recording {
+  /** The first run's header. */
+  header: ReplayHeader;
+  /** Every record of every run, in file order, for a reader that does not care about runs. */
+  records: ReplayRecord[];
+  /** The runs that hold at least one record. */
+  runs: ReplayRun[];
+  /** Headers with no record after them: the app was closed before the brain saw a call. */
+  emptyRuns: number;
   /** The recording's own name, used for the expected and actual file names. */
   name: string;
 }
 
 export class RecordingError extends Error {}
 
-/** Parses a recording. Throws on a format this build predates or a truncated header. */
+/**
+ * Parses a recording. Throws on a format this build predates or a missing first header.
+ *
+ * A half-written final line is skipped: a record reaches disk only when the next call begins, so
+ * a recording ends one record short and its last line may be cut mid-way by the app closing. A
+ * header with nothing after it (the app closed right after the runtime started) is counted, not
+ * replayed.
+ */
 export function parseRecording(text: string, name: string): Recording {
   const lines = text.split('\n').filter((line) => line.length > 0);
   if (!lines.length) throw new RecordingError('The recording is empty.');
-  let header: ReplayHeader;
-  try {
-    header = JSON.parse(lines[0]!) as ReplayHeader;
-  } catch {
-    throw new RecordingError('The recording does not start with a header line.');
-  }
-  if (header.k !== 'header') throw new RecordingError('The recording does not start with a header line.');
-  if (header.v !== NATIVE_CHAT_REPLAY_FORMAT)
-    throw new RecordingError(
-      `The recording is format ${header.v}; this harness reads format ${NATIVE_CHAT_REPLAY_FORMAT}.`
-    );
-  const records: ReplayRecord[] = [];
-  for (let index = 1; index < lines.length; index += 1) {
-    let record: ReplayRecord;
+  const runs: ReplayRun[] = [];
+  let current: ReplayRun | null = null;
+  let emptyRuns = 0;
+  const openRun = (header: ReplayHeader): void => {
+    if (header.v !== NATIVE_CHAT_REPLAY_FORMAT)
+      throw new RecordingError(
+        `The recording is format ${header.v}; this harness reads format ${NATIVE_CHAT_REPLAY_FORMAT}.`
+      );
+    if (current && current.records.length === 0) emptyRuns += 1;
+    current = { index: runs.length + emptyRuns + 1, header, records: [] };
+    runs.push(current);
+  };
+  for (let index = 0; index < lines.length; index += 1) {
+    let parsed: ReplayHeader | ReplayRecord;
     try {
-      record = JSON.parse(lines[index]!) as ReplayRecord;
+      parsed = JSON.parse(lines[index]!) as ReplayHeader | ReplayRecord;
     } catch {
-      // A recording ends when the app does, so a half-written final line is normal.
+      if (index === 0) throw new RecordingError('The recording does not start with a header line.');
       if (index === lines.length - 1) break;
       throw new RecordingError(`Record ${index} is not valid JSON.`);
     }
+    if (parsed.k === 'header') {
+      openRun(parsed);
+      continue;
+    }
+    if (!current) throw new RecordingError('The recording does not start with a header line.');
+    const record = parsed;
     if (record.k !== 'in' && record.k !== 'doc' && record.k !== 'query')
       throw new RecordingError(`Record ${index} has an unknown kind.`);
-    records.push(record);
+    current.records.push(record);
   }
-  return { header, records, name };
+  if (!current) throw new RecordingError('The recording does not start with a header line.');
+  const kept = runs.filter((run) => run.records.length > 0);
+  emptyRuns = runs.length - kept.length;
+  return {
+    header: runs[0]!.header,
+    records: kept.flatMap((run) => run.records),
+    runs: kept,
+    emptyRuns,
+    name,
+  };
 }
 
 /** Serializes one record the way the recorder writes it, so a generator and the app agree. */
@@ -124,8 +167,15 @@ export function serializeHeader(startedAtMs: number): string {
 
 /**
  * One line of the expected (or actual) document sequence. Keeping the document verbatim makes a
- * plain JSON diff of the two files the whole gate.
+ * plain JSON diff of the two files the whole gate. `run` is the 1-based run the document belongs
+ * to and `n` the record number inside that run, which restarts at 1 with every header.
  */
-export function documentLine(n: number, lastRevision: unknown, hash: string, documentJson: string): string {
-  return `{"n":${n},"lastRevision":${JSON.stringify(lastRevision ?? null)},"hash":${JSON.stringify(hash)},"document":${documentJson}}`;
+export function documentLine(
+  run: number,
+  n: number,
+  lastRevision: unknown,
+  hash: string,
+  documentJson: string
+): string {
+  return `{"run":${run},"n":${n},"lastRevision":${JSON.stringify(lastRevision ?? null)},"hash":${JSON.stringify(hash)},"document":${documentJson}}`;
 }

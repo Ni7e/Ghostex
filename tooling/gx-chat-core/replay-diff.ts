@@ -25,6 +25,12 @@
  * contract at all: client storage rides on it there (`composer('read')`, `composer('summary')`)
  * and is an `Effect` here, and its ids come off a counter the TypeScript shares with its timers.
  * The Rust host consumes `Vec<Effect>` and builds no `requests` array.
+ *
+ * `--summary` prints, after the usual report, one machine-readable line with the four numbers the
+ * gate wants from ONE pass over the files: `summary matched=a/b strict=c/b wake=d/b revision=e/b`.
+ * `matched` honours `--ignore`, `strict` ignores nothing, and `wake` and `revision` count the
+ * lines on which `/nextWakeMs` and `/revision` agree. A real recording's expected file runs to
+ * hundreds of megabytes, so reading it four times to get four numbers is what this replaces.
  */
 
 import { readFileSync } from 'node:fs';
@@ -38,6 +44,8 @@ interface Options {
   limit: number;
   /** Print one line per differing record: its `n`, and which side published a document. */
   records: boolean;
+  /** Print the four gate numbers from one pass (see the file comment). */
+  summary: boolean;
 }
 
 function parseOptions(argv: readonly string[]): Options {
@@ -48,6 +56,7 @@ function parseOptions(argv: readonly string[]): Options {
   const ignore: string[] = [];
   let limit = 40;
   let records = false;
+  let summary = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     const next = argv[index + 1];
@@ -76,6 +85,8 @@ function parseOptions(argv: readonly string[]): Options {
       index += 1;
     } else if (argument === '--records') {
       records = true;
+    } else if (argument === '--summary') {
+      summary = true;
     } else if (argument && !argument.startsWith('--')) {
       name = argument;
     }
@@ -87,6 +98,7 @@ function parseOptions(argv: readonly string[]): Options {
     ignore,
     limit,
     records,
+    summary,
   };
 }
 
@@ -168,10 +180,11 @@ function collectPointers(left: unknown, right: unknown, at: string, into: string
   }
 }
 
-/** The recording's own record number for a line, when the line carries one. */
-function recordNumber(line: unknown): number | null {
-  const value = (line as { n?: unknown } | null)?.n;
-  return typeof value === 'number' ? value : null;
+/** The recording's own record number for a line, as `run:n` when the line names its run. */
+function recordLabel(line: unknown): string | null {
+  const record = line as { n?: unknown; run?: unknown } | null;
+  if (typeof record?.n !== 'number') return null;
+  return typeof record.run === 'number' ? `${record.run}:${record.n}` : String(record.n);
 }
 
 /**
@@ -210,15 +223,20 @@ function main(): void {
   const actual = readLines(options.actual);
   const compared = Math.min(expected.length, actual.length);
   const counts = new Map<string, number>();
-  const differing: { n: number | null; side: string; pointers: string[] }[] = [];
+  const differing: { label: string | null; side: string; pointers: string[] }[] = [];
   let matched = 0;
+  let strict = 0;
+  let wake = 0;
+  let revision = 0;
+  const under = (pointer: string, prefix: string): boolean => pointer === prefix || pointer.startsWith(`${prefix}/`);
 
   for (let index = 0; index < compared; index += 1) {
     const found: string[] = [];
     collectPointers(documentOf(expected[index], options.keys), documentOf(actual[index], options.keys), '', found);
-    const pointers = found.filter(
-      (pointer) => !options.ignore.some((prefix) => pointer === prefix || pointer.startsWith(`${prefix}/`))
-    );
+    if (found.length === 0) strict += 1;
+    if (!found.some((pointer) => under(pointer, '/nextWakeMs'))) wake += 1;
+    if (!found.some((pointer) => under(pointer, '/revision'))) revision += 1;
+    const pointers = found.filter((pointer) => !options.ignore.some((prefix) => under(pointer, prefix)));
     if (pointers.length === 0) {
       matched += 1;
       continue;
@@ -228,7 +246,7 @@ function main(): void {
     }
     if (options.records) {
       differing.push({
-        n: recordNumber(expected[index]) ?? recordNumber(actual[index]),
+        label: recordLabel(expected[index]) ?? recordLabel(actual[index]),
         side: snapshotSide(expected[index], actual[index]),
         pointers,
       });
@@ -261,9 +279,14 @@ function main(): void {
     console.log('');
     console.log(`${'record'.padEnd(8)} ${'snapshot'.padEnd(13)} pointers`);
     for (const entry of differing) {
-      const label = entry.n === null ? '?' : String(entry.n);
+      const label = entry.label ?? '?';
       console.log(`${label.padEnd(8)} ${entry.side.padEnd(13)} ${entry.pointers.slice(0, 6).join(' ')}`);
     }
+  }
+  if (options.summary) {
+    console.log(
+      `summary         matched=${matched}/${compared} strict=${strict}/${compared} wake=${wake}/${compared} revision=${revision}/${compared} expected=${expected.length} actual=${actual.length}`
+    );
   }
   process.exit(counts.size === 0 && expected.length === actual.length ? 0 : 1);
 }

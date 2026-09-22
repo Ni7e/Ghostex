@@ -9,6 +9,11 @@
 //! Recordings are the user's conversation: this example reads them from `/tmp/gx-chat/` and writes
 //! to `/tmp/gx-chat/actual/`, and prints counts only, never content.
 //!
+//! A recording holds one RUN per header line: the app starts a fresh QuickJS context every time it
+//! creates a chat runtime for the session, so each header is a fresh brain with its own state and
+//! its own record counter. Every run is replayed into a fresh [`ChatCore`] and [`BridgeTranslator`]
+//! here, the output lines carry the run they belong to, and the report sums the runs.
+//!
 //! Everything below the recording's own framing is `ghostex_gx_chat_core::bridge`: [`BridgeCall`]
 //! parses one call out of the method name and the argument array, and [`BridgeTranslator`] feeds it
 //! to the core and answers what the core asks for (gxserver calls from the recording's own
@@ -67,6 +72,8 @@ fn main() {
 
 struct Report {
     name: String,
+    /// Header lines with at least one record after them, each replayed into a fresh core.
+    runs: usize,
     records: usize,
     inputs: usize,
     documents: usize,
@@ -84,8 +91,9 @@ impl std::fmt::Display for Report {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "recording       {} ({} records)\nreplayed        {} inputs, {} queries, {} documents\nqueries         {}/{} fingerprints matched\nrequests        {} unanswered, {} answers with no request\nrefused         {} inputs\nactual          {}",
+            "recording       {} ({} runs, {} records)\nreplayed        {} inputs, {} queries, {} documents\nqueries         {}/{} fingerprints matched\nrequests        {} unanswered, {} answers with no request\nrefused         {} inputs\nactual          {}",
             self.name,
+            self.runs,
             self.records,
             self.inputs,
             self.queries,
@@ -120,20 +128,48 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
     let mut queries = 0usize;
     let mut queries_differed = 0usize;
     let mut refused = 0usize;
+    let mut unanswered = 0usize;
+    let mut unmatched_answers = 0usize;
+    // The run the next record belongs to. A header opens a run; the run counts once a record
+    // follows it, so a header the app wrote just before closing is skipped rather than graded.
+    let mut run = 0usize;
+    let mut runs = 0usize;
+    let mut run_has_records = false;
+    let mut refusals = Refusals::default();
+    let log_refusals = std::env::var("GX_CHAT_REFUSALS").is_ok();
 
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let Ok(record) = serde_json::from_str::<Value>(line) else {
             // The last line of a live recording may be truncated, which is normal.
             continue;
         };
-        records += 1;
         if record.get("k").and_then(Value::as_str) == Some("header") {
             let version = record.get("v").and_then(Value::as_u64).unwrap_or(0);
             if version != 1 {
                 return Err(format!("unknown recording format {version}"));
             }
+            if run_has_records {
+                finish_run(
+                    &mut core,
+                    &mut translator,
+                    &mut unanswered,
+                    &mut unmatched_answers,
+                );
+                core = ChatCore::new();
+                translator = BridgeTranslator::new();
+            }
+            run += 1;
+            run_has_records = false;
             continue;
         }
+        if run == 0 {
+            return Err("the recording does not start with a header line".to_string());
+        }
+        if !run_has_records {
+            run_has_records = true;
+            runs += 1;
+        }
+        records += 1;
         let kind = record.get("k").and_then(Value::as_str).unwrap_or_default();
         let method = record.get("m").and_then(Value::as_str).unwrap_or_default();
         let args = record
@@ -164,6 +200,7 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
             if kind == "in" {
                 inputs += 1;
                 refused += 1;
+                refusals.note(method, &args, "unparsed");
             }
             continue;
         };
@@ -203,15 +240,14 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
                     // and by kind. A refusal is where the two brains stop being comparable, so
                     // finding the first one is the first thing to do when a recording's count
                     // drops; the record's arguments are never printed.
-                    if std::env::var("GX_CHAT_REFUSALS").is_ok() {
+                    if log_refusals {
                         let number = record.get("n").and_then(Value::as_u64).unwrap_or_default();
-                        let kind = args
-                            .first()
-                            .and_then(|first| first.get("type").or_else(|| first.get("kind")))
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
-                        eprintln!("refused n={number} method={method} kind={kind}");
+                        eprintln!(
+                            "refused run={run} n={number} method={method} {}",
+                            refusal_shape(&args)
+                        );
                     }
+                    refusals.note(method, &args, "unmodelled");
                     refused += 1;
                 }
             }
@@ -232,6 +268,7 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
                 let serialized =
                     serde_json::to_string(&document).map_err(|error| error.to_string())?;
                 let mut out = Map::new();
+                out.insert("run".to_string(), Value::from(run));
                 out.insert(
                     "n".to_string(),
                     record.get("n").cloned().unwrap_or(Value::Null),
@@ -260,9 +297,42 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
         }
     }
 
-    // Storage answers the recording ran out of `resolve` records for are delivered at the end,
-    // so a surface that reads one is not left loading in the last documents of the run.
-    translator.flush_storage(&mut core, ChatContext::at(0.0));
+    if run_has_records {
+        finish_run(
+            &mut core,
+            &mut translator,
+            &mut unanswered,
+            &mut unmatched_answers,
+        );
+    }
+    if log_refusals {
+        refusals.print();
+    }
+    Ok(Report {
+        name,
+        runs,
+        records,
+        inputs,
+        documents,
+        queries,
+        queries_differed,
+        refused,
+        unanswered,
+        unmatched_answers,
+        output,
+    })
+}
+
+/// Closes one run: delivers the storage answers it ran out of `resolve` records for, so a surface
+/// that reads one is not left loading in its last documents, and adds its request counts to the
+/// recording's.
+fn finish_run(
+    core: &mut ChatCore,
+    translator: &mut BridgeTranslator,
+    unanswered: &mut usize,
+    unmatched_answers: &mut usize,
+) {
+    translator.flush_storage(core, ChatContext::at(0.0));
     // `GX_CHAT_REQUESTS=1` names the METHOD of every request the bridge never answered, oldest
     // first. One of those is also what makes a later `resolve` land on the wrong record, because
     // an answer that names nothing goes to the oldest request that could have produced it. Method
@@ -276,18 +346,65 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
             translator.queued_storage_answers()
         );
     }
-    Ok(Report {
-        name,
-        records,
-        inputs,
-        documents,
-        queries,
-        queries_differed,
-        refused,
-        unanswered: translator.unanswered(),
-        unmatched_answers: translator.unmatched_answers(),
-        output,
-    })
+    *unanswered += translator.unanswered();
+    *unmatched_answers += translator.unmatched_answers();
+}
+
+/// The refusals of one replay, counted by the shape of the call rather than by record, so the
+/// summary names every bridge call this build cannot model and how often it arrives.
+#[derive(Default)]
+struct Refusals {
+    counts: std::collections::BTreeMap<String, usize>,
+}
+
+impl Refusals {
+    fn note(&mut self, method: &str, args: &[Value], why: &str) {
+        let key = format!("{why} method={method} {}", refusal_shape(args));
+        *self.counts.entry(key).or_default() += 1;
+    }
+
+    fn print(&self) {
+        for (shape, count) in &self.counts {
+            eprintln!("refusals x{count}: {shape}");
+        }
+    }
+}
+
+/// The SHAPE of a refused call: the first argument's discriminator and its sorted key set.
+///
+/// Never a value. The discriminator (`type` or `kind`) is one of the wire's own spellings, and a
+/// key set names fields, so the line identifies the arm to write without carrying the
+/// conversation. A nested `event` or `result` object is described the same way, one level down,
+/// because the broker wraps the frame the core actually needs.
+fn refusal_shape(args: &[Value]) -> String {
+    fn describe(value: &Value) -> String {
+        match value {
+            Value::Object(object) => {
+                let discriminator = object
+                    .get("type")
+                    .or_else(|| object.get("kind"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let keys: Vec<&str> = object.keys().map(String::as_str).collect();
+                format!("{discriminator}{{{}}}", keys.join(","))
+            }
+            Value::Array(items) => format!("array[{}]", items.len()),
+            Value::String(_) => "string".to_string(),
+            Value::Number(_) => "number".to_string(),
+            Value::Bool(_) => "bool".to_string(),
+            Value::Null => "null".to_string(),
+        }
+    }
+    let Some(first) = args.first() else {
+        return "no arguments".to_string();
+    };
+    let mut shape = describe(first);
+    for nested in ["event", "result", "payload"] {
+        if let Some(inner) = first.get(nested) {
+            shape.push_str(&format!(" {nested}={}", describe(inner)));
+        }
+    }
+    shape
 }
 
 /// Two 32-bit FNV-1a passes over the UTF-16 code units, low byte then high byte, printed as 16

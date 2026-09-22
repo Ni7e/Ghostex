@@ -6,6 +6,7 @@
 #   tooling/gx-chat-core/run-gates.sh --fast       # skip the wasm build and clippy
 #   tooling/gx-chat-core/run-gates.sh --regenerate # rebuild the recordings and fixtures first
 #   tooling/gx-chat-core/run-gates.sh --stale-fails # fail instead of rebuilding a stale expected file
+#   tooling/gx-chat-core/run-gates.sh --only 2c9a     # replay only the recordings whose name contains this
 #
 # What it runs, in order:
 #
@@ -14,7 +15,14 @@
 #  2. `document_roundtrip` over the 24 Chat Lab samples: every one of the document's 84 keys
 #     deserializes and reserializes to the same value.
 #  3. The full replay, on every recording under /tmp/gx-chat: the TypeScript brain and the Rust
-#     core are fed the same inputs and their document sequences are diffed line by line.
+#     core are fed the same inputs and their document sequences are diffed line by line. One row
+#     per recording: documents matched (and strictly matched, with `/requests` in), query
+#     fingerprints, requests the core made that were never answered plus answers that matched no
+#     request, inputs refused, and the two counters. A recording with several header lines (the
+#     app reopened the chat) is several runs, each into a fresh brain on both sides, summed. The
+#     Rust replay is built once in release mode and run as a binary; the TypeScript one is a child
+#     process per run (`replay-typescript.ts`); the diff is ONE pass per recording (`--summary`),
+#     because a real recording's expected file runs to hundreds of megabytes.
 #  4. `coverage.ts`: which of the core's 120 user actions, four frame types and seven broker kinds
 #     no recording reaches. Informational, because it grades the RECORDINGS rather than the core,
 #     but a gate that never opens a surface is grading nothing there.
@@ -57,11 +65,19 @@ recordings="/tmp/gx-chat"
 fast=0
 regenerate=0
 stale_fails=0
+only=""
+expect_only=0
 for argument in "$@"; do
+  if [ "$expect_only" = "1" ]; then
+    only="$argument"
+    expect_only=0
+    continue
+  fi
   case "$argument" in
     --fast) fast=1 ;;
     --regenerate) regenerate=1 ;;
     --stale-fails) stale_fails=1 ;;
+    --only) expect_only=1 ;;
     *) echo "unknown option: $argument" >&2; exit 2 ;;
   esac
 done
@@ -148,31 +164,36 @@ else
 fi
 
 # --- the full replay -------------------------------------------------------
+# Built once, run as a binary: `cargo run` per recording would re-check the crate 35 times.
+replay_binary="$crate/target/release/examples/replay"
+if ! cargo build --release --quiet --example replay 2>/dev/null || [ ! -x "$replay_binary" ]; then
+  record "replay build" "FAIL" "cargo build --release --example replay"
+fi
+reports="$recordings/reports"
+mkdir -p "$reports"
+chmod 700 "$reports"
 shopt -s nullglob
+selected=()
 for recording in "$recordings"/*.jsonl; do
   name="$(basename "$recording" .jsonl)"
-  expected="$recordings/expected/$name.jsonl"
-  # `synthetic-hostile` is graded on ONE property: the core survived. Its input is malformed on
-  # purpose (missing fields, wrong types, absurd numbers, lone UTF-16 surrogates, empty arrays),
-  # the TypeScript brain throws out of its own `publish` on some of it, and answers that name no
-  # request are most of the file. Diffing the documents there would grade Bun's error text rather
-  # than the brain, so this one row is "the replay finished and did not panic".
-  if [ "$name" = "synthetic-hostile" ]; then
-    if hostile="$(cargo run --release --quiet --example replay -- \
-      --utc-offset "$offset_minutes" "$recording" 2>&1)"; then
-      hostile_status="ok"
-    elif printf '%s' "$hostile" | grep -q 'panicked'; then
-      hostile_status="FAIL"
-    else
-      # A non-zero exit with no panic is the replay's own report (answers with no request), which
-      # is expected on this recording and is not what it grades.
-      hostile_status="ok"
-    fi
-    record "hostile survived" "$hostile_status" \
-      "$(printf '%s' "$hostile" | grep '^replayed' | sed 's/^replayed *//')"
-    [ "$hostile_status" = "FAIL" ] && printf '%s\n' "$hostile" | sed 's/^/    /'
+  if [ -n "$only" ] && [[ "$name" != *"$only"* ]]; then
     continue
   fi
+  selected+=("$name")
+done
+shopt -u nullglob
+
+# Three phases, each fanned out across the recordings, because a real recording takes minutes on
+# each side and 28 of them in a row would take an hour: the TypeScript replays (one process per
+# run inside), the Rust replays, then the diffs. Each phase writes one report file per recording
+# under /tmp/gx-chat/reports and the table is read from those afterwards, so no output from two
+# recordings interleaves. The diff phase is the narrowest because a real recording's two document
+# files parse to a few gigabytes each.
+regenerate_list=()
+for name in "${selected[@]}"; do
+  recording="$recordings/$name.jsonl"
+  expected="$recordings/expected/$name.jsonl"
+  [ "$name" = "synthetic-hostile" ] && continue
   # A regenerated recording with an expected sequence older than it grades the Rust core against
   # a TypeScript run of a DIFFERENT recording. That is how `synthetic-e1` read 33/33 on 2026-09-22
   # while its real number was 20/33. A TypeScript brain that has CHANGED since the expected file
@@ -185,38 +206,92 @@ for recording in "$recordings"/*.jsonl; do
     if [ "$stale_fails" = "1" ]; then
       record "expected $name" "FAIL" "stale: the recording or the TypeScript brain is newer"
     else
-      run "replay-typescript $name" bun "$root/tooling/gx-chat-core/replay-typescript.ts" "$recording"
+      regenerate_list+=("$name")
     fi
   fi
-  rust="$(cargo run --release --quiet --example replay -- --utc-offset "$offset_minutes" "$recording" 2>&1)"
+done
+if [ "${#regenerate_list[@]}" -gt 0 ]; then
+  printf '%s\n' "${regenerate_list[@]}" | xargs -P 4 -I{} bash -c \
+    'bun "$1/tooling/gx-chat-core/replay-typescript.ts" "$2/{}.jsonl" > "$2/reports/{}.ts.txt" 2>&1; echo $? > "$2/reports/{}.ts.rc"' \
+    _ "$root" "$recordings"
+  for name in "${regenerate_list[@]}"; do
+    if [ "$(cat "$reports/$name.ts.rc" 2>/dev/null)" != "0" ]; then
+      record "replay-typescript $name" "FAIL" "$(tail -n 1 "$reports/$name.ts.txt" 2>/dev/null)"
+      sed 's/^/    /' "$reports/$name.ts.txt"
+    fi
+  done
+fi
+
+if [ "${#selected[@]}" -gt 0 ]; then
+  printf '%s\n' "${selected[@]}" | xargs -P 8 -I{} bash -c \
+    '"$1" --utc-offset "$3" "$2/{}.jsonl" > "$2/reports/{}.rust.txt" 2>&1; echo $? > "$2/reports/{}.rust.rc"' \
+    _ "$replay_binary" "$recordings" "$offset_minutes"
+  diff_list=()
+  for name in "${selected[@]}"; do
+    [ "$name" = "synthetic-hostile" ] && continue
+    [ -s "$recordings/expected/$name.jsonl" ] && diff_list+=("$name")
+  done
+  if [ "${#diff_list[@]}" -gt 0 ]; then
+    printf '%s\n' "${diff_list[@]}" | xargs -P 3 -I{} bash -c \
+      'bun "$1/tooling/gx-chat-core/replay-diff.ts" {} --ignore /requests,/revision,/nextWakeMs --limit 8 --summary > "$2/reports/{}.diff.txt" 2>&1' \
+      _ "$root" "$recordings"
+  fi
+fi
+
+for name in "${selected[@]}"; do
+  rust="$(cat "$reports/$name.rust.txt" 2>/dev/null)"
+  # `synthetic-hostile` is graded on ONE property: the core survived. Its input is malformed on
+  # purpose (missing fields, wrong types, absurd numbers, lone UTF-16 surrogates, empty arrays),
+  # the TypeScript brain throws out of its own `publish` on some of it, and answers that name no
+  # request are most of the file. Diffing the documents there would grade Bun's error text rather
+  # than the brain, so this one row is "the replay finished and did not panic".
+  if [ "$name" = "synthetic-hostile" ]; then
+    if printf '%s' "$rust" | grep -q 'panicked'; then
+      hostile_status="FAIL"
+    else
+      # A non-zero exit with no panic is the replay's own report (answers with no request), which
+      # is expected on this recording and is not what it grades.
+      hostile_status="ok"
+    fi
+    record "hostile survived" "$hostile_status" \
+      "$(printf '%s' "$rust" | grep '^replayed' | sed 's/^replayed *//')"
+    [ "$hostile_status" = "FAIL" ] && printf '%s\n' "$rust" | sed 's/^/    /'
+    continue
+  fi
+  runs="$(printf '%s' "$rust" | grep '^recording' | sed -n 's/.*(\([0-9]*\) runs.*/\1/p')"
   queries="$(printf '%s' "$rust" | grep '^queries' | awk '{print $2}')"
   unanswered="$(printf '%s' "$rust" | grep '^requests' | awk '{print $2}')"
-  record "replay $name queries" "$([ "${queries%%/*}" = "${queries##*/}" ] && echo ok || echo FAIL)" "$queries fingerprints"
-  record "replay $name requests" "$([ "${unanswered:-0}" = "0" ] && echo ok || echo FAIL)" "$unanswered unanswered"
-  if [ -s "$expected" ]; then
-    diff_output="$(bun "$root/tooling/gx-chat-core/replay-diff.ts" "$name" \
-      --ignore /requests,/revision,/nextWakeMs --limit 8 2>&1)"
-    matched="$(printf '%s' "$diff_output" | grep '^matched' | awk '{print $2}')"
-    strict="$(bun "$root/tooling/gx-chat-core/replay-diff.ts" "$name" --limit 0 2>&1 |
-      grep '^matched' | awk '{print $2}')"
-    status="$([ "${matched%%/*}" = "${matched##*/}" ] && echo ok || echo FAIL)"
-    record "documents $name" "$status" "$matched documents (strict, with /requests: $strict)"
-    # The two excluded counters, measured on their own so the gap stays a number rather than a
-    # footnote. `nextWakeMs` is the earliest armed deadline and should agree; `revision` counts
-    # publishes, including the ones between two drains that no document can show.
-    wake="$(bun "$root/tooling/gx-chat-core/replay-diff.ts" "$name" --keys nextWakeMs --limit 0 2>&1 |
-      grep '^matched' | awk '{print $2}')"
-    counter="$(bun "$root/tooling/gx-chat-core/replay-diff.ts" "$name" --keys revision --limit 0 2>&1 |
-      grep '^matched' | awk '{print $2}')"
-    # `nextWakeMs` is a real gate: the two brains arm the same deadlines, so it must match. Only
-    # `revision` stays informational, because several arms publish two or three times between two
-    # drains and no document can show a publish that happened between them.
-    record "counters $name" "$([ "${wake%%/*}" = "${wake##*/}" ] && echo ok || echo FAIL)" \
-      "nextWakeMs $wake, revision $counter (informational)"
-    [ "$status" = "FAIL" ] && printf '%s\n' "$diff_output" | sed -n '5,20p' | sed 's/^/    /'
+  unmatched="$(printf '%s' "$rust" | grep '^requests' | awk '{print $4}')"
+  refused="$(printf '%s' "$rust" | grep '^refused' | awk '{print $2}')"
+  # One row per recording. It is `ok` only when every document matched with the three excluded
+  # pointers out, every query fingerprint matched, the core left no request unanswered and no
+  # answer unmatched, it refused no input, and the two brains armed the same next deadline.
+  # `revision` stays informational, because several arms publish two or three times between two
+  # drains and no document can show a publish that happened between them.
+  diff_output="$(cat "$reports/$name.diff.txt" 2>/dev/null)"
+  summary="$(printf '%s' "$diff_output" | grep '^summary')"
+  if [ -n "$summary" ]; then
+    matched="$(printf '%s' "$summary" | sed -n 's/.*matched=\([0-9/]*\).*/\1/p')"
+    strict="$(printf '%s' "$summary" | sed -n 's/.*strict=\([0-9/]*\).*/\1/p')"
+    wake="$(printf '%s' "$summary" | sed -n 's/.*wake=\([0-9/]*\).*/\1/p')"
+    counter="$(printf '%s' "$summary" | sed -n 's/.*revision=\([0-9/]*\).*/\1/p')"
+    expected_count="$(printf '%s' "$summary" | sed -n 's/.*expected=\([0-9]*\).*/\1/p')"
+    actual_count="$(printf '%s' "$summary" | sed -n 's/.*actual=\([0-9]*\).*/\1/p')"
+  else
+    matched="?"; strict="?"; wake="?"; counter="?"; expected_count="?"; actual_count="?"
   fi
+  status="ok"
+  [ "${matched%%/*}" = "${matched##*/}" ] || status="FAIL"
+  [ "$expected_count" = "$actual_count" ] || status="FAIL"
+  [ "${queries%%/*}" = "${queries##*/}" ] || status="FAIL"
+  [ "${unanswered:-0}" = "0" ] || status="FAIL"
+  [ "${unmatched:-0}" = "0" ] || status="FAIL"
+  [ "${refused:-0}" = "0" ] || status="FAIL"
+  [ "${wake%%/*}" = "${wake##*/}" ] || status="FAIL"
+  record "replay $name" "$status" \
+    "docs $matched (strict $strict) queries $queries requests ${unanswered:-?}u/${unmatched:-?}m refused ${refused:-?} wake $wake rev $counter runs ${runs:-?}"
+  [ "$status" = "FAIL" ] && [ -n "$diff_output" ] && printf '%s\n' "$diff_output" | sed -n '6,20p' | grep -v '^summary' | sed 's/^/    /'
 done
-shopt -u nullglob
 
 # --- what the recordings never reach ---------------------------------------
 coverage="$(bun "$root/tooling/gx-chat-core/coverage.ts" 2>&1 | grep 'exercised$' | tr '\n' ' ')"

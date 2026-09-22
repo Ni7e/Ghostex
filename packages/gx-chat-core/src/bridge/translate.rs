@@ -90,6 +90,11 @@ pub struct BridgeTranslator {
     history_reads: VecDeque<StorageKey>,
     /// Chunked broker payloads being reassembled, by transfer id: `(total, parts)`.
     transfers: BTreeMap<String, (usize, Vec<String>)>,
+    /// The last call was a chunk that was accepted into `transfers` and produced no event yet.
+    ///
+    /// Read once by [`BridgeTranslator::feed`], which reports the call as applied: a piece the
+    /// core has taken is modelled traffic, not a refusal.
+    absorbed_chunk: bool,
     /// The revision the translator itself last drained, so a `take` asks "what changed since MY
     /// last drain" rather than replaying the other brain's counter.
     last_revision: u64,
@@ -128,6 +133,7 @@ impl BridgeTranslator {
             }
             other => {
                 let mut outcome = BridgeOutcome::default();
+                self.absorbed_chunk = false;
                 for event in self.events_for(other) {
                     let effects = core.handle(event, context.clone());
                     self.record(&effects);
@@ -138,6 +144,9 @@ impl BridgeTranslator {
                         self.record(&round);
                         outcome.effects.extend(round);
                     }
+                }
+                if outcome.applied == 0 && std::mem::take(&mut self.absorbed_chunk) {
+                    outcome.applied = 1;
                 }
                 outcome
             }
@@ -376,6 +385,7 @@ impl BridgeTranslator {
         }
         parts.push(data.to_string());
         if parts.len() != total {
+            self.absorbed_chunk = true;
             return None;
         }
         let assembled = parts.concat();
