@@ -10,9 +10,11 @@
 mod call;
 mod compare;
 mod queries;
+mod record;
 mod translate;
 
 pub use crate::bridge::call::{BridgeCall, BridgeQuery};
 pub use crate::bridge::compare::{comparable_document, comparable_value, EXCLUDED_POINTERS};
 pub use crate::bridge::queries::answer_query;
+pub use crate::bridge::record::recorded_context;
 pub use crate::bridge::translate::{BridgeOutcome, BridgeTranslator};

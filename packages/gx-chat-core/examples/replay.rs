@@ -26,7 +26,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use ghostex_gx_chat_core::bridge::{BridgeCall, BridgeTranslator};
+use ghostex_gx_chat_core::bridge::{recorded_context, BridgeCall, BridgeTranslator};
 use ghostex_gx_chat_core::{ChatContext, ChatCore};
 use serde_json::{Map, Value};
 
@@ -113,6 +113,7 @@ impl std::fmt::Display for Report {
 }
 
 fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
+    let recorder_clock = std::env::var("GX_CHAT_CLOCK").is_ok_and(|clock| clock == "recorder");
     let text = fs::read_to_string(input).map_err(|error| error.to_string())?;
     let name = input
         .file_stem()
@@ -192,43 +193,19 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        // `ms` is the record's own `now_ms` and `r` is every `Math.random()` the live run read
-        // during this call, in order: the two queues the core draws from instead of reading a
-        // clock or a random source (`docs/2026-09-21/rust-chat/REPLAY.md`).
-        // The record's `ms` is the RECORDER's clock read just before the call; `c[0]` is the
-        // brain's own first read inside it, which is the value every rule in that call used
-        // (`tick` fires timers against it, `useState(Date.now)` latches it). They differ by a
-        // millisecond about two percent of the time, and that millisecond is the whole of the
-        // `accountStatus.now` difference on a real recording, so the brain's read is the event's
-        // clock when the record carries one.
-        let recorded_ms = record.get("ms").and_then(Value::as_f64).unwrap_or(0.0);
-        let first_read_ms = record
-            .get("c")
-            .and_then(Value::as_array)
-            .and_then(|reads| reads.first())
-            .and_then(Value::as_f64);
-        let mut context = ChatContext::at(first_read_ms.unwrap_or(recorded_ms));
-        context.utc_offset_minutes = utc_offset_minutes;
-        // The whole `c` queue, so a rule that latches a LATER read of the call (the watchdog's
-        // `now`, a `setNow` inside an interval) takes the one the brain took.
-        context.clock_reads = record
-            .get("c")
-            .and_then(Value::as_array)
-            .map(|reads| reads.iter().filter_map(Value::as_f64).collect())
-            .unwrap_or_default();
-        if let Some(draws) = record.get("r").and_then(Value::as_array) {
-            for (slot, draw) in draws.iter().take(context.random_units.len()).enumerate() {
-                context.random_units[slot] = draw.as_f64().unwrap_or(0.0);
+        // `recorded_context` takes the brain's own clock reads (`c`), its random draws and its ids
+        // off the line, exactly as the desktop shadow must. `GX_CHAT_CLOCK=recorder` reads the
+        // clock the way the shadow did before it adopted that (`ms` for every read), so a
+        // difference only the shadow reports can be told apart from a real one.
+        let context = if recorder_clock {
+            let mut stripped = record.clone();
+            if let Some(object) = stripped.as_object_mut() {
+                object.remove("c");
             }
-        }
-        // `u` is every `crypto.randomUUID()` the live run read during this call. The core takes
-        // them as numbers so its context stays `Copy`; parsing the recorded text back and letting
-        // `ChatContext::random_id` print it again round-trips to the same string.
-        if let Some(ids) = record.get("u").and_then(Value::as_array) {
-            for (slot, id) in ids.iter().take(context.random_ids.len()).enumerate() {
-                context.random_ids[slot] = id.as_str().map(uuid_bits).unwrap_or_default();
-            }
-        }
+            recorded_context(&stripped, utc_offset_minutes)
+        } else {
+            recorded_context(&record, utc_offset_minutes)
+        };
 
         let Some(call) = BridgeCall::parse(method, &args) else {
             if kind == "in" {
@@ -506,15 +483,6 @@ fn fingerprint(text: &str) -> String {
         fnv(text, 0x811c_9dc5),
         fnv(text, 0x0f1b_bcd9)
     )
-}
-
-/// The 128 bits of a canonical UUID string, so the core can print the same one back.
-fn uuid_bits(text: &str) -> u128 {
-    let mut bits = 0u128;
-    for digit in text.chars().filter_map(|unit| unit.to_digit(16)) {
-        bits = (bits << 4) | u128::from(digit);
-    }
-    bits
 }
 
 fn fnv(text: &str, seed: u32) -> u32 {
