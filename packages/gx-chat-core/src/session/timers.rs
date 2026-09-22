@@ -29,6 +29,7 @@ pub fn callback_reads_clock(key: &str) -> bool {
             | "menus.contextMeter"
             | "extras.activityClock"
             | "extras.fleetClock"
+            | "menus.switchClock"
     )
 }
 

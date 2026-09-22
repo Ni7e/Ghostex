@@ -38,8 +38,13 @@ pub struct AccountSwitchState {
     pub now_ms: Option<i64>,
     /// The id whose acknowledgement timer is running, and when it is due.
     pub acknowledge: Option<(String, i64)>,
-    /// The id `now_ms` was latched for, so a new switch re-reads the clock.
+    /// The visible card the clock effect last ran for (`[visible?.id]`).
     pub clock_for: Option<String>,
+    /// When the card's 30 second `setInterval` next fires, or `None` while no card is up.
+    pub clock_due_ms: Option<i64>,
+    /// The progress effect's dependencies (`[progress?.id, progress?.phase, progress?.updatedAt,
+    /// ready]`) as it last ran, so the core knows when it runs again and reads the clock.
+    pub progress_deps: Option<(String, String, String, bool)>,
 }
 
 /// The card to draw, the clock it reads, and whether sending is held.
@@ -96,29 +101,13 @@ impl AccountSwitchState {
                 }
             }
         }
-        let visible = self.visible_id(progress, now_ms).is_some();
-        if visible {
-            // `useEffect` on `visible?.id`: the clock is read once per switch and then every 30
-            // seconds while the card is up.
-            match (&self.clock_for, self.now_ms) {
-                (Some(id), Some(latched))
-                    if id == &progress.id && now_ms - latched < SWITCH_CLOCK_INTERVAL_MS => {}
-                _ => {
-                    self.clock_for = Some(progress.id.clone());
-                    self.now_ms = Some(now_ms);
-                }
-            }
-        }
-        let mut wake = self.acknowledge.as_ref().map(|(_, due)| *due);
-        if visible {
-            let next_clock = self.now_ms.unwrap_or(now_ms) + SWITCH_CLOCK_INTERVAL_MS;
-            wake = Some(wake.map_or(next_clock, |due| due.min(next_clock)));
-        }
-        wake
+        // The card's own clock is `crate::menus::lifecycle`'s: its effect and interval each take
+        // a read of their own, which only the caller holding the turn's clock reads can pick.
+        self.acknowledge.as_ref().map(|(_, due)| *due)
     }
 
     /// `visible`: the switch to draw, or nothing.
-    fn visible_id<'a>(
+    pub fn visible_id<'a>(
         &self,
         progress: &'a SwitchProgress,
         now_ms: i64,

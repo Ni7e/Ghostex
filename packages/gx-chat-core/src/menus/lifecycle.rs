@@ -36,9 +36,17 @@ pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
     // `persistence.write` runs inside the store's own `publish`, which the layout effect above
     // reaches before any passive effect, so the write goes out ahead of the accounts poll.
     effects.extend(persist_options(state));
-    effects.extend(poll_accounts(state, context, now_ms));
+    // The render's own clock reads, measured before any effect below moves the state they read.
+    let render_reads = effect_clock_index(state);
+    let accounts_key = state.menus.accounts_key.clone();
+    effects.extend(poll_accounts(state, context, now_ms, render_reads));
+    // The accounts effect (declared before `computeAccountSwitchStatus`) re-ran and armed its
+    // interval, which is one more read ahead of the card's effects.
+    let accounts_armed =
+        state.menus.accounts_key.is_some() && state.menus.accounts_key != accounts_key;
     let progress = switch_progress(state);
     let ready = switch_ready(state);
+    let progress_reads = progress_effect_reads(state, progress.as_ref(), ready, now_ms);
     // The switch card's own clock starts when the controller first renders, which is the frame
     // after the composer boot read lands; before that there is nothing to draw a card from.
     let switch_wake = if state.menus.options_seeded {
@@ -48,14 +56,24 @@ pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
         if state.menus.account_switch.now_ms.is_none() {
             state.menus.account_switch.now_ms = Some(state.core.read_clock(context).round() as i64);
         }
-        state
+        let wake = state
             .menus
             .account_switch
-            .observe(progress.as_ref(), ready, now_ms)
+            .observe(progress.as_ref(), ready, now_ms);
+        switch_clock(
+            state,
+            context,
+            progress.as_ref(),
+            now_ms,
+            render_reads + usize::from(accounts_armed) + progress_reads,
+        );
+        wake
     } else {
         None
     };
     arm(state, "menus.switchCard", switch_wake, context);
+    let clock_due = state.menus.account_switch.clock_due_ms;
+    arm(state, SWITCH_CLOCK_TIMER, clock_due, context);
     let option_wake = state.menus.options.next_wake_ms();
     arm(state, "menus.optionGrace", option_wake, context);
     let accounts_wake = state.menus.accounts_poll_due_ms;
@@ -202,6 +220,79 @@ fn persist_options(state: &mut ChatState) -> Vec<Effect> {
     effects
 }
 
+/// The key of the switch card's 30 second `setInterval`.
+const SWITCH_CLOCK_TIMER: &str = "menus.switchClock";
+
+/// `useEffect(() => { if (!visible) return; setNow(Date.now()); const timer = setInterval(() =>
+/// setNow(Date.now()), 30000); return () => clearInterval(timer); }, [visible?.id])` in
+/// `computeAccountSwitchStatus`.
+///
+/// `setNow` takes the effect's own read, `effect_read` (the render's reads and every effect ahead
+/// of it come first), and the interval's first deadline the read after it; each fire re-anchors at
+/// the tick and `setNow`s the callback's own read. The core used to latch the event's first read
+/// and re-latch on the first event 30 seconds on, which put `accountStatus.now` a few
+/// milliseconds early for as long as a card stood.
+fn switch_clock(
+    state: &mut ChatState,
+    context: &ChatContext,
+    progress: Option<&crate::menus::accounts_presentation::SwitchProgress>,
+    now_ms: i64,
+    effect_read: usize,
+) {
+    let switch = &mut state.menus.account_switch;
+    let visible = progress
+        .and_then(|progress| switch.visible_id(progress, now_ms))
+        .map(|progress| progress.id.clone());
+    if visible != switch.clock_for {
+        switch.clock_for = visible.clone();
+        switch.clock_due_ms = visible.map(|_| {
+            switch.now_ms = Some(context.clock_read(effect_read).round() as i64);
+            context.clock_read(effect_read + 1).round() as i64
+                + crate::menus::account_switch::SWITCH_CLOCK_INTERVAL_MS
+        });
+        return;
+    }
+    if switch.clock_due_ms.is_some() && state.core.timer_fired(SWITCH_CLOCK_TIMER) {
+        let at = state.core.timer_now(SWITCH_CLOCK_TIMER, context).round() as i64;
+        let switch = &mut state.menus.account_switch;
+        switch.now_ms = Some(at);
+        switch.clock_due_ms = Some(now_ms + crate::menus::account_switch::SWITCH_CLOCK_INTERVAL_MS);
+    }
+}
+
+/// The clock reads the switch card's progress effect makes when it runs this render.
+///
+/// It runs when `[progress?.id, progress?.phase, progress?.updatedAt, ready]` moved, and only a
+/// `success` reads: `Date.now() - Date.parse(updatedAt)` for its age, then the 1.8 s dismissal's
+/// `setTimeout` once the account is ready.
+fn progress_effect_reads(
+    state: &mut ChatState,
+    progress: Option<&crate::menus::accounts_presentation::SwitchProgress>,
+    ready: bool,
+    now_ms: i64,
+) -> usize {
+    let deps = progress.map(|progress| {
+        (
+            progress.id.clone(),
+            progress.phase.clone(),
+            progress.updated_at.clone(),
+            ready,
+        )
+    });
+    let switch = &mut state.menus.account_switch;
+    if deps == switch.progress_deps {
+        return 0;
+    }
+    switch.progress_deps = deps;
+    let Some(progress) = progress.filter(|progress| progress.phase == "success") else {
+        return 0;
+    };
+    let recent = crate::menus::time::parse_iso_millis(&progress.updated_at)
+        .is_some_and(|at| now_ms - at < crate::menus::account_switch::SWITCH_RECENT_MS);
+    let watched = switch.observed.as_deref() == Some(progress.id.as_str());
+    1 + usize::from((watched || recent) && ready)
+}
+
 /// The key of the poll's `setInterval` in the timer table.
 const ACCOUNTS_POLL_TIMER: &str = "menus.accountsPoll";
 
@@ -215,7 +306,12 @@ const ACCOUNTS_POLL_TIMER: &str = "menus.accountsPoll";
 /// `setInterval` itself read, which is past the render's reads rather than the call's first.
 /// Measured from the call's first read, the first poll after every restart went out one host tick
 /// early on a large frame, and `accountPanel.busy` moved a document ahead of the live brain.
-fn poll_accounts(state: &mut ChatState, context: &ChatContext, now_ms: i64) -> Vec<Effect> {
+fn poll_accounts(
+    state: &mut ChatState,
+    context: &ChatContext,
+    now_ms: i64,
+    render_reads: usize,
+) -> Vec<Effect> {
     let key = accounts_poll_key(state);
     let Some(key) = key else {
         // `if (!provider && !panelProvider) { setAccounts(undefined); return; }`
@@ -230,7 +326,7 @@ fn poll_accounts(state: &mut ChatState, context: &ChatContext, now_ms: i64) -> V
         state.menus.accounts_generation += 1;
         state.menus.accounts_busy = false;
         state.menus.accounts_key = Some(key);
-        let armed_at = context.clock_read(effect_clock_index(state)).round() as i64;
+        let armed_at = context.clock_read(render_reads).round() as i64;
         state.menus.accounts_poll_due_ms = Some(armed_at + ACCOUNTS_POLL_MS);
         return request_session_accounts(state);
     }
