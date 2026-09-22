@@ -14,22 +14,6 @@ use crate::session_chat_send::{
     build_session_chat_paste_bytes, capture_session_terminal_text_vt, AGENT_TUI_CLEAR_INPUT_LINE,
 };
 
-fn catalog_model(provider: &str, model: &str) -> Option<Value> {
-    static CATALOG: OnceLock<Value> = OnceLock::new();
-    CATALOG
-        .get_or_init(|| {
-            serde_json::from_str(include_str!("../../agent-model-catalog.json"))
-                .expect("bundled model catalog")
-        })
-        .get("agents")?
-        .get(provider)?
-        .get("models")?
-        .as_array()?
-        .iter()
-        .find(|row| row.get("value").and_then(Value::as_str) == Some(model))
-        .cloned()
-}
-
 fn option_agent(provider: &str) -> SessionChatOptionAgent {
     match provider {
         "cursor" => SessionChatOptionAgent::Cursor,
@@ -115,7 +99,7 @@ fn cursor_parameters(screen: &str, label: &str) -> Option<Vec<ParameterRow>> {
 
 impl PickerDriver<'_> {
     async fn drive_provider(&self, plan: &CodexPickerPlan) -> Result<(), DomainStateError> {
-        let row = catalog_model(&plan.provider, &plan.model)
+        let row = crate::agent_model_catalog::catalog_model(&plan.provider, &plan.model)
             .ok_or_else(|| invalid_params("The model is not in this server's catalog."))?;
         let efforts = row
             .get("efforts")

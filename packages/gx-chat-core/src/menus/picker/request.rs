@@ -9,61 +9,18 @@ use crate::menus::picker::model_picker::{
     EffortChoice, ModelPickerModel, ModelPickerProvider, ModelPickerRequest,
 };
 
-/// `SHORT_MODEL_LABELS`.
-fn short_model_label(value: &str) -> Option<&'static str> {
-    match value {
-        "gpt-6-astra" => Some("Astra"),
-        "gpt-5.6-sol" => Some("Sol"),
-        "gpt-5.6-terra" => Some("Terra"),
-        "gpt-5.6-luna" => Some("Luna"),
-        "fable" => Some("Fable"),
-        "opus[1m]" => Some("Opus (1m)"),
-        "opus" => Some("Opus"),
-        "sonnet" => Some("Sonnet"),
-        "haiku" => Some("Haiku"),
-        _ => None,
-    }
-}
-
-/// CDXC:SessionChat 2026-09-11 DECISION: User chose this exact top-to-bottom Cursor overlay
-/// order, keeping related models together.
-const CURSOR_MODEL_ORDER: &[&str] = &[
-    "auto",
-    "cursor-grok-4.6",
-    "gemini-3.8-flash",
-    "claude-fable-5-1",
-    "claude-opus-5",
-    "claude-opus-4-8",
-    "claude-sonnet-5",
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-];
-
-/// CDXC:SessionChat 2026-09-11 DECISION: User chose this exact top-to-bottom Antigravity overlay
-/// order, with Gemini together, then Opus, Sonnet and GPT-OSS.
-const ANTIGRAVITY_MODEL_ORDER: &[&str] = &[
-    "gemini-3.8-flash",
-    "gemini-3.1-pro",
-    "claude-opus-4-6-thinking",
-    "claude-sonnet-4-6",
-    "gpt-oss-120b-medium",
-];
-
-/// `MODEL_RANKS`: the two providers whose overlay has a fixed order.
-fn model_order(provider: ModelPickerProvider) -> Option<&'static [&'static str]> {
-    match provider {
-        ModelPickerProvider::Cursor => Some(CURSOR_MODEL_ORDER),
-        ModelPickerProvider::Antigravity => Some(ANTIGRAVITY_MODEL_ORDER),
-        _ => None,
-    }
-}
-
-/// The rank a value sorts at: its place in the order, else the order's length (last).
-fn model_rank(order: &[&str], value: &str) -> usize {
+/// `quickPickerRank`: a value's place in the catalog's `quickPickerOrder`, else the order's
+/// length, so rows the order does not name follow in catalog order.
+///
+/// CDXC:SessionChat 2026-09-22 DECISION: User: new models and quick picker changes must reach
+/// customers without an app release. Card order, card names and hidden cards come from the
+/// catalog (`quickPickerOrder`, `quickPickerLabel`, `quickPickerHidden`), which is where the
+/// earlier decisions now live: Cursor's hand-picked order with Grok 4.7 above Grok 4.6,
+/// Antigravity's Gemini-first order, the short Claude and Codex names, and no 200K Opus card.
+fn quick_picker_rank(order: &[String], value: &str) -> usize {
     order
         .iter()
-        .position(|entry| *entry == value)
+        .position(|entry| entry == value)
         .unwrap_or(order.len())
 }
 
@@ -82,18 +39,18 @@ pub fn model_picker_provider(icon: Option<&str>) -> Option<ModelPickerProvider> 
     }
 }
 
-/// The trailing codename Codex's own picker repeats after the version.
-fn strip_codex_codename(label: &str) -> String {
-    for name in ["Astra", "Sol", "Terra", "Luna"] {
-        let Some(head) = label.strip_suffix(name) else {
-            continue;
-        };
-        let trimmed = head.trim_end_matches([' ', '\t', '\n', '\r']);
-        if trimmed.len() < head.len() {
-            return trimmed.to_string();
-        }
+/// `codexCardVersion`: Codex's cards show the codename big and the version under it, so
+/// "GPT 6 Astra" with the card name "Astra" is "GPT 6".
+fn codex_card_version(label: &str, card_label: Option<&str>) -> String {
+    let Some(head) = card_label.and_then(|card| label.strip_suffix(card)) else {
+        return label.to_string();
+    };
+    let trimmed = head.trim_end_matches([' ', '\t', '\n', '\r']);
+    if trimmed.len() < head.len() {
+        trimmed.to_string()
+    } else {
+        label.to_string()
     }
-    label.to_string()
 }
 
 /// `createModelPickerRequest`, shared by the in-pane chat picker and the terminal's native modal
@@ -106,33 +63,29 @@ pub fn create_model_picker_request(
     request_id: String,
 ) -> Option<ModelPickerRequest> {
     let agent = catalog.agents.get(provider.as_str())?;
-    let order = model_order(provider);
     // CDXC:SessionChat 2026-09-09 DECISION: User: keep only the selected models in the quick
     // picker, exclude Cursor Composer too, and retain every other model under Legacy in the
     // normal picker.
     let mut kept: Vec<_> = agent
         .models
         .iter()
-        .filter(|model| model.group.is_none())
+        .filter(|model| model.group.is_none() && !model.quick_picker_hidden)
         .collect();
-    if let Some(order) = order {
-        // `Array.prototype.sort` is stable, so equal ranks keep catalog order.
-        kept.sort_by_key(|model| model_rank(order, &model.value));
-    }
+    // `Array.prototype.sort` is stable, so equal ranks keep catalog order.
+    kept.sort_by_key(|model| quick_picker_rank(&agent.quick_picker_order, &model.value));
     let models: Vec<ModelPickerModel> = kept
         .into_iter()
         .map(|model| ModelPickerModel {
             value: model.value.clone(),
-            label: match provider {
-                ModelPickerProvider::Claude | ModelPickerProvider::Codex => {
-                    short_model_label(&model.value)
-                        .map(str::to_string)
-                        .unwrap_or_else(|| model.label.clone())
-                }
-                _ => model.label.clone(),
-            },
+            label: model
+                .quick_picker_label
+                .clone()
+                .unwrap_or_else(|| model.label.clone()),
             version: match provider {
-                ModelPickerProvider::Codex => Some(strip_codex_codename(&model.label)),
+                ModelPickerProvider::Codex => Some(codex_card_version(
+                    &model.label,
+                    model.quick_picker_label.as_deref(),
+                )),
                 _ => None,
             },
             efforts: model

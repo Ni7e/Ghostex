@@ -42,6 +42,16 @@ export interface AgentModelCatalogModel {
    * Absent means the row sits at the top level of the picker.
    */
   group?: string;
+  /** The quick picker (Option+P) card's name, when it is shorter than `label`. */
+  quickPickerLabel?: string;
+  /** Leaves an ungrouped row out of the quick picker; grouped rows never show there. */
+  quickPickerHidden?: boolean;
+  /**
+   * Other spellings the CLI prints for this model in its footer or statusline
+   * (an older release's name, say), beyond `label` and `pickerLabel`, so
+   * gxserver maps them to `value`.
+   */
+  terminalLabels?: readonly string[];
 }
 
 /**
@@ -83,6 +93,16 @@ export interface AgentModelCatalogAgent {
    * list, so adding a group never has to break them.
    */
   groups?: readonly AgentModelCatalogGroup[];
+  /**
+   * CDXC:SessionChat 2026-09-22 DECISION:
+   * User: new models and quick picker changes must reach customers almost as
+   * soon as the catalog is pushed, without an app release. The quick picker's
+   * card order, card names and hidden cards therefore live here instead of in
+   * the picker code: `quickPickerOrder` lists model values top to bottom, and
+   * rows it does not name follow in catalog order, so a newly added model
+   * still shows up before anyone orders it.
+   */
+  quickPickerOrder?: readonly string[];
   models: readonly AgentModelCatalogModel[];
 }
 
@@ -155,6 +175,20 @@ function parseModel(input: unknown, agentEfforts: readonly string[]): AgentModel
   if (group !== undefined) {
     model.group = group;
   }
+  const quickPickerLabel = optionalString(input.quickPickerLabel);
+  if (quickPickerLabel !== undefined) {
+    model.quickPickerLabel = quickPickerLabel;
+  }
+  if (input.quickPickerHidden === true) {
+    model.quickPickerHidden = true;
+  }
+  if (input.terminalLabels !== undefined) {
+    const terminalLabels = stringList(input.terminalLabels);
+    if (terminalLabels === null) {
+      return null;
+    }
+    model.terminalLabels = terminalLabels;
+  }
   return model;
 }
 
@@ -192,7 +226,8 @@ function parseAgent(input: unknown): AgentModelCatalogAgent | null {
   const name = optionalString(input.name);
   const efforts = stringList(input.efforts);
   const groups = parseGroups(input.groups);
-  if (!name || efforts === null || groups === null || !Array.isArray(input.models)) {
+  const quickPickerOrder = input.quickPickerOrder === undefined ? [] : stringList(input.quickPickerOrder);
+  if (!name || efforts === null || groups === null || quickPickerOrder === null || !Array.isArray(input.models)) {
     return null;
   }
   const models: AgentModelCatalogModel[] = [];
@@ -223,6 +258,9 @@ function parseAgent(input: unknown): AgentModelCatalogAgent | null {
   }
   if (groups.length > 0) {
     agent.groups = groups;
+  }
+  if (quickPickerOrder.length > 0) {
+    agent.quickPickerOrder = quickPickerOrder;
   }
   return agent;
 }

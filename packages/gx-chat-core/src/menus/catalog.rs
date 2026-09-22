@@ -36,6 +36,12 @@ pub struct CatalogModel {
     pub default: bool,
     /// Id of the agent group this row is nested under.
     pub group: Option<String>,
+    /// The quick picker card's name, when it is shorter than `label`.
+    pub quick_picker_label: Option<String>,
+    /// Leaves an ungrouped row out of the quick picker; grouped rows never show there.
+    pub quick_picker_hidden: bool,
+    /// Other spellings the CLI prints for this model, beyond `label` and `picker_label`.
+    pub terminal_labels: Vec<String>,
 }
 
 /// A submenu in an agent's model picker.
@@ -66,6 +72,9 @@ pub struct CatalogAgent {
     pub fast_mode: CatalogFastMode,
     /// Present only when the document declares at least one group.
     pub groups: Vec<CatalogGroup>,
+    /// The quick picker's card order by model value; rows it does not name follow in catalog
+    /// order (`agent-model-catalog.ts`, `quickPickerOrder`).
+    pub quick_picker_order: Vec<String>,
     /// One flat list in display order; grouping is layered on top of it.
     pub models: Vec<CatalogModel>,
 }
@@ -226,6 +235,10 @@ fn parse_agent(input: &Value) -> Option<CatalogAgent> {
     let name = optional_string(object.get("name"))?;
     let efforts = string_list(object.get("efforts"))?;
     let groups = parse_groups(object.get("groups"))?;
+    let quick_picker_order = match object.get("quickPickerOrder") {
+        None => Vec::new(),
+        Some(order) => string_list(Some(order))?,
+    };
     let models_input = object.get("models")?.as_array()?;
     let mut models = Vec::with_capacity(models_input.len());
     for entry in models_input {
@@ -256,6 +269,7 @@ fn parse_agent(input: &Value) -> Option<CatalogAgent> {
         default_effort: optional_string(object.get("defaultEffort")),
         fast_mode,
         groups,
+        quick_picker_order,
         models,
     })
 }
@@ -296,6 +310,10 @@ fn parse_model(input: &Value, agent_efforts: &[String]) -> Option<CatalogModel> 
         Some(efforts) => string_list(Some(efforts))?,
     };
     let picker_label = optional_string(object.get("pickerLabel")).filter(|picker| picker != &label);
+    let terminal_labels = match object.get("terminalLabels") {
+        None => Vec::new(),
+        Some(labels) => string_list(Some(labels))?,
+    };
     Some(CatalogModel {
         value,
         label,
@@ -306,6 +324,9 @@ fn parse_model(input: &Value, agent_efforts: &[String]) -> Option<CatalogModel> 
         fast_mode: object.get("fastMode").and_then(Value::as_bool) == Some(true),
         default: object.get("default").and_then(Value::as_bool) == Some(true),
         group: optional_string(object.get("group")),
+        quick_picker_label: optional_string(object.get("quickPickerLabel")),
+        quick_picker_hidden: object.get("quickPickerHidden").and_then(Value::as_bool) == Some(true),
+        terminal_labels,
     })
 }
 

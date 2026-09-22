@@ -19,11 +19,25 @@ Read this whole page before touching the file.
 1. The same JSON is bundled with every build (imported at build time by
    `packages/shared/agent-model-catalog-store.ts`), so the dropdown is complete
    offline and on first launch.
-2. On each page load the client fetches the GitHub copy once. If it is
+2. The client fetches the GitHub copy on load, again every 30 minutes while
+   it runs, whenever a web or mobile page comes back into view, and when a
+   chat view mounts (reusing a fetch younger than 2 minutes). If it is
    reachable and parses, it is the source of truth: it replaces what is showing
    and is cached in localStorage.
-3. If the fetch fails, the newer (by `updatedAt`) of the bundled and cached
+3. gxserver polls the same file every 5 minutes (with the ETag, so an unchanged
+   file costs a 304), caches it in its app cache folder, and pushes
+   `agentModelCatalogChanged` with the whole document to every connected
+   client, plus once to each socket as it connects. Clients keep the newer (by
+   `updatedAt`) of the pushed copy and what they hold. gxserver's detection
+   and its Cursor, Grok and Antigravity picker drivers read this live copy, so
+   a new model is recognised and selectable without a release.
+   `GHOSTEX_AGENT_MODEL_CATALOG_REMOTE=off` turns the server's polling off.
+4. If every fetch fails, the newer (by `updatedAt`) of the bundled and cached
    copies stays in effect.
+
+GitHub's raw server caches the file for 5 minutes, so a push reaches open apps
+in roughly 5 to 10 minutes. Apps older than the 2026-09-22 change only
+re-fetch when they start.
 
 The schema, the validator, and the label truncation live in
 `packages/shared/agent-model-catalog.ts`. The per-agent option descriptors
@@ -51,6 +65,7 @@ Per agent (`agents.<id>`):
 | `defaultEffort` | Optional.                                                                                      |
 | `fastMode`      | `{ available, command, scope }`. `scope` is `"model"` or `"session"`.                          |
 | `groups`        | Optional submenus: `[{ id, label, description? }]`. See "Grouping and order" below.            |
+| `quickPickerOrder` | Optional list of model `value`s: the quick picker's (Option+P) card order. Rows it does not name follow in `models` order. |
 | `models`        | Ordered list of rows; the dropdown shows them in this order.                                   |
 
 Per model (`agents.<id>.models[]`):
@@ -66,6 +81,9 @@ Per model (`agents.<id>.models[]`):
 | `fastMode`      | Whether this model can run in fast mode.                                                                                  |
 | `default`       | Optional; marks the CLI's own default row.                                                                                |
 | `group`         | Optional id from the agent's `groups`; the row is nested in that submenu instead of listed at the top level.               |
+| `quickPickerLabel` | Optional shorter name for the quick picker card ("Astra", "Opus 5.5"). For Codex the rest of `label` becomes the card's version line. |
+| `quickPickerHidden` | Optional; `true` keeps an ungrouped row out of the quick picker (grouped rows never show there).                     |
+| `terminalLabels` | Optional extra names the CLI prints for this model in its footer (an older release's spelling, like "Cursor Grok 4.6"). gxserver maps `label`, `pickerLabel` and these onto `value`. |
 
 Every other field (`cliVersion`, `modelCommand`, `notes`, `contextWindows`,
 `thinking`, `_readme`) is documentation for humans and is ignored by clients.
@@ -116,14 +134,14 @@ Grok (2) stay flat: a group header would cost more than it saves.
 3. Validate: `bun run test -- packages/core-ui/chat/session-chat-session-options.test.ts`
    and `bun run typecheck` (the bundled import fails the build if the document
    does not parse).
-4. If a `value` was added or renamed, update the matching detection table in
-   `server/src/session_chat_options.rs` (`CLAUDE_MODEL_FAMILIES`,
-   `CLAUDE_EFFORTS`, `CODEX_EFFORTS`, `CURSOR_MODEL_LABELS`, `GROK_EFFORTS`;
-   Antigravity has no detection table yet)
-   so gxserver keeps mapping what the TUI prints onto the new value, then run
-   `cargo check` from inside `server/`.
-5. Commit and push to `main`. Clients pick the change up on their next page
-   load; a new build also carries it bundled.
+4. gxserver maps a footer name onto a `value` through the row's `label`,
+   `pickerLabel` and `terminalLabels`, from the live catalog, so a new model
+   needs no code change as long as the CLI prints one of those. Only a new
+   EFFORT id (`CLAUDE_EFFORTS`, `CODEX_EFFORTS`, `GROK_EFFORTS` and the Cursor
+   and Antigravity effort lists in `server/src/session_chat_options.rs`) or a
+   new footer grammar still needs a server change and a release.
+5. Commit and push to `main`. Open apps pick the change up within about 10
+   minutes (see "How clients load it"); a new build also carries it bundled.
 
 ## Re-collecting the data from the CLIs
 

@@ -32,6 +32,7 @@
           "value": "fable",
           "label": "Fable 5.1",
           "pickerLabel": "Fable",
+          "quickPickerLabel": "Fable",
           "description": "Most capable for your hardest and longest-running tasks",
           "fastMode": false
         },
@@ -39,6 +40,7 @@
           "value": "opus[1m]",
           "label": "Opus 5.5 (1M)",
           "pickerLabel": "Opus (1M context)",
+          "quickPickerLabel": "Opus 5.5",
           "description": "Best for everyday, complex tasks, with a 1M-token context window",
           "default": true,
           "fastMode": true
@@ -47,6 +49,8 @@
           "value": "opus",
           "label": "Opus 5.5",
           "pickerLabel": "Opus",
+          "quickPickerLabel": "Opus 5.5 (200K)",
+          "quickPickerHidden": true,
           "description": "Best for everyday, complex tasks",
           "fastMode": true
         },
@@ -54,6 +58,7 @@
           "value": "sonnet",
           "label": "Sonnet 5",
           "pickerLabel": "Sonnet",
+          "quickPickerLabel": "Sonnet",
           "description": "Efficient for routine tasks",
           "fastMode": false
         },
@@ -61,6 +66,7 @@
           "value": "haiku",
           "label": "Haiku 4.5",
           "pickerLabel": "Haiku",
+          "quickPickerLabel": "Haiku",
           "description": "Fastest for quick answers",
           "efforts": [],
           "fastMode": false,
@@ -92,6 +98,7 @@
         {
           "value": "gpt-6-astra",
           "label": "GPT 6 Astra",
+          "quickPickerLabel": "Astra",
           "description": "Our most capable model for complex, demanding work.",
           "default": true,
           "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
@@ -101,6 +108,7 @@
         {
           "value": "gpt-5.6-sol",
           "label": "GPT 5.6 Sol",
+          "quickPickerLabel": "Sol",
           "description": "Reliable agentic workhorse for everyday tasks.",
           "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
           "defaultEffort": "low",
@@ -109,6 +117,7 @@
         {
           "value": "gpt-5.6-terra",
           "label": "GPT 5.6 Terra",
+          "quickPickerLabel": "Terra",
           "description": "Balanced agentic coding model for everyday work.",
           "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
           "defaultEffort": "medium",
@@ -117,6 +126,7 @@
         {
           "value": "gpt-5.6-luna",
           "label": "GPT 5.6 Luna",
+          "quickPickerLabel": "Luna",
           "description": "Fast and affordable agentic coding model.",
           "efforts": ["low", "medium", "high", "xhigh", "max"],
           "defaultEffort": "medium",
@@ -178,6 +188,7 @@
           "label": "Legacy"
         }
       ],
+      "quickPickerOrder": ["auto", "grok-4.7", "cursor-grok-4.6", "gemini-3.8-flash", "claude-fable-5-1", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
       "models": [
         {
           "value": "auto",
@@ -199,6 +210,7 @@
           "value": "cursor-grok-4.6",
           "label": "Grok 4.6",
           "pickerLabel": "Grok 4.6",
+          "terminalLabels": ["Cursor Grok 4.6"],
           "efforts": ["low", "medium", "high", "xhigh"],
           "fastMode": true
         },
@@ -473,6 +485,7 @@
           "value": "cursor-grok-4.5",
           "label": "Grok 4.5",
           "pickerLabel": "Grok 4.5",
+          "terminalLabels": ["Cursor Grok 4.5"],
           "efforts": ["low", "medium", "high"],
           "fastMode": true,
           "group": "legacy"
@@ -574,6 +587,7 @@
           "label": "Legacy"
         }
       ],
+      "quickPickerOrder": ["gemini-3.8-flash", "gemini-3.1-pro", "claude-opus-4-6-thinking", "claude-sonnet-4-6", "gpt-oss-120b-medium"],
       "models": [
         {
           "value": "gemini-3.8-flash",

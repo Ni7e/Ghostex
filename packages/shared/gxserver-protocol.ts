@@ -3633,6 +3633,19 @@ export type GxserverEvent =
       serverId: GxserverServerId;
       type: 'notificationFeedChanged';
     }
+  /*
+   * CDXC:AgentProviders 2026-09-22:
+   * The published agent model catalog, pushed when gxserver's poll of GitHub
+   * finds a change and once to each socket as it connects (chat-only sockets
+   * included). `catalog` is the whole document; clients validate it with
+   * `parseAgentModelCatalog` and keep the newer of it and what they hold.
+   */
+  | {
+      catalog: unknown;
+      protocolVersion: GxserverProtocolVersion;
+      serverId: GxserverServerId;
+      type: 'agentModelCatalogChanged';
+    }
   | GxserverSessionChatSnapshotEvent
   | GxserverSessionChatAppendedEvent
   | GxserverSessionChatReplacedEvent

@@ -466,6 +466,12 @@ pub async fn run_gxserver_foreground(
     };
     let migration = create_gxserver_migration_status(&storage);
     let event_hub = GxserverEventHub::new(metadata.server_id.clone());
+    crate::agent_model_catalog::start(
+        paths.clone(),
+        event_hub.clone(),
+        metadata.server_id.clone(),
+        logger.clone(),
+    );
     let presentation_event_sequence = Arc::new(Mutex::new(()));
     let (shutdown_tx, _) = broadcast::channel(8);
     let local_host = config.listeners.local.host.clone();

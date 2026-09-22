@@ -640,6 +640,13 @@ fn claude_model_value(family_value: &str, version: &str) -> &'static str {
 }
 
 fn match_claude_model(segment: &str) -> Option<SessionChatDetectedChoice> {
+    if let Some(value) = crate::agent_model_catalog::model_value_for_label("claude", segment) {
+        return Some(SessionChatDetectedChoice {
+            value,
+            label: segment.to_string(),
+            source: SessionChatOptionEvidence::Terminal,
+        });
+    }
     let variant_model = segment
         .strip_suffix(" (1M)")
         .or_else(|| segment.strip_suffix(" (1M context)"));
@@ -808,52 +815,6 @@ fn codex_plan_mode_choice() -> SessionChatDetectedChoice {
 // and unknown labels remain honest readbacks.
 // ---------------------------------------------------------------------------
 
-/// `(picker row text, pill value)` — mirrors the Cursor models in the
-/// published agent model catalog (`agent-model-catalog.json`).
-const CURSOR_MODEL_LABELS: &[(&str, &str)] = &[
-    ("Auto", "auto"),
-    ("Grok 4.7", "grok-4.7"),
-    ("Grok 4.6", "cursor-grok-4.6"),
-    // Cursor CLI before 2026.09.18 printed its Grok rows with a "Cursor" prefix.
-    ("Cursor Grok 4.6", "cursor-grok-4.6"),
-    ("Composer 2.5", "composer-2.5"),
-    ("Claude Opus 5", "claude-opus-5"),
-    ("Claude Opus 4.8", "claude-opus-4-8"),
-    ("GPT-5.6 Sol", "gpt-5.6-sol"),
-    ("GPT-5.5", "gpt-5.5"),
-    ("Claude Fable 5.1", "claude-fable-5-1"),
-    ("Claude Fable 5", "claude-fable-5"),
-    ("Grok 4.5", "cursor-grok-4.5"),
-    ("Cursor Grok 4.5", "cursor-grok-4.5"),
-    ("Gemini 3.8 Flash", "gemini-3.8-flash"),
-    ("Muse Spark 1.3", "muse-spark-1.3"),
-    ("Gemini 3.7 Flash", "gemini-3.7-flash"),
-    ("GPT-5.6 Terra", "gpt-5.6-terra"),
-    ("Claude Sonnet 5", "claude-sonnet-5"),
-    ("Claude Sonnet 4.6", "claude-sonnet-4-6"),
-    ("Codex 5.3", "gpt-5.3-codex"),
-    ("Claude Opus 4.7", "claude-opus-4-7"),
-    ("GPT-5.4", "gpt-5.4"),
-    ("Claude Opus 4.6", "claude-opus-4-6"),
-    ("Claude Opus 4.5", "claude-opus-4-5"),
-    ("GPT-5.2", "gpt-5.2"),
-    ("GPT-5.6 Luna", "gpt-5.6-luna"),
-    ("Gemini 3.6 Flash", "gemini-3.6-flash"),
-    ("Gemini 3.1 Pro", "gemini-3.1-pro"),
-    ("GPT-5.4 Mini", "gpt-5.4-mini"),
-    ("GPT-5.4 Nano", "gpt-5.4-nano"),
-    ("Claude Haiku 4.5", "claude-haiku-4-5"),
-    ("Claude Sonnet 4.5", "claude-sonnet-4-5"),
-    ("GPT-5.1", "gpt-5.1"),
-    ("Gemini 3.5 Flash", "gemini-3.5-flash"),
-    ("Claude Sonnet 4", "claude-sonnet-4"),
-    ("GPT-5 Mini", "gpt-5-mini"),
-    ("Kimi K3", "kimi-k3"),
-    ("Kimi K2.7 Code", "kimi-k2.7-code"),
-    ("GLM 5.2", "glm-5.2"),
-    ("Gemini 3 Flash", "gemini-3-flash"),
-];
-
 fn is_cursor_usage_segment(segment: &str) -> bool {
     let Some(number) = segment.strip_suffix(" used") else {
         return false;
@@ -939,13 +900,12 @@ pub(crate) fn match_cursor_statusline(line: &str) -> Option<SessionChatDetectedS
         (combined, None)
     };
     let (model_label, context_window, effort) = split_cursor_model_context_and_effort(combined);
-    let value = CURSOR_MODEL_LABELS
-        .iter()
-        .find(|(candidate, _)| model_label == *candidate)
-        .map_or_else(
-            || model_label.to_string(),
-            |(_, value)| (*value).to_string(),
-        );
+    // Known names map to the catalog value the client can dispatch (the live
+    // catalog, so a model added to it is recognised without a release; an
+    // older spelling is a row's `terminalLabels`); unknown names remain
+    // honest readbacks.
+    let value = crate::agent_model_catalog::model_value_for_label("cursor", &model_label)
+        .unwrap_or_else(|| model_label.to_string());
     let display_model_label = model_label
         .strip_prefix("Cursor ")
         .or_else(|| model_label.strip_prefix("cursor "))
@@ -1007,9 +967,11 @@ fn match_grok_segment(segment: &str) -> Option<SessionChatDetectedSelection> {
     let (base, fast) = name
         .strip_suffix(" Fast")
         .map_or((name, false), |base| (base, true));
-    if !base
-        .strip_prefix("Grok")
-        .is_some_and(is_model_version_suffix)
+    let catalog_value = crate::agent_model_catalog::model_value_for_label("grok", name);
+    if catalog_value.is_none()
+        && !base
+            .strip_prefix("Grok")
+            .is_some_and(is_model_version_suffix)
     {
         return None;
     }
@@ -1029,13 +991,16 @@ fn match_grok_segment(segment: &str) -> Option<SessionChatDetectedSelection> {
     };
     Some(SessionChatDetectedSelection {
         model: Some(SessionChatDetectedChoice {
-            // The catalog id for the displayed name (`Grok 4.6` ⇒ `grok-4.6`),
-            // which is what grok's own `models_cache.json` keys models by.
-            value: format!(
-                "{}{}",
-                base.to_ascii_lowercase().replace(' ', "-"),
-                if fast { "-build-fast" } else { "" }
-            ),
+            // The catalog's id for the name, else the id derived from it
+            // (`Grok 4.6` ⇒ `grok-4.6`), which is what grok's own
+            // `models_cache.json` keys models by.
+            value: catalog_value.unwrap_or_else(|| {
+                format!(
+                    "{}{}",
+                    base.to_ascii_lowercase().replace(' ', "-"),
+                    if fast { "-build-fast" } else { "" }
+                )
+            }),
             label: name.to_string(),
             source: SessionChatOptionEvidence::Terminal,
         }),
@@ -1067,21 +1032,14 @@ fn match_grok_segment(segment: &str) -> Option<SessionChatDetectedSelection> {
 
 const ANTIGRAVITY_EFFORTS: &[&str] = &["low", "medium", "high"];
 
-/// Display names that do not derive their catalog id from the name alone:
-/// `agy models` folds the fixed reasoning mode into these ids.
-const ANTIGRAVITY_FIXED_MODEL_IDS: &[(&str, &str)] = &[
-    ("Claude Sonnet 4.6", "claude-sonnet-4-6"),
-    ("Claude Opus 4.6", "claude-opus-4-6-thinking"),
-    ("GPT-OSS 120B", "gpt-oss-120b-medium"),
-];
-
 /// `Gemini 3.8 Flash` ⇒ `gemini-3.8-flash`; `Gemini 3.1 Pro` ⇒ `gemini-3.1-pro`.
+///
+/// The live catalog answers first: `agy models` folds a fixed reasoning mode
+/// into some ids (`Claude Opus 4.6` ⇒ `claude-opus-4-6-thinking`), so only a
+/// Gemini name not in it yet is derived.
 fn antigravity_model_id(name: &str) -> Option<String> {
-    if let Some((_, id)) = ANTIGRAVITY_FIXED_MODEL_IDS
-        .iter()
-        .find(|(display, _)| *display == name)
-    {
-        return Some((*id).to_string());
+    if let Some(value) = crate::agent_model_catalog::model_value_for_label("antigravity", name) {
+        return Some(value);
     }
     let rest = name.strip_prefix("Gemini")?;
     let (version, tier) = rest.trim_start().split_once(' ')?;

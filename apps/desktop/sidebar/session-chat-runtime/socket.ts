@@ -1,4 +1,5 @@
 import { GXSERVER_PROTOCOL_VERSION } from '@/packages/shared/gxserver-protocol';
+import { adoptPublishedAgentModelCatalog } from '@/packages/shared/agent-model-catalog-state';
 import type { GxserverSessionChatEvent } from '@/packages/shared/session-chat';
 
 export interface SessionChatRuntimeEndpoint {
@@ -117,6 +118,11 @@ export class SessionChatSocket {
       }
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
       const frame = parsed as Record<string, unknown>;
+      // gxserver pushes the published model catalog when it changes, and once as this socket connects.
+      if (frame.type === 'agentModelCatalogChanged') {
+        adoptPublishedAgentModelCatalog(frame.catalog);
+        return;
+      }
       if (
         typeof frame.type !== 'string' ||
         !FRAME_TYPES.has(frame.type) ||

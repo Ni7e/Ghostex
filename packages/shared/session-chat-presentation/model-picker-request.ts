@@ -1,54 +1,23 @@
 import { agentModelCatalogEffortLabel, type AgentModelCatalog } from '@/packages/shared/agent-model-catalog';
 import type { ModelPickerRequest, ModelPickerProvider } from '@/packages/shared/session-chat-presentation/model-picker';
 
-const SHORT_MODEL_LABELS: Record<string, string> = {
-  'gpt-6-astra': 'Astra',
-  'gpt-5.6-sol': 'Sol',
-  'gpt-5.6-terra': 'Terra',
-  'gpt-5.6-luna': 'Luna',
-  fable: 'Fable',
-  'opus[1m]': 'Opus 5.5',
-  opus: 'Opus 5.5 (200K)',
-  sonnet: 'Sonnet',
-  haiku: 'Haiku',
-};
-
 /**
- * CDXC:SessionChat 2026-09-22 DECISION: User: no 200K Opus card in the quick picker, only the 1M one.
- * Opus 5.5 ships as the `opus` (200K) and `opus[1m]` (1M) aliases, so the 200K row is dropped here
- * and stays in the full model menu as that row's Context Window choice.
+ * CDXC:SessionChat 2026-09-22 DECISION: User: new models and quick picker changes must reach customers without an app release.
+ * Card order, card names and hidden cards come from the catalog (`quickPickerOrder`, `quickPickerLabel`, `quickPickerHidden`),
+ * which is where the earlier decisions now live: Cursor's hand-picked order with Grok 4.7 above Grok 4.6, Antigravity's
+ * Gemini-first order, the short Claude and Codex names, and no 200K Opus card (it stays in the full model menu as that
+ * row's Context Window choice).
  */
-const CLAUDE_QUICK_PICKER_EXCLUDED = new Set(['opus']);
+function quickPickerRank(order: readonly string[] | undefined, value: string): number {
+  const index = order?.indexOf(value) ?? -1;
+  return index === -1 ? (order?.length ?? 0) : index;
+}
 
-/** CDXC:SessionChat 2026-09-22 DECISION: User chose this exact top-to-bottom Cursor overlay order, keeping related models together; Grok 4.7 (added 2026-09-22) sits directly above Grok 4.6. */
-const CURSOR_MODEL_ORDER = [
-  'auto',
-  'grok-4.7',
-  'cursor-grok-4.6',
-  'gemini-3.8-flash',
-  'claude-fable-5-1',
-  'claude-opus-5',
-  'claude-opus-4-8',
-  'claude-sonnet-5',
-  'gpt-5.6-sol',
-  'gpt-5.6-terra',
-  'gpt-5.6-luna',
-];
-const CURSOR_MODEL_RANK = new Map(CURSOR_MODEL_ORDER.map((value, index) => [value, index]));
-
-/** CDXC:SessionChat 2026-09-11 DECISION: User chose this exact top-to-bottom Antigravity overlay order, with Gemini together, then Opus, Sonnet and GPT-OSS. */
-const ANTIGRAVITY_MODEL_ORDER = [
-  'gemini-3.8-flash',
-  'gemini-3.1-pro',
-  'claude-opus-4-6-thinking',
-  'claude-sonnet-4-6',
-  'gpt-oss-120b-medium',
-];
-const ANTIGRAVITY_MODEL_RANK = new Map(ANTIGRAVITY_MODEL_ORDER.map((value, index) => [value, index]));
-const MODEL_RANKS: Partial<Record<ModelPickerProvider, Map<string, number>>> = {
-  cursor: CURSOR_MODEL_RANK,
-  antigravity: ANTIGRAVITY_MODEL_RANK,
-};
+function codexCardVersion(label: string, cardLabel: string | undefined): string {
+  if (!cardLabel || !label.endsWith(cardLabel)) return label;
+  const version = label.slice(0, label.length - cardLabel.length);
+  return /\s$/.test(version) ? version.trimEnd() : label;
+}
 
 /** CDXC:SessionChat 2026-09-09 DECISION: User: Cursor, Grok Build and Antigravity get the quick picker with white accents and one standard icon for every model. */
 export function modelPickerProvider(icon?: string): ModelPickerProvider | undefined {
@@ -67,18 +36,16 @@ export function createModelPickerRequest(
 ): ModelPickerRequest | undefined {
   const agent = catalog.agents[provider];
   if (!agent) return;
-  const modelRank = MODEL_RANKS[provider];
+  const order = agent.quickPickerOrder;
   const models = agent.models
     // CDXC:SessionChat 2026-09-09 DECISION: User: keep only the selected models in the quick picker, exclude Cursor Composer too, and retain every other model under Legacy in the normal picker.
-    .filter((model) => !model.group && !(provider === 'claude' && CLAUDE_QUICK_PICKER_EXCLUDED.has(model.value)))
-    .sort((a, b) =>
-      modelRank ? (modelRank.get(a.value) ?? modelRank.size) - (modelRank.get(b.value) ?? modelRank.size) : 0
-    )
+    .filter((model) => !model.group && !model.quickPickerHidden)
+    .sort((a, b) => quickPickerRank(order, a.value) - quickPickerRank(order, b.value))
     .map((model) => ({
       value: model.value,
-      label:
-        provider === 'claude' || provider === 'codex' ? (SHORT_MODEL_LABELS[model.value] ?? model.label) : model.label,
-      version: provider === 'codex' ? model.label.replace(/\s+(Astra|Sol|Terra|Luna)$/, '') : undefined,
+      label: model.quickPickerLabel ?? model.label,
+      // Codex's cards show the codename big and the version under it: "GPT 6 Astra" is "Astra" over "GPT 6".
+      version: provider === 'codex' ? codexCardVersion(model.label, model.quickPickerLabel) : undefined,
       efforts: model.efforts.map((value) => ({ value, label: agentModelCatalogEffortLabel(catalog, value) })),
       defaultEffort: model.defaultEffort ?? agent.defaultEffort,
     }));

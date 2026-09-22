@@ -115,6 +115,13 @@ pub(crate) async fn handle_event_socket(socket: WebSocket, state: Arc<AppState>,
     {
         return;
     }
+    // A client that connects after the last poll still gets the published
+    // lineup this server holds (agent_model_catalog.rs).
+    if let Some(event) = crate::agent_model_catalog::connect_event(&state.metadata.server_id) {
+        if outbound_tx.try_send(event).is_err() {
+            return;
+        }
+    }
     /*
     Direct client events (including the subscription snapshot) and hub
     broadcasts must enter one FIFO before socket delivery. A separate unbiased
@@ -291,6 +298,13 @@ pub(crate) async fn handle_event_client_message(
 /// Dedicated chat brokers opt into `stream=sessionChat` so unrelated transcripts and presentation events never enter their socket queue.
 /// Legacy event sockets retain their full stream; a chat filter is installed before starting its snapshot-first follower.
 fn chat_event_matches(filter: &RwLock<HashSet<(String, String)>>, event: &Value) -> bool {
+    // The catalog is not a session's frame, and a chat-only socket is exactly
+    // the client that renders model pickers.
+    if event.get("type").and_then(Value::as_str)
+        == Some(crate::agent_model_catalog::AGENT_MODEL_CATALOG_CHANGED_EVENT_TYPE)
+    {
+        return true;
+    }
     if !matches!(
         event.get("type").and_then(Value::as_str),
         Some(
