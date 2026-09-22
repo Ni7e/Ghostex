@@ -367,7 +367,11 @@ impl BridgeTranslator {
         let index = message.get("index").and_then(Value::as_u64)? as usize;
         let total = message.get("total").and_then(Value::as_u64)? as usize;
         let data = message.get("data").and_then(Value::as_str)?;
-        if !(1..=683).contains(&total) || data.len() > 96 * 1024 {
+        // `data.length > 96 * 1024` counts UTF-16 code units, which is what a JS string length
+        // is. Measured in bytes, a piece holding any non-ASCII text overran the bound, the whole
+        // transfer was dropped, and every snapshot over 96 KiB (a long chat's first frame after
+        // a resubscribe) never reached the core.
+        if !(1..=683).contains(&total) || data.encode_utf16().count() > 96 * 1024 {
             self.transfers.clear();
             return None;
         }
@@ -380,6 +384,15 @@ impl BridgeTranslator {
             return None;
         };
         if *known_total != total || parts.len() != index {
+            self.transfers.clear();
+            return None;
+        }
+        let assembled_units: usize = parts
+            .iter()
+            .map(|part| part.encode_utf16().count())
+            .sum::<usize>()
+            + data.encode_utf16().count();
+        if assembled_units > 64 * 1024 * 1024 {
             self.transfers.clear();
             return None;
         }

@@ -142,6 +142,10 @@ fn async_settled(state: &mut ChatState, outcome: &RpcOutcome) -> Vec<Effect> {
                 Some(message.as_str()),
                 submit.skip,
             );
+            // `AsyncQuestions.submit` has its own `catch`: the refusal is the strip's `error`
+            // line and never reaches the action's `catch`, so the composer's error bar stays
+            // clear (`async-questions.ts:162`).
+            state.core.claim_refusal();
             Vec::new()
         }
     };
