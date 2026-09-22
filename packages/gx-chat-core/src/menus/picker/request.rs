@@ -16,7 +16,12 @@ use crate::menus::picker::model_picker::{
 /// customers without an app release. Card order, card names and hidden cards come from the
 /// catalog (`quickPickerOrder`, `quickPickerLabel`, `quickPickerHidden`), which is where the
 /// earlier decisions now live: Cursor's hand-picked order with Grok 4.7 above Grok 4.6,
-/// Antigravity's Gemini-first order, and the short Claude and Codex names.
+/// Antigravity's Gemini-first order, and the Codex codename cards.
+///
+/// CDXC:SessionChat 2026-09-23 DECISION: User: "for claude we must always show the version for
+/// each model please in quick picker and in the chat composer". Claude rows carry no
+/// `quickPickerLabel`, so their cards read the versioned label ("Fable 5.1", "Sonnet 5"), the
+/// same text the composer pill shows.
 fn quick_picker_rank(order: &[String], value: &str) -> usize {
     order
         .iter()
