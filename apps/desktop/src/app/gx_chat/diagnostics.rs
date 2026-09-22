@@ -43,11 +43,16 @@ pub(super) struct HostCounters {
     /// performs nothing either. The names are code constants
     /// (`effects::SWALLOWED_HOST_ACTIONS`), never a chat's own data.
     pub(super) host_actions_swallowed: BTreeMap<&'static str, u64>,
-    /// Chats whose brain panicked and were disabled for the rest of the run. Any number above zero
-    /// is a bug in `packages/gx-chat-core` or in this host, and the user saw a broken pane.
+    /// Unwinds the host thread's guard caught. Any number above zero is a bug in
+    /// `packages/gx-chat-core` or in this host.
+    pub(super) panics: u64,
+    /// Chats whose brain panicked and were disabled for the rest of the run, which is every panic
+    /// the guard could attribute to one. The user saw a broken pane for each.
     pub(super) chats_disabled: u64,
-    /// Renderer requests a chat with no attached view held past its bound and forgot.
+    /// Renderer requests forgotten with a chat released at the held-request bound.
     pub(super) requests_dropped: u64,
+    /// Chats released early because they owed an absent view more than the held-request bound.
+    pub(super) chats_released: u64,
     /// Drive passes that hit `MAX_SETTLE_ROUNDS` with events still pending.
     pub(super) settle_rounds_exhausted: u64,
     /// Draft saves forgotten because too many were in flight at once. The outbox row survives, so
@@ -109,9 +114,11 @@ impl HostDiagnostics {
                 "hostActionsSwallowed": counters.host_actions_swallowed,
                 // Spelled without `disabled`/`dropped` reading as a failure marker: the summary
                 // stays a routine record behind both gates. The one record that deliberately
-                // bypasses them is `gxChat.host.chatDisabledAfterPanic`, written once per chat.
+                // bypasses them is `gxChat.host.chatDisabledAfterPanic`, written once per unwind.
+                "unwindsCaught": counters.panics,
                 "chatsDisabled": counters.chats_disabled,
                 "requestsForgotten": counters.requests_dropped,
+                "chatsReleased": counters.chats_released,
                 "settleRoundsExhausted": counters.settle_rounds_exhausted,
                 "savesForgotten": counters.saves_forgotten,
             }),

@@ -118,12 +118,12 @@ impl ChatStore {
     /// drawing from it. An oversized chat is DISPOSED rather than sliced, because slicing the
     /// transcript would leave the server's pagination cursor pointing at a row that is gone.
     ///
-    /// The answer is `(retention key, storage session key)` per dropped chat, because the maps
-    /// BESIDE this one are keyed by both and a chat's entry in them must not outlive the chat: the
-    /// timers, the retry worker, the park answer, the held requests and the delivery ids are all
-    /// per chat, and the saves in flight are per session key.
-    pub(super) fn prune(&mut self) -> Vec<(String, String)> {
-        let mut dropped: Vec<(String, String)> = Vec::new();
+    /// The answer is the retention key of each dropped chat, because the maps BESIDE this one are
+    /// keyed by it and a chat's entry in them must not outlive the chat: the timers, the retry
+    /// worker, the park answer, the held requests and the delivery ids are all per chat. The saves
+    /// in flight are deliberately not among them (`worker.rs`'s `purge`).
+    pub(super) fn prune(&mut self) -> Vec<String> {
+        let mut dropped: Vec<String> = Vec::new();
         let mut expired: Vec<String> = Vec::new();
         for (key, retained) in self.retained.iter_mut() {
             if retained.listeners > 0 {
@@ -134,8 +134,8 @@ impl ChatStore {
             }
         }
         for key in expired {
-            if let Some(retained) = self.retained.remove(&key) {
-                dropped.push((key, retained.session_key));
+            if self.retained.remove(&key).is_some() {
+                dropped.push(key);
             }
             self.evicted += 1;
         }
@@ -151,8 +151,8 @@ impl ChatStore {
                 // reason to tear down a chat somebody is looking at.
                 break;
             };
-            if let Some(retained) = self.retained.remove(&oldest) {
-                dropped.push((oldest, retained.session_key));
+            if self.retained.remove(&oldest).is_some() {
+                dropped.push(oldest);
             }
             self.evicted += 1;
         }

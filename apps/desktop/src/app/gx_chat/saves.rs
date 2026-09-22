@@ -189,8 +189,12 @@ pub(super) fn settle_draft_save(world: &mut World, key: &str, arguments: &[Value
     if outbox::acknowledge(&draft.session_key, &draft.version, now_millis()).is_err() {
         world.counters.storage_refused += 1;
     }
-    let worker = world.draft_workers.entry(key.to_string()).or_default();
-    worker.failures = 0;
+    // `get_mut`, not `entry().or_default()`: the answer to a save can arrive after its chat was
+    // pruned or disabled, and creating the worker here put an entry back into a map `purge` had
+    // just emptied, one per chat the user ever opened, for the life of the process.
+    if let Some(worker) = world.draft_workers.get_mut(key) {
+        worker.failures = 0;
+    }
 }
 
 /// The answer to a retry write of this host's own, which the core must never see.
@@ -259,7 +263,15 @@ pub(super) fn next_retry_write(
 /// `count` is whether this refusal is the worker's own to count: a save the CORE issued is not one
 /// of the worker's attempts, but it is the event that starts the ladder, which is exactly what
 /// `queueDraftSave`'s `void flushDraftSaves(...)` did on the TypeScript side.
+///
+/// A chat that is no longer retained arms nothing: there is no transport to retry down (the request
+/// is the view's) and nothing to hold the ladder's position, and the row is still in the outbox, so
+/// opening the chat again is what sends it. Arming here instead put a worker and a wake back into
+/// maps `purge` had just emptied.
 pub(super) fn arm_retry(world: &mut World, key: &str, count: bool) {
+    if world.store.get(key).is_none() {
+        return;
+    }
     let worker: &mut DraftWorker = world.draft_workers.entry(key.to_string()).or_default();
     if count {
         worker.failures = worker.failures.saturating_add(1);

@@ -44,11 +44,18 @@ pub(crate) enum ChatHostOutput {
 
 /// What a chat whose brain panicked draws instead of its transcript.
 ///
-/// A whole sentence, and a constant one: it reaches the view's error banner, and a panic payload
-/// can carry anything the failing code was holding, which for this crate is the user's
-/// conversation.
+/// A whole sentence, and a constant one: it reaches the view's error banner
+/// (`native_chat/render.rs` draws `self.error` above the transcript), and a panic payload can carry
+/// anything the failing code was holding, which for this crate is the user's conversation.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// It names the two things that actually work. The sentence used to offer "Reopen this chat", which
+/// [`step`]'s `Attach` arm deliberately refuses with this very message, so the one recovery it
+/// suggested was the one that could not happen; the two it names now are a setting the user can
+/// reach and a restart, which is what clears `disabled`. "Chat brain" is the Settings row's own
+/// label, so the sentence can be followed without translating it.
 const HOST_PANIC_MESSAGE: &str =
-    "Chat could not be shown. Reopen this chat, or switch the chat brain back in Settings.";
+    "Chat could not be shown. Set Chat brain back to QuickJS in Settings, or restart Ghostex.";
 
 /// How deep a storage answer may feed back into the core within one drive pass.
 ///
@@ -225,7 +232,7 @@ fn spawn() -> mpsc::Sender<HostCommand> {
     commands
 }
 
-/// How many renderer requests one chat with no view attached may hold before the oldest go.
+/// How many renderer requests one chat with no view attached may hold before the chat is released.
 ///
 /// A chat is retained without a view for up to five minutes (`store.rs`), and the requests it
 /// raises in that window are the view's to perform, so they wait for one. The bound is what keeps a
@@ -290,11 +297,21 @@ fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
         // per command instead: the one chat is dropped, its view is told, and the thread goes on.
         // The live QuickJS path is untouched by all of this, and an unwind cannot be avoided by
         // being careful, because `packages/gx-chat-core` indexes and unwraps like any other crate.
-        if std::panic::catch_unwind(AssertUnwindSafe(|| step(&mut world, command))).is_err() {
-            disable_chat(&mut world);
-        }
-        for (key, session_key) in world.store.prune() {
-            purge(&mut world, &key, &session_key);
+        //
+        // The retention pass is INSIDE the guard: `ChatStore::prune` measures an idle chat by
+        // serializing its whole document, which is `packages/gx-chat-core`'s `Serialize` code, so a
+        // panic there would have ended the thread outright with none of the above applying.
+        let pruned = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            step(&mut world, command);
+            world.store.prune()
+        }));
+        match pruned {
+            Ok(pruned) => {
+                for key in pruned {
+                    purge(&mut world, &key);
+                }
+            }
+            Err(_) => disable_chat(&mut world),
         }
         world.counters.sessions_retained = world.store.len();
         world.counters.sessions_evicted = world.store.evicted;
@@ -309,51 +326,59 @@ fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
 /// of state a panicking core can have left half written is that chat's own entry, and dropping it
 /// is what makes that true. Rebuilding it is not offered either, because the input that panicked
 /// is on its way back in as soon as the view retries.
+///
+/// A panic that belongs to NO chat is still recorded. `driving` is `None` for the stretch of the
+/// timer pass between its two loops and for a command naming a chat that is already gone, and a
+/// silent unwind there was the one failure this guard could not be noticed by: nothing drawn,
+/// nothing counted, and the thread carrying on as if the pass had run.
 fn disable_chat(world: &mut World) {
-    let Some(key) = world.driving.take() else {
-        return;
-    };
-    let session_key = world
-        .store
-        .get(&key)
-        .map(|retained| retained.session_key.clone())
-        .unwrap_or_default();
-    world.store.remove(&key);
-    purge(world, &key, &session_key);
-    world.disabled.insert(key.clone());
-    if let Some(sink) = world.sinks.remove(&key) {
-        let posted = sink
-            .outputs
-            .send(ChatHostOutput::Error(HOST_PANIC_MESSAGE.to_string()))
-            .is_ok();
-        if posted {
-            (sink.wake)();
+    world.counters.panics += 1;
+    if let Some(key) = world.driving.take() {
+        world.store.remove(&key);
+        purge(world, &key);
+        world.disabled.insert(key.clone());
+        if let Some(sink) = world.sinks.remove(&key) {
+            let posted = sink
+                .outputs
+                .send(ChatHostOutput::Error(HOST_PANIC_MESSAGE.to_string()))
+                .is_ok();
+            if posted {
+                (sink.wake)();
+            }
         }
+        world.counters.chats_disabled += 1;
     }
-    world.counters.chats_disabled += 1;
     // Unconditional: "panic" in the event name is what `support_logs` reads as an important
     // diagnostic, and a chat whose brain died is one the user can see. Counts only, as ever: no
     // key, no session id, and never the payload, which is whatever the failing code was holding.
     crate::support_logs::append(
         crate::support_logs::GpuiSupportLog::SessionChat,
         "gxChat.host.chatDisabledAfterPanic",
-        serde_json::json!({ "chatsDisabled": world.counters.chats_disabled }),
+        serde_json::json!({
+            "panics": world.counters.panics,
+            "chatsDisabled": world.counters.chats_disabled,
+        }),
     );
 }
 
 /// Forgets everything keyed by one chat, so a map does not outlive the chat it belongs to.
-fn purge(world: &mut World, key: &str, session_key: &str) {
+///
+/// CDXC:Drafts 2026-09-22 WHY:
+/// `draft_saves` is NOT purged here, unlike the six maps above it. Its entries are keyed by the
+/// request id of a `setSessionChatDraft` the view is still holding, and `settle_draft_save` runs
+/// before the store is even consulted, so the answer still arrives and still clears the outbox row
+/// it queued. Dropping the entry with the chat meant a save that was in flight when the retention
+/// prune took its chat (twelve chats open, this one the least recently touched) was never
+/// acknowledged: the row stayed in the outbox and went out again on the next open, delivering a
+/// revision gxserver already had. The map is bounded on its own at 256 in flight, which is where a
+/// view that never answers is accounted for.
+fn purge(world: &mut World, key: &str) {
     world.wakes.remove(key);
     world.retry_wakes.remove(key);
     world.draft_workers.remove(key);
     world.parked.remove(key);
     world.delivered.remove(key);
     world.held_requests.remove(key);
-    if !session_key.is_empty() {
-        world
-            .draft_saves
-            .retain(|_, draft| draft.session_key != session_key);
-    }
 }
 
 /// One command, or one pass of the due timers.
@@ -451,12 +476,26 @@ fn step(world: &mut World, command: Option<HostCommand>) {
             arguments,
             reply,
         }) => {
-            let answer = world.store.get(&key).and_then(|retained| {
-                let context = context(retained.core.state());
-                queries::answer(retained.core.state(), context, method, &arguments)
-            });
-            // A query changes nothing, so it does not drain; the view uses the answer at once.
-            let _ = reply.send(answer);
+            let answered = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                world.store.get(&key).and_then(|retained| {
+                    let context = context(retained.core.state());
+                    queries::answer(retained.core.state(), context, method, &arguments)
+                })
+            }));
+            match answered {
+                // A query changes nothing, so it does not drain; the view uses the answer at once.
+                Ok(answer) => {
+                    let _ = reply.send(answer);
+                }
+                Err(payload) => {
+                    // The waiting view is answered FIRST, and only then does the unwind go on to
+                    // the guard that disables the chat. `query_for_gesture` blocks the UI thread on
+                    // this channel, so a panic that left it unanswered stalled the gesture for the
+                    // whole timeout before the pane could draw anything at all, error included.
+                    let _ = reply.send(None);
+                    std::panic::resume_unwind(payload);
+                }
+            }
         }
         None => {
             let due: Vec<String> = world
@@ -817,15 +856,7 @@ fn write_storage(
 /// advance the revision and a new view reads the whole snapshot.
 pub(super) fn publish(world: &mut World, key: &str, requests: Vec<HostRequest>) {
     let Some(last_revision) = world.sinks.get(key).map(|sink| sink.last_revision) else {
-        if !requests.is_empty() {
-            let held = world.held_requests.entry(key.to_string()).or_default();
-            held.extend(requests);
-            if held.len() > MAX_HELD_REQUESTS {
-                let dropped = held.len() - MAX_HELD_REQUESTS;
-                held.drain(..dropped);
-                world.counters.requests_dropped += dropped as u64;
-            }
-        }
+        hold(world, key, requests);
         return;
     };
     let Some(retained) = world.store.get_mut(key) else {
@@ -853,6 +884,34 @@ pub(super) fn publish(world: &mut World, key: &str, requests: Vec<HostRequest>) 
     if posted {
         wake();
     }
+}
+
+/// Keeps what a chat with no attached view owes one, and RELEASES the chat when it owes too much.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// At the cap the whole chat goes, rather than the oldest requests going one by one. Dropping a
+/// single request is exactly the failure the held lane exists to prevent: a `SendRpc` the core never
+/// gets an answer to leaves its lane marked in flight for ever, so a chat trimmed at the cap would
+/// come back with the model-selection outbox or the draft retry worker permanently wedged, and
+/// nothing would ever say so. Releasing the chat is the five-minute retention prune arriving early,
+/// and it costs nothing that is not already on disk or on the wire: the draft, its outbox row and
+/// its recovery checkpoints are the host's records, and the transcript refolds from the snapshot the
+/// next attach subscribes for. The next view therefore reads a chat with no half-settled lanes
+/// instead of one that looks alive and is not.
+fn hold(world: &mut World, key: &str, requests: Vec<HostRequest>) {
+    if requests.is_empty() {
+        return;
+    }
+    let held = world.held_requests.entry(key.to_string()).or_default();
+    held.extend(requests);
+    if held.len() <= MAX_HELD_REQUESTS {
+        return;
+    }
+    let forgotten = held.len() as u64;
+    world.store.remove(key);
+    purge(world, key);
+    world.counters.requests_dropped += forgotten;
+    world.counters.chats_released += 1;
 }
 
 /// The clock, the timezone, the random draws and the formatted stamps, once per turn.
