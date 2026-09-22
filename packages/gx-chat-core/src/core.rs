@@ -277,7 +277,16 @@ impl ChatCore {
         }
         let probe = assemble(&self.state, &self.published_context);
         let probe_parts = frame_parts(&self.state, &self.published_context);
-        if !requested && probe.reactive() == self.document.reactive() && probe_parts == self.parts {
+        // A rebuilt projection is a publish of its own: `update` rebuilds only when one of its
+        // inputs changed identity, every one of those is a `useState` value the lifecycle
+        // republishes on, and `take` then ships the new (if equal) array as a degenerate splice.
+        // Holding the flag until the next real change shipped that splice a turn late.
+        let rebuilt = self.state.transcript_view.projection_rebuilt;
+        if !requested
+            && !rebuilt
+            && probe.reactive() == self.document.reactive()
+            && probe_parts == self.parts
+        {
             return;
         }
         self.document = assemble(&self.state, &self.context);

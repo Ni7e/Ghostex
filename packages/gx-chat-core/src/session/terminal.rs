@@ -438,7 +438,11 @@ pub fn apply_terminal_activity(
 
     let stream = activity.and_then(|activity| terminal_stream_from_activity(activity, context));
     match &stream {
-        Some(stream) => state.pending.terminal_stream = Some(stream.clone()),
+        Some(stream) => {
+            // `setTerminalStream(stream)`: a new object per sample, equal or not.
+            state.pending.terminal_stream = Some(stream.clone());
+            state.messages.new_composition_identity();
+        }
         // The stream is no longer the newest thing on screen: hold it for the transcript to retire.
         None => hold_stream(state),
     }

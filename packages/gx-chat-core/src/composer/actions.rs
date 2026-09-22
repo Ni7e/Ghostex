@@ -771,6 +771,8 @@ fn reorder_optimistically(state: &mut ChatState, visible: &[String]) -> Vec<Stri
         }
     }
     state.session.queue_prompts = Some(next);
+    // `setQueuePrompts((current) => { let next = [...current]; ... })`: a copy either way.
+    state.messages.new_composition_identity();
     order
 }
 

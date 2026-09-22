@@ -64,7 +64,7 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
     // in for "this is a new array".
     let inputs = ProjectionInputs {
         composed: state.messages.composed.clone(),
-        authoritative_revision: state.messages.authoritative_revision,
+        composition_identity: state.messages.composition_identity,
         working: crate::transcript::foreign::is_working(state),
         summary: state.transcript_view.summary_mode,
         detail_revision: state.transcript_view.detail_revision,

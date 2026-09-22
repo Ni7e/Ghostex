@@ -85,6 +85,25 @@ pub struct MessagesState {
     /// a new fold is a new array even when the rows in it are identical, and `take`'s identity
     /// test ships a splice for it. This counter is what stands in for that identity.
     pub authoritative_revision: u64,
+    /// The identity of the composed list as the TypeScript's `messages` memo sees it.
+    ///
+    /// `NativeChatPresentation.update` rebuilds its item list when `state.messages` is a NEW
+    /// ARRAY, and the memo that builds it re-runs when one of its dependencies changed identity:
+    /// `setTranscript` after every fold that the assembler cannot treat as a suffix extension,
+    /// `setAppCommands` on every carrier that names the field, `setTerminalStream` on every
+    /// activity that is a stream, `setPending` and `setMarkers` through `filter` and `map`, and
+    /// every queue answer. None of those compare by value, so a frame that changed nothing a row
+    /// can show still ships a degenerate splice, and the core must ship it on the same turn.
+    /// Bumped by [`MessagesState::new_composition_identity`] at exactly those sites; a value
+    /// change of the composed list rebuilds on its own.
+    pub composition_identity: u64,
+}
+
+impl MessagesState {
+    /// The TypeScript handed a setter the composition depends on a new object.
+    pub fn new_composition_identity(&mut self) {
+        self.composition_identity = self.composition_identity.wrapping_add(1);
+    }
 }
 
 /// Where the accepted stream stands, and whether it ever started.

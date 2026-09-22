@@ -348,7 +348,9 @@ pub fn settle_request(
             // Every queue mutation answers with the whole authoritative queue, so an optimistic
             // step that lost a race self-corrects on the next line instead of rolling back.
             if let Some(queue) = result.get("queue").and_then(Value::as_array) {
+                // `setQueuePrompts(result.queue)`: the answer's own array, equal or not.
                 state.session.queue_prompts = Some(queue.clone());
+                state.messages.new_composition_identity();
             }
             // `setSyncedDraft((current) => mergeSessionChatDraftState(current, result.draft))`:
             // the receipts union, and a newer local revision wins over the answer's body.
@@ -401,7 +403,9 @@ pub fn settle_queue_mutation(
     match outcome {
         crate::wire::RpcOutcome::Ok { result } => {
             if let Some(queue) = result.get("queue").and_then(Value::as_array) {
+                // `setQueuePrompts(result.queue)`: the answer's own array, equal or not.
                 state.session.queue_prompts = Some(queue.clone());
+                state.messages.new_composition_identity();
             }
             if let Some(removed) = removed.as_deref() {
                 sends::drop_queued_send(state, removed);

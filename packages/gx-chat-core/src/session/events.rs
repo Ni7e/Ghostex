@@ -327,10 +327,16 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                     if state.messages.remove_ids(&appended.superseded_message_ids) {
                         state.messages.snapshot = Some(previous.clone());
                         state.messages.authoritative_revision += 1;
+                        // `setTranscript(mergerRef.current.list)` on a retraction.
+                        state.messages.new_composition_identity();
                     }
                     let folded = fold_append(&previous, appended);
                     if !appended.messages.is_empty() {
                         state.messages.apply_append(&appended.messages);
+                        // `setTranscript(mergerRef.current.list)`: `applySessionChatMergerAppend`
+                        // copies the list, and a row it replaced or added is a new object, so the
+                        // assembler never sees a suffix extension by identity.
+                        state.messages.new_composition_identity();
                         // Keep the read window at least as large as what is on screen, so a later
                         // resync or pagination read cannot answer with less than the live list
                         // already holds.
@@ -605,6 +611,11 @@ fn page_read_settled(
     let mut rows = older.clone();
     rows.extend(state.messages.list.iter().cloned());
     state.messages.replace_list(&rows);
+    // `setTranscript(merger.list)`: the same objects shifted right, so the assembler resets and
+    // the memo re-runs only when the page actually prepended rows.
+    if !older.is_empty() {
+        state.messages.new_composition_identity();
+    }
     // Grow the read window so a later resync answers with at least the history already on screen.
     state.messages.history_epoch = pending.epoch;
     state.messages.history_prefix_count += older.len();

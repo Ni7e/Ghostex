@@ -126,8 +126,9 @@ pub struct ProjectedMessage {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectionInputs {
     pub composed: Vec<ChatMessage>,
-    /// A new fold is a new composed array in the TypeScript, whatever its rows say.
-    pub authoritative_revision: u64,
+    /// The composed array's identity, which the TypeScript compares instead of its rows
+    /// (`MessagesState::composition_identity`).
+    pub composition_identity: u64,
     pub working: bool,
     pub summary: bool,
     pub detail_revision: u64,

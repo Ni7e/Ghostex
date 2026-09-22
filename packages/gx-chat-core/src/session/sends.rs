@@ -81,11 +81,15 @@ pub fn adopt_queued_prompt_id(state: &mut ChatState, pending_id: &str, queued_pr
             entry.queued_prompt_id = Some(queued_prompt_id.to_string());
         }
     }
+    // `setPending((current) => current.map(...))`: a new array whether or not a row matched.
+    state.messages.new_composition_identity();
 }
 
 /// The send failed: the echo goes, because nothing will ever replace it.
 pub fn drop_send(state: &mut ChatState, pending_id: &str) {
     state.pending.sends.retain(|entry| entry.id != pending_id);
+    // `setPending((current) => current.filter(...))`: a new array whether or not a row went.
+    state.messages.new_composition_identity();
 }
 
 /// Drops every echo that became a queue row, for a queue row the user deleted.
@@ -94,6 +98,7 @@ pub fn drop_queued_send(state: &mut ChatState, queued_prompt_id: &str) {
         .pending
         .sends
         .retain(|entry| entry.queued_prompt_id.as_deref() != Some(queued_prompt_id));
+    state.messages.new_composition_identity();
 }
 
 /// Records the "Ran /x" marker for a catalog slash command and answers its stamp.
@@ -133,6 +138,8 @@ pub fn drop_command_marker(state: &mut ChatState, command: &str, sent_at_ms: i64
         .pending
         .markers
         .retain(|marker| marker.sent_at_ms != sent_at_ms || marker.command != command);
+    // `setMarkers((current) => current.filter(...))`: a new array either way.
+    state.messages.new_composition_identity();
 }
 
 /// Keystroke dispatch: a non-empty marker is recorded only after the write is accepted.
@@ -175,7 +182,9 @@ pub fn begin_interrupt(state: &mut ChatState, context: &ChatContext) -> bool {
     // Stop: suppress the spinner and drop optimistic echoes. The delayed server-side Enter may
     // never fire, so the echo would be a ghost bubble.
     state.session.interrupted = true;
+    // `setPending([])`: a new array even when there was nothing to drop.
     state.pending.sends.clear();
+    state.messages.new_composition_identity();
     let sent_at_ms = context.now_millis();
     let id = next_pending_send_id(state, sent_at_ms);
     let marker = CommandMarker {

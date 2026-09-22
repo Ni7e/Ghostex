@@ -82,7 +82,7 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
     let working = state.extras.subagent.working;
     let inputs = ProjectionInputs {
         composed: rows.clone(),
-        authoritative_revision: 0,
+        composition_identity: 0,
         working,
         summary: false,
         detail_revision: 0,

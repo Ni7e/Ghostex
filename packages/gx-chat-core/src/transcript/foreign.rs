@@ -227,12 +227,10 @@ pub fn is_role(message: &ChatMessage, role: ChatRole) -> bool {
 
 /// Family a: whether the agent is working, which decides the turn boundaries.
 ///
-/// The real rule is `packages/core-ui/chat/session-chat-working-status.ts` and the document's
-/// `working` key, both family a's. This is the smallest stand-in over the flags family a has
-/// already put in `SessionState`; when family a publishes its own answer this reads that instead.
+/// `presentation.update(state.messages, state.workingSignal, …)` in `native-host.ts`: the
+/// projection is keyed on the controller's `workingSignal && !interrupted`, the raw live signal
+/// (an optimistic echo, a compaction, the server's flag or status, the host's own signal) before
+/// the lifecycle settle, not on the settled `working` the document publishes.
 pub fn is_working(state: &crate::state::ChatState) -> bool {
-    !state.session.interrupted
-        && (state.session.server_working
-            || state.session.session_activity_working
-            || state.session.external_working)
+    crate::session::working::working_signal(state) && !state.session.interrupted
 }
