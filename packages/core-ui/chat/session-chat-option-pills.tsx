@@ -241,7 +241,8 @@ export interface SessionChatSessionOptionPillsProps {
   /** The draft's own launch agent id: the row that renders checked. */
   draftAgentId?: string | null;
   /** Runs `/api/switchDraftAgent`; rejections are shown, never swallowed. */
-  onSwitchDraftAgent?: (agentId: string) => Promise<void>;
+  /** `launch` starts the new CLI on that model and effort (Claude and Codex), the way a handoff does. */
+  onSwitchDraftAgent?: (agentId: string, launch?: { model: string; effort: string }) => Promise<void>;
   /**
    * The model picker chose another agent's model in a real conversation: the host opens Handoff with
    * that agent selected. Absent on a host with no such route, where only this agent's models are offered.
@@ -596,12 +597,12 @@ export function SessionChatSessionOptionPills({
   const agentRows = onSwitchDraftAgent && draftAgents && draftAgents.length > 0 ? draftAgents : null;
   const currentDraftAgent = agentRows?.find((row) => row.agentId === draftAgentId) ?? null;
 
-  const switchAgent = (agentId: string): void => {
+  const switchAgent = (agentId: string, launch?: { model: string; effort: string }): void => {
     if (!onSwitchDraftAgent || agentId === draftAgentId) {
       return;
     }
     setSwitchingAgent(true);
-    void onSwitchDraftAgent(agentId)
+    void onSwitchDraftAgent(agentId, launch)
       .catch((error: unknown) => {
         /*
         The daemon refuses the switch once the draft has been promoted (its
@@ -1179,7 +1180,10 @@ export function SessionChatSessionOptionPills({
             // A draft has no conversation to hand over, so another agent's model switches the draft to that agent.
             if (isDraft) {
               const target = draftAgentFor(pick.provider);
-              if (target) switchAgent(target.agentId);
+              // The launch line carries a model only for Claude and Codex; the other CLIs start on their own default.
+              const launchable = pick.provider === 'claude' || pick.provider === 'codex';
+              if (target)
+                switchAgent(target.agentId, launchable ? { model: pick.model, effort: pick.effort } : undefined);
               return;
             }
             onHandoffToModel?.(pick);

@@ -47,6 +47,7 @@ import {
 import {
   terminalDialogPresentation,
   terminalNoticeActionAnswer,
+  terminalNoticeActionShortcutEligible,
   terminalNoticeChoiceAnswer,
 } from '../session-chat-presentation/terminal-prompts';
 import { fitChatComposerControls } from '../session-chat-presentation/composer-layout';
@@ -446,7 +447,9 @@ function publish(state: NativeChatState): void {
   });
   if (!composerCollapseEligible || (state.prompt?.kind === 'question' && promptKey !== dismissedPrompt))
     composerCollapsed = false;
-  trackTranscriptLoading(state.view.kind === 'loading');
+  const showNewSessionWelcome = sessionChatShowsNewSessionWelcome(state.view.kind, state.availableAgents !== null);
+  const transcriptLoading = state.view.kind === 'loading' && !showNewSessionWelcome;
+  trackTranscriptLoading(transcriptLoading);
   /*
   The agent identity the welcome greets the user with. A draft's own row wins over the
   transcript family, because a project custom agent built on Claude reports `claude` there
@@ -536,7 +539,7 @@ function publish(state: NativeChatState): void {
     `starting` or `empty` transcript greets the user with the agent mark and headline
     instead of falling through to the `emptyState` loading copy.
     */
-    newSessionWelcome: sessionChatShowsNewSessionWelcome(state.view.kind)
+    newSessionWelcome: showNewSessionWelcome
       ? {
           agentName: welcomeAgentName,
           icon: welcomeAgentIcon ?? null,
@@ -544,7 +547,7 @@ function publish(state: NativeChatState): void {
           title: sessionChatNewSessionWelcomeTitle(welcomeAgentName),
         }
       : null,
-    loadingStage: state.view.kind === 'loading' ? loadingStage : null,
+    loadingStage: transcriptLoading ? loadingStage : null,
     noticeVisible: noticeVisible(state),
     noticeError,
     terminalNotice: state.terminalNotice
@@ -890,7 +893,11 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           break;
         await composer('flush');
         try {
-          await rpc('switchDraftAgent', { agentId: command.agentId });
+          await rpc('switchDraftAgent', {
+            agentId: command.agentId,
+            ...(command.model ? { agentModel: command.model } : {}),
+            ...(command.effort ? { agentEffort: command.effort } : {}),
+          });
         } finally {
           chat.refresh();
           for (const delay of [2000, 6000]) schedule(() => chat.refresh(), delay);
@@ -1059,7 +1066,13 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         if (chat.availableAgents) {
           if (draftAgent) {
             modelMenuView = { tab: null, query: '' };
-            await action({ type: 'switchDraftAgent', agentId: draftAgent.agentId });
+            // The launch line carries a model only for Claude and Codex; the other CLIs start on their own default.
+            const launchable = pick.provider === 'claude' || pick.provider === 'codex';
+            await action({
+              type: 'switchDraftAgent',
+              agentId: draftAgent.agentId,
+              ...(launchable ? { model: pick.model, effort: pick.effort } : {}),
+            });
           }
           break;
         }
@@ -1335,7 +1348,8 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         const choices = chat.terminalNotice!.choices?.filter((choice) => choice.label.trim()) ?? [];
         const choice = choices[command.type === 'noticePrimary' ? 0 : 1];
         const noticeAction = chat
-          .terminalNotice!.actions?.map((action) => terminalNoticeActionAnswer(chat.terminalNotice!, action))
+          .terminalNotice!.actions?.filter(terminalNoticeActionShortcutEligible)
+          .map((action) => terminalNoticeActionAnswer(chat.terminalNotice!, action))
           .find(Boolean);
         const answer = choice
           ? terminalNoticeChoiceAnswer(chat.terminalNotice, choice.index)

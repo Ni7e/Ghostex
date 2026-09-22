@@ -49,7 +49,9 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
     `starting` or `empty` transcript greets the user with the agent mark and headline instead of
     falling through to the `emptyState` loading copy.
     */
-    into.new_session_welcome = shows_new_session_welcome(view_kind).then(|| {
+    let show_welcome = shows_new_session_welcome(view_kind)
+        || (view_kind == "loading" && state.session.available_agents.is_some());
+    into.new_session_welcome = show_welcome.then(|| {
         let agent_name = welcome_agent_name(state.session.agent.as_deref());
         NewSessionWelcome {
             title: new_session_welcome_title(agent_name.as_deref()),
@@ -60,7 +62,7 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
             agent_name,
         }
     });
-    into.loading_stage = (view_kind == "loading").then(|| extras.loading_stage.clone());
+    into.loading_stage = (view_kind == "loading" && !show_welcome).then(|| extras.loading_stage.clone());
 }
 
 /// A notice or a question card is on screen, which is what the welcome gives its headline up for.

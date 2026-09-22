@@ -155,7 +155,9 @@ pub(crate) enum ExportTranscriptStage {
 /// before sending any command other than `RunExport`.
 pub(crate) enum ExportTranscriptModalCommand {
     RunExport(ExportTranscriptIncludeOptions),
-    StartConversation { agent_id: String },
+    StartConversation {
+        agent_id: String,
+    },
     Cancel,
     Reveal,
     /// The exported file's path was just written to the clipboard; the host gives the copy feedback.

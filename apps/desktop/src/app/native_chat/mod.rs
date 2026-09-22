@@ -32,6 +32,7 @@ mod fork_branches;
 mod image_viewer;
 mod images;
 mod inter_agent_message;
+mod launch;
 mod menu_toggle;
 mod minimap;
 mod nested_scroll;

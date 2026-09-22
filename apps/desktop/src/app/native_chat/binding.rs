@@ -9,8 +9,15 @@ impl GhostexGpuiApp {
         session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) -> Option<Entity<NativeChatView>> {
-        if let Some(view) = self.native_chat_views.get(&session_id) {
-            return Some(view.clone());
+        let existing = self.native_chat_views.get(&session_id).cloned();
+        if let Some(view) = &existing {
+            if !view.read(cx).config.session_id.is_empty()
+                || self
+                    .workspace_terminal_key_for_shell_session(session_id)
+                    .is_none()
+            {
+                return Some(view.clone());
+            }
         }
         let key = self.workspace_terminal_key_for_shell_session(session_id)?;
         let sidebar_session_id = match &key {
@@ -39,9 +46,6 @@ impl GhostexGpuiApp {
                 Some(self.gpui_remote_gxserver_request_target(&key.remote_machine_id)?),
             ),
         };
-        let mut state = SessionChatPageState::new();
-        state.account_key = Some(key.clone());
-        let generation = state.generation;
         let config = NativeChatConfig {
             machine_id,
             project_id,
@@ -56,6 +60,26 @@ impl GhostexGpuiApp {
             initial_snapshot: self.cached_session_chat_runtime_snapshot(Some(&key)),
             initial_presentation: self.initial_session_chat_presentation(Some(&key)),
         };
+        if let Some(view) = existing {
+            self.agents_chat_page_states
+                .get_mut(&session_id)?
+                .account_key = Some(key);
+            view.update(cx, |view, cx| view.bind_launched_session(config, cx));
+            return Some(view);
+        }
+        Some(self.insert_native_chat(config, Some(key), cx))
+    }
+
+    pub(crate) fn insert_native_chat(
+        &mut self,
+        config: NativeChatConfig,
+        key: Option<GpuiWorkspaceTerminalSessionKey>,
+        cx: &mut gpui::Context<Self>,
+    ) -> Entity<NativeChatView> {
+        let session_id = config.shell_session_id;
+        let mut state = SessionChatPageState::new();
+        state.account_key = key;
+        let generation = state.generation;
         let armed_actions = self.session_chat_armed_actions(session_id);
         let view = cx.new(|cx| {
             let mut view = NativeChatView::new(config, cx);
@@ -123,7 +147,7 @@ impl GhostexGpuiApp {
         view.update(cx, |view, _| view.subscriptions.push(subscription));
         self.agents_chat_page_states.insert(session_id, state);
         self.native_chat_views.insert(session_id, view.clone());
-        Some(view)
+        view
     }
 
     pub(crate) fn native_chat_for_generation(

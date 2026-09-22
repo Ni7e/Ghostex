@@ -664,6 +664,13 @@ pub(crate) fn switch_draft_agent(
         "runtimeSettings".to_string(),
         Value::Object(runtime_settings),
     );
+    // CDXC:SessionChat 2026-09-22 DECISION:
+    // User: picking another agent's model in the chat picker "switches the CLI and also sets the right effort and model on the CLI that we switched to". A draft rebuilt without them started the new CLI on its own saved default, so the pick rides the rebuilt launch line the way `createAgentSession` carries `agentModel` and `agentEffort`.
+    for key in ["agentModel", "agentEffort"] {
+        if let Some(value) = params.get(key).filter(|value| !value.is_null()) {
+            create_params.insert(key.to_string(), value.clone());
+        }
+    }
     // CDXC:AgentProviders 2026-09-16 DECISION:
     // User: switching Codex to Claude or Claude to Codex must choose the same account as launching the target agent from the sidebar button.
     let mut resolved = create_agent_session_params_for_project(db, &project, &create_params)?;

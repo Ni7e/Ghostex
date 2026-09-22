@@ -379,8 +379,11 @@ impl GhostexGpuiApp {
                     message["accountId"] = json!(account_id);
                 }
                 self.sidebar_primary_agent_launcher_id = Some(agent_id);
-                self.dispatch_gpui_sidebar_host_message(message, cx);
                 self.release_gpui_new_thread_picker_window(cx);
+                if self.sidebar.is_some() {
+                    self.stage_agent_launch_placeholder(&message, cx);
+                }
+                self.dispatch_gpui_sidebar_host_message(message, cx);
             }
             NewThreadPickerCommand::OpenBrowser => {
                 self.dispatch_gpui_sidebar_host_message(

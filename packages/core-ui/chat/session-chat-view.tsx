@@ -660,7 +660,7 @@ export function SessionChatView({
   const switchDraftAgent = useMemo(() => {
     const switchAgent = transport.switchDraftAgent?.bind(transport);
     return switchAgent
-      ? async (agentId: string): Promise<void> => {
+      ? async (agentId: string, launch?: { model: string; effort: string }): Promise<void> => {
           /*
           CDXC:Drafts 2026-08-28:
           The switch restarts the agent CLI inside the draft's pane, so the
@@ -682,7 +682,11 @@ export function SessionChatView({
           which show the daemon's own sentence.
           */
           try {
-            await switchAgent({ agentId });
+            await switchAgent({
+              agentId,
+              ...(launch?.model ? { agentModel: launch.model } : {}),
+              ...(launch?.effort ? { agentEffort: launch.effort } : {}),
+            });
           } finally {
             refreshAfterDraftSwitch();
           }
@@ -757,7 +761,8 @@ export function SessionChatView({
           <SessionAccountsPanel {...accountState} contextUsage={detectedOptions?.contextUsage} close={close} />
         )
       : undefined;
-  const initialTranscriptLoading = chat.view.kind === 'loading';
+  const showNewSessionWelcome = sessionChatShowsNewSessionWelcome(chat.view.kind, chat.availableAgents !== null);
+  const initialTranscriptLoading = chat.view.kind === 'loading' && !showNewSessionWelcome;
   /*
   How far the blank hold has been allowed to progress. Keyed to the moment
   loading started, so it restarts from 'blank' whenever loading clears or the
@@ -1451,6 +1456,8 @@ export function SessionChatView({
         return;
       }
       const target = event.target as HTMLElement | null;
+      // Answer editors own all typing and editing keys, including Shift+Enter, before background composer routing.
+      if (target?.closest?.(EDITABLE_TARGET_SELECTOR)) return;
       /*
       CDXC:SessionChat 2026-09-16 DECISION:
       User: pressing Enter in the chat view sends the message, Option+Enter always compacts then sends, and Shift+Enter adds a new line to the draft, no matter which control holds DOM focus.
@@ -1462,7 +1469,6 @@ export function SessionChatView({
         event.key === 'Enter' &&
         !event.metaKey &&
         !event.ctrlKey &&
-        !target?.closest?.(EDITABLE_TARGET_SELECTOR) &&
         !sessionChatKeyboardPopupOpen(event.currentTarget)
       ) {
         if (event.shiftKey) {
@@ -1606,8 +1612,7 @@ export function SessionChatView({
   }, [transcriptSelection]);
 
   /*
-  CDXC:SessionChat 2026-09-07 DECISION:
-  User: Add to Chat puts the transcript selection in the composer as a quote, followed by exactly one newline with the caret there; remove the extra return previously added beneath it.
+  CDXC:SessionChat 2026-09-22 WHY:
   The desktop menu restores focus to its trigger when it finishes closing, so that path reclaims composer focus afterward.
   */
   const addTranscriptTextToChat = useCallback((text: string): boolean => {
@@ -1629,7 +1634,6 @@ export function SessionChatView({
   const emptyKind =
     chat.view.kind === 'ready' ? null : chat.view.kind === 'error' ? ('error' as const) : chat.view.kind;
   const bottomCardVisible = noticeCardVisible || interactiveCardVisible;
-  const showNewSessionWelcome = sessionChatShowsNewSessionWelcome(emptyKind);
 
   return (
     <SessionChatPresentationProvider

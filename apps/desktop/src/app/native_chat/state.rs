@@ -108,6 +108,7 @@ pub(crate) struct NativeChatView {
     pub(super) composer_caret_image: Option<String>,
     pub(super) async_answer_input: Option<(String, Entity<InputState>)>,
     pub(super) async_answer_subscription: Option<Subscription>,
+    pub(super) async_answer_echo: super::async_questions::AsyncAnswerEcho,
     pub(crate) answer_input: Option<(String, Entity<InputState>)>,
     pub(crate) answer_subscription: Option<Subscription>,
     pub(super) terminal_dialog_input: Option<super::terminal_dialog::TerminalDialogInput>,
@@ -174,6 +175,15 @@ impl NativeChatView {
     pub(crate) fn new(config: NativeChatConfig, cx: &mut Context<Self>) -> Self {
         super::fonts::register(cx);
         super::keyboard::register(cx);
+        let runtime = (!config.session_id.is_empty()).then(|| Self::start_runtime(&config, cx));
+        let error = None;
+        Self::with_runtime(config, runtime, error, cx)
+    }
+
+    pub(super) fn start_runtime(
+        config: &NativeChatConfig,
+        cx: &mut Context<Self>,
+    ) -> ChatRuntimeWorker {
         let (wake, mut wakes) = futures::channel::mpsc::unbounded::<()>();
         let runtime = ChatRuntimeWorker::start(
             json!({"clientId":config.client_id,"machineId":config.machine_id,"projectId":config.project_id,"sessionId":config.session_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
@@ -190,7 +200,15 @@ impl NativeChatView {
             }
         })
         .detach();
-        let (runtime, error) = (Some(runtime), None);
+        runtime
+    }
+
+    fn with_runtime(
+        config: NativeChatConfig,
+        runtime: Option<ChatRuntimeWorker>,
+        error: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let list = gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(400.0));
         list.set_follow_mode(gpui::FollowMode::Tail);
         let subagent_list = gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(400.0));
@@ -278,6 +296,7 @@ impl NativeChatView {
             composer_caret_image: None,
             async_answer_input: None,
             async_answer_subscription: None,
+            async_answer_echo: Default::default(),
             answer_input: None,
             answer_subscription: None,
             terminal_dialog_input: None,
@@ -605,6 +624,7 @@ impl NativeChatView {
         {
             // The pane's keyboard zoom is its own, and outlives the snapshots the host publishes.
             self.apply_chat_zoom(&mut snapshot);
+            self.retain_launch_welcome(&mut snapshot);
             self.snapshot = Arc::new(snapshot);
             self.adopt_status_line_reservation();
             self.sync_model_picker_window(cx);
@@ -624,13 +644,24 @@ impl NativeChatView {
                 }
                 Some("returnedPrompt") => self.invoke(json!({"type":"applyReturned","text":request["params"]["text"],"current":self.draft}),cx),
                 Some("composerInit") => {
+                    let local_draft = (self.draft_revision > 0).then(|| self.draft.clone());
                     let entry = &request["params"]["entry"];
                     self.config.client_id = request["params"]["clientId"].as_str().unwrap_or_default().to_string();
                     self.draft_id = entry["version"]["draftId"].as_str().unwrap_or_default().to_string();
                     self.draft_revision = entry["version"]["revision"].as_u64().unwrap_or(1);
-                    self.draft = if entry["parked"] == true || entry["submitted"] == true { String::new() } else { entry["text"].as_str().unwrap_or_default().to_string() };
-                    self.input_needs_sync = true;
+                    let restored = if entry["parked"] == true || entry["submitted"] == true { String::new() } else { entry["text"].as_str().unwrap_or_default().to_string() };
+                    let draft = match &local_draft {
+                        Some(local) => format!("{restored}{local}"),
+                        None => restored,
+                    };
+                    self.input_needs_sync = self.draft != draft;
+                    self.draft = draft;
                     self.composer_ready = true;
+                    if local_draft.is_some() {
+                        self.draft_revision += 1;
+                        self.persist_draft(cx);
+                        self.save_draft(cx);
+                    }
                     self.host("composerReady", json!({}), cx);
                     // The stash badge and the session-note dot need their first read (native-composer-chrome.ts).
                     self.invoke(json!({"type":"refreshComposerChrome","sessionId":self.config.session_id}), cx);

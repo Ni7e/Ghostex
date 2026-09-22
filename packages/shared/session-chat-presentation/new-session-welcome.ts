@@ -18,9 +18,10 @@ import { getDefaultSidebarAgentById, isSidebarAgentIcon, type SidebarAgentIcon }
 /**
  * A new agent reports `starting` until its first transcript file exists, and
  * `empty` once the file is there but still has no turns. The welcome owns both.
+ * A known draft is also empty while its first read runs.
  */
-export function sessionChatShowsNewSessionWelcome(viewKind: string | null | undefined): boolean {
-  return viewKind === 'starting' || viewKind === 'empty';
+export function sessionChatShowsNewSessionWelcome(viewKind: string | null | undefined, isDraft = false): boolean {
+  return viewKind === 'starting' || viewKind === 'empty' || (viewKind === 'loading' && isDraft);
 }
 
 /** The agent's display name, e.g. `claude-code` → `Claude Code`. */

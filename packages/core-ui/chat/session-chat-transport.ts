@@ -181,7 +181,7 @@ export interface SessionChatTransport {
   daemon refuses the call once the draft has been promoted, and that rejection
   is surfaced, never swallowed.
   */
-  switchDraftAgent?(params: { agentId: string }): Promise<void>;
+  switchDraftAgent?(params: { agentId: string; agentModel?: string; agentEffort?: string }): Promise<void>;
   answerPrompt(params: Omit<GxserverAnswerSessionChatPromptParams, 'projectId' | 'sessionId'>): Promise<void>;
   interrupt(): Promise<void>;
   /*
