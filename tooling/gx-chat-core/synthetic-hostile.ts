@@ -57,6 +57,48 @@ const SESSION_ID = 'gx-synthetic-hostile-session';
  * landing in the middle of one. The rest are a NUL, a combining mark on its own, an astral pair,
  * and a right-to-left override.
  */
+/**
+ * Bodies that reach the Markdown walk's alert test, whose two cuts are fixed offsets.
+ *
+ * `markdown.slice(start ?? 0, 60)` is an END index in UTF-16 code units, and the alert name is
+ * then cut at the length of `note`, `tip`, `important`, `warning` or `caution`. A Rust port that
+ * spells either as a byte range panics whenever the cut falls inside a character, so each body
+ * below puts a multi-byte character exactly there.
+ */
+const PROJECTION_BODIES = [
+  // Byte 60 is interior to the emoji; UTF-16 unit 60 is not.
+  `> \`a/b\` ${'x'.repeat(51)}\u{1F600}`,
+  // The alert NAME cut at the length of `note`, landing inside the euro sign.
+  '> [!no\u20ac]] \`a/b\` still a quote',
+  // A real alert, so the marked branch itself is walked rather than only refused.
+  '> [!WARNING] \`a/b\`\n> mind the gap',
+  // The blockquote starts past offset 60, which is the case the slice tests the empty string on.
+  `${'y'.repeat(80)}\n\n> [!tip] \`a/b\`\n> after the bound`,
+  // A quote whose first line is exactly the bound, with an astral pair across it.
+  `> \`a/b\` ${'z'.repeat(50)}\u{1F600}\u{1F600}`,
+];
+
+/**
+ * Paths for the relative-path projection, against the Windows root the start config carries.
+ *
+ * The root holds KELVIN SIGN (U+212A), which `to_lowercase` folds to a one-byte `k`: a port that
+ * compares folded and then slices at the UNFOLDED length lands past the end of the path or inside
+ * a character, and every such pair rendered the wrong relative path even without the panic.
+ */
+const PROJECTION_PATHS = [
+  // The same two capitals as the root, spelled DECOMPOSED: the fold agrees, the byte lengths do
+  // not, and the unfolded cut lands inside the second combining dot.
+  'C:/Users/\u212ael\u212ain/i\u0307i\u0307/src/main.rs',
+  // The same root, spelled exactly as the root is.
+  'C:/Users/\u212ael\u212ain/\u0130\u0130/src/main.rs',
+  // The root itself, with nothing after it.
+  'C:/Users/\u212ael\u212ain/\u0130\u0130',
+  // Outside the project but inside the home directory, which is the `~/` branch.
+  'C:/Users/\u212ael\u212ain/other/file.ts',
+  // Outside both, which keeps its full path.
+  '/sample/project/plain.ts',
+];
+
 const NASTY_TEXT = [
   // `@"` satisfies both `startsWith('@"')` and `endsWith('"')` on the SAME quote, which is the
   // two-character token that panicked `bare_file_paths` on 2026-09-22. A user can type it.
@@ -301,7 +343,18 @@ async function main(): Promise<number> {
     };
   };
 
-  host.start({ clientId: 'gx-synthetic-hostile-client', projectId: PROJECT_ID });
+  host.start({
+    clientId: 'gx-synthetic-hostile-client',
+    projectId: PROJECT_ID,
+    // `presentation.setWorkingDirectory(...)` is what turns a diff card's absolute path into one
+    // relative to the project, and `sessionChatFileChangePathParts` folds case on a Windows root.
+    // A full Unicode fold changes byte lengths in both directions: U+212A KELVIN SIGN folds three
+    // bytes to one, and U+0130 folds two bytes to THREE (`i` plus a combining dot). A port that
+    // compares folded and then slices at the UNFOLDED length therefore lands past the end or
+    // inside a character. Nothing else in this file can reach that projection, because the
+    // working directory rides on the presentation cache rather than on a chat frame.
+    initialPresentation: { workingDirectory: 'C:/Users/\u212ael\u212ain/\u0130\u0130' },
+  });
   await settle();
   await pump();
   if (!subscribed) {
@@ -330,6 +383,55 @@ async function main(): Promise<number> {
     })
   );
   await settle();
+  await pump();
+
+  phase('projection paths');
+  // 1b. The two projections no other frame in this file reaches, each on a WELL FORMED snapshot
+  //     so the row is really built rather than refused on the way in.
+  //
+  //     * the Markdown walk's GitHub-alert test, which cuts the body at the UTF-16 constant 60
+  //       and then cuts the alert NAME at the length of an ASCII name. Both were byte ranges
+  //       until 2026-09-22, so a blockquote with a multi-byte character straddling either cut
+  //       panicked the host thread. `bare_paths` is `isUser`, so the body has to be a USER one.
+  //     * `sessionChatFileChangePathParts`, which folds case against the working directory and
+  //       then takes the prefix. A Windows root with a KELVIN SIGN in it folds three bytes to
+  //       one, so the unfolded length lands past the end or inside a character.
+  for (const [at, body] of PROJECTION_BODIES.entries()) {
+    frame(
+      envelope('sessionChatSnapshot', {
+        messages: [
+          {
+            id: `projection-${at}`,
+            role: 'user',
+            blocks: [{ type: 'text', text: body }],
+            timestamp: CLOCK_START,
+            source: 'transcript',
+            byteOffset: 20 + at,
+          },
+          {
+            id: `projection-agent-${at}`,
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tool-call',
+                id: `projection-call-${at}`,
+                name: 'Write',
+                input: { file_path: PROJECTION_PATHS[at % PROJECTION_PATHS.length], content: body },
+              },
+              { type: 'tool-result', id: `projection-call-${at}`, name: 'Write', output: 'ok' },
+            ],
+            timestamp: CLOCK_START,
+            source: 'transcript',
+            byteOffset: 21 + at,
+          },
+        ],
+        status: 'ready',
+        beforeOffset: 0,
+        hasMore: false,
+      })
+    );
+    await settle();
+  }
   await pump();
 
   phase('opened');

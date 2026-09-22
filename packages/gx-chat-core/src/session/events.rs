@@ -131,6 +131,19 @@ pub fn boot_read(
     state.identity.session_key = read.session_key.clone();
     let config = state.session.boot_config.clone().unwrap_or_default();
     state.core.preview_settings = config.preview.clone();
+    // CDXC:SessionChat 2026-09-22 WHY:
+    // `presentation.setWorkingDirectory(transport.presentation.getSnapshot().workingDirectory)`
+    // runs on every publish in `native-host.ts:415`, and it is what turns a diff card's absolute
+    // path into one relative to the project. `StartConfig::initial_presentation` carried the same
+    // cache into the core and was never read, so `TranscriptViewState::working_directory` had no
+    // writer and every file-change row drew a full path.
+    state.transcript_view.working_directory = config
+        .initial_presentation
+        .as_ref()
+        .and_then(|cache| cache.get("workingDirectory"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
 
     // Retained data is folded before the first paint, so a session switch never shows an empty
     // transcript between mount and the subscription's first frame.

@@ -5,6 +5,7 @@
 #   bun tooling/gx-chat-core/run-gates.sh          # everything
 #   tooling/gx-chat-core/run-gates.sh --fast       # skip the wasm build and clippy
 #   tooling/gx-chat-core/run-gates.sh --regenerate # rebuild the recordings and fixtures first
+#   tooling/gx-chat-core/run-gates.sh --stale-fails # fail instead of rebuilding a stale expected file
 #
 # What it runs, in order:
 #
@@ -20,7 +21,12 @@
 #  4b. `synthetic-hostile`: malformed frames, actions and answers, graded on one property only,
 #     that the replay finished without panicking. The core runs on the host's own thread, so a
 #     slice or an index that panics on server data takes the chat window down with it.
-#  5. The per-family checks that cover ground no recording reaches (`transcript_check`'s 58
+#  4c. Freshness: an expected document sequence older than its recording, or older than any of the
+#     TypeScript the brain is assembled from, is rebuilt before it is graded. Without it the gate
+#     compares the Rust core against a TypeScript run of a different recording, or of rules that
+#     have since changed, and reads green while a whole family is broken.
+#  5. The per-family checks that cover ground no recording reaches (`js_number_check`'s 40 rows of
+#     `Number.prototype.toString()` taken from V8, `transcript_check`'s 58
 #     projection cases, `extras_parity`'s invented table, `extras_check`'s wiring, `e1_check`,
 #     `questions_check`, `question_exchange_check`, `composer_check`).
 #
@@ -48,13 +54,47 @@ crate="$root/packages/gx-chat-core"
 recordings="/tmp/gx-chat"
 fast=0
 regenerate=0
+stale_fails=0
 for argument in "$@"; do
   case "$argument" in
     --fast) fast=1 ;;
     --regenerate) regenerate=1 ;;
+    --stale-fails) stale_fails=1 ;;
     *) echo "unknown option: $argument" >&2; exit 2 ;;
   esac
 done
+
+# The TypeScript the brain is assembled from. An expected document sequence older than any of it
+# was produced by rules that have since changed, which is a gate grading a brain nobody ships.
+brain_sources=(
+  "$root/packages/shared/session-chat-controller"
+  "$root/packages/shared/session-chat-presentation"
+  "$root/packages/shared/session-chat-preview"
+  "$root/packages/core-ui/chat"
+  "$root/tooling/gx-chat-core"
+)
+
+# Prints the first input newer than `$2`, or nothing. `find -newer` compares modification times,
+# which is what `test -nt` does, so the recording and the sources are measured the same way.
+newer_than_expected() {
+  local recording="$1"
+  local expected="$2"
+  if [ "$recording" -nt "$expected" ]; then
+    printf '%s' "$recording"
+    return 0
+  fi
+  local source
+  for source in "${brain_sources[@]}"; do
+    [ -d "$source" ] || continue
+    local hit
+    hit="$(find "$source" -type f -name '*.ts' -newer "$expected" -print -quit 2>/dev/null)"
+    if [ -n "$hit" ]; then
+      printf '%s' "$hit"
+      return 0
+    fi
+  done
+  return 0
+}
 
 # `date +%z` is `+HHMM`; the core wants minutes east of UTC.
 offset_text="$(date +%z)"
@@ -133,10 +173,18 @@ for recording in "$recordings"/*.jsonl; do
   fi
   # A regenerated recording with an expected sequence older than it grades the Rust core against
   # a TypeScript run of a DIFFERENT recording. That is how `synthetic-e1` read 33/33 on 2026-09-22
-  # while its real number was 20/33, so the expected side is rebuilt whenever the recording is
-  # newer rather than only when it is missing.
-  if [ ! -f "$expected" ] || [ "$recording" -nt "$expected" ]; then
-    run "replay-typescript $name" bun "$root/tooling/gx-chat-core/replay-typescript.ts" "$recording"
+  # while its real number was 20/33. A TypeScript brain that has CHANGED since the expected file
+  # was written is the same failure one step further back: the gate then grades the Rust core
+  # against rules nobody ships any more. So the expected side is rebuilt whenever the recording,
+  # the replay driver, or any of the shared TypeScript the brain is assembled from is newer than
+  # it, and `--stale-fails` turns that into a failure instead for a machine that must not
+  # regenerate (a CI run checking that a committed expected file is current).
+  if [ ! -f "$expected" ] || [ -n "$(newer_than_expected "$recording" "$expected")" ]; then
+    if [ "$stale_fails" = "1" ]; then
+      record "expected $name" "FAIL" "stale: the recording or the TypeScript brain is newer"
+    else
+      run "replay-typescript $name" bun "$root/tooling/gx-chat-core/replay-typescript.ts" "$recording"
+    fi
   fi
   rust="$(cargo run --release --quiet --example replay -- --utc-offset "$offset_minutes" "$recording" 2>&1)"
   queries="$(printf '%s' "$rust" | grep '^queries' | awk '{print $2}')"
@@ -173,6 +221,7 @@ coverage="$(bun "$root/tooling/gx-chat-core/coverage.ts" 2>&1 | grep 'exercised$
 record "coverage" "info" "${coverage:-not measured}"
 
 # --- the per-family checks the recordings cannot reach ---------------------
+run "js_number_check" cargo run --release --quiet --example js_number_check
 run "transcript_check" cargo run --release --quiet --example transcript_check
 run "extras_parity" cargo run --release --quiet --example extras_parity
 run "extras_check" cargo run --release --quiet --example extras_check
