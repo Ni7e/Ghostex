@@ -371,7 +371,11 @@ fn self_naming(method: &ChatRpcMethod) -> bool {
     )
 }
 
-/// The seven `brokerMessage` kinds, fanned out into the events they carry.
+/// The five `brokerMessage` kinds that carry state, fanned out into the events they carry.
+///
+/// The other two the TypeScript accepts are QuickJS transport and have no core meaning: `chunk`
+/// reassembles a transfer over 96 KiB, and `response` completes a request in the broker's own id
+/// table. The broker is deleted and the Rust host answers through `resolve`, so both fall through.
 fn broker_events(message: &Value) -> Vec<Event> {
     match message.get("kind").and_then(Value::as_str) {
         Some("event") => chat_frame(

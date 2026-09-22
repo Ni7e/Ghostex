@@ -55,16 +55,16 @@ pub struct QuestionsState {
     pub dismissed_notice: Option<DismissedNotice>,
     /// The refusal the notice card shows instead of the composer's error line.
     pub notice_error: Option<String>,
-    /// Whether the notice card is on screen, cached for the surfaces that gate on it.
+    /// Whether the notice card is on screen, kept true by [`crate::questions::sync`] after every
+    /// event.
     ///
-    /// Family d's send gate and composer placeholder read this; family c keeps it true through
-    /// [`crate::questions::sync`], which runs after every event.
+    /// Nothing reads it: family d calls [`crate::questions::gates::notice_visible`] directly, and
+    /// the document key comes from the same gate. Kept as the cache the surfaces may move back to
+    /// rather than deleted, because the gate walks the whole question list on every read.
     pub notice_visible: bool,
     /// Whether the notice on screen is the detection whose answer was refused, so it no longer
-    /// holds the agent's input line. Cached beside `notice_visible` and read by family d.
+    /// holds the agent's input line. Kept beside `notice_visible`, and unread for the same reason.
     pub notice_retired: bool,
-    /// The dismissal write in flight, which replaces `dismissed_notice` when it lands.
-    pub dismiss_notice_pending: Option<DismissedNotice>,
 
     // ---- the async strip --------------------------------------------------
     pub async_questions: AsyncQuestionsState,
