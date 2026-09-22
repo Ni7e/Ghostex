@@ -62,8 +62,12 @@ pub struct TranscriptViewState {
     /// transcript's markdown on every publish is exactly the cost the TypeScript cache exists to
     /// avoid.
     pub projected: BTreeMap<String, ProjectedMessage>,
-    /// Ids queued for the next backfill batch, in the order the last projection met them.
-    pub backfill: Vec<String>,
+    /// The rows queued for the next backfill batch, in the order the last projection met them.
+    ///
+    /// Messages rather than ids, as `NativeChatPresentation.backfill` holds them: a completed
+    /// turn's work rows come from the `loadWork` reads and are in no list an id could be looked up
+    /// in, and an id that never resolved kept the zero-delay timer firing on every tick.
+    pub backfill: Vec<ChatMessage>,
     /// Bumped by every applied batch, so the next publish differs and the rows ship.
     pub backfill_revision: u64,
     /// The open-row set the renderer last reported, with the detail each row asks for.

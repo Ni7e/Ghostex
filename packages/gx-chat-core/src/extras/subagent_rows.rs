@@ -161,7 +161,7 @@ pub fn advance(state: &mut ChatState, context: &ChatContext) -> bool {
         .backfill
         .len()
         .saturating_sub(crate::state::BACKFILL_BATCH);
-    let batch: Vec<String> = view.backfill.split_off(batch_start);
+    let batch: Vec<ChatMessage> = view.backfill.split_off(batch_start);
     let mut cache = std::mem::take(&mut view.projected);
     {
         let view = &state.extras.subagent.view;
@@ -171,12 +171,8 @@ pub fn advance(state: &mut ChatState, context: &ChatContext) -> bool {
             state.extras.subagent.working,
             view.working_directory.as_deref(),
         );
-        for id in batch {
-            if let Some(message) = rows.iter().find(|message| message.id == id) {
-                crate::transcript::presentation::project_cached(
-                    &mut cache, &scope, context, message,
-                );
-            }
+        for message in &batch {
+            crate::transcript::presentation::project_cached(&mut cache, &scope, context, message);
         }
     }
     let view = &mut state.extras.subagent.view;

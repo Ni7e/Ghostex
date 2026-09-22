@@ -278,7 +278,7 @@ pub struct Projection {
     pub items: Vec<TranscriptItem>,
     pub final_ids: Vec<String>,
     /// Ids that shipped as placeholders and want a backfill batch.
-    pub backfill: Vec<String>,
+    pub backfill: Vec<ChatMessage>,
     /// The minimap rail for this pass.
     ///
     /// `NativeChatPresentation.update` builds the rail inside the same result object as the items
@@ -377,7 +377,7 @@ struct Builder<'a> {
     context: &'a ChatContext,
     cache: &'a mut ProjectionCache,
     eager_from: usize,
-    backfill: Vec<String>,
+    backfill: Vec<ChatMessage>,
 }
 
 impl Builder<'_> {
@@ -398,7 +398,7 @@ impl Builder<'_> {
         if eager {
             return project_cached(self.cache, self.scope, self.context, message);
         }
-        self.backfill.push(message.id.clone());
+        self.backfill.push(message.clone());
         placeholder(message)
     }
 

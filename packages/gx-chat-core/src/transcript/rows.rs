@@ -111,24 +111,15 @@ pub fn advance(state: &mut ChatState, context: &ChatContext) -> bool {
         .backfill
         .len()
         .saturating_sub(crate::state::BACKFILL_BATCH);
-    let batch: Vec<String> = view.backfill.split_off(batch_start);
-    let sources: Vec<_> = batch
-        .iter()
-        .filter_map(|id| {
-            state
-                .messages
-                .composed
-                .iter()
-                .find(|message| message.id == *id)
-                .cloned()
-        })
-        .collect();
-    // `for (const message of this.backfill.splice(-BACKFILL_BATCH)) this.message(message)`: each
+    // `for (const message of this.backfill.splice(-BACKFILL_BATCH)) this.message(message)`: the
+    // queue holds the MESSAGES the projection met, not ids looked up in the composed list, because
+    // a completed turn's work rows come from the `loadWork` reads and are in no list at all. Each
     // is projected NOW and cached, so the refresh below reads whole rows for them.
+    let batch: Vec<ghostex_gx_protocol::ChatMessage> = view.backfill.split_off(batch_start);
     let mut cache = std::mem::take(&mut state.transcript_view.projected);
     {
         let scope = presentation::scope(state, &state.transcript_view);
-        for message in &sources {
+        for message in &batch {
             presentation::project_cached(&mut cache, &scope, context, message);
         }
     }
