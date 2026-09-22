@@ -30,6 +30,7 @@ const LATER: &str = "Later";
 const CANCEL: &str = "Cancel";
 const RESTART_AND_UPDATE: &str = "Restart and update";
 const DOWNLOAD_UPDATE: &str = "Download update";
+const OPEN_DOWNLOAD_PAGE: &str = "Open download page";
 
 /// `.update-available-modal-notes`: 13px prose at line-height 1.55.
 const NOTES_FONT_SIZE: f32 = 13.0;
@@ -68,6 +69,9 @@ const CIRCLE_TOP: f32 = 8.25;
 pub(crate) enum UpdateAvailableState {
     Available,
     Ready,
+    /// CDXC:Release 2026-09-22 DECISION:
+    /// User: Linux does not install updates itself; its dialog shows the same changelog and its button opens the download page. Native only: the React twin is never opened on Linux.
+    Notify,
 }
 
 /// What the dialog asks its host to do. The dialog removes its own window before sending any of these.
@@ -75,6 +79,7 @@ pub(crate) enum UpdateAvailableModalCommand {
     Cancel,
     Download,
     Restart,
+    OpenDownloadPage,
 }
 
 pub(crate) type UpdateAvailableModalHost = Rc<dyn Fn(UpdateAvailableModalCommand, &mut App)>;
@@ -369,10 +374,10 @@ impl GpuiUpdateAvailableModalWindow {
     }
 
     fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let command = if self.ready() {
-            UpdateAvailableModalCommand::Restart
-        } else {
-            UpdateAvailableModalCommand::Download
+        let command = match self.state {
+            UpdateAvailableState::Ready => UpdateAvailableModalCommand::Restart,
+            UpdateAvailableState::Available => UpdateAvailableModalCommand::Download,
+            UpdateAvailableState::Notify => UpdateAvailableModalCommand::OpenDownloadPage,
         };
         self.close_window_and_send(command, window, cx);
     }
@@ -754,12 +759,12 @@ impl GpuiUpdateAvailableModalWindow {
 
     fn render_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        let ready = self.ready();
+        let later = self.state != UpdateAvailableState::Available;
         modal_footer(vec![
             modal_action_button(
                 &p,
                 "update-available-cancel",
-                if ready { LATER } else { CANCEL },
+                if later { LATER } else { CANCEL },
                 None,
                 ModalButtonTone::Neutral,
                 false,
@@ -769,10 +774,10 @@ impl GpuiUpdateAvailableModalWindow {
             modal_action_button(
                 &p,
                 "update-available-confirm",
-                if ready {
-                    RESTART_AND_UPDATE
-                } else {
-                    DOWNLOAD_UPDATE
+                match self.state {
+                    UpdateAvailableState::Ready => RESTART_AND_UPDATE,
+                    UpdateAvailableState::Available => DOWNLOAD_UPDATE,
+                    UpdateAvailableState::Notify => OPEN_DOWNLOAD_PAGE,
                 },
                 None,
                 ModalButtonTone::Neutral,

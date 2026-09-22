@@ -17,6 +17,8 @@ mod component_store;
 mod ghostty_kit;
 mod ghostty_vt;
 mod hotkey_label;
+#[cfg(target_os = "linux")]
+mod linux_updater;
 mod navigation_history;
 mod notification_feed;
 mod plugins_modal;

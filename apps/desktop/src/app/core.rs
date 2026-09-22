@@ -102,6 +102,9 @@ pub struct GhostexGpuiApp {
     pub(crate) command_pane_project_id: Option<String>,
     pub(crate) parked_command_panes_by_project: HashMap<String, serde_json::Value>,
     pub(crate) command_pane_project_epoch: u64,
+    /// The main workspace window, recorded by its render so model hooks without a `Window` can
+    /// defer window work onto it (`defer_in_main_window`).
+    pub(crate) main_window_handle: Option<gpui::AnyWindowHandle>,
     pub(crate) project_editor_shell: ProjectEditorShellModel,
     pub(crate) project_editor_auto_sleep_epochs: ProjectEditorAutoSleepEpochs,
     pub(crate) project_editor_auto_sleep_policy: ProjectEditorAutoSleepPolicySnapshot,
@@ -183,14 +186,17 @@ pub struct GhostexGpuiApp {
     pub(crate) titlebar_accounts_revision: u64,
     pub(crate) titlebar_tips_unread_count: u64,
     // Platform-neutral updater state drives the native titlebar. Sparkle owns
-    // macOS delivery and Velopack owns Windows delivery; only the Windows
-    // backend retains release metadata for the confirmation child window.
+    // macOS delivery and Velopack owns Windows delivery; Linux only announces
+    // the release. The Windows and Linux backends retain release metadata for
+    // the Ghostex Update child window.
     pub(crate) updater_started: bool,
-    #[allow(dead_code)] // read by the windows update path (begin_windows_update_check)
+    #[allow(dead_code)] // read by the windows and linux update check paths
     pub(crate) update_checking: bool,
     pub(crate) update_available: bool,
     pub(crate) update_downloading: bool,
     pub(crate) update_download_progress: Option<f64>,
+    #[cfg(target_os = "linux")]
+    pub(crate) linux_update: Option<linux_updater::LinuxUpdate>,
     #[cfg(target_os = "windows")]
     pub(crate) windows_updater: Option<windows_updater::WindowsUpdater>,
     #[cfg(target_os = "windows")]
@@ -310,12 +316,8 @@ pub struct GhostexGpuiApp {
     makes every later sleep a user decision this pass must not override.
     */
     pub(crate) startup_restore_wake_pending: HashSet<String>,
-    /*
-    In-flight surfaced-restore SSH plan preparations, so the repeated
-    authoritative snapshots that arrive during startup cannot stack duplicate
-    remote round trips for the same tab.
-    */
-    pub(crate) remote_workspace_attach_pending: HashSet<GpuiRemoteAttachSessionKey>,
+    pub(crate) remote_attach_requests:
+        crate::app::remote_conn::attach_request::RemoteAttachRequests,
     // CDXC:Navigation 2026-08-07: last workarea + split ratio per canonical
     // workspace project key. See GpuiProjectViewState.
     pub(crate) project_view_states_by_project: HashMap<String, GpuiProjectViewState>,
@@ -334,9 +336,6 @@ pub struct GhostexGpuiApp {
     pub(crate) view_panel_picker_open: bool,
     /// The picker's scroll position, so a long list is reachable in a short panel.
     pub(crate) view_picker_scroll: ScrollHandle,
-    /// The Dev servers start page of each Browser pane that is showing a blank tab.
-    pub(crate) browser_start_pages:
-        HashMap<BrowserPaneId, Entity<crate::app::window::remote_sites::RemoteSitesPanel>>,
     /// Where a tab being dragged along the view panel's strip would land, as an index into the
     /// drawn row.
     pub(crate) view_strip_drop_index: Option<usize>,
@@ -639,7 +638,6 @@ pub struct GhostexGpuiApp {
     pub(crate) workspace_drop_feedback: Option<WorkspaceDropFeedback>,
     pub(crate) command_drop_feedback: Option<CommandPaneDropFeedback>,
     pub(crate) workspace_tab_drag_active: bool,
-    pub(crate) pending_workspace_tab_click: Option<WorkspacePendingTabClick>,
     pub(crate) command_tab_drag_active: bool,
     pub(crate) pending_command_tab_click: Option<CommandPanePendingTabClick>,
     pub(crate) browser_tab_drop_feedback: Option<BrowserDropFeedback>,
@@ -800,7 +798,6 @@ pub struct GhostexGpuiApp {
     pub(crate) workarea_split_divider_hovering: bool,
     pub(crate) workarea_split_divider_hover_visible: bool,
     pub(crate) workarea_split_divider_hover_epoch: u64,
-    pub(crate) hovered_workspace_tab: Option<WorkspaceHoverTab>,
     pub(crate) hovered_command_tab: Option<CommandPaneHoverTab>,
     pub(crate) hovered_browser_tab: Option<BrowserHoverTab>,
     pub(crate) command_resize_hovering: Option<CommandPaneResizeHoverTarget>,

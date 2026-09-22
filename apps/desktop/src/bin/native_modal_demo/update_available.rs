@@ -21,6 +21,7 @@ fn demo_release_notes() -> String {
 pub(super) fn open(demo: &super::DemoEnv, cx: &mut App) {
     let state = match demo.state.as_str() {
         "ready" | "portable" => UpdateAvailableState::Ready,
+        "notify" => UpdateAvailableState::Notify,
         _ => UpdateAvailableState::Available,
     };
     let host: UpdateAvailableModalHost = Rc::new(|command, cx: &mut App| {
@@ -28,6 +29,7 @@ pub(super) fn open(demo: &super::DemoEnv, cx: &mut App) {
             UpdateAvailableModalCommand::Cancel => eprintln!("cancel"),
             UpdateAvailableModalCommand::Download => eprintln!("download update"),
             UpdateAvailableModalCommand::Restart => eprintln!("restart and update"),
+            UpdateAvailableModalCommand::OpenDownloadPage => eprintln!("open download page"),
         }
         cx.quit();
     });

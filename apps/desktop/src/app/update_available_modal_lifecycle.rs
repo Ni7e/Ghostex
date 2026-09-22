@@ -5,7 +5,7 @@ use crate::*;
 
 impl GhostexGpuiApp {
     /// Opens the native dialog for the `updateAvailable` open message the
-    /// Windows updater builds (`open_windows_update_modal`). Refuses payloads
+    /// Windows and Linux updaters build (`open_windows_update_modal`, `open_linux_update_modal`). Refuses payloads
     /// the React host would have ignored: a missing version or an unknown state.
     pub(crate) fn open_gpui_update_available_modal(
         &mut self,
@@ -27,6 +27,7 @@ impl GhostexGpuiApp {
         let state = match message.get("state").and_then(serde_json::Value::as_str) {
             Some("available") => UpdateAvailableState::Available,
             Some("ready") => UpdateAvailableState::Ready,
+            Some("notify") => UpdateAvailableState::Notify,
             _ => return,
         };
         let config = UpdateAvailableModalConfig {
@@ -70,7 +71,8 @@ impl GhostexGpuiApp {
 
     /// The dialog has already removed its window. `Download` and `Restart`
     /// are the `downloadGhostexUpdate` / `restartAndUpdateGhostex` bridge
-    /// commands the React page posted; the updater only exists on Windows.
+    /// commands the React page posted and exist only on Windows;
+    /// `OpenDownloadPage` is the Linux dialog's one action.
     fn handle_gpui_update_available_modal_command(
         &mut self,
         command: UpdateAvailableModalCommand,
@@ -88,8 +90,12 @@ impl GhostexGpuiApp {
                 #[cfg(target_os = "windows")]
                 self.restart_and_apply_windows_update(cx);
             }
+            UpdateAvailableModalCommand::OpenDownloadPage => {
+                #[cfg(target_os = "linux")]
+                self.open_linux_update_download_page(cx);
+            }
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         let _ = cx;
     }
 }
