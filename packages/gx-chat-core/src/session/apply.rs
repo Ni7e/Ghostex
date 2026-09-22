@@ -199,6 +199,10 @@ pub fn apply_authoritative(
         result.messages.clone()
     };
     if !keep_history {
+        // `invalidateDeferredSessionChatWork(transport.readHistory)`: a transcript that was
+        // replaced rather than extended invalidates every walked work section, because the byte
+        // offsets they were walked from belong to the conversation that is gone.
+        state.transcript_view.deferred_cache.clear();
         state.messages.history_epoch = None;
         state.messages.history_prefix_count = 0;
         state.messages.boundary_attempt = None;

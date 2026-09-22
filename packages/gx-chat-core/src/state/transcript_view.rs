@@ -26,6 +26,7 @@ use std::collections::BTreeMap;
 use ghostex_gx_protocol::ChatMessage;
 
 use crate::document::{DeferredWorkRow, RowDetails, TranscriptItem};
+use crate::transcript::deferred_work::{DeferredWalk, DeferredWorkCache};
 
 /// Items from the tail that are fully projected before the first publish; the rest backfill in
 /// batches of the same size.
@@ -79,8 +80,10 @@ pub struct TranscriptViewState {
     pub row_details: RowDetails,
     /// The `saveStashedPrompt` calls in flight, by request id, with the message they belong to.
     pub save_prompt_requests: BTreeMap<u64, String>,
-    /// The `loadWork` reads in flight, by request id, with the turn's user-message id.
-    pub deferred_requests: BTreeMap<u64, String>,
+    /// The `loadWork` reads in flight, by request id, with the walk that asked for them.
+    pub deferred_requests: BTreeMap<u64, DeferredWalk>,
+    /// Sections already walked, so reopening one is not several more round trips.
+    pub deferred_cache: DeferredWorkCache,
     /// The `readSessionChatImage` reads in flight, by request id, with the path asked for.
     pub image_requests: BTreeMap<u64, String>,
     /// The summary mode the write in flight will adopt once it lands.
@@ -136,6 +139,7 @@ impl Default for TranscriptViewState {
             row_details: RowDetails::new(),
             save_prompt_requests: BTreeMap::new(),
             deferred_requests: BTreeMap::new(),
+            deferred_cache: DeferredWorkCache::default(),
             image_requests: BTreeMap::new(),
             pending_summary_mode: None,
             pending_verbose_override: None,

@@ -9,6 +9,9 @@ use serde_json::{json, Value};
 use crate::action::{ActionKind, UserAction};
 use crate::effect::{Effect, OpenTarget};
 use crate::state::{ChatContext, ChatState, OpenRow, RewindRequest};
+use crate::transcript::deferred_work::{
+    DeferredWalk, WalkStep, DEFERRED_WORK_PAGE_LIMIT, WORK_HISTORY_UNREADABLE,
+};
 use crate::transcript::file_position::FilePosition;
 use crate::transcript::jsstr::js_trim;
 use crate::transcript::links::{classify_link_href, file_position_from_href, LinkTarget};
@@ -24,6 +27,73 @@ fn text(action: &UserAction, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+/// The row the document draws for a section that is still being read, or that refused.
+fn work_row(error: Option<String>) -> crate::document::DeferredWorkRow {
+    crate::document::DeferredWorkRow {
+        loading: error.is_none(),
+        error: match error {
+            Some(message) => ghostex_gx_protocol::Tri::Value(message),
+            None => ghostex_gx_protocol::Tri::Absent,
+        },
+    }
+}
+
+/// One page of a `loadWork` walk.
+fn read_work_page(state: &mut ChatState, walk: DeferredWalk) -> Vec<Effect> {
+    let request_id = state.core.allocate_request_id();
+    let cursor = walk.cursor;
+    state
+        .transcript_view
+        .deferred_requests
+        .insert(request_id, walk);
+    vec![Effect::SendRpc {
+        request_id,
+        method: ChatRpcMethod::ReadSessionChat,
+        // `readHistory({beforeOffset, limit: 200, detail: true})`, which `native-host.ts` spreads
+        // into the call and spells `historyMode: 'detail'`.
+        params: Box::new(json!({
+            "beforeOffset": cursor,
+            "limit": DEFERRED_WORK_PAGE_LIMIT,
+            "detail": true,
+            "historyMode": "detail",
+        })),
+    }]
+}
+
+/// `case 'loadWork'`: a completed turn's collapsed work is read back out of history.
+///
+/// The failure belongs to the row that asked for it, not to the composer's error bar, so it never
+/// reaches the outer handler. A section the cache already holds resolves on this turn, with no
+/// round trip at all, which is what the TypeScript's already-settled promise does.
+fn load_work(state: &mut ChatState, action: &UserAction) -> Vec<Effect> {
+    let turn_id = text(action, "id");
+    state
+        .transcript_view
+        .deferred_work
+        .insert(turn_id.clone(), work_row(None));
+    state.transcript_view.detail_revision += 1;
+    // `publish(controller.current())` before the await: the row spins on this turn.
+    state.core.request_publish();
+    let Some(walk) = DeferredWalk::begin(turn_id.clone(), param(action, "work")) else {
+        state
+            .transcript_view
+            .deferred_work
+            .insert(turn_id, work_row(Some(WORK_HISTORY_UNREADABLE.to_string())));
+        state.transcript_view.detail_revision += 1;
+        return Vec::new();
+    };
+    if let Some(messages) = state.transcript_view.deferred_cache.take_fresh(&walk.key) {
+        state
+            .transcript_view
+            .deferred
+            .insert(turn_id.clone(), messages);
+        state.transcript_view.deferred_work.remove(&turn_id);
+        state.transcript_view.detail_revision += 1;
+        return Vec::new();
+    }
+    read_work_page(state, walk)
 }
 
 /// The open rows the renderer reports, in the order it reports them.
@@ -96,37 +166,7 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
                 durable: false,
             }]
         }
-        ActionKind::LoadWork => {
-            // The failure belongs to the row that asked for it, not to the composer's error bar, so
-            // it never reaches the outer handler.
-            let id = text(action, "id");
-            state.transcript_view.deferred_work.insert(
-                id,
-                crate::document::DeferredWorkRow {
-                    loading: true,
-                    error: ghostex_gx_protocol::Tri::Absent,
-                },
-            );
-            state.transcript_view.detail_revision += 1;
-            let request_id = state.core.allocate_request_id();
-            state
-                .transcript_view
-                .deferred_requests
-                .insert(request_id, text(action, "id"));
-            // One page, where `readWork` (`presentation/deferred-work.ts`) walks back through
-            // `beforeOffset` until it meets the section's first message. The walk and its LRU cache
-            // are not ported; a section longer than one page comes back short.
-            let work = param(action, "work").cloned().unwrap_or(Value::Null);
-            vec![Effect::SendRpc {
-                request_id,
-                method: ChatRpcMethod::ReadSessionChat,
-                params: Box::new(json!({
-                    "beforeOffset": work.get("beforeOffset").cloned().unwrap_or(Value::Null),
-                    "limit": 200,
-                    "historyMode": "detail",
-                })),
-            }]
-        }
+        ActionKind::LoadWork => load_work(state, action),
         ActionKind::RewindOpen => {
             state.transcript_view.rewind = Some(RewindRequest {
                 message_id: text(action, "messageId"),
@@ -250,40 +290,40 @@ pub fn settle_rpc(state: &mut ChatState, request_id: u64, outcome: &RpcOutcome) 
             .insert(message_id, status.to_string());
         return Vec::new();
     }
-    if let Some(turn_id) = state.transcript_view.deferred_requests.remove(&request_id) {
-        match result {
-            Some(result) => {
-                let messages = result
-                    .get("messages")
-                    .and_then(Value::as_array)
-                    .map(|rows| {
-                        rows.iter()
-                            .filter_map(|row| serde_json::from_value(row.clone()).ok())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+    if let Some(mut walk) = state.transcript_view.deferred_requests.remove(&request_id) {
+        let turn_id = walk.turn_id.clone();
+        let step = match result {
+            Some(page) => walk.advance(&page),
+            None => {
+                // The rpc itself rejected, which the arm's own `catch` turns into the row's text.
+                let message = failure
+                    .clone()
+                    .map(|(_, message)| message)
+                    .filter(|message| !message.is_empty())
+                    .unwrap_or_else(|| WORK_HISTORY_UNREADABLE.to_string());
+                WalkStep::Failed { message }
+            }
+        };
+        match step {
+            // The walk continues on the page before this one; the row keeps spinning and nothing
+            // publishes, because the arm has not returned yet.
+            WalkStep::ReadPage { .. } => return read_work_page(state, walk),
+            WalkStep::Done { messages } => {
+                state
+                    .transcript_view
+                    .deferred_cache
+                    .store(&walk.key, &messages);
                 state
                     .transcript_view
                     .deferred
                     .insert(turn_id.clone(), messages);
                 state.transcript_view.deferred_work.remove(&turn_id);
             }
-            None => {
-                let message = failure
-                    .clone()
-                    .map(|(_, message)| message)
-                    .unwrap_or_default();
-                state.transcript_view.deferred_work.insert(
-                    turn_id,
-                    crate::document::DeferredWorkRow {
-                        loading: false,
-                        error: ghostex_gx_protocol::Tri::Value(if message.is_empty() {
-                            "Work history could not be loaded.".to_string()
-                        } else {
-                            message
-                        }),
-                    },
-                );
+            WalkStep::Failed { message } => {
+                state
+                    .transcript_view
+                    .deferred_work
+                    .insert(turn_id, work_row(Some(message)));
             }
         }
         state.transcript_view.detail_revision += 1;

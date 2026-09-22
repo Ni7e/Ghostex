@@ -459,7 +459,21 @@ async function main(): Promise<number> {
       label: 'pagination, a completed turn s work, and the summary modes',
       run: async () => {
         await act({ type: 'loadEarlier' });
-        await act({ type: 'loadWork', id: firstUserId(), work: null });
+        // A real `SessionChatDeferredWork`: `readWork` walks back page by page from `beforeOffset`
+        // until it meets `startId`, so this exercises the walk and its LRU cache rather than a
+        // malformed descriptor the brain throws on.
+        await act({
+          type: 'loadWork',
+          id: firstUserId(),
+          work: {
+            completedAt: null,
+            beforeOffset: 4820,
+            startId: 'history-2',
+            endId: 'history-4',
+            messageCount: 3,
+            filePaths: [],
+          },
+        });
         await act({ type: 'toggleSummary' });
         await act({ type: 'setVerbose', enabled: true });
         await act({ type: 'setVerbose', enabled: false });

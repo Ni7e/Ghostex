@@ -6,6 +6,7 @@
 
 pub mod actions;
 pub mod agent_message;
+pub mod deferred_work;
 pub mod diff;
 pub mod document;
 pub mod file_change_rows;
