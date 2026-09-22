@@ -188,11 +188,12 @@ fn toggle_model_picker(
     ) else {
         return Vec::new();
     };
-    let session_key = action
-        .param("sessionKey")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
+    // `const sessionKey = chat.sessionOptions.sessionKey`: the option store's STORAGE key (a
+    // draft session suffixes its agent id), which is what the close callback compares against.
+    // The action's own `sessionKey` is the bare host key and never matched it, so every pick
+    // made through the picker was dropped at the close animation's end and never reached the
+    // outbox or gxserver.
+    let session_key = state.menus.options.storage_key.clone().unwrap_or_default();
     let mut picker = ModelPickerState::open(request, session_key);
     if let Some(size) = pane_size(action, "size") {
         picker.measure(size, controls_height(action));

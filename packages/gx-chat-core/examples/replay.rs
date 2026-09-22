@@ -281,7 +281,7 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
             let after = translator.queued_storage_answers();
             if !stores.is_empty() || after != before_queue {
                 eprintln!(
-                    "n={number} m={method} raised=[{}] queue {before_queue}->{after}",
+                    "run={run} n={number} m={method} raised=[{}] queue {before_queue}->{after}",
                     stores.join(",")
                 );
             }

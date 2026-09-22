@@ -359,6 +359,7 @@ pub fn settle_request(
                     state.session.synced_draft.as_ref(),
                     draft,
                 ));
+                state.session.synced_draft_revision += 1;
             }
             if let Some(submission) = state.composer.submitting.as_mut() {
                 let sent = submission.phases.first().copied();

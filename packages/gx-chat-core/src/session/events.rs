@@ -55,9 +55,31 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
     }
     effects
         .into_iter()
+        .chain(record_deliveries(state))
         .chain(crate::session::persistence::flush_due(state, context))
         .chain(crate::session::presentation::settle(state, context))
         .collect()
+}
+
+/// `useEffect(() => { options.onDeliveredDrafts(syncedDraft?.deliveredDrafts ?? []) },
+/// [syncedDraft])`, whose host arm writes only when the list is not empty.
+fn record_deliveries(state: &mut ChatState) -> Vec<Effect> {
+    if state.session.deliveries_recorded_revision == state.session.synced_draft_revision {
+        return Vec::new();
+    }
+    state.session.deliveries_recorded_revision = state.session.synced_draft_revision;
+    let deliveries: Vec<serde_json::Value> = state
+        .session
+        .synced_draft
+        .as_ref()
+        .and_then(|draft| draft.get("deliveredDrafts"))
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if deliveries.is_empty() {
+        return Vec::new();
+    }
+    vec![Effect::RecordDeliveries { deliveries }]
 }
 
 /// The publish chain's own bookkeeping, which is what the settle above is mostly for.
@@ -289,6 +311,9 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                 None
             };
             let folded = fold_state(carried, StateCarrier::Snapshot(snapshot));
+            // The view takes the frame's own fields (`applyAuthoritative(event, …)`); the fold
+            // below is what is retained.
+            let own = crate::session::fold::snapshot_frame_result(snapshot);
             accept_authoritative_frame(
                 &mut state.messages.position,
                 &snapshot.base.server_id,
@@ -303,9 +328,9 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                 || snapshot.available_agents.is_some()
                 || snapshot.switchable_agents.is_some()
             {
-                apply_draft_agent_carriage(state, &folded.result);
+                apply_draft_agent_carriage(state, &own);
             }
-            apply_authoritative(state, &folded.result, true, context);
+            apply_authoritative(state, &own, true, context);
             state.messages.snapshot = Some(folded);
             state.messages.authoritative_revision += 1;
             Vec::new()

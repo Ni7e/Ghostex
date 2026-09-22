@@ -90,6 +90,12 @@ pub struct SessionState {
     /// The latest synced composer draft. Unchanged on omission; a clear is an explicit empty
     /// `content`.
     pub synced_draft: Option<Value>,
+    /// Bumped on every assignment of `synced_draft`, which is every `setSyncedDraft` with a
+    /// merged (and therefore new) object: the identity the `useEffect` on `syncedDraft` re-runs
+    /// on.
+    pub synced_draft_revision: u64,
+    /// The revision the delivered-draft receipts were last handed to the host for.
+    pub deliveries_recorded_revision: u64,
 }
 
 impl Default for SessionState {
@@ -127,6 +133,8 @@ impl Default for SessionState {
             pending_model_selection: Tri::Absent,
             queue_prompts: None,
             synced_draft: None,
+            synced_draft_revision: 0,
+            deliveries_recorded_revision: 0,
         }
     }
 }

@@ -70,7 +70,12 @@ pub struct BridgeTranslator {
     /// rides on the broker (`composer('summary')`, `composer('questionWrite')`, …) where the
     /// core's is an [`Effect`]. Delivering them there rather than immediately is what puts a
     /// `summaryMode = await composer('summary', …)` on the same turn in both brains.
-    storage_answers: VecDeque<Event>,
+    ///
+    /// Each answer is tagged with the SHAPE the bridge's own acknowledgement of that operation has
+    /// (`composer('optionWrite')` answers `true`, `composer('write')` answers the draft record),
+    /// so a stray boolean from a write the core never made cannot take the answer a draft write
+    /// is waiting for and derail the send chain behind it.
+    storage_answers: VecDeque<(Expect, Event)>,
     /// Answers the OTHER brain never asked the bridge for, delivered on the same turn.
     ///
     /// The retained transcript is `store.ts`'s, not `native-host.ts`'s: its read and its write go
@@ -162,7 +167,7 @@ impl BridgeTranslator {
     /// recording, which is a shortage of input rather than a difference in the rules.
     pub fn flush_storage(&mut self, core: &mut ChatCore, context: ChatContext) -> Vec<Effect> {
         let mut effects = Vec::new();
-        while let Some(event) = self.storage_answers.pop_front() {
+        while let Some((_, event)) = self.storage_answers.pop_front() {
             let round = core.handle(event, context.clone());
             self.record(&round);
             effects.extend(round);
@@ -229,10 +234,13 @@ impl BridgeTranslator {
                 }
                 Effect::ReadStorage { key } => {
                     let value = self.storage.get(&slot(key)).cloned();
-                    self.storage_answers.push_back(Event::StorageLoaded {
-                        key: key.clone(),
-                        value,
-                    });
+                    self.storage_answers.push_back((
+                        Expect::Any,
+                        Event::StorageLoaded {
+                            key: key.clone(),
+                            value,
+                        },
+                    ));
                 }
                 // One host round trip, so ONE queued answer: the TypeScript's own
                 // `composer('asyncQuestionRead')` is a single `resolve` record, and pairing is by
@@ -246,7 +254,7 @@ impl BridgeTranslator {
                         })
                         .collect();
                     self.storage_answers
-                        .push_back(Event::StorageBatchLoaded { records });
+                        .push_back((Expect::Object, Event::StorageBatchLoaded { records }));
                 }
                 Effect::WriteStorageBatch { writes } => {
                     for write in writes {
@@ -259,10 +267,13 @@ impl BridgeTranslator {
                             }
                         }
                     }
-                    self.storage_answers.push_back(Event::StorageBatchWritten {
-                        keys: writes.iter().map(|write| write.key.clone()).collect(),
-                        error: None,
-                    });
+                    self.storage_answers.push_back((
+                        Expect::Any,
+                        Event::StorageBatchWritten {
+                            keys: writes.iter().map(|write| write.key.clone()).collect(),
+                            error: None,
+                        },
+                    ));
                 }
                 Effect::WriteStorage { key, value, .. } => {
                     match value {
@@ -273,10 +284,13 @@ impl BridgeTranslator {
                             self.storage.remove(&slot(key));
                         }
                     }
-                    self.storage_answers.push_back(Event::StorageWritten {
-                        key: key.clone(),
-                        error: None,
-                    });
+                    self.storage_answers.push_back((
+                        write_expectation(&key.store),
+                        Event::StorageWritten {
+                            key: key.clone(),
+                            error: None,
+                        },
+                    ));
                 }
                 // The store's own round trips, which the bridge never carried.
                 Effect::ReadRetainedSnapshot => {
@@ -288,14 +302,32 @@ impl BridgeTranslator {
                 Effect::WriteRetainedSnapshot { value } => {
                     self.retained_snapshot.clone_from(value);
                 }
-                Effect::FlushStorage { store } => {
-                    self.storage_answers.push_back(Event::StorageWritten {
-                        key: StorageKey {
-                            store: store.clone(),
-                            suffix: String::new(),
+                // `composer('deliveries')` answers `true`, and the core awaits nothing on it: the
+                // acknowledgement is queued so the bridge's own round trip pairs with a record.
+                Effect::RecordDeliveries { .. } => {
+                    self.storage_answers.push_back((
+                        Expect::Bool,
+                        Event::StorageWritten {
+                            key: StorageKey {
+                                store: "deliveries".to_string(),
+                                suffix: String::new(),
+                            },
+                            error: None,
                         },
-                        error: None,
-                    });
+                    ));
+                }
+                // `composer('flush')` answers `true`.
+                Effect::FlushStorage { store } => {
+                    self.storage_answers.push_back((
+                        Expect::Bool,
+                        Event::StorageWritten {
+                            key: StorageKey {
+                                store: store.clone(),
+                                suffix: String::new(),
+                            },
+                            error: None,
+                        },
+                    ));
                 }
                 _ => {}
             }
@@ -445,22 +477,54 @@ impl BridgeTranslator {
     fn answer(&mut self, result: Value, error: Value, claimed: bool) -> Option<Event> {
         let failed = (!error.is_null()).then_some(error);
         let boot = result.get("sessionKey").is_some() && result.get("clientId").is_some();
-        let named = identified(&result);
-        let at =
-            self.outstanding
-                .iter()
-                .position(|pending| match (&pending.method, boot, &named) {
-                    (None, true, _) => true,
-                    (None, false, _) => false,
-                    (Some(_), true, _) => false,
-                    (Some(method), false, Some(named)) => method == named,
-                    (Some(method), false, None) => !self_naming(method),
+        let shape = if failed.is_some() {
+            AnswerShape::Failure
+        } else {
+            answer_shape(&result)
+        };
+        let got = if result.is_boolean() {
+            Expect::Bool
+        } else if result.is_object() {
+            Expect::Object
+        } else {
+            Expect::Any
+        };
+        if shape == AnswerShape::Empty {
+            let note = self.outstanding.iter().position(|pending| {
+                matches!(
+                    pending.method,
+                    Some(ChatRpcMethod::ReadSessionAgentNote)
+                        | Some(ChatRpcMethod::SaveSessionAgentNote)
+                )
+            });
+            if let Some(at) = note {
+                let pending = self.outstanding.remove(at)?;
+                return Some(Event::RpcSettled {
+                    request_id: pending.request_id,
+                    outcome: Box::new(RpcOutcome::Ok { result }),
                 });
+            }
+        }
+        if matches!(shape, AnswerShape::Unrecognised | AnswerShape::Empty) {
+            if let Some(queued) = queued_storage_answer(&self.storage_answers, got) {
+                return self.storage_answers.remove(queued).map(|(_, event)| event);
+            }
+        }
+        let at = self
+            .outstanding
+            .iter()
+            .position(|pending| match (&pending.method, boot) {
+                (None, true) => true,
+                (None, false) => false,
+                (Some(_), true) => false,
+                (Some(method), false) => shape.answers(method),
+            });
         let Some(at) = at else {
             // Not an answer to anything the core asked for: it is the other brain's own storage
-            // round trip, and the core has a storage answer of its own waiting for this turn.
-            if let Some(event) = self.storage_answers.pop_front() {
-                return Some(event);
+            // round trip, and the core has a storage answer of its own waiting for this turn: the
+            // oldest one whose acknowledgement has this payload's shape.
+            if let Some(queued) = queued_storage_answer(&self.storage_answers, got) {
+                return self.storage_answers.remove(queued).map(|(_, event)| event);
             }
             // The recall ring has already taken this record, so it is answered, not orphaned.
             if !claimed {
@@ -503,41 +567,205 @@ fn slot(key: &StorageKey) -> (String, String) {
     (key.store.clone(), key.suffix.clone())
 }
 
-/// The gxserver method a `resolve` payload's SHAPE identifies, when it identifies one.
-///
-/// The bridge carries no method beside its `resolve`, so the reads whose payload names itself are
-/// recognised and the rest fall back to "the oldest request that is not one of those". Without
-/// this, a `composer(...)` write answering `true` would be handed to whichever gxserver call
-/// happened to be in flight.
-fn identified(result: &Value) -> Option<ChatRpcMethod> {
-    let object = result.as_object()?;
-    if object.contains_key("messages") {
-        return Some(ChatRpcMethod::ReadSessionChat);
-    }
-    if object.contains_key("skills") {
-        return Some(ChatRpcMethod::ReadSessionChatSkills);
-    }
-    if object.contains_key("files") {
-        return Some(ChatRpcMethod::ReadSessionChatFiles);
-    }
-    if object.contains_key("branches") {
-        return Some(ChatRpcMethod::SessionForkBranches);
-    }
-    if object.contains_key("accounts") {
-        return Some(ChatRpcMethod::AgentAccounts);
-    }
-    None
+/// The shape the bridge's own acknowledgement of a queued storage operation has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Expect {
+    /// `composer('optionWrite')`, `composer('flush')`, `composer('modelWrite')`: `true`.
+    Bool,
+    /// `composer('write')`, `composer('asyncQuestionRead')`, `composer('dismissNotice')`: a record.
+    Object,
+    /// An operation whose acknowledgement no recording has shown yet.
+    Any,
 }
 
-/// Whether a request's answer would have been recognised by [`identified`].
-fn self_naming(method: &ChatRpcMethod) -> bool {
+impl Expect {
+    fn accepts(self, got: Expect) -> bool {
+        self == Expect::Any || got == Expect::Any || self == got
+    }
+}
+
+/// The oldest queued storage answer this payload can acknowledge: an exact shape first, so a read
+/// whose answer could be anything does not take the boolean a write behind it is waiting for.
+fn queued_storage_answer(queue: &VecDeque<(Expect, Event)>, got: Expect) -> Option<usize> {
+    queue
+        .iter()
+        .position(|(expect, _)| *expect == got)
+        .or_else(|| queue.iter().position(|(expect, _)| expect.accepts(got)))
+}
+
+/// What the bridge answers a write to `store` with, by the composer operation the store rides on.
+fn write_expectation(store: &str) -> Expect {
+    if store == crate::composer::storage::DRAFTS_STORE
+        || store == crate::composer::storage::DRAFT_SUBMITTED_STORE
+        || store == crate::composer::storage::DRAFT_PARK_STORE
+        || store == crate::composer::storage::DRAFT_RECEIVE_STORE
+        || store == crate::questions::drafts::NOTICES_STORE
+    {
+        Expect::Object
+    } else if store == crate::menus::option_storage::SESSION_OPTIONS_STORE
+        || store == crate::menus::picker::selection::MODEL_OUTBOX_STORE
+    {
+        Expect::Bool
+    } else {
+        Expect::Any
+    }
+}
+
+/// What a `resolve` payload's SHAPE says about the request it answers.
+///
+/// The bridge carries no method beside its `resolve`, so the payload is the only evidence. The
+/// table is the one the recordings themselves give: every gxserver method the brain calls answers
+/// with a key set no other method produces, except the queue mutations, which all answer with the
+/// whole queue carriage. A bare boolean is never a gxserver answer (it is a `composer(...)` write
+/// acknowledging), and a bare array is the attachment import or the model favorites read. Before
+/// this table, a `{agentSessionId}` note answer was handed to the stashed-prompts read issued a
+/// record earlier, whose own answer then found nothing waiting and was counted as a refusal.
+#[derive(Clone, Debug, PartialEq)]
+enum AnswerShape {
+    /// A payload only these methods produce.
+    Known(Vec<ChatRpcMethod>),
+    /// A payload no known method produces: the oldest request of an UNKNOWN-shaped method.
+    Unknown,
+    /// `null` or `true`: the same as [`AnswerShape::Unknown`], but only once no storage answer
+    /// of that shape is waiting, because on a real recording it is one of those.
+    Unrecognised,
+    /// `{}`: a session note that is empty (`readSessionAgentNote`, `saveSessionAgentNote`) when
+    /// one is in flight; otherwise as [`AnswerShape::Unrecognised`].
+    Empty,
+    /// A refusal carries no payload: the oldest request of any method.
+    Failure,
+    /// Never an rpc answer.
+    NotRpc,
+}
+
+impl AnswerShape {
+    fn answers(&self, method: &ChatRpcMethod) -> bool {
+        match self {
+            Self::Known(methods) => methods.contains(method),
+            Self::Unknown | Self::Unrecognised | Self::Empty => !known_shape(method),
+            Self::Failure => true,
+            Self::NotRpc => false,
+        }
+    }
+}
+
+fn answer_shape(result: &Value) -> AnswerShape {
+    use ChatRpcMethod as M;
+    let Some(object) = result.as_object() else {
+        return match result {
+            Value::Array(_) => AnswerShape::Known(vec![M::ImportNativeAttachments]),
+            // A bare boolean or `null` is a `composer(...)` acknowledgement on every real
+            // recording; the synthetic generators answer a send, an answer or an interrupt with
+            // one, so it still reaches a request whose answers are not all recognised, after the
+            // storage queue has had its turn (`BridgeTranslator::answer`).
+            Value::Bool(_) | Value::Null => AnswerShape::Unrecognised,
+            _ => AnswerShape::NotRpc,
+        };
+    };
+    let has = |key: &str| object.contains_key(key);
+    let known = |methods: Vec<M>| AnswerShape::Known(methods);
+    if object.is_empty() {
+        return AnswerShape::Empty;
+    }
+    // The bridge's own composer operations: the draft record, the submitted revision, the async
+    // question drafts, a received handoff, a dismissed notice. Never a gxserver answer.
+    if (has("parked") && has("submitted"))
+        || has("nextVersion")
+        || (has("drafts") && has("retired"))
+        || has("disposition")
+        || has("dismissedAt")
+    {
+        return AnswerShape::NotRpc;
+    }
+    if has("messages") {
+        return known(vec![M::ReadSessionChat]);
+    }
+    if has("skills") {
+        return known(vec![M::ReadSessionChatSkills]);
+    }
+    if has("files") {
+        return known(vec![M::ReadSessionChatFiles]);
+    }
+    if has("branches") {
+        return known(vec![M::SessionForkBranches]);
+    }
+    if has("accounts") {
+        return known(vec![M::AgentAccounts]);
+    }
+    if has("prompts") {
+        return known(vec![M::ListStashedPrompts]);
+    }
+    if has("base64Data") {
+        return known(vec![M::ReadSessionChatImage]);
+    }
+    if has("lines") && has("captured") {
+        return known(vec![M::ReadSessionTerminalTail]);
+    }
+    if has("acknowledged") {
+        return known(vec![M::AcknowledgeSessionChatDraftHandoff]);
+    }
+    if has("interrupted") {
+        return known(vec![M::InterruptSessionChat]);
+    }
+    if has("ok") && has("model") {
+        return known(vec![M::SelectSessionChatModel]);
+    }
+    if has("agentId") && has("session") {
+        return known(vec![M::SwitchDraftAgent]);
+    }
+    if has("queue") {
+        return known(vec![
+            M::QueueSessionChatPrompt,
+            M::UpdateSessionChatQueuedPrompt,
+            M::RemoveSessionChatQueuedPrompt,
+            M::ReorderSessionChatQueue,
+            M::SendSessionChatQueuedPrompt,
+        ]);
+    }
+    if has("queued") && has("textBytes") {
+        return known(vec![M::SendSessionChatMessage]);
+    }
+    if has("queued") {
+        return known(vec![M::AnswerSessionChatPrompt]);
+    }
+    if has("draft") {
+        return known(vec![M::SetSessionChatDraft]);
+    }
+    if object
+        .keys()
+        .all(|key| key == "agentSessionId" || key == "note")
+    {
+        return known(vec![M::ReadSessionAgentNote, M::SaveSessionAgentNote]);
+    }
+    AnswerShape::Unknown
+}
+
+/// Whether every answer of `method` is recognised by [`answer_shape`], so an unrecognised
+/// payload can never be its.
+fn known_shape(method: &ChatRpcMethod) -> bool {
+    use ChatRpcMethod as M;
     matches!(
         method,
-        ChatRpcMethod::ReadSessionChat
-            | ChatRpcMethod::ReadSessionChatSkills
-            | ChatRpcMethod::ReadSessionChatFiles
-            | ChatRpcMethod::SessionForkBranches
-            | ChatRpcMethod::AgentAccounts
+        M::ReadSessionChat
+            | M::ReadSessionChatSkills
+            | M::ReadSessionChatFiles
+            | M::ReadSessionChatImage
+            | M::SelectSessionChatModel
+            | M::QueueSessionChatPrompt
+            | M::UpdateSessionChatQueuedPrompt
+            | M::RemoveSessionChatQueuedPrompt
+            | M::ReorderSessionChatQueue
+            | M::SendSessionChatQueuedPrompt
+            | M::SetSessionChatDraft
+            | M::AcknowledgeSessionChatDraftHandoff
+            | M::ReadSessionTerminalTail
+            | M::SessionForkBranches
+            | M::SwitchDraftAgent
+            | M::AgentAccounts
+            | M::ReadSessionAgentNote
+            | M::SaveSessionAgentNote
+            | M::ListStashedPrompts
+            | M::ImportNativeAttachments
     )
 }
 

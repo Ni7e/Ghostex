@@ -467,6 +467,22 @@ fn empty_result() -> ReadSessionChatResult {
 /// lifecycle; everything a frame has no field for (the draft metadata, the fork info, the
 /// fingerprint) survives from the previous fold, which is exactly what `{...previous, ...base}`
 /// does there.
+/// The snapshot frame as the read result the VIEW applies: the frame's own fields and nothing
+/// carried from the previous fold.
+///
+/// `onEvent` in `controller.ts` hands `applyAuthoritative` the EVENT; the store's fold, which
+/// carries `selectedOptions`, `appCommands`, the queue and the draft forward when a frame omits
+/// them, is only what is retained. Applying the fold instead re-applied the carried options as a
+/// fresh detection on every replaced frame (an `optionWrite` the live brain never made, which
+/// then took the acknowledgement a draft write was waiting for), and re-set the carried
+/// `appCommands` as a new array.
+pub fn snapshot_frame_result(frame: &ChatSnapshotFrame) -> ReadSessionChatResult {
+    let mut result = snapshot_as_result(frame, None).result;
+    result.epoch = frame.base.epoch;
+    result.seq = frame.base.seq;
+    result
+}
+
 fn snapshot_as_result(
     frame: &ChatSnapshotFrame,
     previous: Option<&FoldedSnapshot>,

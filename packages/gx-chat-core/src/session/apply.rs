@@ -202,6 +202,7 @@ pub fn apply_queue_carriage(
             state.session.synced_draft.as_ref(),
             draft,
         ));
+        state.session.synced_draft_revision += 1;
     }
 }
 

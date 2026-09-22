@@ -92,6 +92,7 @@ fn settle_draft_push(
                 state.session.synced_draft.as_ref(),
                 draft,
             ));
+            state.session.synced_draft_revision += 1;
         }
     }
     Some(Vec::new())

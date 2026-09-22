@@ -108,6 +108,19 @@ pub enum Effect {
     /// before the submitted revision is on disk. It is its own effect rather than a
     /// [`Effect::WriteStorage`] with no value, which would DELETE the record.
     FlushStorage { store: String },
+    /// Record the drafts the daemon reports as delivered, so the sent-prompt history and the
+    /// recall ring learn about them.
+    ///
+    /// `options.onDeliveredDrafts(syncedDraft?.deliveredDrafts ?? [])` runs on every change of
+    /// the synced draft (`controller.ts`, the `useEffect` on `syncedDraft`), and the host's arm is
+    /// `composer('deliveries', {deliveries})`, which is
+    /// `recordDeliveredSessionChatDrafts(...)` in
+    /// `apps/desktop/sidebar/session-chat-runtime/native-composer.ts`. Fire and forget: the
+    /// TypeScript neither awaits it nor publishes on its answer, so nothing answers it here
+    /// either. Its own variant because the records it touches belong to the host's sent-history
+    /// store, whose keys the core does not build. Each entry is one `SessionChatDeliveredDraft`
+    /// as the wire carries it.
+    RecordDeliveries { deliveries: Vec<Value> },
     /// Wake the core with [`crate::Event::Tick`] in `delay_ms`, or cancel the pending wake when
     /// `delay_ms` is `None`.
     SetTimer { delay_ms: Option<u64> },
