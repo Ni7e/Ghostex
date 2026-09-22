@@ -20,12 +20,16 @@ pub(crate) fn resolve(
     session: &Value,
     id: &str,
     text: Option<String>,
-) -> Result<AsyncAnswer, String> {
+) -> Result<Option<AsyncAnswer>, String> {
     if crate::session_chat_async_questions::retired_question_ids(session)
         .iter()
         .any(|key| key == id)
     {
-        return Err("This Codex question has already been answered or skipped.".into());
+        return if text.is_none() {
+            Ok(None)
+        } else {
+            Err("This Codex question has already been answered or skipped.".into())
+        };
     }
     let path = resolve_session_chat_transcript_path(
         SessionChatTranscriptAgent::Codex,
@@ -68,8 +72,19 @@ pub(crate) fn resolve(
     let question = questions
         .iter()
         .find(|(key, _)| key == id)
-        .map(|(_, question)| question)
-        .ok_or("This Codex question is no longer available.")?;
+        .map(|(_, question)| question);
+    // CDXC:SessionChat 2026-09-22 WHY:
+    // A cached card can outlive the question in Codex's current transcript after compaction or resume. Skip must persist its retirement even when there is no terminal question left to dismiss.
+    let Some(question) = question else {
+        return if text.is_none() {
+            Ok(None)
+        } else {
+            Err(
+                "This Codex question is no longer available. Skip it to dismiss the old card."
+                    .into(),
+            )
+        };
+    };
     // The terminal exposes titles, not item IDs. Never guess between identical questions.
     if questions
         .iter()
@@ -77,7 +92,7 @@ pub(crate) fn resolve(
     {
         return Err("Codex has repeated this question. Answer it in the terminal so the correct question is selected.".into());
     }
-    Ok(AsyncAnswer {
+    Ok(Some(AsyncAnswer {
         title: question.title.clone(),
         options: question
             .options
@@ -85,7 +100,7 @@ pub(crate) fn resolve(
             .map(|options| options.iter().take(32).filter(|s| s.len() <= 512).count())
             .unwrap_or(0),
         text,
-    })
+    }))
 }
 
 fn normalized(text: &str) -> String {

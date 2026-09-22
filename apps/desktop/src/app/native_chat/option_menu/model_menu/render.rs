@@ -130,7 +130,7 @@ impl ChatOptionMenuPanel {
         };
         let body = if row["showAgent"] == true {
             // Favorites mix agents, so each row names its own on a second line.
-            let mut line = div()
+            let line = div()
                 .flex()
                 .items_center()
                 .gap(px(6.0 * scale))
@@ -142,11 +142,6 @@ impl ChatOptionMenuPanel {
                 .child(caption(
                     row["agentName"].as_str().unwrap_or_default().to_owned(),
                 ));
-            if let Some(description) = description {
-                line = line
-                    .child(caption("·".to_owned()))
-                    .child(caption(description));
-            }
             div()
                 .flex_1()
                 .min_w_0()
@@ -163,10 +158,35 @@ impl ChatOptionMenuPanel {
                 .items_center()
                 .gap(px(6.0 * scale))
                 .child(name)
-                .when_some(description, |body, description| {
-                    body.child(caption(description))
-                })
         };
+        // CDXC:SessionChat 2026-09-22 DECISION:
+        // User: a model's description is not written next to it in the picker; an eye that appears when the row is hovered shows it on hover instead.
+        let about = description.map(|description| {
+            let about_hover = palette.ink(0.08);
+            div()
+                .id(("model-menu-about", index))
+                .role(gpui::Role::Button)
+                .aria_label(format!("About {label}"))
+                .flex_shrink_0()
+                .size(px(22.0 * scale))
+                .rounded(px(ITEM_RADIUS * scale))
+                .flex()
+                .items_center()
+                .justify_center()
+                .opacity(if active { 1.0 } else { 0.0 })
+                .hover(move |style| style.bg(about_hover))
+                .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(description.clone()).build(window, cx)
+                })
+                .child(
+                    svg()
+                        .path("titlebar/eye.svg")
+                        .size(px(13.0 * scale))
+                        .text_color(palette.muted),
+                )
+        });
         let star_hover = palette.ink(0.08);
         let item = div()
             .id(("model-menu-row", index))
@@ -203,6 +223,7 @@ impl ChatOptionMenuPanel {
                 cx.listener(move |panel, _, _, cx| panel.model_menu_pick(index, true, cx)),
             )
             .child(body)
+            .children(about)
             .when_some(row["shortcut"].as_u64(), |item, slot| {
                 item.child(
                     div()

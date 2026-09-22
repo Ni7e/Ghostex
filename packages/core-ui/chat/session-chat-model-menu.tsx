@@ -4,6 +4,7 @@ import {
   IconBrain,
   IconChartBar,
   IconCheck,
+  IconEye,
   IconSearch,
   IconStar,
   IconStarFilled,
@@ -141,7 +142,11 @@ export function SessionChatModelMenu({
   );
   const tabs = projection.tabs.filter((tab) => tab.id === MODEL_MENU_FAVORITES_TAB || canOfferProvider(tab.id));
   const rows = projection.rows.filter((row) => canOfferProvider(row.provider));
-  const trays: readonly (ModelMenuTrait | SessionChatModelMenuExtraRow)[] = [...projection.traits, ...extraRows];
+  // A host row carrying a footer icon stands in for the shared button of that kind (Cursor's detected context window).
+  const trays: readonly (ModelMenuTrait | SessionChatModelMenuExtraRow)[] = [
+    ...projection.traits.map((trait) => extraRows.find((row) => row.icon && row.icon === trait.icon) ?? trait),
+    ...extraRows.filter((row) => !row.icon || !projection.traits.some((trait) => trait.icon === row.icon)),
+  ];
   const count = rows.length + trays.length;
   const selectedIndex = rows.findIndex((row) => row.selected);
 
@@ -376,23 +381,26 @@ export function SessionChatModelMenu({
               <span className='ghostex-chat-model-menu-row-body'>
                 <span className='ghostex-chat-model-menu-row-line'>
                   <span className='ghostex-chat-model-menu-row-label'>{row.label}</span>
-                  {!row.showAgent && row.description ? (
-                    <span className='ghostex-chat-model-menu-row-description'>{row.description}</span>
-                  ) : null}
                 </span>
                 {row.showAgent ? (
                   <span className='ghostex-chat-model-menu-row-line'>
                     <AgentLogo icon={row.icon} size={11} />
                     <span className='ghostex-chat-model-menu-row-agent'>{row.agentName}</span>
-                    {row.description ? (
-                      <>
-                        <span className='ghostex-chat-model-menu-row-agent'>·</span>
-                        <span className='ghostex-chat-model-menu-row-description'>{row.description}</span>
-                      </>
-                    ) : null}
                   </span>
                 ) : null}
               </span>
+              {row.description ? (
+                <AppTooltip content={row.description}>
+                  <span
+                    aria-label={`About ${row.label}`}
+                    className='ghostex-chat-model-menu-row-about'
+                    onClick={(event) => event.stopPropagation()}
+                    onContextMenu={(event) => event.stopPropagation()}
+                  >
+                    <IconEye aria-hidden='true' size={13} stroke={1.8} />
+                  </span>
+                </AppTooltip>
+              ) : null}
               {row.shortcut !== undefined ? <kbd className='ghostex-chat-model-menu-kbd'>⌘{row.shortcut}</kbd> : null}
               <button
                 aria-label={row.favorite ? `Remove ${row.label} from favorites` : `Add ${row.label} to favorites`}

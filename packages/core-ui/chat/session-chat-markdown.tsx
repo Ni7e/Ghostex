@@ -995,6 +995,7 @@ function markdownComponents(
                 // Kept an anchor so the URL shows in the status bar; the host
                 // owns ordinary clicks and both explicit context-menu opens.
                 href={target.url}
+                className='inline-block max-w-full truncate align-bottom'
                 {...{ [SESSION_CHAT_WEB_URL_ATTRIBUTE]: target.url }}
                 onClick={(event) => {
                   event.preventDefault();
@@ -1008,7 +1009,13 @@ function markdownComponents(
           );
         }
         return (
-          <a href={target.url} rel='noreferrer' target='_blank'>
+          <a
+            href={target.url}
+            title={target.url}
+            className='inline-block max-w-full truncate align-bottom'
+            rel='noreferrer'
+            target='_blank'
+          >
             <span aria-hidden='true' className='ghostex-chat-markdown-link-icon' />
             {children}
           </a>

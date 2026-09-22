@@ -89,8 +89,10 @@ impl ModelMenuState {
             }
             input
         });
-        let subscription =
-            cx.subscribe_in(&input, window, |panel, input, event: &InputEvent, window, cx| {
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            |panel, input, event: &InputEvent, window, cx| {
                 if matches!(event, InputEvent::Focus) {
                     crate::app::native_chat::focus::reclaim_keyboard_focus(window);
                 }
@@ -98,7 +100,8 @@ impl ModelMenuState {
                     let query = input.read(cx).value().to_string();
                     panel.model_menu_send(json!({"type":"modelMenuView","query":query}), cx);
                 }
-            });
+            },
+        );
         // Typed text reaches a field only through the window's native keyboard owner, which a GPUI focus handle alone does not claim (native_chat/focus.rs); every other chat field reclaims it the same way.
         crate::app::native_chat::focus::reclaim_keyboard_focus(window);
         input.update(cx, |input, cx| input.focus(window, cx));

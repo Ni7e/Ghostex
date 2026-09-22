@@ -216,10 +216,7 @@ impl ImageViewerWindow {
                 _ => None,
             });
         if let Some(bytes) = bytes {
-            crate::app::helpers::gpui_copy_to_clipboard(
-                gpui::ClipboardItem::new_image(&bytes),
-                cx,
-            );
+            crate::app::helpers::gpui_copy_to_clipboard(gpui::ClipboardItem::new_image(&bytes), cx);
             self.chat.update(cx, |chat, cx| {
                 chat.note_image_viewer_action("Image copied", cx)
             });

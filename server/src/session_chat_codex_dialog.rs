@@ -527,7 +527,7 @@ impl TerminalDialog {
         self.id.starts_with(UPDATE_PROMPT_ID_PREFIX)
     }
 
-    fn payload(&self, params: &Map<String, Value>) -> Result<String, DomainStateError> {
+    pub(crate) fn payload(&self, params: &Map<String, Value>) -> Result<String, DomainStateError> {
         let invalid = || DomainStateError {
             code: "invalidParams",
             message: "That action is not offered by this Codex dialog.".to_string(),

@@ -176,17 +176,37 @@
   white-space: nowrap;
 }
 
-.ghostex-chat-model-menu-row-description,
 .ghostex-chat-model-menu-row-agent {
   color: var(--menu-muted);
   font-size: 0.6875rem;
   white-space: nowrap;
 }
 
-.ghostex-chat-model-menu-row-description {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/*
+ * CDXC:SessionChat 2026-09-22 DECISION:
+ * User: a model's description is not written next to it in the picker; an eye that appears when the row is hovered shows it on hover instead.
+ */
+.ghostex-chat-model-menu-row-about {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--menu-muted);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.ghostex-chat-model-menu-row:hover .ghostex-chat-model-menu-row-about,
+.ghostex-chat-model-menu-row[data-active] .ghostex-chat-model-menu-row-about,
+.ghostex-chat-model-menu-row-about:hover {
+  opacity: 1;
+}
+
+.ghostex-chat-model-menu-row-about:hover {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
 }
 
 .ghostex-chat-model-menu-kbd {

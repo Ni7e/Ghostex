@@ -87,6 +87,15 @@ impl ChatOptionMenuPanel {
         }
         self.selected = Some(index);
         self.hover_task = None;
+        // CDXC:SessionChat 2026-09-22 DECISION: The user asked that the Switch Account submenu not close when the pointer moves over another More Actions row. A submenu its row opens only on a press (`openOnHover: false`) therefore stays up while other rows are hovered; a press, the arrow keys, or Escape still replace or close it.
+        let pinned = self
+            .child
+            .is_some_and(|child| child != index && self.rows[child]["openOnHover"] == false)
+            && self.menu.read(cx).windows.len() > self.depth + 1;
+        if pinned {
+            cx.notify();
+            return;
+        }
         if self.rows[index]["children"].is_array() && self.rows[index]["openOnHover"] != false {
             self.hover_task = Some(cx.spawn_in(window, async move |this, cx| {
                 cx.background_executor()

@@ -46,11 +46,11 @@ impl ChatOptionMenuPanel {
         let Some(setting) = state.traits().get(index) else {
             return;
         };
-        if !setting["toggle"].is_object() {
-            self.open_model_flyout(index, window, cx);
+        if setting["disabled"] == true || state.view["disabled"] == true {
             return;
         }
-        if setting["disabled"] == true || state.view["disabled"] == true {
+        if !setting["toggle"].is_object() {
+            self.open_model_flyout(index, window, cx);
             return;
         }
         let command = json!({

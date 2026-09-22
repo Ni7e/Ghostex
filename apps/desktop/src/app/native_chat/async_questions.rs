@@ -11,6 +11,15 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use serde_json::json;
 use std::time::Duration;
 
+/// CDXC:SessionChat 2026-09-22 WHY: The controller echoes every asyncQuestionText edit back in a later snapshot, so the draft a snapshot carries lags what the user has typed by a round trip. Writing that echo into the input truncated the answer to the older text and, because multi-line set_value resets the selection to 0..0, threw the caret to the start every few keystrokes. The input owns what it typed; only a draft this input never reported (an option choice clearing it, the saved answer restored after load) is written back.
+#[derive(Default)]
+pub(super) struct AsyncAnswerEcho {
+    /// Texts this input reported whose snapshot has not come back yet, oldest first.
+    sent: Vec<String>,
+    /// The draft text the last snapshot carried.
+    seen: String,
+}
+
 impl NativeChatView {
     pub(super) fn render_async_questions(
         &mut self,
@@ -174,18 +183,51 @@ impl NativeChatView {
                     .default_value(answer.clone())
             });
             let question_key = key.clone();
-            self.async_answer_subscription = Some(cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, window, cx| match event {
-                InputEvent::Change => this.invoke(json!({"type":"asyncQuestionText","key":question_key,"text":input.read(cx).value().to_string()}), cx),
-                InputEvent::PressEnter { shift: false, .. } => this.invoke(json!({"type":"asyncQuestionSend"}), cx),
-                InputEvent::Focus => { super::focus::reclaim_keyboard_focus(window); cx.notify(); },
-                InputEvent::Blur => cx.notify(),
-                _ => {},
-            }));
+            self.async_answer_subscription = Some(cx.subscribe_in(
+                &input,
+                window,
+                move |this, input, event: &InputEvent, window, cx| match event {
+                    InputEvent::Change => {
+                        let text = input.read(cx).value().to_string();
+                        this.async_answer_echo.sent.push(text.clone());
+                        this.invoke(
+                            json!({"type":"asyncQuestionText","key":question_key,"text":text}),
+                            cx,
+                        )
+                    }
+                    InputEvent::PressEnter { shift: false, .. } => {
+                        this.invoke(json!({"type":"asyncQuestionSend"}), cx)
+                    }
+                    InputEvent::Focus => {
+                        super::focus::reclaim_keyboard_focus(window);
+                        cx.notify();
+                    }
+                    InputEvent::Blur => cx.notify(),
+                    _ => {}
+                },
+            ));
             self.async_answer_input = Some((key, input));
+            self.async_answer_echo = AsyncAnswerEcho {
+                sent: Vec::new(),
+                seen: answer.clone(),
+            };
         }
         let input = self.async_answer_input.as_ref().unwrap().1.clone();
-        if input.read(cx).value().as_str() != answer {
-            input.update(cx, |input, cx| input.set_value(answer, window, cx));
+        if self.async_answer_echo.seen != answer {
+            self.async_answer_echo.seen = answer.clone();
+            let echo = &mut self.async_answer_echo.sent;
+            match echo.iter().position(|sent| sent == &answer) {
+                // The controller caught up with an edit this input made; anything typed since is still on its way there.
+                Some(settled) => {
+                    echo.drain(..=settled);
+                }
+                None => {
+                    echo.clear();
+                    if input.read(cx).value().as_str() != answer {
+                        input.update(cx, |input, cx| input.set_value(answer, window, cx));
+                    }
+                }
+            }
         }
         let focused = input.read(cx).focus_handle(cx).is_focused(window);
         body = body.child(

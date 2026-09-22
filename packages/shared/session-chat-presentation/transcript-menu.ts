@@ -52,9 +52,12 @@ export function sessionChatMarkdownQuote(text: string): string {
     .join('\n');
 }
 
-/** What Add to Chat appends: the selection quoted, then one newline for the caret (the 2026-09-07 DECISION in session-chat-view.tsx). */
+/**
+ * CDXC:SessionChat 2026-09-22 DECISION:
+ * User: Add to Chat adds one more newline between the quoted message and my text so Markdown renders correctly. This supersedes the 2026-09-07 single-newline decision.
+ */
 export function sessionChatTranscriptQuote(selection: string): string {
-  return `${sessionChatMarkdownQuote(selection)}\n`;
+  return `${sessionChatMarkdownQuote(selection)}\n\n`;
 }
 
 /**

@@ -60,7 +60,7 @@ impl NativeChatView {
                     "projectId":config.project_id, "sessionId":config.session_id,
                     "base64Data":base64::engine::general_purpose::STANDARD.encode(image.bytes()),
                     "suggestedName":format!("clipboard-image-{}.{}", index+1, image.format().extension()),
-                }));
+                })).await;
                 match result {
                     Ok(value) if value["path"].is_string() => paths.push(value["path"].clone()),
                     Ok(_) => return (paths, Some("The session machine did not return an image path".to_owned())),

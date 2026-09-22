@@ -343,7 +343,7 @@ impl Render for ModelPickerWindow {
                     cx.stop_propagation(); window.prevent_default();
                 }
             }))
-            .on_key_up(cx.listener(|view,event: &gpui::KeyUpEvent,_,cx| {
+            .capture_key_up(cx.listener(|view,event: &gpui::KeyUpEvent,_,cx| {
                 view.chat.update(cx,|chat,cx| chat.invoke(json!({"type":"modelPickerKeyUp","key":event.keystroke.key}),cx));
             }))
             .on_action(cx.listener(|view,action: &crate::app::hotkeys::RunConfiguredGhostexHotkey,_,cx| {

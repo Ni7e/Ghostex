@@ -18,6 +18,7 @@ export function useModelPickerKeyFeedback() {
   useEffect(() => {
     const release = (event: KeyboardEvent) => feedback.release(event.code || event.key);
     const blur = () => feedback.blur();
+    // Capture releases before child controls, matching the native picker's capture_key_up.
     window.addEventListener('keyup', release, true);
     window.addEventListener('blur', blur);
     return () => {

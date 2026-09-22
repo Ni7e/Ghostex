@@ -1,5 +1,5 @@
 use super::super::window::ChatOptionMenuPanel;
-use gpui::{Context, ScrollStrategy, Window};
+use gpui::{Context, Focusable as _, ScrollStrategy, Window};
 
 #[derive(Clone, Debug, PartialEq, gpui::Action)]
 #[action(namespace = ghostex_gpui, no_json)]
@@ -35,12 +35,11 @@ pub(super) fn register(cx: &mut gpui::App) {
     .into_iter()
     .map(str::to_owned)
     .chain((1..=9).map(|slot| format!("secondary-{slot}")));
-    cx.bind_keys(keys.map(|key| {
-        gpui::KeyBinding::new(
-            &key,
-            ModelMenuKey { key: key.clone() },
-            Some("ChatModelMenu > Input"),
-        )
+    // The card itself holds focus after a side list closes or the window is re-activated, so the same keys are bound there too.
+    cx.bind_keys(keys.flat_map(|key| {
+        ["ChatModelMenu > Input", "ChatModelMenu"].map(|context| {
+            gpui::KeyBinding::new(&key, ModelMenuKey { key: key.clone() }, Some(context))
+        })
     }));
 }
 
@@ -51,6 +50,13 @@ impl ChatOptionMenuPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Whatever held focus, the next typed letter belongs to the search field.
+        if let Some(state) = self.model_menu.as_ref() {
+            let input = state.input.clone();
+            if !input.read(cx).focus_handle(cx).is_focused(window) {
+                input.update(cx, |input, cx| input.focus(window, cx));
+            }
+        }
         if self.model_menu_key(&action.key, window, cx) {
             cx.stop_propagation();
             window.prevent_default();

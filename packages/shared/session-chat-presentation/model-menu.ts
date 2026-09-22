@@ -23,6 +23,8 @@ export type ModelMenuTabId = typeof MODEL_MENU_FAVORITES_TAB | ModelPickerProvid
 export const MODEL_MENU_SEARCH_PLACEHOLDER = 'Search models…';
 export const MODEL_MENU_SHORTCUT_ROWS = 9;
 
+const AUTO_MODEL_VALUE = 'auto';
+
 /** The long-context twin of a model is the same row with another Context Window choice. */
 const LONG_CONTEXT_SUFFIX = '[1m]';
 const CONTEXT_LABELS = { standard: '200K', long: '1M' } as const;
@@ -180,6 +182,11 @@ export function modelMenuRows(
     ? MODEL_MENU_PROVIDERS.flatMap((provider) => entries[provider] ?? []).filter(isFavorite)
     : (entries[params.tab] ?? []);
   const query = params.query.trim().toLowerCase();
+  /**
+   * CDXC:SessionChat 2026-09-22 DECISION:
+   * User: "make Auto show up at the top here", above a starred model on the agent's own tab. Auto is the agent choosing for you rather than one model among the others, so a star does not move it down; a search still ranks it by the match.
+   */
+  const pinned = (entry: ModelMenuEntry) => !favoritesTab && entry.value === AUTO_MODEL_VALUE;
   const ranked = pool
     .map((entry, index) => {
       const favorite = isFavorite(entry);
@@ -190,7 +197,13 @@ export function modelMenuRows(
       return Number.isFinite(rank) ? { entry, favorite, index, rank } : null;
     })
     .filter((item): item is NonNullable<typeof item> => item !== null)
-    .sort((a, b) => a.rank - b.rank || Number(b.favorite) - Number(a.favorite) || a.index - b.index);
+    .sort(
+      (a, b) =>
+        a.rank - b.rank ||
+        Number(pinned(b.entry)) - Number(pinned(a.entry)) ||
+        Number(b.favorite) - Number(a.favorite) ||
+        a.index - b.index
+    );
   const current = modelMenuEntryFor(entries, params.current.provider, params.current.model);
   return ranked.map(({ entry, favorite }, index) => ({
     ...entry,
@@ -245,6 +258,15 @@ const TRAIT_ICONS: Record<string, ModelMenuTrait['icon']> = { effort: 'reasoning
  * User: Reasoning, Context Window and Fast Mode are three buttons along the bottom of the picker, each an icon beside its value (brain, chart bars, bolt); clicking Fast or the Context Window toggles it, since it usually has only two values.
  * This supersedes the full-width footer rows that each opened a side list; only a button with more than two values, such as Reasoning, still opens one.
  */
+/**
+ * CDXC:SessionChat 2026-09-22 DECISION:
+ * User: "always show the 3 bottom buttons in all cases, make them disabled when they don't make sense and say Default for options that don't have options, or N/A where makes sense."
+ * A model with one reasoning level or one context window runs on its default, so those read Default; an agent or model without a fast mode reads Off (the user asked for Off rather than N/A on 2026-09-22).
+ */
+function unavailable(id: string, label: string, valueLabel: string): Omit<ModelMenuTrait, 'icon' | 'toggle'> {
+  return { id, label, valueLabel, disabled: true, choices: [] };
+}
+
 function asButton(trait: Omit<ModelMenuTrait, 'icon' | 'toggle'>): ModelMenuTrait {
   const next = trait.choices.length <= 2 ? trait.choices.find((choice) => !choice.selected) : undefined;
   return {
@@ -310,22 +332,26 @@ export function modelMenuTraits(
   };
   const others = params.descriptors.filter((descriptor) => !isShiftTabModeCycler(descriptor));
   const effort = others.find((descriptor) => descriptor.id === 'effort');
-  const reasoning = effort ? option(effort) : null;
-  if (reasoning) traits.push(reasoning);
-  if (entry && entry.variants.length > 0)
-    traits.push({
-      id: 'context',
-      label: 'Context Window',
-      valueLabel: entry.variants.find((variant) => variant.value === model)?.label ?? null,
-      choices: entry.variants.map((variant, index) => ({
-        value: variant.value,
-        label: variant.label,
-        selected: variant.value === model,
-        isDefault: index === 0,
-      })),
-    });
+  const fast = others.find((descriptor) => descriptor.id === 'fastMode');
+  traits.push(
+    (effort && option(effort)) || unavailable('effort', 'Reasoning', 'Default'),
+    entry && entry.variants.length > 0
+      ? {
+          id: 'context',
+          label: 'Context Window',
+          valueLabel: entry.variants.find((variant) => variant.value === model)?.label ?? null,
+          choices: entry.variants.map((variant, index) => ({
+            value: variant.value,
+            label: variant.label,
+            selected: variant.value === model,
+            isDefault: index === 0,
+          })),
+        }
+      : unavailable('context', 'Context Window', 'Default'),
+    (fast && option(fast)) || unavailable('fastMode', 'Fast mode', 'Off')
+  );
   for (const descriptor of others) {
-    if (descriptor === effort) continue;
+    if (descriptor === effort || descriptor === fast) continue;
     const trait = option(descriptor);
     if (trait) traits.push(trait);
   }
@@ -342,7 +368,7 @@ export function modelMenuPillLabels(
 ): { label: string | null; suffix: string | null } {
   const entry = modelMenuEntryFor(entries, provider, model);
   const parts = traits
-    .filter((trait) => trait.id === 'effort' || trait.id === 'context')
+    .filter((trait) => (trait.id === 'effort' || trait.id === 'context') && trait.choices.length > 0)
     .map((trait) => trait.valueLabel)
     .filter((value): value is string => !!value);
   return { label: entry?.label ?? modelLabel, suffix: parts.length > 0 ? parts.join(' · ') : null };

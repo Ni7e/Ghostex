@@ -419,6 +419,8 @@ impl NativeChatView {
         };
         let header_wraps = wraps.clone();
         TextView::markdown(id, content)
+            .min_w_0()
+            .max_w(gpui::relative(1.0))
             .link_presentation(move |href, label| {
                 references
                     .get(&(href.to_owned(), label.to_owned()))
