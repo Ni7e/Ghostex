@@ -828,3 +828,30 @@ pub(crate) fn gpui_configured_hotkey_unbinds_from_settings(
         })
         .collect()
 }
+
+impl GhostexGpuiApp {
+    /// Runs a configured hotkey once its window's keyboard owner has let it through. Returns
+    /// false when nothing took it, so the chord can reach whatever else binds it. The main
+    /// window's root and the floating reveal panel both answer hotkeys through this.
+    pub(crate) fn run_configured_ghostex_hotkey(
+        &mut self,
+        action_id: &str,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if action_id == "openModelPicker" {
+            return self.request_focused_session_model_picker(cx);
+        }
+        self.handle_gpui_app_modal_sidebar_command(
+            serde_json::json!({
+                "message": {
+                    "actionId": action_id,
+                    "type": "runGhostexHotkeyAction",
+                },
+            }),
+            window,
+            cx,
+        );
+        true
+    }
+}

@@ -60,6 +60,11 @@ impl Render for FloatingRevealWindow {
                         app.handle_native_sidebar_action(action, window, cx)
                     },
                 ))
+                .on_action(cx.listener(
+                    |app, action: &crate::app::hotkeys::RunConfiguredGhostexHotkey, _, cx| {
+                        app.run_floating_reveal_hotkey(action, cx)
+                    },
+                ))
                 .child(
                     h_flex()
                         .w(px(width))
@@ -202,6 +207,33 @@ impl GhostexGpuiApp {
         }
         self.schedule_floating_reveal_bounds_refresh(cx);
         cx.notify();
+    }
+
+    /// CDXC:Sidebar 2026-09-22 WHY:
+    /// App hotkeys are answered by the main window's root, and the floating panel is a window of
+    /// its own that the root is not under, so with the panel key (a floating chat's composer has
+    /// the keyboard) every configured hotkey found no listener and Option+P could not open the
+    /// quick model picker. The panel runs them itself, against the main window. It skips the main
+    /// root's keyboard-owner gate on purpose: that gate reads who owns the main window's keyboard
+    /// (a Source view's editor keeps it while the panel is key) and would hand the chord to a
+    /// page that never saw it.
+    fn run_floating_reveal_hotkey(
+        &self,
+        action: &crate::app::hotkeys::RunConfiguredGhostexHotkey,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(main) = self.main_window_handle else {
+            return;
+        };
+        let app = cx.weak_entity();
+        let action_id = action.action_id.clone();
+        gpui::App::defer(cx, move |cx| {
+            let _ = main.update(cx, |_, window, cx| {
+                let _ = app.update(cx, |app, cx| {
+                    app.run_configured_ghostex_hotkey(&action_id, window, cx)
+                });
+            });
+        });
     }
 
     /// CDXC:Sidebar 2026-09-22 WHY:
@@ -383,6 +415,10 @@ impl GhostexGpuiApp {
         if self.agents_chat_mode_sessions.contains(&session_id)
             && let Some(chat) = self.native_chat_views.get(&session_id).cloned()
         {
+            // The terminal branch below claims the pane through its mount slot. A chat that takes
+            // the keyboard has to claim it too, or session-scoped hotkeys (Option+P) resolve
+            // against whatever the main window focused last and find no session.
+            self.set_shell_focus(ShellFocusTarget::AgentsPane(pane_id));
             if let Ok(root) = cef_parent_native_view(window) {
                 crate::cef::focus_gpui_root_view(root);
             }

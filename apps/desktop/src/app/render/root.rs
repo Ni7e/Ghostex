@@ -416,22 +416,9 @@ impl Render for GhostexGpuiApp {
                     ) {
                         return;
                     }
-                    if action.action_id == "openModelPicker" {
-                        if !this.request_focused_session_model_picker(cx) {
-                            cx.propagate();
-                        }
-                        return;
+                    if !this.run_configured_ghostex_hotkey(&action.action_id, window, cx) {
+                        cx.propagate();
                     }
-                    this.handle_gpui_app_modal_sidebar_command(
-                        serde_json::json!({
-                            "message": {
-                                "actionId": action.action_id,
-                                "type": "runGhostexHotkeyAction",
-                            },
-                        }),
-                        window,
-                        cx,
-                    );
                 }),
             )
             .on_action(
