@@ -5,7 +5,8 @@
 //! Ghostty draws overlay scrollbars on every platform: macOS hands the surface to an `NSScrollView` with `.overlay` scrollers, and the Win32 apprt runs the four-state machine ported here (hidden -> fading in -> visible -> fading out). Scroll activity restarts a 1.5s countdown, hovering the track or dragging the thumb freezes it, and new activity during a fade-out resumes from the current alpha instead of snapping back to transparent.
 //! SEE-ALSO: apps/desktop/src/terminal_element.rs owns the geometry and paints the knob with `alpha`.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// Idle time after the last scroll activity before the bar starts to fade.
 pub(crate) const AUTO_HIDE_DELAY: Duration = Duration::from_millis(1500);

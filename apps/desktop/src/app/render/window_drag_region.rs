@@ -33,7 +33,8 @@ fn window_drag_is_app_owned(window: &gpui::Window) -> bool {
     )
 }
 
-#[cfg(target_os = "windows")]
+// The browser build (apps/gpui-web) compiles this file too; a page has no window to drag.
+#[cfg(any(target_os = "windows", target_family = "wasm"))]
 fn window_drag_is_app_owned(_window: &gpui::Window) -> bool {
     false
 }

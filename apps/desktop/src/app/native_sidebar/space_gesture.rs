@@ -1,7 +1,8 @@
 use super::model::NativeSidebarSnapshot;
 use crate::GhostexGpuiApp;
 use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase, Window};
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
+use web_time::Instant;
 
 #[derive(Default)]
 pub(crate) struct SpaceGesture {

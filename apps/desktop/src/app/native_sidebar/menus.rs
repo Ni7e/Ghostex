@@ -384,7 +384,7 @@ impl GhostexGpuiApp {
                         .as_ref()
                         .is_some_and(SidebarMenuState::dropped_from_trigger)
                     {
-                        app.native_sidebar.more_menu_dismissed_at = Some(std::time::Instant::now());
+                        app.native_sidebar.more_menu_dismissed_at = Some(web_time::Instant::now());
                     }
                     app.close_native_sidebar_menu(window, cx);
                 }),

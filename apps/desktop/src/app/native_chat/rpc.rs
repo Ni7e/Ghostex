@@ -2,7 +2,8 @@ use crate::app::{helpers::*, model::*};
 use serde_json::{Value, json};
 use std::time::Duration;
 
-pub(super) fn request(
+/// Async so the browser build (apps/gpui-web), which has no blocking sockets, can share both call sites; here the body still blocks, on the background thread every caller already runs it on.
+pub(super) async fn request(
     remote: Option<GpuiRemoteGxserverRequestTarget>,
     endpoint: &str,
     params: &Value,

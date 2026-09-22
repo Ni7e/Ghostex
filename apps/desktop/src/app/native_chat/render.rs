@@ -1,5 +1,6 @@
 use super::keyboard::ComposerInputActions as _;
 use super::{appearance::ChatAppearance, state::NativeChatView};
+use gpui::StatefulInteractiveElement as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Context, Focusable as _, InteractiveElement as _, IntoElement, ParentElement as _, Render,
@@ -54,7 +55,7 @@ impl Render for NativeChatView {
         super::scroll_bottom::register(cx);
         super::search::register(cx);
         super::zoom::register(cx);
-        self.last_render = Some(std::time::Instant::now());
+        self.last_render = Some(web_time::Instant::now());
         self.schedule_row_detail_sync(window, cx);
         self.main_window = Some(window.window_handle());
         if self.maximized_window.is_none() {
@@ -118,6 +119,9 @@ impl Render for NativeChatView {
             };
             Some(
                 div()
+                    .id("chat-transcript")
+                    .role(gpui::Role::Document)
+                    .aria_label("Conversation")
                     .relative()
                     .flex()
                     .flex_col()
@@ -156,6 +160,8 @@ impl Render for NativeChatView {
         let subagent_viewer = self.render_subagent_viewer(&p, window, cx);
         div()
             .id("native-session-chat")
+            .role(gpui::Role::Group)
+            .aria_label("Session chat")
             .size_full()
             .min_w_0()
             .min_h_0()

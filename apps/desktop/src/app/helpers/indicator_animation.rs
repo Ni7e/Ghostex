@@ -2,11 +2,8 @@ use gpui::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement,
     LayoutId, Pixels, Window, WindowId,
 };
-use std::{
-    cell::RefCell,
-    collections::HashSet,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, collections::HashSet, time::Duration};
+use web_time::Instant;
 
 /// CDXC:Sidebar 2026-09-18 WHY:
 /// gpui redraws the whole window for every animation frame, and the repeating indicators (sidebar working spinners, the chat working strip) ran at display rate.

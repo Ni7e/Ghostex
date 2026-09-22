@@ -2,10 +2,8 @@ use super::model::NativeSidebarSnapshot;
 use crate::GhostexGpuiApp;
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, px};
 use gpui_component::v_flex;
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, time::Duration};
+use web_time::Instant;
 
 #[derive(Default)]
 pub(crate) struct SidebarDisclosures {

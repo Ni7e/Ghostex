@@ -1,0 +1,56 @@
+//! Which chat view belongs to which session in the browser build. The desktop's file resolves a shell pane to a workspace terminal key and parks views per project; here a session is its store key, and a view lives for as long as the page does.
+use super::state::{NativeChatConfig, NativeChatEvent, NativeChatView};
+use crate::*;
+use ghostex_gx_core::SessionKey;
+
+impl GhostexGpuiApp {
+    pub(crate) fn ensure_native_chat(
+        &mut self,
+        session: &SessionKey,
+        cx: &mut gpui::Context<Self>,
+    ) -> Entity<NativeChatView> {
+        if let Some((_, view)) = self.native_chats.get(session) {
+            return view.clone();
+        }
+        let shell_session_id = TerminalSessionId(self.native_chats.len() as u64 + 1);
+        let config = NativeChatConfig {
+            machine_id: "local".to_string(),
+            project_id: session.project_id.clone(),
+            session_id: session.session_id.clone(),
+            sidebar_session_id: format!(
+                "combined-session:{}:{}",
+                session.project_id, session.session_id
+            ),
+            shell_session_id,
+            app: Some(cx.weak_entity()),
+            preview: None,
+            parent_native_view: std::ptr::null_mut(),
+            client_id: format!("gpui-web-{}", crate::app::helpers::gpui_random_uuid_string().unwrap_or_default()),
+            remote: None,
+            initial_snapshot: None,
+            initial_presentation: self.chat_presentations.get(session).cloned(),
+        };
+        let view = cx.new(|cx| NativeChatView::new(config, cx));
+        let key = session.clone();
+        let subscription = cx.subscribe(&view, move |this, view, event: &NativeChatEvent, cx| {
+            match event {
+                NativeChatEvent::Broker(message) => {
+                    let mut message = message.clone();
+                    message["clientId"] = view.read(cx).config.client_id.clone().into();
+                    message["requestId"] = message["id"]
+                        .as_u64()
+                        .map(|id| id.to_string())
+                        .unwrap_or_default()
+                        .into();
+                    this.web_relay_chat_broker(&key, message, cx);
+                }
+                NativeChatEvent::Host(message) => this.web_chat_host_action(&key, message, cx),
+                NativeChatEvent::ComposerFocused | NativeChatEvent::DraftState(_) => {}
+            }
+        });
+        view.update(cx, |view, _| view.subscriptions.push(subscription));
+        self.native_chats
+            .insert(session.clone(), (shell_session_id, view.clone()));
+        view
+    }
+}

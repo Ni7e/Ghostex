@@ -1,6 +1,6 @@
 use crate::{GhostexGpuiApp, app::helpers::*};
 use gpui::{AnyElement, Bounds, IntoElement, Pixels, Point, Styled, Window, canvas, px};
-use std::time::Instant;
+use web_time::Instant;
 
 pub(crate) struct SidebarScrollAnimation {
     from: Point<Pixels>,

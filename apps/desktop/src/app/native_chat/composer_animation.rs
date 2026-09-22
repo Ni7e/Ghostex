@@ -13,7 +13,8 @@
 //! `packages/shared/session-chat-presentation/composer-animation.json`.
 
 use serde::Deserialize;
-use std::{cell::Cell, rc::Rc, sync::LazyLock, time::Instant};
+use std::{cell::Cell, rc::Rc, sync::LazyLock};
+use web_time::Instant;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

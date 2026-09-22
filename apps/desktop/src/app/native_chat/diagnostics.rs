@@ -1,5 +1,6 @@
 use crate::{shared_settings, support_logs};
-use std::{cell::RefCell, time::Instant};
+use std::cell::RefCell;
+use web_time::Instant;
 
 struct FocusRequest {
     session_id: String,

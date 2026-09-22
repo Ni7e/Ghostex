@@ -27,7 +27,7 @@ pub(super) struct ModelPickerWindow {
     pub(super) chat: Entity<NativeChatView>,
     pub(super) focus: FocusHandle,
     pub(super) last_size: Option<(f32, f32)>,
-    pub(super) started: std::time::Instant,
+    pub(super) started: web_time::Instant,
     _activation: Subscription,
     _subscription: Subscription,
 }
@@ -168,12 +168,15 @@ impl NativeChatView {
                                     },
                                 );
                                 let focus = cx.focus_handle();
+                                // GPUI focus alone does not restore AppKit's first responder after
+                                // configuring the child window; key-up must reach this GPUI root too.
+                                super::super::focus::reclaim_keyboard_focus(window);
                                 focus.focus(window, cx);
                                 ModelPickerWindow {
                                     chat,
                                     focus,
                                     last_size: None,
-                                    started: std::time::Instant::now(),
+                                    started: web_time::Instant::now(),
                                     _activation: activation,
                                     _subscription: subscription,
                                 }

@@ -2,7 +2,8 @@
 
 use super::state::NativeChatView;
 use gpui::Context;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// How long after a menu dismissed itself a press on its own trigger still counts as the
 /// second half of the very press that dismissed it.

@@ -229,9 +229,8 @@ impl CefBrowser {
                     })
             })
             .or_else(|| {
-                // Browser panes are the only surface with a shell popup path,
-                // so they are the only ones that turn middle-click and
-                // Cmd/Ctrl-click link opens into Browser tabs.
+                // Browser panes and project website views use the same shell popup
+                // route for middle-click and Cmd/Ctrl-click links.
                 popup_open_handler
                     .clone()
                     .map(GhostexGpuiBrowserRequestHandler::new)

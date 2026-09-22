@@ -1,0 +1,147 @@
+//! The web build's `GhostexGpuiApp`: the fields and methods the shared drawing code reads, with the browser's answer behind each. Same type name as the desktop's so the shared files compile unchanged.
+use gpui::{AnyElement, Context, IntoElement, WindowHandle, div};
+use serde_json::Value;
+
+use crate::app::native_sidebar::appearance::SidebarAppearance;
+use crate::app::native_sidebar::model::NativeSidebarRenameRequest;
+use crate::app::native_sidebar::state::NativeSidebarState;
+use crate::app::titlebar::account_usage::{GpuiAccountUsageMeter, GpuiAccountUsageMeterHost};
+use crate::*;
+
+/// Stand-in for the desktop's native modal host window; the browser build opens no child windows.
+pub(crate) struct GpuiAppModalHostWindow;
+
+impl gpui::Render for GpuiAppModalHostWindow {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
+
+impl GpuiAppModalHostWindow {
+    pub(crate) fn refresh_project_view_scope_options(
+        &mut self,
+        _changed: &[(&str, Value)],
+        _cx: &mut Context<Self>,
+    ) {
+    }
+}
+
+pub(crate) struct GhostexGpuiApp {
+    pub(crate) native_sidebar: NativeSidebarState,
+    pub(crate) gx_store: crate::app::gx_store::GxStoreHost,
+    pub(crate) sidebar_width: f32,
+    pub(crate) sidebar_collapsed: bool,
+    pub(crate) sidebar_usage_visible: bool,
+    pub(crate) gpui_pet_overlay_reduce_motion_enabled: bool,
+    pub(crate) app_modal_window: Option<WindowHandle<GpuiAppModalHostWindow>>,
+    /// Whether a focused session row is drawn unfocused because a browser tab owns focus; always false until the web build has browser tabs.
+    pub(crate) snapshot_browser_focus: bool,
+    /// The session the work area shows.
+    pub(crate) open_session: Option<ghostex_gx_core::SessionKey>,
+    /// Every chat opened in this page, with the shell id its view was given.
+    pub(crate) terminals: HashMap<ghostex_gx_core::SessionKey, Entity<crate::terminal_element::TerminalView>>,
+    /// Whether the work area shows the open session's terminal instead of its chat.
+    pub(crate) show_terminal: bool,
+    pub(crate) linked_session_opened: bool,
+    /// The presentation each chat last published, handed back as `initialPresentation` when its view is made again.
+    pub(crate) chat_presentations: HashMap<ghostex_gx_core::SessionKey, Value>,
+    pub(crate) native_chats: HashMap<ghostex_gx_core::SessionKey, (TerminalSessionId, Entity<crate::app::native_chat::state::NativeChatView>)>,
+}
+
+impl GhostexGpuiApp {
+    pub(crate) fn new() -> Self {
+        Self {
+            native_sidebar: NativeSidebarState::default(),
+            gx_store: Default::default(),
+            sidebar_width: 300.0,
+            sidebar_collapsed: false,
+            sidebar_usage_visible: false,
+            gpui_pet_overlay_reduce_motion_enabled: false,
+            app_modal_window: None,
+            snapshot_browser_focus: false,
+            open_session: None,
+            native_chats: HashMap::new(),
+            chat_presentations: HashMap::new(),
+            terminals: HashMap::new(),
+            show_terminal: false,
+            linked_session_opened: false,
+        }
+    }
+
+    pub(crate) fn account_usage_meters(&self) -> Vec<GpuiAccountUsageMeter> {
+        Vec::new()
+    }
+
+    pub(crate) fn render_account_usage_meter(
+        &self,
+        _meter: &GpuiAccountUsageMeter,
+        _host: &GpuiAccountUsageMeterHost,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div().into_any_element()
+    }
+
+    pub(crate) fn titlebar_notification_bell_visible(&self) -> bool {
+        false
+    }
+
+    pub(crate) fn render_sidebar_notification_bell(
+        &self,
+        _appearance: &SidebarAppearance,
+        _cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div().into_any_element()
+    }
+
+    pub(crate) fn render_sidebar_collapse_button(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+
+    pub(crate) fn react_to_native_sidebar_session_click(
+        &mut self,
+        _sidebar_session_id: &str,
+        _cx: &mut Context<Self>,
+    ) -> NativeSidebarClickReaction {
+        NativeSidebarClickReaction::NotApplied
+    }
+
+    pub(crate) fn gx_store_sidebar_row_focus(
+        &self,
+        _row_id: &str,
+        _is_browser: bool,
+        snapshot_focused: bool,
+        snapshot_visible: bool,
+    ) -> (bool, bool) {
+        (snapshot_focused, snapshot_visible)
+    }
+
+    pub(crate) fn gx_store_selection_is_settling(&self) -> bool {
+        false
+    }
+
+    pub(crate) fn gx_store_pending_collection_rename(&self) -> Option<NativeSidebarRenameRequest> {
+        None
+    }
+
+    pub(crate) fn gx_store_note_sidebar_snapshot_browser_focus(&mut self, browser_focus: bool) {
+        self.snapshot_browser_focus = browser_focus;
+    }
+
+    /// The shell id of the chat the work area shows, which is the only pane this build has.
+    pub(crate) fn focused_agents_or_companion_shell_session_id(&self) -> Option<TerminalSessionId> {
+        let open = self.open_session.as_ref()?;
+        self.native_chats.get(open).map(|(id, _)| *id)
+    }
+
+    /// Sleep Space needs the daemon's per-space work list, which the web store does not read yet.
+    pub(crate) fn gx_store_space_sleep_has_work(&self, _space_id: &str) -> bool {
+        false
+    }
+
+    // Native focus and window plumbing the browser has no counterpart for.
+    pub(crate) fn reveal_floating_sessions(&mut self, _cx: &mut Context<Self>) {}
+    pub(crate) fn reclaim_gpui_root_for_chrome_input_focus(&mut self) {}
+    pub(crate) fn drop_pending_browser_keyboard_handoff(&mut self) {}
+    pub(crate) fn persist_shell_layout_state(&self) {}
+}

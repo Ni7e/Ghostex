@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use gpui::{
     App, Bounds, DispatchPhase, Entity, Hitbox, HitboxBehavior, MouseMoveEvent, Pixels, Window,
