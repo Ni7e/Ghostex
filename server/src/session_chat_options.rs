@@ -745,13 +745,35 @@ fn is_codex_model_id(token: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '.' || ch == '-')
 }
 
+/// The model id a footer token names: the id itself (`gpt-6-sol`), or the
+/// display name Codex 0.156 prints instead (`GPT-6-Sol`), which is the id in
+/// upper case.
+///
+/// CDXC:AgentScreenDetection 2026-09-23 WHY:
+/// Codex 0.156 moved its footer from ids to display names, which made every
+/// Codex session's model unreadable. A display name only counts when its
+/// lower case is a Codex model in the live catalog, so a session titled
+/// "GPT-5.5" is still never read as a model, and a model pushed to the
+/// catalog is recognised without a release.
+fn codex_model_value(token: &str) -> Option<String> {
+    if is_codex_model_id(token) {
+        return Some(token.to_string());
+    }
+    let id = token.to_ascii_lowercase();
+    (token.starts_with("GPT-")
+        && is_codex_model_id(&id)
+        && crate::agent_model_catalog::catalog_model("codex", &id).is_some())
+    .then_some(id)
+}
+
 fn match_codex_segment(segment: &str) -> Option<SessionChatDetectedSelection> {
     let mut tokens = segment.split(' ');
-    let model = tokens.next().filter(|token| is_codex_model_id(token))?;
+    let label = tokens.next()?;
+    let model = codex_model_value(label)?;
     let mut selection = SessionChatDetectedSelection {
         model: Some(SessionChatDetectedChoice {
-            value: model.to_string(),
-            label: model.to_string(),
+            value: model,
+            label: label.to_string(),
             source: SessionChatOptionEvidence::Terminal,
         }),
         ..SessionChatDetectedSelection::default()
