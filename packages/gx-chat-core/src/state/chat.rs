@@ -82,6 +82,11 @@ pub struct CoreState {
     /// happened, and several rpc continuations do the same. A family that ports one of those calls
     /// [`CoreState::request_publish`] so the revision moves on exactly the same turns.
     pub publish_requested: bool,
+    /// Set with [`CoreState::request_render`]: the publish this dispatch asks for follows a
+    /// `useState` setter, so the live brain re-ran its controller before publishing. A plain
+    /// `publish(controller.current())` (the fleet clock, a backfill batch, an action's close)
+    /// ships the LAST render's values, which is what the account panel's clock reads.
+    pub render_requested: bool,
     /// The answers an action that is still in flight publishes on.
     ///
     /// `action` in `native-host.ts` is `async`: its closing `publish(controller.current())` runs
@@ -321,6 +326,12 @@ impl CoreState {
     /// the TypeScript publishes unconditionally.
     pub fn request_publish(&mut self) {
         self.publish_requested = true;
+    }
+
+    /// A publish that follows a `useState` setter: the controller renders first.
+    pub fn request_render(&mut self) {
+        self.publish_requested = true;
+        self.render_requested = true;
     }
 
     /// The id for the next request any family asks for. Monotonic and never reused, so a late

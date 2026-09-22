@@ -97,7 +97,7 @@ pub fn observe(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
         }
         if state.core.timer_fired("menus.contextMeter") {
             state.menus.meter_now_ms = Some(state.core.timer_now("menus.contextMeter", context));
-            state.core.request_publish();
+            state.core.request_render();
         }
         // One `setInterval` from a `useEffect` with no dependencies: armed once, and it keeps its
         // place in the table across fires, which is the order the host runs coincident callbacks

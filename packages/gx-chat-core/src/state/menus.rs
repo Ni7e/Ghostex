@@ -62,6 +62,10 @@ pub struct MenusState {
     /// adopted, and every 30 seconds on its own interval. Each of those is a state change the live
     /// brain publishes on, whether or not a label moved.
     pub meter_now_ms: Option<f64>,
+    /// The clock of the controller's last render, which `nativeAccountPanel` reads (its own
+    /// `Date.now()` runs inside `computeNativeChatControls`). A publish that re-renders nothing
+    /// ships the panel as that render drew it, so its minute labels hold until the next render.
+    pub panel_clock_ms: Option<f64>,
     /// A `switchDraftAgent` in flight: `await composer('flush')`, then the call, then `refresh()`.
     pub draft_agent_switch: Option<DraftAgentSwitch>,
     /// The option values and the changes still in flight.
@@ -124,6 +128,7 @@ impl Default for MenusState {
             session_key: None,
             latched_draft_agent: None,
             meter_now_ms: None,
+            panel_clock_ms: None,
             draft_agent_switch: None,
             options: OptionStore::default(),
             options_agent: None,

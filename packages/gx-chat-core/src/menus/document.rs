@@ -42,6 +42,10 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
         None => Tri::Absent,
     };
     into.account_switch = nullable(state.session.account_switch.value().cloned());
+    let mut panel_context = context.clone();
+    if let Some(clock) = state.menus.panel_clock_ms {
+        panel_context.now_ms = clock;
+    }
     into.account_panel = Tri::Value(match providers.panel {
         None => Value::Null,
         Some(_) => to_value(&native_account_panel(
@@ -54,7 +58,7 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
                 .as_ref()
                 .and_then(|selected| selected.get("contextUsage")),
             state.core.hide_account_emails,
-            context,
+            &panel_context,
         )),
     });
     into.account_switch_card = Tri::Value(match &status.visible {

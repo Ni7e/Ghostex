@@ -345,7 +345,7 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
             state.messages.snapshot = Some(folded);
             state.messages.authoritative_revision += 1;
             if moved || before != FrameIdentity::capture(state) {
-                state.core.request_publish();
+                state.core.request_render();
             }
             Vec::new()
         }
@@ -391,7 +391,7 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                     if let Some(lifecycle) = appended.lifecycle.clone() {
                         state.session.lifecycle = Some(lifecycle);
                         // `setLifecycle(event.lifecycle)`: a new object, so a publish.
-                        state.core.request_publish();
+                        state.core.request_render();
                     }
                     state.messages.snapshot = Some(folded);
                     state.messages.authoritative_revision += 1;
@@ -418,7 +418,7 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
                         side_state_moves(state, frame.lifecycle.as_ref(), false, &frame.state);
                     crate::session::apply::apply_state_frame(state, frame, context);
                     if moved || before != FrameIdentity::capture(state) {
-                        state.core.request_publish();
+                        state.core.request_render();
                     }
                     Vec::new()
                 }

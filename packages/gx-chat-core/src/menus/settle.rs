@@ -26,7 +26,7 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
         Event::SettingsChanged(_) | Event::ContextPreferencesChanged { .. } => {
             if state.menus.meter_now_ms.is_some() {
                 state.menus.meter_now_ms = Some(context.now_ms);
-                state.core.request_publish();
+                state.core.request_render();
             }
         }
         Event::StorageWritten { key, error } => {

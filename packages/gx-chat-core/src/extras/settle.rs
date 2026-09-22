@@ -97,7 +97,7 @@ fn settle_with_ids(
             // state change the lifecycle publishes on.
             if state.core.timer_fired(ACTIVITY_CLOCK) {
                 state.extras.activity_now_ms = Some(state.core.timer_now(ACTIVITY_CLOCK, context));
-                state.core.request_publish();
+                state.core.request_render();
             }
         }
         _ => {}

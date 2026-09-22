@@ -61,10 +61,15 @@ pub fn settle_task_signature(panels: &mut PanelsState, tasks: Option<&Value>) {
 /// re-publish once a second.
 pub fn project(state: &ChatState, context: &ChatContext) -> (Value, Value, bool) {
     let panels = &state.extras.panels;
+    // `sessionChatAgentFleetRows(fleet, provider, Date.now())` inside `publish`: the read comes
+    // after everything else the call did before it published, so the call's LAST read is the
+    // one the published elapsed labels were measured at, not its first.
+    let mut clock = context.clone();
+    clock.now_ms = context.clock_read(usize::MAX);
     let strip = agent_fleet_rows(
         state.session.agent_fleet.as_ref(),
         state.session.agent.as_deref(),
-        context,
+        &clock,
     );
     let ticking = strip.as_ref().is_some_and(|strip| strip.ticking);
     let panel = agent_task_panel(

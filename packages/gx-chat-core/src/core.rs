@@ -262,6 +262,7 @@ impl ChatCore {
         // the clock moved, and the TypeScript would not have published either, so the host keeps
         // the snapshot it has (its `snapshot` variable is not refreshed without a publish).
         let requested = std::mem::take(&mut self.state.core.publish_requested);
+        let rendered = std::mem::take(&mut self.state.core.render_requested);
         let chain_continued = std::mem::take(&mut self.state.core.chain_continued);
         // `start`'s `.catch`: `transcriptItems = []; snapshot = {status: 'error', error};
         // revision++`. It runs with no controller at all, so it is decided before the gate below
@@ -302,8 +303,15 @@ impl ChatCore {
             || crate::extras::markers(&self.state, &self.published_context) != self.parts.minimap
             || crate::transcript::row_details(&self.state, &self.published_context)
                 != self.parts.row_details;
-        if !requested && !parts_moved && probe.reactive() == self.document.reactive() {
+        let state_moved = probe.reactive() != self.document.reactive();
+        if !requested && !parts_moved && !state_moved {
             return;
+        }
+        // A publish that follows a state change re-rendered the controller, and the render is
+        // where `nativeAccountPanel` reads the clock; one that did not (a fleet tick, a backfill
+        // batch, an action's close) ships the last render's panel.
+        if rendered || state_moved || !self.published_once {
+            self.state.menus.panel_clock_ms = Some(self.context.now_ms);
         }
         self.document = assemble(&self.state, &self.context);
         self.parts = frame_parts(&self.state, &self.context);
