@@ -61,8 +61,6 @@ pub struct ComposerState {
     pub draft_attachment_count: u32,
     /// A draft offered from another client, or `None`.
     pub incoming_draft: Option<IncomingDraft>,
-    /// The newest draft stamp this client already applied or dismissed.
-    pub last_handled_draft_at: Option<String>,
     /// Which queue and draft endpoints this host can actually call.
     pub transport: TransportQueueMethods,
     /// Whether this host can offer the session note, the stash, attachments and the terminal.
