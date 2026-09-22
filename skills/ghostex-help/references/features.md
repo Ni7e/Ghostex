@@ -20,7 +20,7 @@ Views open beside your sessions, in a panel with its own tab strip, and a
 project can keep several of them open at once. The strip is the top row of the
 panel and shares that row with the work area header, so the tabs sit over the
 view and the header's breadcrumb and buttons over your sessions. Expand a view
-over the sessions column and the strip moves to its own row under the header. The tabs belong to the project,
+over the Agents Panel and the strip moves to its own row under the header. The tabs belong to the project,
 so switching sessions leaves them alone and coming back to a project brings the
 same tabs back. Option/Alt+1 through 9 jump to the tabs in the order they appear
 in the strip; direct built-in view shortcuts can be assigned in Settings >
@@ -44,7 +44,7 @@ Only the view you are looking at, and the two you came from most recently, stay
 loaded; the rest keep their tab and wake when you click them.
 
 The buttons at the far end of the strip **pop the view out** into its own
-window, for a second monitor, and **expand** it over the sessions column so it
+window, for a second monitor, and **expand** it over the Agents Panel so it
 has the whole work area (Cmd+Ctrl+E, `expandViewPanel`). The **+** joined to the
 expand button **expands it fully**, hiding the sidebar as well
 (Cmd+Ctrl+Shift+E, `expandViewPanelFully`). The same buttons bring everything
@@ -56,8 +56,8 @@ the view this project last had open, and shows **Open a view** when the project
 has no tabs yet. Closing it leaves your sessions at full width. The header itself
 carries the project breadcrumb, Start, Open and Commit, the **⋯** button (Ask
 Ghostex, Tips & Tricks, Resources, Dev servers, Extensions and Customize), **Hide sidebar**,
-the chat-icon **Toggle sessions column** button beside it (it hides or shows the sessions
-column while a view is open, the same thing Expand side panel does, and leaves the
+the chat-icon **Toggle Agents Panel** button beside it (it hides or shows the Agents
+Panel while a view is open, the same thing Expand side panel does, and leaves the
 sidebar alone), and the command terminal toggle. When an update is available, a download button
 appears just before the project name. On Linux the button opens the release
 notes with an **Open download page** button instead of installing the update;
@@ -231,14 +231,10 @@ the empty sidebar area) joins the Space that is open at the time and appears at
 the top of it; add a project while Other is selected to leave it out of every
 Space.
 Right-click a Space icon for its menu: Manage (Edit Space, New Space) and
-Sleep. Sleep Space puts everything in the Space to sleep: every session in its
-projects and every view those projects have open (Code, Browser tabs, Kanban,
-Automate, Docs). Sleep Inactive sleeps only the Space's sessions that are awake
-but neither working nor waiting on you. Sleep Others sleeps everything outside
-the Space, sessions and views, so only that Space stays awake. Sessions and
-tabs stay where they are, asleep, and wake when you open them; a row is greyed
-out when it has nothing to sleep. The Other button offers the same rows for
-projects that are in no Space.
+Sleep. Sleep Inactive sleeps only the Space's sessions that are awake but
+neither working nor waiting on you. Sessions stay where they are, asleep, and
+wake when you open them; the row is greyed out when it has nothing to sleep.
+The Other button offers the same rows for projects that are in no Space.
 Space icons keep their normal glyph and show amber working-session and blue
 attention-session counts in extra-bold text near the bottom of each icon, including
 the selected Space.
@@ -254,7 +250,7 @@ Back/Forward, Search by Prompt, a notification, or Previous Sessions; otherwise
 the Space row only marks that Space with a dot.
 Switching projects by any route keeps the project's last view, its own width for the
 split between sessions and the view, and whether the view panel was open.
-Clicking a session opens it in the sessions column, which is always on screen, so it
+Clicking a session opens it in the Agents Panel, which is always on screen, so it
 never closes the view you are looking at.
 Leaving a project (by switching Spaces or projects) does not close what you had
 open there: the terminals, chats, and view page that were on screen stay running
@@ -288,13 +284,13 @@ where they are while you open, change and close views.
   (`sidebarCollapseAnimationDurationMs`, 0 for no animation), whatever the
   system's Reduce Motion setting says. If you have also expanded a view to fill the window, the strip
   splits in two: the top half (sidebar icon) floats the sidebar and the bottom half
-  (chat icon) floats the sessions column, so you can glance at your agents without
+  (chat icon) floats the Agents Panel, so you can glance at your agents without
   leaving the view. With the sidebar open and a view expanded, hover the sidebar's
-  left edge, click a session, or start a new agent, and the sessions column floats
+  left edge, click a session, or start a new agent, and the Agents Panel floats
   to the right of the sidebar. It is always 520px wide and takes your typing right
   away. This works on macOS, Windows and Linux.
 - Pane width: agent panes have a minimum resize width of 388px, and so does the
-  sessions column when a view is open beside it. In the desktop app, an open Code,
+  Agents Panel when a view is open beside it. In the desktop app, an open Code,
   Browser, Kanban, Automate, or Docs view has a minimum width of 455px.
 - Presets: Settings > General > Sidebar > Preset switches groups of card
   details at once; the individual rows below it are marked Advanced.
@@ -521,6 +517,8 @@ conversation history. Install its hooks in Settings > Agents to connect new
 conversations and keep activity in sync. ZCode runs in the same terminal, so
 you can switch to Terminal for its setup, model menus, and permission prompts.
 Scrolling up collapses the composer; returning to the bottom expands it.
+Settings > Chat > Keep chat box expanded while scrolling leaves the desktop
+chat box at full size instead (`sessionChatKeepComposerExpanded`, on by default).
 An empty collapsed composer shows only the first placeholder line, and scrolling
 keeps the same toolbar buttons visible.
 Hex colors in messages, inline code, and tables have a small rounded color swatch
@@ -837,6 +835,7 @@ Related settings: `hideAccountEmails`, `preferredAgentInterface`, `sessionChatTh
 `sessionChatFontFamily`, `sessionChatCustomTranscriptWidthEnabled`,
 `sessionChatTranscriptWidthPercent`, `sessionChatVerboseMode`,
 `sessionChatFileEditPreviews`,
+`sessionChatKeepComposerExpanded`,
 `terminalViewWidthMode` (`match-chat` makes the terminal body the same width
 as the chat transcript), `terminalWidthApplyToCommandPaneTerminals`.
 
@@ -1155,13 +1154,13 @@ docs directory), `hideProjectHeaderDiffStats`,
   accounts to show their usage at the bottom of the desktop sidebar, or unstar
   them to hide it. These are the same per-account stars available in
   Settings > Accounts. The meters are hidden until you ask for them: hover the
-  pin button in the sidebar's Commands row, just left of the Settings gear, and
-  every starred account floats over the bottom of the list, four per row,
-  without moving the list. Click the pin to keep them there above the Commands
-  row, and click it again to unpin them. Ghostex remembers whether they are
-  pinned. While the meters are unpinned the button carries a small dot whenever
-  one of those accounts is close to a limit, and the button itself is only
-  there once you have starred an account.
+  chart button in the sidebar's Commands row, just left of the Settings gear,
+  and every starred account floats over the bottom of the list, four per row,
+  without moving the list. The button turns into a pin while you hover it:
+  click it to keep the meters there above the Commands row, and click it again
+  (the pin shows filled while they are pinned) to unpin them. Ghostex remembers
+  whether they are pinned. The button itself is only there once you have
+  starred an account.
   Claude meters show the two tightest of the weekly, five-hour, and Fable
   limits, so the Fable limit is never hidden when it is running out; launcher
   and picker rows and the Accounts figures use the same two numbers. Each

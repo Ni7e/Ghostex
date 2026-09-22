@@ -51,7 +51,7 @@ How to use this file:
 - **Hide project git stats** `hideProjectHeaderDiffStats` (boolean, default false) [advanced]: Hide +added/-removed line counts in sidebar project rows.
 - **Show changed-file count** `showProjectEditorDiffFileCount` (boolean, default false) [advanced]: Show changed-file counts in sidebar project row git stats.
 - **Show Menu Bar Session Indicators** `hideMenuBarSessionStatusIndicators` (boolean, default false): Show the menu bar session status badges.
-- **Collapse animation speed** `sidebarCollapseAnimationDurationMs` (number 0 to 1000 step 100 default 400): Set how quickly sidebar sections, groups, and projects expand or collapse, and how quickly the floating sidebar and sessions column slide in from the window edge. Set to 0 for no animation.
+- **Collapse animation speed** `sidebarCollapseAnimationDurationMs` (number 0 to 1000 step 100 default 400): Set how quickly sidebar sections, groups, and projects expand or collapse, and how quickly the floating sidebar and Agents Panel slide in from the window edge. Set to 0 for no animation.
 - **Tooltip Delay** `sidebarTooltipDelayMs` (number 0 to 2000 step 100 default 600): Set how long sidebar hover labels wait before appearing. Set to 0 to show them immediately.
 - **Default Width** `sidebarDefaultWidthPx` (number 150 to 520 default 275) [advanced]: Width restored when double-clicking the sidebar resize handle.
 - **Command Pane Default Height** `commandsPanelDefaultHeightPx` (number 40 to 600 default 125) [advanced]: Height used when opening the command pane and when double-clicking its top resize rail.
@@ -83,6 +83,7 @@ How to use this file:
 - **Custom transcript width** `sessionChatCustomTranscriptWidthEnabled` (boolean, default false): Let the transcript use a different width from the prompt composer.
 - **Transcript width** `sessionChatTranscriptWidthPercent` (number 50 to 100 step 5 default 75): Set the centered transcript width without changing the prompt composer.
 - **Show file edit previews** `sessionChatFileEditPreviews` (boolean, default false): Show the first seven code lines in each file edit. Turn off to show only the path and change counts.
+- **Keep chat box expanded while scrolling** `sessionChatKeepComposerExpanded` (boolean, default true): Keep the desktop chat box at full size while you scroll the transcript instead of shrinking it as you scroll up and growing it back at the end.
 - **Simple mode** `sessionChatSimpleMode` (boolean, default false): Simplify all chats: hide tool command previews and group file edits behind an expandable file count.
 - **Verbose mode** `sessionChatVerboseMode` (boolean, default false): Expand thinking blocks to show their tool calls by default. Each chat can override it from its composer.
 ### Tools

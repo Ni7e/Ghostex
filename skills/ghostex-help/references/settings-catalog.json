@@ -4496,7 +4496,7 @@
     {
       "key": "sidebarCollapseAnimationDurationMs",
       "title": "Collapse animation speed",
-      "subtitle": "Set how quickly sidebar sections, groups, and projects expand or collapse, and how quickly the floating sidebar and sessions column slide in from the window edge. Set to 0 for no animation.",
+      "subtitle": "Set how quickly sidebar sections, groups, and projects expand or collapse, and how quickly the floating sidebar and Agents Panel slide in from the window edge. Set to 0 for no animation.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "sidebar",
@@ -5135,6 +5135,20 @@
       "sectionTitle": "Chat",
       "type": "boolean",
       "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "sessionChatKeepComposerExpanded",
+      "title": "Keep chat box expanded while scrolling",
+      "subtitle": "Keep the desktop chat box at full size while you scroll the transcript instead of shrinking it as you scroll up and growing it back at the end.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "boolean",
+      "default": true,
       "agentWritable": true
     },
     {
@@ -9587,13 +9601,13 @@
     {
       "id": "expandViewPanel",
       "title": "Expand Side Panel",
-      "description": "Expand the side panel over the sessions column, or bring the sessions back.",
+      "description": "Expand the side panel over the Agents Panel, or bring the Agents Panel back.",
       "defaultKey": "cmd+ctrl+e"
     },
     {
       "id": "expandViewPanelFully",
       "title": "Expand Side Panel Fully",
-      "description": "Expand the side panel over the sessions column and hide the sidebar, or bring both back.",
+      "description": "Expand the side panel over the Agents Panel and hide the sidebar, or bring both back.",
       "defaultKey": "cmd+ctrl+shift+e"
     },
     {

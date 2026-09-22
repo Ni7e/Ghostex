@@ -18,8 +18,8 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Hotkeys | `cmd+.` |  | Open app hotkeys. | `openHotkeys` |
 | Toggle Sidebar | `cmd+b` |  | Collapse or expand the sidebar. | `toggleSidebarCollapsed` |
 | Toggle View Panel | `cmd+alt+b` |  | Open or close the view panel beside your sessions. | `toggleViewPanel` |
-| Expand Side Panel | `cmd+ctrl+e` |  | Expand the side panel over the sessions column, or bring the sessions back. | `expandViewPanel` |
-| Expand Side Panel Fully | `cmd+ctrl+shift+e` |  | Expand the side panel over the sessions column and hide the sidebar, or bring both back. | `expandViewPanelFully` |
+| Expand Side Panel | `cmd+ctrl+e` |  | Expand the side panel over the Agents Panel, or bring the Agents Panel back. | `expandViewPanel` |
+| Expand Side Panel Fully | `cmd+ctrl+shift+e` |  | Expand the side panel over the Agents Panel and hide the sidebar, or bring both back. | `expandViewPanelFully` |
 | Rename Active Session | `cmd+r` |  | Rename the focused session. | `renameActiveSession` |
 | Open Browser Pane | `cmd+n` |  | Open a browser tab beside the focused tab. | `openBrowserPane` |
 | Switch to Agents | unassigned |  | Switch to Agents view. | `switchAgentsView` |

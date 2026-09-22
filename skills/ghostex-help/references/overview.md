@@ -24,8 +24,8 @@ hotkeys Every shortcut and its default binding
   Tips & Tricks, Resources, Dev servers, Extensions and Customize, and the command terminal
   and view panel toggles. The header covers your sessions only: when a view panel
   is open, the panel's own tabs take the rest of that same row, so the tabs sit
-  over the view and the header's buttons over your sessions. Narrow the sessions
-  column and the buttons drop their labels and the breadcrumb drops the project
+  over the view and the header's buttons over your sessions. Narrow the Agents
+  Panel and the buttons drop their labels and the breadcrumb drops the project
   name. There is no line under the header: your chat fades out beneath it. Drag
   the header, or the sidebar's Search row, to move the window.
 - **Sidebar** (left by default): projects, their sessions, tags and filters,
@@ -44,7 +44,7 @@ hotkeys Every shortcut and its default binding
   drag, and your agents keep running on the left. The panel's tab strip shares
   the header's row: several views can be open at once, the **+** opens another,
   and the two buttons at its end pop the view out into its own window or expand
-  it over the sessions column. With nothing open it shows **Open a view**, a picker of
+  it over the Agents Panel. With nothing open it shows **Open a view**, a picker of
   everything this project can open. Project views load on demand and sleep when unused.
   The view panel toggle at the right end of the header, or Cmd+Option+B, opens
   and closes the whole panel.
