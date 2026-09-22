@@ -139,7 +139,11 @@ pub fn compute_native_chat_options(state: &ChatState, _context: &ChatContext) ->
     let can_send_key = menus.can_send_key;
     let draft_agents = DraftAgent::list(state.session.available_agents.as_ref());
     let draft_agent_id = state.session.session_agent_id.clone();
-    let selection_error = None;
+    // `selectionError: modelSelection.selectionError` (`native-options.ts:112`), which is the
+    // pending selection's own `errorMessage` once it has failed (`model-selection.ts:223`). It was
+    // hardcoded to `None` here, so the option pill's model menu could never draw the "Not applied"
+    // heading the model menu two fields away draws from the same value.
+    let selection_error = state.pickers.model_selection.selection_error.clone();
     let menu_params = OptionMenuParams {
         quick_picker: provider.is_some(),
         can_pick_model,
