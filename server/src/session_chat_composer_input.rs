@@ -111,6 +111,9 @@ pub(super) fn cursor_input_region(lines: &[String]) -> Option<Range<usize>> {
 }
 
 pub fn claude_composer_draft(screen: &str) -> Option<String> {
+    if super::is_claude_code_agents_screen(screen) {
+        return None;
+    }
     let lines: Vec<_> = screen.lines().map(strip_ansi_sgr).collect();
     let region = rule_input_region(&lines, CLAUDE_COMPOSER_MARKERS)?;
     let first = lines[region.start].trim_start();
@@ -415,6 +418,9 @@ fn codex_remote_images(lines: &[StyledLine], start: usize) -> Vec<String> {
 
 /// Input only, excluding transcript and footer. Call with a VT capture when proving a draft empty.
 pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionChatComposerInput> {
+    if matches!(agent, "claude" | "openclaude") && super::is_claude_code_agents_screen(screen) {
+        return None;
+    }
     if agent == "grok" {
         return super::grok_composer_draft(screen).map(|text| {
             // CDXC:AgentScreenDetection 2026-09-09 WHY: Grok's empty composer paints "Type a message..." in RGB 78,78,78 rather than SGR faint. Treating it as a draft held model selections forever; checking its VT style protects real input with the same words.

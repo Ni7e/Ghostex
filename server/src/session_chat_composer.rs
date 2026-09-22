@@ -367,6 +367,41 @@ fn composer_screen_tail(lines: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// CDXC:AgentScreenDetection 2026-09-22 WHY:
+/// Claude 2.1.278's agents dashboard draws the same input frame as a conversation, but its prompt creates a new session. After /exit detaches a background conversation, treating this dashboard as its composer makes account switching try to clear the dashboard placeholder.
+pub(crate) fn is_claude_code_agents_screen(screen_text: &str) -> bool {
+    let lines = composer_lines(screen_text);
+    lines.iter().any(|line| {
+        (line.contains("space to reply")
+            && line.contains("ctrl+x to delete")
+            && line.contains("? for shortcuts"))
+            || line.starts_with("A different way to work with Claude:")
+    }) && ["Needs input", "Working", "Completed"]
+        .iter()
+        .all(|heading| lines.iter().any(|line| line.trim() == *heading))
+}
+
+/// CDXC:AgentScreenDetection 2026-09-22 WHY:
+/// Claude's usage-limit choice dialog covers its composer and blocks /exit during account switching. Escape cancels the dialog without selecting paid usage credits.
+pub(crate) fn is_claude_usage_limit_dialog(screen_text: &str) -> bool {
+    let lines = composer_lines(screen_text);
+    lines
+        .last()
+        .is_some_and(|line| line.trim() == "Enter to confirm · Esc to cancel")
+        && lines
+            .iter()
+            .any(|line| line.trim() == "What do you want to do?")
+        && lines
+            .iter()
+            .any(|line| line.contains("1. Stop and wait for limit to reset"))
+        && lines
+            .iter()
+            .any(|line| line.contains("2. Wait here, then continue automatically"))
+        && lines
+            .iter()
+            .any(|line| line.contains("3. Switch to usage credits"))
+}
+
 /*
 Claude Code's `/config` screen owns the keyboard until Escape closes it. Its
 full-width upper-eighth-block rule scales with the terminal width, while the
@@ -712,6 +747,20 @@ pub fn detect_session_chat_composer_ready(
     if is_claude_code_settings_screen(agent_id, screen_text) {
         return SessionChatComposerReadiness::not_ready_dismiss_with_escape(
             "Claude Code settings are open instead of the input box.".to_string(),
+            screen_tail,
+        );
+    }
+    if agent == "claude" && is_claude_usage_limit_dialog(screen_text) {
+        return SessionChatComposerReadiness::not_ready_dismiss_with_escape(
+            "Claude Code's usage-limit dialog is open instead of the input box.".to_string(),
+            screen_tail,
+        );
+    }
+    if matches!(agent.as_str(), "claude" | "openclaude")
+        && is_claude_code_agents_screen(screen_text)
+    {
+        return SessionChatComposerReadiness::not_ready(
+            "Claude Code's agents dashboard is open instead of this conversation. Return to the conversation in the terminal before sending.".to_string(),
             screen_tail,
         );
     }
