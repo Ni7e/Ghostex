@@ -24,25 +24,22 @@ use crate::menus::option_pills::{account_indicator, option_pill_values, options_
 use crate::menus::option_values::{current_model_value, OptionState};
 use crate::state::{ChatContext, ChatState};
 
-/// `modelPickerProvider(icon)`: the picker lineup an agent icon maps to.
+/// `modelPickerProvider(icon)`, as the option pills need it: the provider's wire spelling.
 ///
-/// A private copy of family e2's `model-picker-request.ts` helper, because the pills need it to
-/// decide whether a model choice can be queued at all. Fold it into `menus/picker/` when that
-/// lands.
+/// The rule itself is family e2's (`crate::menus::picker::request::model_picker_provider`); this
+/// is the same answer with `ModelPickerProvider::as_str` applied, because the pills publish
+/// `modelProvider` as a plain string. It was a second copy of the table until 2026-09-22.
 pub fn model_picker_provider(icon: Option<&str>) -> Option<&'static str> {
-    match icon {
-        Some("claude") => Some("claude"),
-        Some("codex") => Some("codex"),
-        Some("cursor-cli") | Some("cursor") => Some("cursor"),
-        Some("grok-build") | Some("grok") => Some("grok"),
-        Some("antigravity-cli") | Some("antigravity") => Some("antigravity"),
-        _ => None,
-    }
+    crate::menus::picker::request::model_picker_provider(icon).map(|provider| provider.as_str())
 }
 
-/// `modelPickerSupportsSessionScope(provider)`.
+/// `modelPickerSupportsSessionScope(provider)`, keyed by the wire spelling.
+///
+/// A provider string the catalog does not know answers false, which is what the enum's own
+/// `model_picker_supports_session_scope` cannot be handed at all.
 pub fn picker_supports_session_scope(provider: &str) -> bool {
-    provider == "claude"
+    crate::menus::picker::model_picker::ModelPickerProvider::from_wire(provider)
+        .is_some_and(crate::menus::picker::model_picker::model_picker_supports_session_scope)
 }
 
 /// The pill labels the composer draws, in the key order `JSON.stringify` writes them.

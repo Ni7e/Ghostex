@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::questions::exchange::ParsedQuestion;
 use crate::questions::model::Question;
+use crate::transcript::jsstr::{js_trim, js_trim_end};
 
 /// One question's answer, matched back onto the options it was offered.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -120,7 +121,7 @@ pub fn match_answer_to_options(question: &Question, text: &str) -> ExchangeAnswe
             break;
         }
     }
-    let other = remaining.trim();
+    let other = js_trim(remaining);
     ExchangeAnswer {
         selected_indices,
         other_text: if other.is_empty() {
@@ -304,7 +305,7 @@ fn parse_omp_multi_answers(
         };
         answers[*index] = Some(parse_omp_answer_value(
             &entries[*index].question,
-            raw.trim_end(),
+            js_trim_end(raw),
         ));
     }
     Some(answers)
@@ -353,7 +354,7 @@ fn hermes_response_to_answer(
     }
     let text = response
         .and_then(serde_json::Value::as_str)
-        .map(str::trim)
+        .map(js_trim)
         .unwrap_or_default();
     if text.is_empty() {
         return ExchangeAnswer {
@@ -407,7 +408,7 @@ fn parse_hermes_answers(
 }
 
 fn parse_answers(entries: &[ParsedQuestion], output: &str) -> Option<Vec<Option<ExchangeAnswer>>> {
-    let trimmed = output.trim();
+    let trimmed = js_trim(output);
     if entries.len() == 1 {
         let first = &entries[0].question;
         if trimmed == PI_CANCELLED_TEXT {
@@ -458,7 +459,7 @@ fn parse_answers(entries: &[ParsedQuestion], output: &str) -> Option<Vec<Option<
             Some((next_start, _, _)) => &body[*end..*next_start],
             None => &body[*end..],
         };
-        let mut raw = slice.trim_end();
+        let mut raw = js_trim_end(slice);
         raw = raw.strip_suffix(',').unwrap_or(raw);
         raw = raw.strip_suffix('"').unwrap_or(raw);
         answers[*index] = Some(match_answer_to_options(&entries[*index].question, raw));
@@ -479,7 +480,7 @@ pub fn answered_question_exchange(
         return None;
     }
     let entries = crate::questions::exchange::parse_questions_with_ids(input, Some(name))?;
-    let output = output.trim();
+    let output = js_trim(output);
     if output.is_empty() {
         return None;
     }

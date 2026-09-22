@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::transcript::jsstr::js_trim;
+
 /// Trailing editor coordinates on a path: `:913`, `:913-940`, or `:42:8`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,7 +94,9 @@ fn trailing_number(value: &str) -> Option<(&str, u32)> {
 
 /// Classifies a Markdown href into what the chat can do with it.
 pub fn classify_link_href(href: &str) -> LinkTarget {
-    let trimmed = href.trim();
+    // `href.trim()` in the TypeScript, which is `String.prototype.trim`: it trims U+FEFF and
+    // leaves U+0085, where Rust's `str::trim` does the exact opposite.
+    let trimmed = js_trim(href);
     if trimmed.is_empty() || trimmed.starts_with('#') {
         return LinkTarget::Inert;
     }

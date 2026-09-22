@@ -32,7 +32,6 @@ pub mod option_store;
 pub mod option_values;
 pub mod options;
 pub mod picker;
-pub mod status_line;
 pub mod time;
 
 pub mod settle;

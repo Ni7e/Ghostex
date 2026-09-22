@@ -8,6 +8,7 @@
 use serde_json::Value;
 
 use crate::questions::model::{Question, QuestionOption};
+use crate::transcript::jsstr::js_trim;
 
 /// Hermes' clarify tool hard-caps `choices` at 4 before the terminal panel renders, so the
 /// answered card mirrors what was actually offered.
@@ -67,7 +68,7 @@ pub fn parse_questions_with_ids(
     for raw in candidates {
         // Hermes tolerates bare-string batch entries (["Q1?", "Q2?"]).
         let bare = match raw {
-            Value::String(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
+            Value::String(text) if !js_trim(text).is_empty() => Some(js_trim(text).to_string()),
             _ => None,
         };
         if !matches!(raw, Value::Object(_) | Value::Array(_)) && bare.is_none() {

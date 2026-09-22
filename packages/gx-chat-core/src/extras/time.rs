@@ -10,24 +10,30 @@
 /// Accepts `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS`, an optional fractional second,
 /// and an optional `Z` or `±HH:MM` offset. A date-only stamp is UTC and a date-time without an
 /// offset is local, which is what the ECMAScript date-time string format says.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// Every field is taken with `str::get`, not with a byte range. A stamp is server data and can be
+/// any string at all, and the core runs on the host's own thread: `&value[0..4]` on a `detectedAt`
+/// whose first characters are not ASCII panics in the middle of a slice and takes the chat window
+/// with it. `Date.parse` answers NaN for all of them, which is what `None` is here.
 pub fn parse_iso_millis(value: &str, utc_offset_minutes: i32) -> Option<f64> {
     let bytes = value.as_bytes();
     if bytes.len() < 10 {
         return None;
     }
-    let year: i64 = digits(&value[0..4])?;
+    let year: i64 = digits(value.get(0..4)?)?;
     if bytes[4] != b'-' {
         return None;
     }
-    let month: i64 = digits(&value[5..7])?;
+    let month: i64 = digits(value.get(5..7)?)?;
     if bytes[7] != b'-' {
         return None;
     }
-    let day: i64 = digits(&value[8..10])?;
+    let day: i64 = digits(value.get(8..10)?)?;
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    let rest = &value[10..];
+    let rest = value.get(10..)?;
     if rest.is_empty() {
         // A date-only stamp is UTC, which is what the ECMAScript date-time string format says.
         return epoch_millis(CivilStamp {
@@ -44,24 +50,24 @@ pub fn parse_iso_millis(value: &str, utc_offset_minutes: i32) -> Option<f64> {
     if !rest.starts_with('T') && !rest.starts_with('t') && !rest.starts_with(' ') {
         return None;
     }
-    let rest = &rest[1..];
+    let rest = rest.get(1..)?;
     if rest.len() < 5 {
         return None;
     }
-    let hour: i64 = digits(&rest[0..2])?;
+    let hour: i64 = digits(rest.get(0..2)?)?;
     if rest.as_bytes()[2] != b':' {
         return None;
     }
-    let minute: i64 = digits(&rest[3..5])?;
-    let mut tail = &rest[5..];
+    let minute: i64 = digits(rest.get(3..5)?)?;
+    let mut tail = rest.get(5..)?;
     let mut second: i64 = 0;
     let mut fraction = 0.0_f64;
     if tail.starts_with(':') {
         if tail.len() < 3 {
             return None;
         }
-        second = digits(&tail[1..3])?;
-        tail = &tail[3..];
+        second = digits(tail.get(1..3)?)?;
+        tail = tail.get(3..)?;
         if tail.starts_with('.') {
             let digit_count = tail[1..]
                 .bytes()
@@ -78,7 +84,7 @@ pub fn parse_iso_millis(value: &str, utc_offset_minutes: i32) -> Option<f64> {
                 .take(3)
                 .collect();
             fraction = digits::<i64>(&millis_text)? as f64;
-            tail = &tail[1 + digit_count..];
+            tail = tail.get(1 + digit_count..)?;
         }
     }
     if hour > 24 || minute > 59 || second > 59 {
@@ -112,9 +118,9 @@ fn parse_offset(text: &str) -> Option<i32> {
     if body.len() != 2 && body.len() != 4 {
         return None;
     }
-    let hours: i32 = digits(&body[0..2])?;
+    let hours: i32 = digits(body.get(0..2)?)?;
     let minutes: i32 = if body.len() == 4 {
-        digits(&body[2..4])?
+        digits(body.get(2..4)?)?
     } else {
         0
     };
