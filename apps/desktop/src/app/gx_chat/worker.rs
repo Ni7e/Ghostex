@@ -699,13 +699,7 @@ fn perform(
     let now_ms = now_millis();
     match effect {
         Effect::ReadStorage { key: storage_key } => {
-            let value = match storage::read(&storage_key, now_ms) {
-                Ok(value) => value,
-                Err(_) => {
-                    world.counters.storage_refused += 1;
-                    None
-                }
-            };
+            let value = read_storage(world, &storage_key, now_ms);
             answers.push(Event::StorageLoaded {
                 key: storage_key,
                 value,
@@ -717,13 +711,7 @@ fn perform(
             let records = keys
                 .into_iter()
                 .map(|storage_key| {
-                    let value = match storage::read(&storage_key, now_ms) {
-                        Ok(value) => value,
-                        Err(_) => {
-                            world.counters.storage_refused += 1;
-                            None
-                        }
-                    };
+                    let value = read_storage(world, &storage_key, now_ms);
                     ghostex_gx_chat_core::StorageRecord {
                         key: storage_key,
                         value,
@@ -848,6 +836,37 @@ fn perform(
             }
         },
         _ => {}
+    }
+}
+
+/// One stored read, or the one store the core names that is a QUERY rather than a record.
+///
+/// CDXC:SavedPrompts 2026-09-22 WHY:
+/// `composerHistory` has no row anywhere: it is `composer('history')`, which
+/// `native-composer.ts` answers with `listSentSessionChatMessages().map(m => m.content)
+/// .reverse()`, a scan of the whole `sentHistory` store across every session rather than a read of
+/// one key. The suffix it arrives with is the session it was asked from and is deliberately not
+/// used, because Up-arrow recall reaches what every composer on this computer sent. Left to the
+/// catalog the read answers `unregistered`, which the core reads as an empty ring: Up and Down
+/// would do nothing and `historyActive` would be false for ever.
+///
+/// The array is OLDEST FIRST, which is what `.reverse()` of a newest-first list produces and what
+/// `recall_previous` walks backwards from.
+fn read_storage(
+    world: &mut World,
+    storage_key: &ghostex_gx_chat_core::StorageKey,
+    now_ms: i64,
+) -> Option<String> {
+    if storage_key.store == ghostex_gx_chat_core::composer::storage::COMPOSER_HISTORY_STORE {
+        let entries = host_records::sent_history_contents(now_ms);
+        return serde_json::to_string(&entries).ok();
+    }
+    match storage::read(storage_key, now_ms) {
+        Ok(value) => value,
+        Err(_) => {
+            world.counters.storage_refused += 1;
+            None
+        }
     }
 }
 
