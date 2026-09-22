@@ -161,6 +161,7 @@ impl ChatOptionMenuPanel {
         };
         // CDXC:SessionChat 2026-09-22 DECISION:
         // User: a model's description is not written next to it in the picker; an eye that appears when the row is hovered shows it on hover instead.
+        const TOOLTIP_WIDTH: f32 = 220.0;
         let about = description.map(|description| {
             let about_hover = palette.ink(0.08);
             div()
@@ -177,8 +178,17 @@ impl ChatOptionMenuPanel {
                 .hover(move |style| style.bg(about_hover))
                 .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
                 .on_click(|_, _, cx| cx.stop_propagation())
+                // The picker is its own small window and a tooltip cannot draw past it, so the text wraps
+                // at a width that fits inside the card instead of running off its edge on one line.
                 .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(description.clone()).build(window, cx)
+                    let description = description.clone();
+                    gpui_component::tooltip::Tooltip::element(move |_, _| {
+                        div()
+                            .w(px(TOOLTIP_WIDTH * scale))
+                            .whitespace_normal()
+                            .child(description.clone())
+                    })
+                    .build(window, cx)
                 })
                 .child(
                     svg()
