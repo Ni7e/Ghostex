@@ -82,11 +82,30 @@ fn switch_draft_agent(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
     let Some(agent_id) = action.params.get("agentId").and_then(Value::as_str) else {
         return Vec::new();
     };
-    switch_draft_agent_to(state, agent_id)
+    let text = |key: &str| {
+        action
+            .params
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    switch_draft_agent_with(state, agent_id, text("model"), text("effort"))
 }
 
 /// `switchDraftAgent` for an agent another rule already picked.
 pub fn switch_draft_agent_to(state: &mut ChatState, agent_id: &str) -> Vec<Effect> {
+    switch_draft_agent_with(state, agent_id, None, None)
+}
+
+/// `switchDraftAgent` with the model and effort the launch line should carry
+/// (`...(command.model ? { agentModel: command.model } : {})`, and the same for the effort).
+pub fn switch_draft_agent_with(
+    state: &mut ChatState,
+    agent_id: &str,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Vec<Effect> {
     let known =
         crate::menus::option_menus::DraftAgent::list(state.session.available_agents.as_ref())
             .is_some_and(|agents| agents.iter().any(|agent| agent.agent_id == agent_id));
@@ -99,6 +118,8 @@ pub fn switch_draft_agent_to(state: &mut ChatState, agent_id: &str) -> Vec<Effec
     // closing publish waits for all three, as the TypeScript's does.
     state.menus.draft_agent_switch = Some(crate::state::DraftAgentSwitch {
         agent_id: agent_id.to_string(),
+        model,
+        effort,
         request_id: None,
     });
     let effects = vec![Effect::FlushStorage {
@@ -129,19 +150,33 @@ pub fn switch_after_flush(
         return Vec::new();
     }
     let request_id = state.core.allocate_request_id();
-    let agent_id = state
+    let (agent_id, model, effort) = state
         .menus
         .draft_agent_switch
         .as_ref()
-        .map(|switch| switch.agent_id.clone())
+        .map(|switch| {
+            (
+                switch.agent_id.clone(),
+                switch.model.clone(),
+                switch.effort.clone(),
+            )
+        })
         .unwrap_or_default();
     if let Some(switch) = state.menus.draft_agent_switch.as_mut() {
         switch.request_id = Some(request_id);
     }
+    let mut params = serde_json::Map::new();
+    params.insert("agentId".to_string(), Value::String(agent_id));
+    if let Some(model) = model {
+        params.insert("agentModel".to_string(), Value::String(model));
+    }
+    if let Some(effort) = effort {
+        params.insert("agentEffort".to_string(), Value::String(effort));
+    }
     let effects = vec![Effect::SendRpc {
         request_id,
         method: ChatRpcMethod::SwitchDraftAgent,
-        params: Box::new(serde_json::json!({ "agentId": agent_id })),
+        params: Box::new(Value::Object(params)),
     }];
     state.core.publish_after(&effects);
     effects

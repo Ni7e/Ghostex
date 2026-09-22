@@ -20,7 +20,8 @@ use crate::questions::model::{InteractivePrompt, TerminalNotice};
 use crate::questions::notice_state::dismissed_notice_state;
 use crate::questions::sync::sync;
 use crate::questions::terminal_prompts::{
-    terminal_notice_action_answer, terminal_notice_choice_answer,
+    terminal_notice_action_answer, terminal_notice_action_shortcut_eligible,
+    terminal_notice_choice_answer,
 };
 use crate::state::{AnswerRequest, AsyncSubmit, ChatContext, ChatState};
 use crate::wire::ChatRpcMethod;
@@ -200,6 +201,7 @@ fn notice_answer(
             .actions
             .iter()
             .flatten()
+            .filter(|action| terminal_notice_action_shortcut_eligible(action))
             .find_map(|action| terminal_notice_action_answer(notice, action)),
         None => None,
     }

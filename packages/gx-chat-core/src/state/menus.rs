@@ -23,6 +23,10 @@ use crate::menus::option_store::OptionStore;
 #[derive(Clone, Debug, PartialEq)]
 pub struct DraftAgentSwitch {
     pub agent_id: String,
+    /// The model and effort the launch line carries (`agentModel`, `agentEffort`), when the pick
+    /// came from a Claude or Codex row of the model menu.
+    pub model: Option<String>,
+    pub effort: Option<String>,
     /// The gxserver call once the flush has answered; `None` while the flush is in flight.
     pub request_id: Option<u64>,
 }

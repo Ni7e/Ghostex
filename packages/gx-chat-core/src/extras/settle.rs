@@ -176,7 +176,10 @@ fn track_transcript_loading(state: &mut ChatState, context: &ChatContext) {
     if !state.core.controller_started {
         return;
     }
-    let loading = state.session.server_status.as_str() == "loading";
+    // `transcriptLoading = state.view.kind === 'loading' && !showNewSessionWelcome`: a draft
+    // session greets instead of loading, so its stages never start.
+    let loading = state.session.server_status.as_str() == "loading"
+        && state.session.available_agents.is_none();
     if loading == state.extras.loading_started_at_ms.is_some() {
         return;
     }

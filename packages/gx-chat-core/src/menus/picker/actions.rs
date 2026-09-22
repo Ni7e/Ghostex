@@ -301,10 +301,22 @@ fn model_menu_pick_action(state: &mut ChatState, action: &UserAction) -> Vec<Eff
                         })
                         .map(|agent| agent.agent_id.clone())
                 });
+                // The launch line carries a model only for Claude and Codex; the other CLIs
+                // start on their own default.
+                let launchable = matches!(
+                    provider,
+                    crate::menus::picker::model_picker::ModelPickerProvider::Claude
+                        | crate::menus::picker::model_picker::ModelPickerProvider::Codex
+                );
+                let carry =
+                    |value: &str| (launchable && !value.is_empty()).then(|| value.to_string());
                 return match agent_id {
-                    Some(agent_id) => {
-                        crate::menus::actions::switch_draft_agent_to(state, &agent_id)
-                    }
+                    Some(agent_id) => crate::menus::actions::switch_draft_agent_with(
+                        state,
+                        &agent_id,
+                        carry(&model),
+                        carry(&effort),
+                    ),
                     None => Vec::new(),
                 };
             }
