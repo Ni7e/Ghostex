@@ -84,6 +84,9 @@ struct Report {
     unanswered: usize,
     /// Recorded answers that arrived with no request of the core's waiting.
     unmatched_answers: usize,
+    /// Requests the core made after the last answer its run carries. No record could have
+    /// answered them: the live brain's own answer arrived after the app closed the recording.
+    in_flight_at_close: usize,
     output: PathBuf,
 }
 
@@ -91,7 +94,7 @@ impl std::fmt::Display for Report {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "recording       {} ({} runs, {} records)\nreplayed        {} inputs, {} queries, {} documents\nqueries         {}/{} fingerprints matched\nrequests        {} unanswered, {} answers with no request\nrefused         {} inputs\nactual          {}",
+            "recording       {} ({} runs, {} records)\nreplayed        {} inputs, {} queries, {} documents\nqueries         {}/{} fingerprints matched\nrequests        {} unanswered, {} answers with no request, {} in flight at close\nrefused         {} inputs\nactual          {}",
             self.name,
             self.runs,
             self.records,
@@ -102,6 +105,7 @@ impl std::fmt::Display for Report {
             self.queries,
             self.unanswered,
             self.unmatched_answers,
+            self.in_flight_at_close,
             self.refused,
             self.output.display()
         )
@@ -130,6 +134,9 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
     let mut refused = 0usize;
     let mut unanswered = 0usize;
     let mut unmatched_answers = 0usize;
+    let mut in_flight_at_close = 0usize;
+    // How many requests were outstanding just after the run's latest answer-bearing record.
+    let mut outstanding_at_last_answer = 0usize;
     // The run the next record belongs to. A header opens a run; the run counts once a record
     // follows it, so a header the app wrote just before closing is skipped rather than graded.
     let mut run = 0usize;
@@ -153,9 +160,12 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
                 finish_run(
                     &mut core,
                     &mut translator,
+                    outstanding_at_last_answer,
                     &mut unanswered,
                     &mut unmatched_answers,
+                    &mut in_flight_at_close,
                 );
+                outstanding_at_last_answer = 0;
                 core = ChatCore::new();
                 translator = BridgeTranslator::new();
             }
@@ -226,6 +236,9 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
         };
         let before_queue = translator.queued_storage_answers();
         let outcome = translator.feed(&mut core, call, context);
+        if method == "resolve" || method == "brokerMessage" {
+            outstanding_at_last_answer = translator.unanswered();
+        }
         // `GX_CHAT_RPC=1` names every gxserver call the core makes, by run, record and METHOD, so
         // the two brains' request sequences can be lined up against the `requests` the expected
         // file carries. Method names only.
@@ -355,8 +368,10 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
         finish_run(
             &mut core,
             &mut translator,
+            outstanding_at_last_answer,
             &mut unanswered,
             &mut unmatched_answers,
+            &mut in_flight_at_close,
         );
     }
     if log_refusals {
@@ -373,6 +388,7 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
         refused,
         unanswered,
         unmatched_answers,
+        in_flight_at_close,
         output,
     })
 }
@@ -380,11 +396,18 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
 /// Closes one run: delivers the storage answers it ran out of `resolve` records for, so a surface
 /// that reads one is not left loading in its last documents, and adds its request counts to the
 /// recording's.
+///
+/// A request still open at the end that was issued AFTER the run's last answer-bearing record
+/// (`outstanding_at_last_answer` is the count just after that record) is in flight at close, not
+/// unanswered: the recording stops one record short of the app closing, so a poll that fires in
+/// the last seconds of a run is open on both brains and nothing in the file could answer it.
 fn finish_run(
     core: &mut ChatCore,
     translator: &mut BridgeTranslator,
+    outstanding_at_last_answer: usize,
     unanswered: &mut usize,
     unmatched_answers: &mut usize,
+    in_flight_at_close: &mut usize,
 ) {
     translator.flush_storage(core, ChatContext::at(0.0));
     // `GX_CHAT_REQUESTS=1` names the METHOD of every request the bridge never answered, oldest
@@ -400,7 +423,10 @@ fn finish_run(
             translator.queued_storage_answers()
         );
     }
-    *unanswered += translator.unanswered();
+    let open = translator.unanswered();
+    let late = open.saturating_sub(outstanding_at_last_answer);
+    *unanswered += open - late;
+    *in_flight_at_close += late;
     *unmatched_answers += translator.unmatched_answers();
 }
 

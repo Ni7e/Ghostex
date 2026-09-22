@@ -262,6 +262,9 @@ for name in "${selected[@]}"; do
   queries="$(printf '%s' "$rust" | grep '^queries' | awk '{print $2}')"
   unanswered="$(printf '%s' "$rust" | grep '^requests' | awk '{print $2}')"
   unmatched="$(printf '%s' "$rust" | grep '^requests' | awk '{print $4}')"
+  # Requests issued after the run's last answer-bearing record: open on both brains when the app
+  # closed, so nothing in the file could answer them. Shown, never failed on.
+  in_flight="$(printf '%s' "$rust" | grep '^requests' | awk '{print $9}')"
   refused="$(printf '%s' "$rust" | grep '^refused' | awk '{print $2}')"
   # One row per recording. It is `ok` only when every document matched with the three excluded
   # pointers out, every query fingerprint matched, the core left no request unanswered and no
@@ -289,7 +292,7 @@ for name in "${selected[@]}"; do
   [ "${refused:-0}" = "0" ] || status="FAIL"
   [ "${wake%%/*}" = "${wake##*/}" ] || status="FAIL"
   record "replay $name" "$status" \
-    "docs $matched (strict $strict) queries $queries requests ${unanswered:-?}u/${unmatched:-?}m refused ${refused:-?} wake $wake rev $counter runs ${runs:-?}"
+    "docs $matched (strict $strict) queries $queries requests ${unanswered:-?}u/${unmatched:-?}m/${in_flight:-0}c refused ${refused:-?} wake $wake rev $counter runs ${runs:-?}"
   [ "$status" = "FAIL" ] && [ -n "$diff_output" ] && printf '%s\n' "$diff_output" | sed -n '6,20p' | grep -v '^summary' | sed 's/^/    /'
 done
 
