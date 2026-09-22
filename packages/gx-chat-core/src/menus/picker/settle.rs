@@ -190,6 +190,8 @@ fn settle_fork_branches(state: &mut ChatState, request_id: u64, outcome: &RpcOut
         return;
     }
     state.pickers.fork_branches.branches = branches;
+    // `this.republish()`: unconditional, even for a family of one that draws no strip.
+    state.core.request_publish();
 }
 
 /// Runs the open picker's deadlines, and applies the choice when its close animation ends.
