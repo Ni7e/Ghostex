@@ -8,10 +8,10 @@ use ghostex_gx_protocol::{LifecycleState, PresentationSession, SessionKind};
 
 use crate::keys::SessionKey;
 
-use super::agents::{resolve_agent_icon, BROWSER_AGENT_ICON};
+use super::agents::{BROWSER_AGENT_ICON, resolve_agent_icon};
 use super::inputs::{BrowserTabInput, CloseAfterDoneInput, DelayedSendInput};
-use super::session_text::{session_heading, session_tooltip, TitleInput};
-use super::tags::{effective_tag, tag_presentation, TagCatalog};
+use super::session_text::{TitleInput, session_heading, session_tooltip};
+use super::tags::{TagCatalog, effective_tag, tag_presentation};
 use super::text::{encode_uri_component, js_trim, parse_iso_ms};
 use super::view::{DelayedSendView, SessionMenuFacts, SessionRow, SessionTiming};
 
@@ -216,6 +216,7 @@ pub(crate) fn session_row(
         },
         title_tooltip: tooltip,
         activity: session.activity.as_str().to_string(),
+        has_background_work: session.background_work_detected_at.is_some(),
         pending_question_count: session.pending_question_count,
         agent_icon: agent_icon.map(str::to_string),
         session_kind: Some(session_kind),

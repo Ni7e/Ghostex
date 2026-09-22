@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::de::{null_as_default, Rows};
+use crate::de::{Rows, null_as_default};
 use crate::side_state::{
     CustomSessionTagsState, SidebarProjectCollectionsState, SidebarSpacesState,
     WorkspaceSessionGroupsState,
@@ -415,6 +415,10 @@ pub struct PresentationSession {
     pub meaningful_activity_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_started_at: Option<String>,
+    /// Present while a background shell or monitor the agent started is still running after its
+    /// turn; the sidebar draws it as a grey dot, separate from `activity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_work_detected_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_observation: Option<TitleObservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

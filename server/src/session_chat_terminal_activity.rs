@@ -269,9 +269,9 @@ pub fn publishable_session_chat_terminal_activity(
     activity.filter(|activity| working || activity.remains_live_when_ready())
 }
 
-/// CDXC:SessionStatus 2026-09-06 DECISION:
-/// User: Claude must be considered working while its footer reports one or more monitors running.
-pub(crate) fn is_session_chat_monitor_activity(
+/// CDXC:SessionStatus 2026-09-22 DECISION:
+/// User: a Claude session whose footer reports a background shell still running gets its own sidebar indicator (a grey dot) rather than showing idle. This widens the 2026-09-06 decision, which counted only monitors, and both now feed the `backgroundWorkDetectedAt` presentation field through the persisted `sessionChatMonitorDetectedAt` marker instead of the working state.
+pub(crate) fn is_session_chat_background_work_activity(
     activity: Option<&SessionChatTerminalActivity>,
 ) -> bool {
     activity.is_some_and(|activity| {
@@ -282,7 +282,13 @@ pub(crate) fn is_session_chat_monitor_activity(
                 .is_some_and(|(_, status)| {
                     status.split_once(' ').is_some_and(|(count, suffix)| {
                         count.parse::<u64>().is_ok_and(|count| count > 0)
-                            && matches!(suffix, "monitor still running" | "monitors still running")
+                            && matches!(
+                                suffix,
+                                "shell still running"
+                                    | "shells still running"
+                                    | "monitor still running"
+                                    | "monitors still running"
+                            )
                     })
                 })
     })

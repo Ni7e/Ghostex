@@ -4,7 +4,7 @@
 
 use super::agents::tooltip_strip_labels;
 use super::inputs::CloseAfterDoneInput;
-use super::tags::{tag_label, TagCatalog};
+use super::tags::{TagCatalog, tag_label};
 use super::text::{
     is_js_line_terminator, js_trim, js_trim_start, normalized_non_empty, parse_iso_ms, utf16_len,
     utf16_prefix, utf16_suffix,
@@ -541,8 +541,12 @@ pub(crate) fn next_label_deadline(
         return None;
     }
     // The relative time is drawn only when the card shows it and the row is neither working nor
-    // waiting for an answer, which are drawn as their own state instead.
-    if !show_relative_time || row.activity == "working" || row.activity == "attention" {
+    // waiting for an answer nor running background work, which are drawn as their own state instead.
+    if !show_relative_time
+        || row.activity == "working"
+        || row.activity == "attention"
+        || row.has_background_work
+    {
         return None;
     }
     let at = parse_iso_ms(row.last_interaction_at.as_deref()?)?;

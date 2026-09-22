@@ -184,7 +184,9 @@ fn refresh_fleet_status(state: &AppState) {
         };
         let activity = observation.as_ref().and_then(|activity| activity.as_ref());
         let monitor =
-            crate::session_chat_terminal_activity::is_session_chat_monitor_activity(activity);
+            crate::session_chat_terminal_activity::is_session_chat_background_work_activity(
+                activity,
+            );
         if let Ok(mut cache) = state.session_chat_option_cache.lock() {
             if let Some(entry) = cache.get_mut(&key) {
                 entry.projected_fleet =

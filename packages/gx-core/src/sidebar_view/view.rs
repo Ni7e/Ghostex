@@ -187,6 +187,9 @@ pub struct SessionRow {
     /// The hover tooltip, already assembled.
     pub title_tooltip: String,
     pub activity: String,
+    /// A background shell or monitor is still running after the agent's turn; drawn as a grey dot
+    /// when the row is otherwise idle.
+    pub has_background_work: bool,
     pub pending_question_count: u64,
     pub agent_icon: Option<String>,
     /// `terminal`, `browser`, or whatever else a newer daemon publishes.

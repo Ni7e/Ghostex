@@ -73,6 +73,8 @@ pub(crate) struct NativeSidebarSession {
     pub(crate) display_title: Option<String>,
     pub(crate) alias: String,
     pub(crate) activity: String,
+    #[serde(default)]
+    pub(crate) has_background_work: bool,
     pub(crate) agent_icon: Option<String>,
     pub(crate) kind: Option<String>,
     pub(crate) session_kind: Option<String>,

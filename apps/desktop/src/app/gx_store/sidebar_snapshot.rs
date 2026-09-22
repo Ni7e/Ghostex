@@ -268,7 +268,7 @@ pub(super) fn snapshot_from_view(
 ) -> NativeSidebarSnapshot {
     let SnapshotInput { menus, now_ms, .. } = *input;
 
-    let started = std::time::Instant::now();
+    let started = web_time::Instant::now();
     cache.phases = InstallPhases::default();
     // Compared before it is built, so a hit does not clone the settings, the hidden items and the
     // host's agent and command lists on every install just to throw them away.
@@ -293,13 +293,13 @@ pub(super) fn snapshot_from_view(
         cache.more_menu = None;
     }
     cache.phases.key_us = started.elapsed().as_micros() as u64;
-    let phase = std::time::Instant::now();
+    let phase = web_time::Instant::now();
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     let groups: Vec<NativeSidebarGroup> = view
         .groups
         .iter()
         .map(|group| {
-            let rows_started = std::time::Instant::now();
+            let rows_started = web_time::Instant::now();
             let sessions = group
                 .core
                 .sessions
@@ -329,7 +329,7 @@ pub(super) fn snapshot_from_view(
         .retain(|group_id, _| drawn.contains(group_id.as_str()));
     cache.phases.groups_us =
         (phase.elapsed().as_micros() as u64).saturating_sub(cache.phases.rows_us);
-    let phase = std::time::Instant::now();
+    let phase = web_time::Instant::now();
     let collections: Vec<NativeSidebarCollection> = view
         .collections
         .iter()
@@ -344,10 +344,10 @@ pub(super) fn snapshot_from_view(
         .collections
         .retain(|collection_id, _| drawn_collections.contains(collection_id.as_str()));
     cache.phases.collections_us = phase.elapsed().as_micros() as u64;
-    let phase = std::time::Instant::now();
+    let phase = web_time::Instant::now();
     let more_menu = more_menu(view, input, menus, cache);
     cache.phases.more_menu_us = phase.elapsed().as_micros() as u64;
-    let phase = std::time::Instant::now();
+    let phase = web_time::Instant::now();
 
     let snapshot = NativeSidebarSnapshot {
         scroll_scope: view.scroll_scope.clone(),
@@ -845,6 +845,7 @@ fn build_session(
         display_title: Some(row.display_title.clone()),
         alias: row.alias.clone(),
         activity: row.activity.clone(),
+        has_background_work: row.has_background_work,
         agent_icon: row.agent_icon.clone(),
         kind: row.is_browser.then(|| "browser".to_string()),
         session_kind: row.session_kind.clone(),

@@ -1,6 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, px, rgb};
 
+use crate::app::helpers::chrome_palette::chrome_color;
+
 /// CDXC:SessionStatus 2026-09-21 DECISION:
 /// User: "I feel we have multiple degrees for the orange color status \"working\" in the sidebar pls unify all of them on this new one you picked", so every working dot, count, and badge in the sidebar uses this one orange (the Spaces badge orange, 20% darker than the old 0xf8ad07 so a white digit stays readable on it).
 pub(crate) const WORKING_COLOR: u32 = 0xc68a06;
@@ -8,7 +10,13 @@ pub(crate) const WORKING_COLOR: u32 = 0xc68a06;
 /// CDXC:SessionStatus 2026-09-19 DECISION:
 /// User: "make the working indicator just the orange dot without animation. i dont mind. like the one we have in the SESSIONS header", so a working session shows the same static 8px orange dot the section headers draw.
 /// This supersedes the 2026-09-17 decision that brought the animated working spinner back.
-pub(crate) fn activity_indicator(activity: &str, scale: f32) -> Option<AnyElement> {
+/// CDXC:SessionStatus 2026-09-22 DECISION:
+/// User: "make shell running just show a #B4B8BF color dot in the sidebar in dark mode and a darker dot in light mode", so a row whose agent still has a background shell or monitor running after its turn draws a grey dot in place of the time; working and attention keep precedence over it.
+pub(crate) fn activity_indicator(
+    activity: &str,
+    has_background_work: bool,
+    scale: f32,
+) -> Option<AnyElement> {
     let indicator = match activity {
         "working" => div()
             .size(px(8.0 * scale))
@@ -19,6 +27,11 @@ pub(crate) fn activity_indicator(activity: &str, scale: f32) -> Option<AnyElemen
             .size(px(7.0 * scale))
             .rounded_full()
             .bg(rgb(0x95d7f6))
+            .into_any_element(),
+        _ if has_background_work => div()
+            .size(px(8.0 * scale))
+            .rounded_full()
+            .bg(chrome_color(0xb4b8bf, 0x6b7078))
             .into_any_element(),
         _ => return None,
     };
@@ -45,13 +58,18 @@ pub(crate) fn question_indicator(working: bool, scale: f32) -> AnyElement {
         .justify_center()
         .gap(px(4.0 * scale))
         .when(working, |indicator| {
-            indicator.child(div().size(px(8.0 * scale)).rounded_full().bg(rgb(WORKING_COLOR)))
+            indicator.child(
+                div()
+                    .size(px(8.0 * scale))
+                    .rounded_full()
+                    .bg(rgb(WORKING_COLOR)),
+            )
         })
         .child(div().size(px(6.0 * scale)).rounded_full().bg(rgb(0xf472b6)))
         .into_any_element()
 }
 
-pub(crate) fn completion_opacity(start: std::time::Instant) -> f32 {
+pub(crate) fn completion_opacity(start: web_time::Instant) -> f32 {
     let progress = (start.elapsed().as_secs_f32() / 3.0).min(1.0);
     let stops = [
         (0.0, 1.0),

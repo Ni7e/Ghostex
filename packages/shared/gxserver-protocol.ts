@@ -2791,6 +2791,8 @@ export interface GxserverPresentationSession {
    */
   meaningfulActivityAt?: string;
   workingStartedAt?: string;
+  /** Present while a background shell or monitor the agent started is still running after its turn. */
+  backgroundWorkDetectedAt?: string;
   providerSessionState: GxserverPresentationProviderSessionState;
   projectId: GxserverProjectId;
   /**

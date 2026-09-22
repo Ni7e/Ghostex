@@ -367,6 +367,11 @@ pub(crate) fn project_presentation_session(
         "workingStartedAt",
         session_effective_working_started_at(session, generated_at),
     );
+    insert_optional_string(
+        &mut output,
+        "backgroundWorkDetectedAt",
+        session_background_work_detected_at(session),
+    );
     output.insert("zmxName".to_string(), value_field(session, "zmxName"));
     Value::Object(output)
 }
@@ -389,12 +394,17 @@ pub(crate) fn session_effective_working_started_at(
                     .or_else(|| {
                         crate::session_chat_compacting::session_chat_fleet_detected_at(session)
                     })
-                    .or_else(|| {
-                        crate::session_chat_compacting::session_chat_monitor_detected_at(session)
-                    })
             })
             .flatten()
     })
+}
+
+/// CDXC:SessionStatus 2026-09-22 DECISION:
+/// User: a Claude session whose footer still lists a background shell (or monitor) after its turn shows a grey dot in the sidebar instead of working or idle. The value is the screen detection's stable `detectedAt`, present only while the session runs and the footer still shows the line.
+pub(crate) fn session_background_work_detected_at(session: &Value) -> Option<String> {
+    (effective_lifecycle_state(session) == "running")
+        .then(|| crate::session_chat_compacting::session_chat_monitor_detected_at(session))
+        .flatten()
 }
 
 pub(crate) fn session_agent_activity(session: &Value) -> Option<&Value> {
