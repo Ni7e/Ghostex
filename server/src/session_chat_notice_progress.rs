@@ -7,8 +7,13 @@ use serde_json::Value;
 
 use crate::{domain::DomainRepository, session_chat_notice::SessionChatTerminalNotice};
 
-fn cleared() -> &'static Mutex<HashMap<String, String>> {
-    static CLEARED: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+struct ClearedNotice {
+    instance: String,
+    response_at: i64,
+}
+
+fn cleared() -> &'static Mutex<HashMap<String, ClearedNotice>> {
+    static CLEARED: OnceLock<Mutex<HashMap<String, ClearedNotice>>> = OnceLock::new();
     CLEARED.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -45,7 +50,11 @@ pub(crate) fn visible(project: &str, session: &str, notice: &SessionChatTerminal
     cleared()
         .lock()
         .ok()
-        .and_then(|entries| entries.get(&key(project, session)).cloned())
+        .and_then(|entries| {
+            entries
+                .get(&key(project, session))
+                .map(|entry| entry.instance.clone())
+        })
         .as_deref()
         != Some(instance(notice).as_str())
 }
@@ -176,12 +185,23 @@ pub(crate) fn refresh(
     if notice.kind == crate::session_chat_notice::SESSION_CHAT_NOTICE_USAGE_LIMIT {
         error_at = usage_limit_error_at.or(error_at);
     }
-    let recovered = response_at.is_some_and(|response| response > error_at.unwrap_or(observed_at));
+    let recovered = response_at.filter(|response| *response > error_at.unwrap_or(observed_at));
     if let Ok(mut entries) = cleared().lock() {
-        if recovered {
-            entries.insert(key(project, session), instance(notice));
-        } else if error_at.is_some_and(|error| error > observed_at) {
-            // The same wording can describe a new failed attempt after progress.
+        if let Some(response_at) = recovered {
+            entries.insert(
+                key(project, session),
+                ClearedNotice {
+                    instance: instance(notice),
+                    response_at,
+                },
+            );
+        } else if error_at.is_some_and(|error| {
+            entries
+                .get(&key(project, session))
+                .is_some_and(|entry| error > entry.response_at)
+        }) {
+            // CDXC:AgentProviders 2026-09-22 WHY:
+            // The screen can report a new limit before its transcript record arrives. Comparing the later record with screen-detection time kept that limit hidden forever; compare it with the response that actually cleared the old error instead.
             entries.remove(&key(project, session));
         }
     }
