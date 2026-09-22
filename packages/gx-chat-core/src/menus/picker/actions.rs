@@ -8,6 +8,7 @@ use serde_json::{json, Map, Value};
 
 use crate::action::{ActionKind, UserAction};
 use crate::effect::Effect;
+use crate::jsnum::js_safe_integer;
 use crate::menus::picker::favorites::{
     model_favorites_key, serialize_model_favorites, toggle_model_favorite,
 };
@@ -84,7 +85,8 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             Vec::new()
         }
         ActionKind::ModelPickerModel => {
-            let index = action.param("index").and_then(Value::as_i64);
+            // `modelPicker.chooseModel(command.index, …)` over a JSON number: `1.0` is 1.
+            let index = js_safe_integer(action.param("index"));
             let save = action.param("save") == Some(&Value::Bool(true));
             let pointer = action.param("pointer") == Some(&Value::Bool(true));
             if let (Some(picker), Some(index)) = (picker_mut(state), index) {
@@ -93,7 +95,7 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
             Vec::new()
         }
         ActionKind::ModelPickerEffort => {
-            let index = action.param("index").and_then(Value::as_i64);
+            let index = js_safe_integer(action.param("index"));
             let save = action.param("save") == Some(&Value::Bool(true));
             if let (Some(picker), Some(index)) = (picker_mut(state), index) {
                 picker.choose_effort(index, save, now);

@@ -11,6 +11,8 @@
 
 use serde_json::Value;
 
+use crate::jsnum::js_safe_integer;
+
 use crate::wire::ChatMessage;
 
 /// How many sections the cache holds, and how many bytes of them.
@@ -69,7 +71,9 @@ impl DeferredWalk {
     /// because a host is free to send anything and a panic here takes the host thread with it.
     pub fn begin(turn_id: String, work: Option<&Value>) -> Option<Self> {
         let work = work?;
-        let cursor = work.get("beforeOffset").and_then(Value::as_i64)?;
+        // A JSON number, read the way JavaScript reads it: `1234.0` is 1234. `Value::as_i64`
+        // refused that token and drew the row as unreadable where `deferred-work.ts` walks on.
+        let cursor = js_safe_integer(work.get("beforeOffset"))?;
         let start_id = work
             .get("startId")
             .and_then(Value::as_str)
@@ -139,7 +143,7 @@ impl DeferredWalk {
                 message: WORK_SECTION_GONE.to_string(),
             };
         }
-        let Some(cursor) = page.get("beforeOffset").and_then(Value::as_i64) else {
+        let Some(cursor) = js_safe_integer(page.get("beforeOffset")) else {
             return WalkStep::Failed {
                 message: WORK_SECTION_GONE.to_string(),
             };

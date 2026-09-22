@@ -11,6 +11,8 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+use crate::jsnum::js_number_of;
+
 /// The schema version this build understands.
 pub const AGENT_MODEL_CATALOG_SCHEMA_VERSION: i64 = 1;
 
@@ -189,8 +191,10 @@ fn is_js_whitespace(character: char) -> bool {
 /// `parseAgentModelCatalog`: a complete, well-formed document, or `None`.
 pub fn parse_agent_model_catalog(input: &Value) -> Option<AgentModelCatalog> {
     let object = input.as_object()?;
-    if object.get("schemaVersion").and_then(Value::as_i64)
-        != Some(AGENT_MODEL_CATALOG_SCHEMA_VERSION)
+    // `input.schemaVersion !== AGENT_MODEL_CATALOG_SCHEMA_VERSION`, over a JSON number: a stored
+    // catalog whose version was written `1.0` is the same document, and refusing it threw the
+    // whole lineup away.
+    if js_number_of(object.get("schemaVersion")) != Some(AGENT_MODEL_CATALOG_SCHEMA_VERSION as f64)
     {
         return None;
     }

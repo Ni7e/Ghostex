@@ -10,6 +10,8 @@
 
 use serde_json::Value;
 
+use crate::jsnum::js_safe_integer;
+
 /// One usage window of an account.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UsageWindow {
@@ -174,10 +176,9 @@ impl AccountsState {
                             .and_then(Value::as_str)
                             .unwrap_or_default()
                             .to_string(),
-                        attempt: recovery
-                            .get("attempt")
-                            .and_then(Value::as_i64)
-                            .unwrap_or_default(),
+                        // `Attempt ${attempt + 1}` over a JSON number: `2.0` is 2, where
+                        // `Value::as_i64` refused it and the line read "Attempt 1".
+                        attempt: js_safe_integer(recovery.get("attempt")).unwrap_or_default(),
                         next_attempt_at: recovery
                             .get("nextAttemptAt")
                             .and_then(Value::as_str)
@@ -217,49 +218,18 @@ fn js_number_or_text(value: &Value) -> Option<String> {
     }
 }
 
-/// `String(value)` for a number: an integral double has no decimal point.
-pub fn js_number_text(value: f64) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value.is_infinite() {
-        return if value > 0.0 { "Infinity" } else { "-Infinity" }.to_string();
-    }
-    if value == value.trunc() && value.abs() < 1e21 {
-        return format!("{}", value as i64);
-    }
-    let mut text = format!("{value}");
-    if text.contains('e') {
-        text = text.replace('e', "e+");
-        text = text.replace("e+-", "e-");
-    }
-    text
-}
+/// `String(value)` for a number, which is `crate::jsnum::js_number` for every family.
+///
+/// This file kept its own copy until 2026-09-22; it saturated an integral double above
+/// `i64::MAX` and never emitted an exponent, so a reset-credits figure or a used-percentage that
+/// wandered out of range printed digits JavaScript does not print.
+pub use crate::jsnum::js_number as js_number_text;
 
-/// A number as `JSON.stringify` writes it: an integral double has no decimal point, and `NaN` and
-/// the infinities are `null`.
-pub fn js_number_value(value: f64) -> serde_json::Value {
-    if !value.is_finite() {
-        return serde_json::Value::Null;
-    }
-    if value == value.trunc() && value.abs() < 9_007_199_254_740_992.0 {
-        return serde_json::Value::from(value as i64);
-    }
-    serde_json::Number::from_f64(value).map_or(serde_json::Value::Null, serde_json::Value::Number)
-}
+/// A number as `JSON.stringify` writes it.
+pub use crate::jsnum::js_number_value;
 
 /// `Math.round`: halves go up, towards positive infinity.
-pub fn js_round(value: f64) -> f64 {
-    if !value.is_finite() {
-        return value;
-    }
-    let floor = value.floor();
-    if value - floor >= 0.5 {
-        floor + 1.0
-    } else {
-        floor
-    }
-}
+pub use crate::jsnum::js_round;
 
 /// `isWeeklyWindow`.
 pub fn is_weekly_window(window: &UsageWindow) -> bool {

@@ -29,14 +29,21 @@ fn available_agents(state: &ChatState) -> Vec<AvailableAgent> {
         .unwrap_or_default()
 }
 
-/// What the three filters produce for the draft and caret the composer currently holds.
+/// What the three filters produce for the draft and caret the SUGGESTION CONTROLLER holds.
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// `NativeComposerSuggestions.matches()` reads `this.text` and `this.caret`, and the only two
+/// callers of `update()` are the `composerSelection` arm and `recall`; `editDraft` never touches
+/// them (`native-host.ts:821`, `:1200`). Reading the composer's own text here opened the `/`
+/// popup on a keystroke the TypeScript leaves closed, because the renderer sends the caret
+/// separately from the draft write.
 ///
 /// `canRequestSkills` is always true here: the native host passes the same constant, because its
 /// own skills read is always available.
 pub fn current_matches(state: &ChatState, sources: &SuggestionSources) -> SuggestionMatches {
     composer_suggestions(
-        &state.composer.text,
-        state.composer.caret,
+        &state.composer.suggestions.text,
+        state.composer.suggestions.caret,
         sources,
         state.composer.suggestions.dismissed,
         true,

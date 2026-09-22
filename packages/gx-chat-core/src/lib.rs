@@ -31,6 +31,7 @@ mod document;
 mod effect;
 mod event;
 pub mod extras;
+pub mod jsnum;
 pub mod menus;
 pub mod questions;
 pub mod session;

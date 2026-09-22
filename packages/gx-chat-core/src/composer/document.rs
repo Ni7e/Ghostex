@@ -49,7 +49,7 @@ pub fn document(state: &ChatState, _context: &ChatContext, into: &mut Document) 
     let popup = suggestion_popup(
         &matches,
         &sources,
-        &composer.text,
+        &composer.suggestions.text,
         composer.suggestions.index,
     );
     into.suggestions = match &popup {

@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::composer::queue::DraftVersion;
+use crate::jsnum::js_safe_integer;
 
 /// The store ids the composer uses, as `StorageKey::store`.
 pub const DRAFTS_STORE: &str = "drafts";
@@ -52,13 +53,22 @@ pub const DRAFT_RECEIVE_STORE: &str = "draftReceive";
 /// The field names are the TypeScript's `DecodedStoredDraft`, and `updatedAt` stays a number of
 /// epoch milliseconds. `submitted` and `parked` are written as real booleans, which is what
 /// `entry.submitted === true` reads back.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredDraftRecord {
     pub text: String,
     /// `None` for a legacy plain-string draft, which callers must treat as "age unknown".
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<i64>,
+    ///
+    /// A double, not an `i64`: the stamp is compared with `>=` against `Date.parse(...)` in
+    /// `session-chat-draft-storage.ts`, and `value as i64` truncated a fractional stamp and
+    /// saturated anything past `i64::MAX`, which is a different answer from the one JavaScript
+    /// gives. `js_optional_number` writes it back as `JSON.stringify` writes a number.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::jsnum::js_optional_number"
+    )]
+    pub updated_at: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<DraftVersion>,
     #[serde(default)]
@@ -77,20 +87,19 @@ pub fn decode_stored_draft(raw: &str) -> StoredDraftRecord {
         let text = parsed.get("text").and_then(Value::as_str);
         let updated_at = parsed.get("updatedAt").and_then(Value::as_f64);
         if let (Some(text), Some(updated_at)) = (text, updated_at) {
+            // `Number.isSafeInteger(version.revision) && version.revision > 0`, which is what
+            // `js_safe_integer` is, so a `3.0` token reads as 3 rather than being thrown away.
             let version = parsed.get("version").and_then(|version| {
                 let draft_id = version.get("draftId")?.as_str()?;
-                let revision = version.get("revision")?.as_f64()?;
-                (revision.fract() == 0.0
-                    && revision > 0.0
-                    && revision.abs() <= 9_007_199_254_740_991.0)
-                    .then(|| DraftVersion {
-                        draft_id: draft_id.to_string(),
-                        revision: revision as i64,
-                    })
+                let revision = js_safe_integer(version.get("revision"))?;
+                (revision > 0).then(|| DraftVersion {
+                    draft_id: draft_id.to_string(),
+                    revision,
+                })
             });
             return StoredDraftRecord {
                 text: text.to_string(),
-                updated_at: Some(updated_at as i64),
+                updated_at: Some(updated_at),
                 version,
                 submitted: parsed.get("submitted") == Some(&Value::Bool(true)),
                 parked: parsed.get("parked") == Some(&Value::Bool(true)),

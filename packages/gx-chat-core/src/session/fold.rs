@@ -18,6 +18,8 @@ use ghostex_gx_protocol::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::jsnum::{js_number_of, js_number_value};
+
 use crate::session::merge::merge_messages;
 use crate::session::view_state::transcript_status_after_state;
 
@@ -318,7 +320,7 @@ fn parse_date(value: Option<&str>) -> Option<&str> {
 /// The highest revision of a draft id wins, a consumed draft's body is emptied rather than
 /// dropped, and the delivery receipts are kept newest first and bounded.
 pub fn merge_draft_state(current: Option<&Value>, incoming: &Value) -> Value {
-    let mut consumed: Vec<(String, i64)> = Vec::new();
+    let mut consumed: Vec<(String, f64)> = Vec::new();
     for receipt in receipts(current, "consumedDrafts")
         .into_iter()
         .chain(receipts(Some(incoming), "consumedDrafts"))
@@ -326,7 +328,10 @@ pub fn merge_draft_state(current: Option<&Value>, incoming: &Value) -> Value {
         let Some(draft_id) = receipt.get("draftId").and_then(Value::as_str) else {
             continue;
         };
-        let revision = receipt.get("revision").and_then(Value::as_i64).unwrap_or(0);
+        // `Math.max(consumed.get(id) ?? 0, receipt.revision)` over a JSON number, which has no
+        // integer form: `Value::as_i64` refused a `5.0` token and wrote 0 back into the
+        // document, so every later `revision >= version.revision` saw a retired draft as live.
+        let revision = js_number_of(receipt.get("revision")).unwrap_or(0.0);
         match consumed.iter_mut().find(|(id, _)| id == draft_id) {
             Some(entry) => entry.1 = entry.1.max(revision),
             None => consumed.push((draft_id.to_string(), revision)),
@@ -348,7 +353,7 @@ pub fn merge_draft_state(current: Option<&Value>, incoming: &Value) -> Value {
             .iter()
             .find(|(id, _)| id == draft_id)
             .map(|(_, revision)| *revision)
-            .unwrap_or(0)
+            .unwrap_or(0.0)
             >= version_revision(body)
     });
 
@@ -398,7 +403,9 @@ pub fn merge_draft_state(current: Option<&Value>, incoming: &Value) -> Value {
                     .map(|(draft_id, revision)| {
                         let mut entry = Map::new();
                         entry.insert("draftId".to_string(), Value::String(draft_id));
-                        entry.insert("revision".to_string(), Value::from(revision));
+                        // `JSON.stringify(5)` is `5`, not `5.0`: the receipt goes back on the
+                        // wire and is read by the TypeScript brain.
+                        entry.insert("revision".to_string(), js_number_value(revision));
                         Value::Object(entry)
                     })
                     .collect(),
@@ -421,12 +428,14 @@ fn version_field<'a>(draft: &'a Value, key: &str) -> Option<&'a str> {
     draft.get("version")?.get(key)?.as_str()
 }
 
-fn version_revision(draft: &Value) -> i64 {
-    draft
-        .get("version")
-        .and_then(|version| version.get("revision"))
-        .and_then(Value::as_i64)
-        .unwrap_or(0)
+/// `draft.version.revision` as JavaScript reads it: one double, whatever token carried it.
+fn version_revision(draft: &Value) -> f64 {
+    js_number_of(
+        draft
+            .get("version")
+            .and_then(|version| version.get("revision")),
+    )
+    .unwrap_or(0.0)
 }
 
 fn empty_result() -> ReadSessionChatResult {

@@ -9,6 +9,8 @@
 
 use serde_json::Value;
 
+use crate::jsnum::js_number;
+
 fn write_string(out: &mut String, value: &str) {
     out.push('"');
     for character in value.chars() {
@@ -29,16 +31,17 @@ fn write_string(out: &mut String, value: &str) {
     out.push('"');
 }
 
-/// A number as JavaScript prints it: no trailing `.0` on a whole value.
+/// A number as `JSON.stringify` prints it, which is `Number.prototype.toString()`.
+///
+/// Every token `JSON.parse` produced is a double, so the whole rule is `crate::jsnum::js_number`:
+/// no trailing `.0`, `1e+21` above the bound, `0` for `-0`. The old test asked serde whether the
+/// token had been parsed as an integer, which answered differently for `3.0` and `3` and printed
+/// ryu's `1e21` where JavaScript writes `1e+21`.
 fn write_number(out: &mut String, value: &serde_json::Number) {
-    if let Some(float) = value.as_f64() {
-        let whole = value.as_i64().is_some() || value.as_u64().is_some();
-        if !whole && float.fract() == 0.0 && float.abs() < 1e21 {
-            out.push_str(&format!("{float:.0}"));
-            return;
-        }
+    match value.as_f64() {
+        Some(float) => out.push_str(&js_number(float)),
+        None => out.push_str(&value.to_string()),
     }
-    out.push_str(&value.to_string());
 }
 
 fn write_value(out: &mut String, value: &Value, indent: Option<usize>, depth: usize) {

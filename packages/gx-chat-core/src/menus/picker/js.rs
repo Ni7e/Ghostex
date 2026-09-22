@@ -10,42 +10,16 @@
 //!   is `"1.3"`), while Rust's `{:.1}` rounds a tie to even and writes `"1.2"`.
 //! - `String(number)` writes an integral double without a decimal point (`2`, not `2.0`).
 //!
-//! These are private to family e2. When a sibling family needs the same rules they should move to
-//! a shared module rather than being copied again.
+//! `js_round` and `js_number` moved to `crate::jsnum` on 2026-09-22 and are re-exported here, so
+//! every family shares one `Number.prototype.toString()` and one `Math.round`. `to_fixed` and
+//! `is_finite` are still family e2's only.
 
-/// `Math.round`: halves go up, towards positive infinity.
-pub fn js_round(value: f64) -> f64 {
-    if !value.is_finite() {
-        return value;
-    }
-    let floor = value.floor();
-    if value - floor >= 0.5 {
-        floor + 1.0
-    } else {
-        floor
-    }
-}
+/// `Math.round`, re-exported so family e2's callers keep one import.
+pub use crate::jsnum::js_round;
 
-/// `String(value)` for a number JavaScript would print without an exponent.
-///
-/// Every caller here divides small integers (`minutes / 1440`, `seconds / 3600`), so the shortest
-/// round-trip form and the plain decimal form agree; an integral value loses its `.0`.
-pub fn js_number(value: f64) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value.is_infinite() {
-        return if value > 0.0 { "Infinity" } else { "-Infinity" }.to_string();
-    }
-    if value == value.trunc() && value.abs() < 1e21 {
-        return format!("{}", value as i64);
-    }
-    let mut text = format!("{value}");
-    if text.ends_with(".0") {
-        text.truncate(text.len() - 2);
-    }
-    text
-}
+/// `String(value)`, re-exported: the whole of `Number.prototype.toString()` now lives in
+/// `crate::jsnum` because six families needed it and two of them had written their own.
+pub use crate::jsnum::js_number;
 
 /// `Number.prototype.toFixed(digits)`.
 ///

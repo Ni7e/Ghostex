@@ -23,6 +23,7 @@ use crate::composer::suggestions::{
 use crate::composer::transcript_menu::append_draft_text;
 use crate::composer::view::{current_matches, suggestion_sources};
 use crate::effect::Effect;
+use crate::jsnum::js_number_of;
 use crate::state::{ChatContext, ChatState};
 use crate::wire::ChatRpcMethod;
 
@@ -268,7 +269,11 @@ fn scroll(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> 
 }
 
 fn complete_command(state: &ChatState) -> Vec<Effect> {
-    match composer_native_command(state.session.agent.as_deref(), &state.composer.text) {
+    // `suggestions.nativeCommand(chat)` reads the controller's own text, not the composer's.
+    match composer_native_command(
+        state.session.agent.as_deref(),
+        &state.composer.suggestions.text,
+    ) {
         Some(content) => vec![Effect::SetComposerText {
             content: content.to_string(),
             caret: Some(content.encode_utf16().count()),
@@ -326,7 +331,7 @@ fn suggestion_command(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
     let Some(popup) = suggestion_popup(
         &matches,
         &sources,
-        &state.composer.text,
+        &state.composer.suggestions.text,
         state.composer.suggestions.index,
     ) else {
         return Vec::new();
@@ -341,12 +346,13 @@ fn suggestion_command(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
         }];
     }
     if action.kind == ActionKind::SuggestionHighlight {
-        let index = action
-            .param("index")
-            .and_then(Value::as_i64)
-            .unwrap_or_default();
-        state.composer.suggestions.index =
-            index.clamp(0, popup.rows.len() as i64 - 1).max(0) as usize;
+        // `Math.max(0, Math.min(command.index ?? 0, projection.rows.length - 1))`, in that order:
+        // an empty popup answers 0, where `i64::clamp(0, -1)` panics. `suggestion_popup` does
+        // return an empty one (the skill list still loading, the file list not read yet), so a
+        // hover on a loading picker took the chat window down.
+        let index = js_number_of(action.param("index")).unwrap_or(0.0);
+        let last = popup.rows.len() as f64 - 1.0;
+        state.composer.suggestions.index = index.min(last).max(0.0) as usize;
         return Vec::new();
     }
     if key == Some("escape") || action.kind == ActionKind::SuggestionDismiss {
@@ -367,18 +373,20 @@ fn suggestion_command(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
             ((popup.selected as i64 + step + count) % count) as usize;
         return Vec::new();
     }
-    let index = action
-        .param("index")
-        .and_then(Value::as_u64)
-        .map(|index| index as usize)
-        .unwrap_or(popup.selected);
+    // `const index = command.index ?? projection.selected`, with the JavaScript reading of a
+    // number: `2.0` is 2, and an index off the end simply finds no row below.
+    let index = match js_number_of(action.param("index")) {
+        Some(index) if index >= 0.0 && index < usize::MAX as f64 => index as usize,
+        Some(_) => usize::MAX,
+        None => popup.selected,
+    };
     if popup.kind == SuggestionKind::Slash {
         let Some(command) = matches.slash_matches.get(index) else {
             return Vec::new();
         };
         if command.insert_text.is_none()
             && key == Some("enter")
-            && state.composer.text == format!("/{}", command.name)
+            && state.composer.suggestions.text == format!("/{}", command.name)
         {
             // The picker sends rather than completing: the draft is already the whole command.
             return vec![Effect::HostAction {
@@ -397,14 +405,17 @@ fn suggestion_command(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
             from_history: false,
         }];
     }
-    let Some(replacement) =
-        suggestion_replacement(&matches, popup.kind, index, &state.composer.text)
-    else {
+    let Some(replacement) = suggestion_replacement(
+        &matches,
+        popup.kind,
+        index,
+        &state.composer.suggestions.text,
+    ) else {
         return Vec::new();
     };
     match complete_composer_mention(
-        &state.composer.text,
-        state.composer.caret,
+        &state.composer.suggestions.text,
+        state.composer.suggestions.caret,
         &format!("{replacement} "),
     ) {
         Some((content, caret)) => vec![Effect::SetComposerText {

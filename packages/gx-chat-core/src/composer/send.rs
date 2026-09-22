@@ -33,6 +33,7 @@ use crate::composer::submission::{
 };
 use crate::effect::Effect;
 use crate::event::StorageKey;
+use crate::jsnum::js_number_of;
 use crate::session::sends;
 use crate::session::streaming::{classify_send, SendClassification};
 use crate::state::Submission;
@@ -148,7 +149,7 @@ fn run_head(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
             let key = draft_key(state);
             let record = StoredDraftRecord {
                 text: text.clone(),
-                updated_at: Some(context.now_millis()),
+                updated_at: Some(context.now_millis() as f64),
                 version: version.clone(),
                 submitted: true,
                 parked: false,
@@ -509,7 +510,7 @@ pub fn handoff(
 ) -> Vec<Effect> {
     let record = StoredDraftRecord {
         text: text.to_string(),
-        updated_at: Some(context.now_millis()),
+        updated_at: Some(context.now_millis() as f64),
         version: version.clone(),
         submitted: false,
         parked: false,
@@ -573,10 +574,8 @@ pub fn receive_handoff(
             .is_some_and(|receipts| {
                 receipts.iter().any(|receipt| {
                     receipt.get("draftId").and_then(Value::as_str) == Some(&version.draft_id)
-                        && receipt
-                            .get("revision")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|revision| revision >= version.revision)
+                        && js_number_of(receipt.get("revision"))
+                            .is_some_and(|revision| revision >= version.revision as f64)
                 })
             })
     });
@@ -622,7 +621,7 @@ pub fn receive_handoff(
             HandoffDisposition::Accept => {
                 let record = StoredDraftRecord {
                     text: content.to_string(),
-                    updated_at: Some(context.now_millis()),
+                    updated_at: Some(context.now_millis() as f64),
                     version: version.clone(),
                     submitted: false,
                     parked: false,
