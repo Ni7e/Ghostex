@@ -86,6 +86,13 @@ fn settle_with_ids(
                 subagent_rows::advance(state, context);
                 state.core.request_publish();
             }
+            // `setInterval(() => this.republish(), FLEET_CLOCK_TICK_MS)` in `native-panels.ts`:
+            // an unconditional publish every second while a row's clock moves, whose projection
+            // reads the clock afresh. The document is compared at the last publish's clock, so
+            // without the request a moving elapsed label never shipped on its own tick.
+            if state.core.timer_fired(FLEET_CLOCK) {
+                state.core.request_publish();
+            }
         }
         _ => {}
     }
