@@ -44,7 +44,7 @@ import {
 import { readSessionChatContextDetailsPreferences } from '@/packages/shared/session-chat-presentation/context-details';
 import BUNDLED_MODEL_CATALOG from '@/agent-model-catalog.json';
 import { loadChatBrain, settle } from './brain';
-import { RECORDING_ROOT, serializeHeader, serializeRecord, type ReplayRecord } from './recording';
+import { composerAnswer, RECORDING_ROOT, serializeHeader, serializeRecord, type ReplayRecord } from './recording';
 
 const CLOCK_START = PREVIEW_START_MS;
 const CLOCK_STEP_MS = 25;
@@ -187,14 +187,7 @@ async function main(): Promise<number> {
       else if (request.method === 'composer') {
         const composer = (request.params.composer ?? {}) as Record<string, unknown> & { operation: string };
         const { operation, ...rest } = composer;
-        // The Chat Lab double answers a bare `true` for the two mode writes where the desktop host
-        // answers the flag it wrote (`native-composer.ts`: `return request.enabled === true`).
-        // Grading against the stub would grade the double, not the brain: a second `toggleSummary`
-        // would come back ON.
-        value =
-          operation === 'summary' || operation === 'verbose'
-            ? rest.enabled === true
-            : await world.outside(() => backend.composer(operation, rest));
+        value = await world.outside(() => composerAnswer(backend, operation, rest));
       } else return;
       host.resolve(request.id, crossing(value));
     } catch (error) {

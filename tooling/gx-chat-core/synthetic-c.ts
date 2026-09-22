@@ -46,7 +46,7 @@ import {
 import { dismissedNoticeState } from '@/packages/shared/session-chat-controller/notice-state';
 import { remainingQuestionDrafts, type AnswerDrafts } from '@/packages/shared/session-chat-controller/question-drafts';
 import { loadChatBrain, settle } from './brain';
-import { RECORDING_ROOT, serializeHeader, serializeRecord, type ReplayRecord } from './recording';
+import { composerAnswer, RECORDING_ROOT, serializeHeader, serializeRecord, type ReplayRecord } from './recording';
 
 const CLOCK_START = PREVIEW_START_MS;
 /** How far the invented clock moves between two calls, enough for the rules' short timers. */
@@ -325,7 +325,7 @@ async function main(): Promise<number> {
         const composer = (request.params.composer ?? {}) as Record<string, any> & { operation: string };
         const { operation, ...rest } = composer;
         const mine = await world.outside(() => storage.handle(operation, rest));
-        value = mine === undefined ? await world.outside(() => backend.composer(operation, rest)) : mine;
+        value = mine === undefined ? await world.outside(() => composerAnswer(backend, operation, rest)) : mine;
       } else return;
       host.resolve(request.id, crossing(value));
     } catch (error) {

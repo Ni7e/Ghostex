@@ -37,7 +37,7 @@ import {
 } from '@/packages/shared/session-chat-controller/native-host-replay';
 import { classifyDraftHandoff } from '@/packages/shared/session-chat-controller/draft-handoff';
 import { loadChatBrain, settle } from './brain';
-import { RECORDING_ROOT, serializeHeader, serializeRecord, type ReplayRecord } from './recording';
+import { composerAnswer, RECORDING_ROOT, serializeHeader, serializeRecord, type ReplayRecord } from './recording';
 
 const CLOCK_START = PREVIEW_START_MS;
 /** How far the invented clock moves between two calls, enough for the rules' short timers. */
@@ -324,7 +324,7 @@ async function main(): Promise<number> {
         const mine = await world.outside(() => drafts.handle(operation, rest));
         const theirs =
           mine === undefined || operation === 'read'
-            ? await world.outside(() => backend.composer(operation, rest))
+            ? await world.outside(() => composerAnswer(backend, operation, rest))
             : undefined;
         value =
           mine === undefined ? theirs : operation === 'read' ? { ...(theirs as object), ...(mine as object) } : mine;

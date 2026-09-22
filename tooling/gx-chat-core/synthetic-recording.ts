@@ -39,7 +39,7 @@ import {
   type NativeChatReplayKind,
 } from '@/packages/shared/session-chat-controller/native-host-replay';
 import { loadChatBrain, settle } from './brain';
-import { RECORDING_ROOT, serializeHeader, serializeRecord, type ReplayRecord } from './recording';
+import { composerAnswer, RECORDING_ROOT, serializeHeader, serializeRecord, type ReplayRecord } from './recording';
 
 const CLOCK_START = PREVIEW_START_MS;
 /** How far the invented clock moves between two calls, enough for the rules' short timers. */
@@ -318,7 +318,7 @@ async function main(): Promise<number> {
       else if (request.method === 'composer') {
         const composer = (request.params.composer ?? {}) as Record<string, unknown> & { operation: string };
         const { operation, ...rest } = composer;
-        value = await world.outside(() => backend.composer(operation, rest));
+        value = await world.outside(() => composerAnswer(backend, operation, rest));
       } else return;
       host.resolve(request.id, crossing(value));
     } catch (error) {
@@ -449,7 +449,7 @@ async function main(): Promise<number> {
         act({ type: 'toggleSummary' });
         await settle();
         await pump();
-        act({ type: 'setVerbose', value: true });
+        act({ type: 'setVerbose', enabled: true });
         await settle();
         await pump();
       },

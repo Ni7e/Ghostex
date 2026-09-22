@@ -98,6 +98,26 @@ export function serializeRecord(record: ReplayRecord): string {
   return JSON.stringify(line);
 }
 
+/**
+ * What a `composer(...)` operation answers in a recording.
+ *
+ * `ChatPreviewBackend` is the Chat Lab's double and answers a bare `true` for `summary` and
+ * `verbose`, where the desktop host answers the flag it wrote (`native-composer.ts`:
+ * `writeStoredSessionChatSummary(sessionKey, request.enabled === true); return request.enabled
+ * === true`). `native-host.ts` assigns that answer straight to its own module variable
+ * (`summaryMode = await composer('summary', …)`), so grading against the stub grades the double:
+ * a SECOND `toggleSummary` comes back ON and the mode never turns off. Every generator answers
+ * those two here instead, so the recordings hold what the product does.
+ */
+export async function composerAnswer(
+  backend: { composer(operation: string, params: Record<string, unknown>): Promise<unknown> },
+  operation: string,
+  params: Record<string, unknown>
+): Promise<unknown> {
+  if (operation === 'summary' || operation === 'verbose') return params.enabled === true;
+  return backend.composer(operation, params);
+}
+
 export function serializeHeader(startedAtMs: number): string {
   return JSON.stringify({ v: NATIVE_CHAT_REPLAY_FORMAT, k: 'header', startedAtMs });
 }

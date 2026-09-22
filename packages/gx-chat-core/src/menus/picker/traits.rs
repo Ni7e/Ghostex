@@ -141,7 +141,8 @@ fn trait_icon(id: &str) -> Option<&'static str> {
 /// User: "always show the 3 bottom buttons in all cases, make them disabled when they don't make
 /// sense and say Default for options that don't have options, or N/A where makes sense."
 /// A model with one reasoning level or one context window runs on its default, so those read
-/// Default; an agent or model without a fast mode reads N/A.
+/// Default; an agent or model without a fast mode reads Off (the user asked for Off rather than
+/// N/A on 2026-09-22, which supersedes the N/A this comment carried).
 fn unavailable(id: &str, label: &str, value_label: &str) -> ModelMenuTrait {
     ModelMenuTrait {
         id: id.to_string(),
@@ -302,7 +303,7 @@ pub fn model_menu_traits(
     });
     traits.push(
         fast.and_then(|index| option(&others[index], catalog))
-            .unwrap_or_else(|| unavailable("fastMode", "Fast mode", "N/A")),
+            .unwrap_or_else(|| unavailable("fastMode", "Fast mode", "Off")),
     );
     for (index, descriptor) in others.iter().enumerate() {
         if Some(index) == effort || Some(index) == fast {

@@ -107,7 +107,11 @@ shopt -s nullglob
 for recording in "$recordings"/*.jsonl; do
   name="$(basename "$recording" .jsonl)"
   expected="$recordings/expected/$name.jsonl"
-  if [ ! -f "$expected" ]; then
+  # A regenerated recording with an expected sequence older than it grades the Rust core against
+  # a TypeScript run of a DIFFERENT recording. That is how `synthetic-e1` read 33/33 on 2026-09-22
+  # while its real number was 20/33, so the expected side is rebuilt whenever the recording is
+  # newer rather than only when it is missing.
+  if [ ! -f "$expected" ] || [ "$recording" -nt "$expected" ]; then
     run "replay-typescript $name" bun "$root/tooling/gx-chat-core/replay-typescript.ts" "$recording"
   fi
   rust="$(cargo run --release --quiet --example replay -- --utc-offset "$offset_minutes" "$recording" 2>&1)"
