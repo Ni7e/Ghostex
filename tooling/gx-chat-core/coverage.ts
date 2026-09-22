@@ -21,6 +21,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { actionKinds } from './coverage-actions';
+
 const ROOT = join(import.meta.dir, '..', '..');
 const RECORDINGS = '/tmp/gx-chat';
 
@@ -32,11 +34,6 @@ function wireSpellings(source: string, from: string, to: string): string[] {
   }
   const body = source.slice(start, to ? source.indexOf(to, start) : undefined);
   return [...body.matchAll(/=>\s*"([^"]+)"/g)].map((match) => match[1]!);
-}
-
-function actionKinds(): string[] {
-  const source = readFileSync(join(ROOT, 'packages/gx-chat-core/src/action.rs'), 'utf8');
-  return wireSpellings(source, 'action_kinds! {', '\n}');
 }
 
 function frameTypes(): string[] {

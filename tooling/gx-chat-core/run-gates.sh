@@ -17,6 +17,9 @@
 #  4. `coverage.ts`: which of the core's 120 user actions, four frame types and seven broker kinds
 #     no recording reaches. Informational, because it grades the RECORDINGS rather than the core,
 #     but a gate that never opens a surface is grading nothing there.
+#  4b. `synthetic-hostile`: malformed frames, actions and answers, graded on one property only,
+#     that the replay finished without panicking. The core runs on the host's own thread, so a
+#     slice or an index that panics on server data takes the chat window down with it.
 #  5. The per-family checks that cover ground no recording reaches (`transcript_check`'s 58
 #     projection cases, `extras_parity`'s invented table, `extras_check`'s wiring, `e1_check`,
 #     `questions_check`, `question_exchange_check`, `composer_check`).
@@ -80,7 +83,7 @@ run() {
 }
 
 if [ "$regenerate" = "1" ]; then
-  for generator in synthetic-recording synthetic-c synthetic-e1 synthetic-send synthetic-surfaces synthetic-composer synthetic-b extras-parity; do
+  for generator in synthetic-recording synthetic-c synthetic-e1 synthetic-send synthetic-surfaces synthetic-hostile synthetic-composer synthetic-b extras-parity; do
     run "generate $generator" bun "$root/tooling/gx-chat-core/$generator.ts"
   done
   run "generate samples" bun "$root/tooling/gx-chat-core/sample-document.ts"
@@ -107,6 +110,27 @@ shopt -s nullglob
 for recording in "$recordings"/*.jsonl; do
   name="$(basename "$recording" .jsonl)"
   expected="$recordings/expected/$name.jsonl"
+  # `synthetic-hostile` is graded on ONE property: the core survived. Its input is malformed on
+  # purpose (missing fields, wrong types, absurd numbers, lone UTF-16 surrogates, empty arrays),
+  # the TypeScript brain throws out of its own `publish` on some of it, and answers that name no
+  # request are most of the file. Diffing the documents there would grade Bun's error text rather
+  # than the brain, so this one row is "the replay finished and did not panic".
+  if [ "$name" = "synthetic-hostile" ]; then
+    if hostile="$(cargo run --release --quiet --example replay -- \
+      --utc-offset "$offset_minutes" "$recording" 2>&1)"; then
+      hostile_status="ok"
+    elif printf '%s' "$hostile" | grep -q 'panicked'; then
+      hostile_status="FAIL"
+    else
+      # A non-zero exit with no panic is the replay's own report (answers with no request), which
+      # is expected on this recording and is not what it grades.
+      hostile_status="ok"
+    fi
+    record "hostile survived" "$hostile_status" \
+      "$(printf '%s' "$hostile" | grep '^replayed' | sed 's/^replayed *//')"
+    [ "$hostile_status" = "FAIL" ] && printf '%s\n' "$hostile" | sed 's/^/    /'
+    continue
+  fi
   # A regenerated recording with an expected sequence older than it grades the Rust core against
   # a TypeScript run of a DIFFERENT recording. That is how `synthetic-e1` read 33/33 on 2026-09-22
   # while its real number was 20/33, so the expected side is rebuilt whenever the recording is
