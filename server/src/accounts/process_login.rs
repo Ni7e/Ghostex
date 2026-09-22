@@ -7,6 +7,11 @@ pub(crate) fn identity(process_id: i64, agent: &str, home: &Path) -> Option<Stri
         "codex" => (Provider::Codex, "CODEX_HOME"),
         _ => return None,
     };
+    let root = configured_home(process_id, key)?;
+    login_identity(provider, &root, home)
+}
+
+pub(super) fn configured_home(process_id: i64, key: &str) -> Option<PathBuf> {
     let environment = process_environment(process_id)?;
     let prefix = format!("{key}=");
     let value = environment
@@ -16,7 +21,7 @@ pub(crate) fn identity(process_id: i64, agent: &str, home: &Path) -> Option<Stri
     if !root.is_absolute() {
         return None;
     }
-    login_identity(provider, &root, home)
+    Some(root)
 }
 
 #[cfg(target_os = "linux")]

@@ -60,7 +60,10 @@ pub(crate) fn refresh(
     agent: Option<&str>,
     notice: &SessionChatTerminalNotice,
 ) {
-    if !crate::accounts::recovery::retryable(notice) || notice.is_answerable() {
+    if !crate::accounts::recovery::retryable(notice)
+        || (notice.is_answerable()
+            && notice.kind != crate::session_chat_notice::SESSION_CHAT_NOTICE_USAGE_LIMIT)
+    {
         return;
     }
     let Some(transcript_agent) = crate::session_chat::resolve_session_chat_transcript_agent(agent)
@@ -167,6 +170,11 @@ pub(crate) fn refresh(
                 let _ = crate::accounts::endpoint::update_session(repository, &row, runtime);
             }
         }
+    }
+    // The limit chooser's body contains options, not the transcript's error
+    // text. Its quota error still anchors progress and lifts switch suppression.
+    if notice.kind == crate::session_chat_notice::SESSION_CHAT_NOTICE_USAGE_LIMIT {
+        error_at = usage_limit_error_at.or(error_at);
     }
     let recovered = response_at.is_some_and(|response| response > error_at.unwrap_or(observed_at));
     if let Ok(mut entries) = cleared().lock() {

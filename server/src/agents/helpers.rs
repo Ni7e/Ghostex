@@ -238,6 +238,8 @@ pub(crate) fn quote_shell_arg(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// CDXC:AgentProviders 2026-09-22 WHY:
+/// Interrupting a restored CLI during an account switch is an intentional exit, not a failed resume. POSIX signal exit statuses must not launch the old account's fallback command while the switch is returning to the shell.
 pub(crate) fn wrap_restored_terminal_resume_command(
     command: &str,
     display_command: &str,
@@ -267,7 +269,7 @@ pub(crate) fn wrap_restored_terminal_resume_command(
     ];
     if let Some(fallback_command) = fallback_command.filter(|fallback| *fallback != command) {
         lines.extend([
-            "if [ \"$__ghostex_restore_resume_status\" -ne 0 ]; then".to_string(),
+            "if [ \"$__ghostex_restore_resume_status\" -ne 0 ] && [ \"$__ghostex_restore_resume_status\" -lt 128 ]; then".to_string(),
             format!(
                 "  printf '%s\\n' {}",
                 quote_shell_arg("Exact resume failed; trying saved fallback resume command.")

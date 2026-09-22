@@ -20,6 +20,7 @@ pub(crate) struct AccountRuntime {
     pub setup_jobs: super::setup::SetupJobs,
     pub mutations: Mutex<()>,
     pub history: Arc<super::history::HistoryRuntime>,
+    pub recovery: Arc<super::recovery::RecoverySignals>,
     poll_gate: Mutex<()>,
 }
 impl AccountRuntime {

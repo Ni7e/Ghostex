@@ -10,7 +10,49 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
-use std::{sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+type SessionKey = (String, String);
+#[derive(Default)]
+struct PendingRecovery {
+    observed: BTreeMap<SessionKey, String>,
+    pending: BTreeSet<SessionKey>,
+}
+/// CDXC:AgentProviders 2026-09-22 WHY:
+/// A limit already visible in chat used to wait for the 30-second recovery sweep. Fresh visible notices now wake a targeted pass; remembering each instance prevents the pass's own screen probe from scheduling itself forever.
+#[derive(Default)]
+pub(crate) struct RecoverySignals {
+    changed: tokio::sync::Notify,
+    state: Mutex<PendingRecovery>,
+}
+impl RecoverySignals {
+    pub(crate) fn observe(
+        &self,
+        project: &str,
+        session: &str,
+        notice: Option<&SessionChatTerminalNotice>,
+    ) {
+        let key = (project.to_string(), session.to_string());
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(notice) = notice.filter(|notice| retryable(notice)) else {
+            state.observed.remove(&key);
+            return;
+        };
+        let instance = format!("{}\n{}", notice.identity(), notice.detected_at);
+        if state.observed.get(&key) == Some(&instance) {
+            return;
+        }
+        state.observed.insert(key.clone(), instance);
+        state.pending.insert(key);
+        self.changed.notify_one();
+    }
+    fn take(&self) -> BTreeSet<SessionKey> {
+        std::mem::take(&mut self.state.lock().unwrap_or_else(|e| e.into_inner()).pending)
+    }
+}
 const CONTINUE: &str = "Continue the unfinished task from the last confirmed progress after the temporary error or usage limit. Check the current state first and do not repeat completed actions. If the task is already complete, report that and stop.";
 /// CDXC:AgentProviders 2026-09-05 DECISION:
 /// User requested automatic continuation after errors with increasingly slower retries so unattended work can recover. Temporary errors retry after 5, 10, 20, 40, then 60 minutes; the one-hour cap continues until recovery or Stop.
@@ -21,35 +63,39 @@ pub(crate) fn start(state: Arc<AppState>) {
         let mut clock = tokio::time::interval(Duration::from_secs(30));
         let mut first = true;
         loop {
-            tokio::select! {
+            let targets = tokio::select! {
                 _ = shutdown.recv() => break,
-                _ = clock.tick() => {
-                    let scan = state.clone();
-                    let restart = first;
-                    match tokio::task::spawn_blocking(move || collect(&scan, restart)).await {
-                        Ok(Ok(plans)) => {
-                            first = false;
-                            for plan in plans {
-                                let state = state.clone();
-                                tokio::spawn(async move { deliver(state, plan).await; });
-                            }
-                        }
-                        Ok(Err(error)) => log(
-                            &state,
-                            LogLevel::Warn,
-                            "accountRecoveryPassFailed",
-                            Some(error.message),
-                            json!({ "restart": restart }),
-                        ),
-                        Err(join) => log(
-                            &state,
-                            LogLevel::Error,
-                            "accountRecoveryPassPanicked",
-                            Some(join.to_string()),
-                            json!({ "restart": restart }),
-                        ),
+                _ = clock.tick() => None,
+                _ = state.accounts.recovery.changed.notified() => {
+                    Some(state.accounts.recovery.take())
+                }
+            };
+            let scan = state.clone();
+            let restart = first;
+            match tokio::task::spawn_blocking(move || collect(&scan, restart, targets)).await {
+                Ok(Ok(plans)) => {
+                    first = false;
+                    for plan in plans {
+                        let state = state.clone();
+                        tokio::spawn(async move {
+                            deliver(state, plan).await;
+                        });
                     }
                 }
+                Ok(Err(error)) => log(
+                    &state,
+                    LogLevel::Warn,
+                    "accountRecoveryPassFailed",
+                    Some(error.message),
+                    json!({ "restart": restart }),
+                ),
+                Err(join) => log(
+                    &state,
+                    LogLevel::Error,
+                    "accountRecoveryPassPanicked",
+                    Some(join.to_string()),
+                    json!({ "restart": restart }),
+                ),
             }
         }
     });
@@ -142,11 +188,25 @@ fn save(
 /// CDXC:AgentProviders 2026-09-11 WHY:
 /// One session used to end the whole pass: a `?` or a panic anywhere in the loop skipped every session behind it in the list, silently, for as long as the fault lasted.
 /// Each session is now planned on its own, with its errors and panics logged, and the pass outcome is logged too, because three sessions sat at the Fable limit for an hour with nothing in gxserver.jsonl to say why.
-fn collect(state: &AppState, restart: bool) -> Result<Vec<Plan>, DomainStateError> {
+fn collect(
+    state: &AppState,
+    restart: bool,
+    selected: Option<BTreeSet<SessionKey>>,
+) -> Result<Vec<Plan>, DomainStateError> {
     let db = open_gxserver_database(&state.paths).map_err(store::error)?;
     let repo = DomainRepository::new(&db, &state.metadata.server_id);
     let registry = store::read(&db)?;
-    let targets = repo.list_sessions(None)?;
+    let targets = if let Some(selected) = selected.filter(|_| !restart) {
+        selected
+            .into_iter()
+            .map(|(pid, sid)| repo.get_session(&pid, &sid))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect()
+    } else {
+        repo.list_sessions(None)?
+    };
     if restart {
         let _gate = state
             .accounts
@@ -404,7 +464,14 @@ fn plan_session(
             || activity.kind
                 == crate::session_chat_terminal_activity::SESSION_CHAT_ACTIVITY_COMPACTING
     });
-    if live_activity || (working && !detection.notice.as_ref().is_some_and(retryable)) {
+    // A visible limit has already passed transcript-progress and account-switch
+    // suppression. Leftover tool rows and a working hook cannot overrule it.
+    let usage_limit = detection.notice.as_ref().is_some_and(|notice| {
+        notice.kind == crate::session_chat_notice::SESSION_CHAT_NOTICE_USAGE_LIMIT
+    });
+    if !usage_limit
+        && (live_activity || (working && !detection.notice.as_ref().is_some_and(retryable)))
+    {
         if !recovery.is_null() {
             if let Some(since) = time(recovery.get("healthySince")) {
                 if now - since >= chrono::Duration::minutes(1) {

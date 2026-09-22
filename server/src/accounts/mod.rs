@@ -1,7 +1,9 @@
+pub(crate) mod claude_background;
 pub(crate) mod continuation;
 pub(crate) mod default_account;
 pub(crate) mod drafts;
 pub(crate) mod endpoint;
+pub(crate) mod exit;
 pub(crate) mod helpers;
 mod history;
 mod history_parser;

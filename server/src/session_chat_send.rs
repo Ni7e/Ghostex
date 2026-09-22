@@ -852,6 +852,14 @@ pub enum SessionChatSendStep {
         home_dir: PathBuf,
         timeout_ms: u64,
     },
+    StopClaudeBackground {
+        background: crate::accounts::claude_background::BackgroundSession,
+        home_dir: PathBuf,
+    },
+    InterruptAgentForAccountSwitch {
+        home_dir: PathBuf,
+        timeout_ms: u64,
+    },
     /// Keep the restart sequence exclusive until the selected login is running and ready.
     WaitForAccountReady {
         agent: String,
@@ -1542,6 +1550,39 @@ async fn run_session_chat_send_worker(
                                 error,
                             )
                         });
+                        break;
+                    }
+                }
+                SessionChatSendStep::StopClaudeBackground {
+                    background,
+                    home_dir,
+                } => {
+                    if let Err(error) =
+                        crate::accounts::claude_background::stop(&background, &home_dir, &|| {
+                            job_generation != generation.load(Ordering::SeqCst)
+                        })
+                        .await
+                    {
+                        outcome = Err(error);
+                        break;
+                    }
+                }
+                SessionChatSendStep::InterruptAgentForAccountSwitch {
+                    home_dir,
+                    timeout_ms,
+                } => {
+                    if let Err(error) = crate::accounts::exit::interrupt_until_exited(
+                        &home_dir,
+                        &project_id,
+                        &session_id,
+                        &zmx_name,
+                        &source,
+                        timeout_ms,
+                        &|| job_generation != generation.load(Ordering::SeqCst),
+                    )
+                    .await
+                    {
+                        outcome = Err(error);
                         break;
                     }
                 }
@@ -3252,23 +3293,25 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
                 )
             }
         };
-        if let Err(error) = execute_session_chat_send(
-            &target.project_id,
-            &target.session_id,
-            &target.zmx_name,
-            "asyncQuestion",
-            vec![SessionChatSendStep::DriveCodexAsyncQuestion(answer)],
-        )
-        .await
-        {
-            return domain_error_response(
-                endpoint_path,
-                request_id,
-                DomainStateError {
-                    code: "agentBusy",
-                    message: error.message,
-                },
-            );
+        if let Some(answer) = answer {
+            if let Err(error) = execute_session_chat_send(
+                &target.project_id,
+                &target.session_id,
+                &target.zmx_name,
+                "asyncQuestion",
+                vec![SessionChatSendStep::DriveCodexAsyncQuestion(answer)],
+            )
+            .await
+            {
+                return domain_error_response(
+                    endpoint_path,
+                    request_id,
+                    DomainStateError {
+                        code: "agentBusy",
+                        message: error.message,
+                    },
+                );
+            }
         }
         return match crate::session_chat_async_questions::dismiss(
             state,
@@ -3350,6 +3393,25 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
             &target.project_id,
             &target.session_id,
             Some(agent_name),
+        );
+        return match result {
+            Ok(result) => routed_json(
+                Some(endpoint_path),
+                StatusCode::OK,
+                rpc_success(request_id, result),
+            ),
+            Err(error) => domain_error_response(endpoint_path, request_id, error),
+        };
+    }
+    if kind == "trustAndRemember" {
+        let result =
+            crate::session_chat_trust_memory::answer_trust_and_remember(state, &target).await;
+        let agent = session_chat_agent_for_session(&target.session);
+        schedule_session_chat_option_redetect(
+            state,
+            &target.project_id,
+            &target.session_id,
+            agent.as_deref(),
         );
         return match result {
             Ok(result) => routed_json(
