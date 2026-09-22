@@ -251,7 +251,7 @@ export function agentSyncPlanChangeCount(plan: AgentSyncPlan, enabled: ReadonlyS
   return plan.groups.reduce((sum, group) => (enabled.has(group.kind) ? sum + group.changeCount : sum), 0);
 }
 
-/** Skills, Instructions, Hooks: the three dots on an agent row. */
+/** Skills, Instructions, Hook scripts: the three things Agent Sync shares, one tone each. */
 export type AgentSyncDotTone = 'ok' | 'warn' | 'err' | 'off';
 
 export function agentSyncSkillsTone(agent: AgentSyncAgentReport): AgentSyncDotTone {
@@ -303,6 +303,73 @@ export function agentSyncHooksTone(agent: AgentSyncAgentReport): AgentSyncDotTon
       return 'warn';
     default:
       return 'err';
+  }
+}
+
+export type AgentSyncPart = 'skills' | 'instructions' | 'hooks';
+
+/** The plan groups that fix one part of one agent; empty when that part has nothing to fix. */
+export function agentSyncPartFixGroups(agent: AgentSyncAgentReport, part: AgentSyncPart): AgentSyncPlanGroupKind[] {
+  switch (part) {
+    case 'skills': {
+      const skills = agent.skills;
+      if (!skills) {
+        return [];
+      }
+      const groups: AgentSyncPlanGroupKind[] = [];
+      if (skills.counts.dangling > 0) {
+        groups.push('removeDangling');
+      }
+      if (skills.dirState === 'wholeFolderLink') {
+        groups.push('convertWholeFolder');
+      }
+      if (agent.detected && (skills.counts.copiesIdentical > 0 || (!agent.universal && skills.counts.missing > 0))) {
+        groups.push('perSkillLinks');
+      }
+      return groups;
+    }
+    case 'instructions': {
+      const state = agent.instructions?.state;
+      return agent.detected && (state === 'missing' || state === 'legacyPointer' || state === 'otherContent')
+        ? ['pointerFiles']
+        : [];
+    }
+    case 'hooks': {
+      const hooksOpen = agent.hooks && agent.hooks.state !== 'linked' && agent.hooks.state !== 'otherLink';
+      const lockOpen = agent.lock && agent.lock.state !== 'linked' && agent.lock.state !== 'otherLink';
+      return agent.detected && (hooksOpen || lockOpen) ? ['hooks'] : [];
+    }
+  }
+}
+
+export const AGENT_SYNC_PARTS: readonly AgentSyncPart[] = ['skills', 'instructions', 'hooks'];
+
+/** How many fixes an agent row advertises ("3 to fix"). An agent the scan flags always shows at least one. */
+export function agentSyncIssueCount(agent: AgentSyncAgentReport): number {
+  const count = AGENT_SYNC_PARTS.reduce((sum, part) => sum + agentSyncPartFixGroups(agent, part).length, 0);
+  return agent.status === 'attention' ? Math.max(count, 1) : count;
+}
+
+/** Red when something is broken, amber when it works today but can go out of date. */
+export function agentSyncWorstTone(agent: AgentSyncAgentReport): 'ok' | 'warn' | 'err' {
+  const tones = [agentSyncSkillsTone(agent), agentSyncInstructionsTone(agent), agentSyncHooksTone(agent)];
+  if (tones.includes('err')) {
+    return 'err';
+  }
+  return tones.includes('warn') || agent.status === 'attention' ? 'warn' : 'ok';
+}
+
+/** Which of the three shared things a problem belongs to; the shared folder's own problems have none. */
+export function agentSyncProblemPart(kind: AgentSyncProblemKind): AgentSyncPart | undefined {
+  switch (kind) {
+    case 'danglingLinks':
+    case 'copiedFolders':
+    case 'wholeFolderLinks':
+      return 'skills';
+    case 'missingPointers':
+      return 'instructions';
+    default:
+      return undefined;
   }
 }
 

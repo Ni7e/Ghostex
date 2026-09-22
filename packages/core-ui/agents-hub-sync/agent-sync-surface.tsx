@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { IconFolderOpen, IconRefresh } from '@tabler/icons-react';
-import { Button } from '@/packages/components/ui/button';
 import { Input } from '@/packages/components/ui/input';
 import { ScrollArea } from '@/packages/components/ui/scroll-area';
 import type { WebviewApi } from '../webview-api';
@@ -117,32 +115,6 @@ export function AgentSyncSurface({
             value={query}
           />
         </div>
-        {report ? (
-          <div className='agents-hub-sync-source'>
-            <span className='k'>Source of truth</span>
-            <span className='v'>{report.source.path}</span>
-            <span className='s'>
-              {report.source.skills.filter((skill) => !skill.broken).length} skills · {report.source.mdFiles.length} md
-              files · {report.source.hookScriptCount} hook scripts · lock {report.source.lock.entryCount} entries
-            </span>
-            <div className='agents-hub-sync-source-actions'>
-              <Button
-                onClick={() =>
-                  vscode.postMessage({
-                    path: expandHomePath(report.source.path, report.home),
-                    type: 'openAgentsHubPathInFinder',
-                  })
-                }
-                size='sm'
-                type='button'
-                variant='ghost'
-              >
-                <IconFolderOpen data-icon='inline-start' size={14} />
-                Open folder
-              </Button>
-            </div>
-          </div>
-        ) : null}
         <ScrollArea className='agents-hub-scroll'>
           {report ? (
             <SyncAgentList
@@ -178,26 +150,15 @@ export function AgentSyncSurface({
             vscode={vscode}
           />
         ) : (
-          <>
-            <div className='agents-hub-sync-toolbar'>
-              <div className='agents-hub-sync-toolbar-title'>
-                <span>All agents</span>
-                <span className='agents-hub-sync-toolbar-path'>
-                  {report.summary.agentsDetected} agents and profiles found on this computer
-                </span>
-              </div>
-              <div className='agents-hub-sync-toolbar-actions'>
-                <Button onClick={refresh} size='sm' type='button' variant='ghost'>
-                  <IconRefresh data-icon='inline-start' size={14} />
-                  Refresh
-                </Button>
-                <Button onClick={() => openPlan('all')} size='sm' type='button' variant='default'>
-                  Sync all…
-                </Button>
-              </div>
-            </div>
-            <SyncOverviewPane onFixProblem={(groups) => openPlan('all', groups)} report={report} />
-          </>
+          <SyncOverviewPane
+            onOpenFolder={(path) =>
+              vscode.postMessage({ path: expandHomePath(path, report.home), type: 'openAgentsHubPathInFinder' })
+            }
+            onOpenPlan={openPlan}
+            onRefresh={refresh}
+            onSelectAgent={setSelectedId}
+            report={report}
+          />
         )}
       </div>
       {sheet ? (

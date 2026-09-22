@@ -1,7 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { ModalStorySurface } from './modal-gallery/modal-story-surface';
 import { AgentsHubModal } from './agents-hub-modal';
-import { agentSyncFixturePlan, agentSyncFixtureReport } from './agents-hub-sync/agent-sync-fixture';
+import {
+  agentSyncFixturePlan,
+  agentSyncFixtureReport,
+  agentSyncFixtureSyncedReport,
+} from './agents-hub-sync/agent-sync-fixture';
 import type { WebviewApi } from './webview-api';
 import type { AgentsHubCatalogMessage, AgentsHubTab } from '../shared/session-grid-contract';
 
@@ -470,12 +474,15 @@ function AgentsHubModalStory({
   initialTab,
   syncAgentId,
   syncPlanScope,
+  syncSynced = false,
   withSyncFixture = false,
 }: {
   catalog?: AgentsHubCatalogMessage;
   initialTab: AgentsHubTab;
   syncAgentId?: string;
   syncPlanScope?: string;
+  /** Render the report of a computer where every agent is already in sync. */
+  syncSynced?: boolean;
   withSyncFixture?: boolean;
 }) {
   return (
@@ -488,7 +495,11 @@ function AgentsHubModalStory({
         syncInitialAgentId={syncAgentId}
         syncInitialPlanScope={syncPlanScope}
         syncPlan={withSyncFixture ? { ...agentSyncFixturePlan, type: 'agentSyncPlan' } : undefined}
-        syncReport={withSyncFixture ? { ...agentSyncFixtureReport, type: 'agentSyncReport' } : undefined}
+        syncReport={
+          withSyncFixture
+            ? { ...(syncSynced ? agentSyncFixtureSyncedReport : agentSyncFixtureReport), type: 'agentSyncReport' }
+            : undefined
+        }
         vscode={mockVscode}
       />
     </ModalStorySurface>
@@ -569,6 +580,10 @@ export const AgentSyncAgentDetail: Story = {
 
 export const AgentSyncPlanSheet: Story = {
   render: () => <AgentsHubModalStory initialTab='sync' syncPlanScope='all' withSyncFixture />,
+};
+
+export const AgentSyncAllSynced: Story = {
+  render: () => <AgentsHubModalStory initialTab='sync' syncSynced withSyncFixture />,
 };
 
 export const AgentSyncLight: Story = {

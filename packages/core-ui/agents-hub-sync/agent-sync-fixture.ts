@@ -257,6 +257,46 @@ export const agentSyncFixtureReport: AgentSyncReport = {
   },
 };
 
+/** The same computer after a sync: every agent linked, nothing left to fix. */
+export const agentSyncFixtureSyncedReport: AgentSyncReport = {
+  ...agentSyncFixtureReport,
+  agents: agentSyncFixtureReport.agents
+    .filter((agent) => agent.detected)
+    .map((agent) => {
+      const linked = entries(
+        agent.skills?.dir ?? `${agent.root}/skills`,
+        Object.fromEntries(sourceSkills.map((name) => [name, 'linked' as const]))
+      );
+      return {
+        ...agent,
+        hooks: agent.hooks ? { ...agent.hooks, state: 'linked' as const } : undefined,
+        instructions: agent.instructions ? { ...agent.instructions, state: 'pointer' as const } : undefined,
+        lock: agent.lock ? { ...agent.lock, state: 'linked' as const } : undefined,
+        skills: agent.skills
+          ? {
+              ...agent.skills,
+              counts: counts(linked),
+              dirLinkTarget: undefined,
+              dirState: 'realDir' as const,
+              entries: linked,
+            }
+          : undefined,
+        status: 'linked' as const,
+      };
+    }),
+  problems: [],
+  summary: {
+    ...agentSyncFixtureReport.summary,
+    agentsAttention: 0,
+    agentsLinked: agentSyncFixtureReport.summary.agentsDetected,
+    copiedSkillFolders: 0,
+    danglingLinks: 0,
+    missingPointers: 0,
+    staleLockEntries: 0,
+    wholeFolderLinks: 0,
+  },
+};
+
 export const agentSyncFixturePlan: AgentSyncPlan = {
   generatedAt: '2026-09-16T12:00:01.000Z',
   groups: [

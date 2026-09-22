@@ -1,220 +1,320 @@
-import { IconAlertTriangle, IconCircleCheck, IconInfoCircle, IconLink, IconLinkOff } from '@tabler/icons-react';
+import { useState } from 'react';
+import type { ReactNode } from 'react';
+import {
+  IconBook2,
+  IconCheck,
+  IconCircleCheck,
+  IconExternalLink,
+  IconFileText,
+  IconFolder,
+  IconInfoCircle,
+  IconLock,
+  IconRefresh,
+  IconTerminal,
+} from '@tabler/icons-react';
 import { Button } from '@/packages/components/ui/button';
+import { Switch } from '@/packages/components/ui/switch';
 import { cn } from '@/packages/components/utils';
-import type { AgentSyncPlanGroupKind, AgentSyncProblem, AgentSyncReport } from '../../shared/agent-sync';
-import { agentSyncProblemFixGroups } from '../../shared/agent-sync';
-import { Pill } from './shared';
+import type { AgentSyncPart, AgentSyncPlanGroupKind, AgentSyncReport } from '../../shared/agent-sync';
+import { agentSyncDefaultPlanGroups, agentSyncProblemPart } from '../../shared/agent-sync';
+import { SyncFixList } from './sync-fix-list';
 
-function problemFixLabel(problem: AgentSyncProblem): string {
-  switch (problem.kind) {
-    case 'danglingLinks':
-      return 'Remove links';
-    case 'sourceBrokenLinks':
-      return 'Remove link';
-    case 'wholeFolderLinks':
-      return 'Convert';
-    case 'copiedFolders':
-      return 'Replace with links';
-    case 'missingPointers':
-      return 'Write pointers';
-    case 'staleLockEntries':
-      return 'Prune lock';
-    case 'untrackedSkills':
-      return '';
+const RING_RADIUS = 24;
+const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
+
+function checkedLabel(generatedAt: string): string | undefined {
+  const date = new Date(generatedAt);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
   }
+  return `Checked at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-function ProblemRow({
-  onFix,
-  problem,
+function CoverageCard({
+  active,
+  caption,
+  done,
+  icon,
+  label,
+  onClick,
+  total,
 }: {
-  onFix: (groups: AgentSyncPlanGroupKind[]) => void;
-  problem: AgentSyncProblem;
+  active: boolean;
+  caption: string;
+  done: number;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  total: number;
 }) {
-  const groups = agentSyncProblemFixGroups(problem.kind);
-  const tone = problem.fixable
-    ? problem.kind === 'danglingLinks' || problem.kind === 'sourceBrokenLinks'
-      ? 'err'
-      : 'warn'
-    : 'info';
-  const Icon = tone === 'err' ? IconLinkOff : tone === 'warn' ? IconAlertTriangle : IconInfoCircle;
+  const complete = total > 0 && done >= total;
   return (
-    <div className='agents-hub-sync-row'>
-      <div className='agents-hub-sync-row-main'>
-        <span className={cn('agents-hub-sync-icon-tile', `is-${tone}`)}>
-          <Icon size={14} />
+    <button
+      aria-pressed={active}
+      className={cn('agents-hub-sync-coverage-card', active && 'is-active')}
+      onClick={onClick}
+      type='button'
+    >
+      <span className='agents-hub-sync-coverage-head'>
+        {icon}
+        {label}
+        <span className='count'>
+          <b>{done}</b> of {total} agents
         </span>
-        <div className='agents-hub-sync-row-text'>
-          <span className='agents-hub-sync-row-label'>
-            {problem.title}
-            {!problem.fixable ? <Pill>Info</Pill> : null}
-          </span>
-          <span className='agents-hub-sync-row-detail' title={problem.items.join('\n')}>
-            {problem.items.slice(0, 6).join(' · ')}
-            {problem.items.length > 6 ? ` · +${problem.items.length - 6} more` : ''}
-          </span>
-          <span className='agents-hub-sync-row-detail is-sans'>{problem.detail}</span>
-        </div>
-      </div>
-      {problem.fixable && groups.length > 0 ? (
-        <div className='agents-hub-sync-row-control'>
-          <Button onClick={() => onFix(groups)} size='sm' type='button' variant='outline'>
-            {problemFixLabel(problem)}
-          </Button>
-        </div>
-      ) : null}
-    </div>
+      </span>
+      <span className='agents-hub-sync-coverage-bar'>
+        <span className={cn(complete && 'is-ok')} style={{ width: `${total > 0 ? (done / total) * 100 : 0}%` }} />
+      </span>
+      <span className='agents-hub-sync-coverage-caption'>{caption}</span>
+    </button>
   );
 }
 
 export function SyncOverviewPane({
-  onFixProblem,
+  onOpenFolder,
+  onOpenPlan,
+  onRefresh,
+  onSelectAgent,
   report,
 }: {
-  onFixProblem: (groups: AgentSyncPlanGroupKind[]) => void;
+  onOpenFolder: (path: string) => void;
+  onOpenPlan: (scope: string, groups?: AgentSyncPlanGroupKind[]) => void;
+  onRefresh: () => void;
+  onSelectAgent: (id: string) => void;
   report: AgentSyncReport;
 }) {
+  const [part, setPart] = useState<AgentSyncPart | undefined>();
+  const [tidyLock, setTidyLock] = useState(false);
+
   const summary = report.summary;
   const detected = report.agents.filter((agent) => agent.detected);
   const skillsLinked = detected.filter(
     (agent) =>
-      agent.skills &&
-      agent.skills.dirState === 'realDir' &&
-      agent.skills.counts.dangling === 0 &&
-      agent.skills.counts.missing === 0 &&
-      agent.skills.counts.copiesIdentical === 0
+      agent.universal ||
+      (agent.skills &&
+        agent.skills.dirState === 'realDir' &&
+        agent.skills.counts.dangling === 0 &&
+        agent.skills.counts.missing === 0 &&
+        agent.skills.counts.copiesIdentical === 0)
   ).length;
   const pointers = detected.filter((agent) => agent.instructions?.state === 'pointer').length;
   const pointerTargets = detected.filter((agent) => agent.instructions).length;
   const hooksLinked = detected.filter((agent) => agent.hooks?.state === 'linked').length;
   const hooksTargets = detected.filter((agent) => agent.hooks).length;
+
+  const toFix = report.problems.filter((problem) => problem.fixable && problem.kind !== 'staleLockEntries');
+  const staleLock = report.problems.find((problem) => problem.kind === 'staleLockEntries');
+  const untracked = report.problems.find((problem) => problem.kind === 'untrackedSkills');
+  const visible = part ? toFix.filter((problem) => agentSyncProblemPart(problem.kind) === part) : toFix;
+  const synced = summary.agentsAttention === 0 && toFix.length === 0;
+  const checked = checkedLabel(report.generatedAt);
+  const sourceSkills = report.source.skills.filter((skill) => !skill.broken).length;
+
+  /*
+   * CDXC:AgentSync 2026-09-22 WHY:
+   * Tidying the lock file stays opt-in (DECISION 4A, 2026-09-16), so it is a switch beside the fix list rather than a problem row, and "Review and fix all" only adds the pruneLock group while that switch is on.
+   */
+  const fixAll = () =>
+    onOpenPlan('all', tidyLock ? [...agentSyncDefaultPlanGroups(undefined), 'pruneLock'] : undefined);
+  const togglePart = (next: AgentSyncPart) => setPart((current) => (current === next ? undefined : next));
+
   return (
     <div className='agents-hub-sync-detail-body'>
-      <div className='agents-hub-sync-stats'>
-        <div className={cn('agents-hub-sync-stat', summary.agentsLinked > 0 && 'is-ok')}>
-          <span className='n'>{summary.agentsLinked}</span>
-          <span className='l'>agents fully linked</span>
+      <section className={cn('agents-hub-sync-hero', synced && 'is-synced')}>
+        <div className='agents-hub-sync-hero-main'>
+          <div className='agents-hub-sync-ring'>
+            <svg aria-hidden='true' viewBox='0 0 56 56'>
+              <circle className='track' cx='28' cy='28' r={RING_RADIUS} />
+              <circle
+                className='fill'
+                cx='28'
+                cy='28'
+                r={RING_RADIUS}
+                strokeDasharray={`${
+                  summary.agentsDetected > 0 ? (summary.agentsLinked / summary.agentsDetected) * RING_LENGTH : 0
+                } ${RING_LENGTH}`}
+              />
+            </svg>
+            <span className='agents-hub-sync-ring-label'>
+              {synced ? <IconCheck size={22} stroke={2.4} /> : `${summary.agentsLinked}/${summary.agentsDetected}`}
+            </span>
+          </div>
+          <div className='agents-hub-sync-hero-text'>
+            <h2 className='agents-hub-sync-hero-title'>
+              {synced
+                ? `All ${summary.agentsDetected} agents are in sync`
+                : summary.agentsAttention > 0
+                  ? `${summary.agentsAttention} of ${summary.agentsDetected} agents are out of sync`
+                  : `${toFix.length} ${toFix.length === 1 ? 'thing' : 'things'} to fix in your shared folder`}
+            </h2>
+            <p className='agents-hub-sync-hero-sub'>
+              {synced
+                ? 'Every agent on this computer uses the skills, instructions and hook scripts in your shared folder. Edit them there and every agent picks up the change.'
+                : 'Agent Sync makes every agent on this computer use the same skills, instructions and hook scripts from one shared folder.'}
+            </p>
+          </div>
+          <div className='agents-hub-sync-hero-actions'>
+            {synced ? (
+              <Button onClick={onRefresh} size='sm' type='button' variant='outline'>
+                <IconRefresh data-icon='inline-start' size={14} />
+                Check again
+              </Button>
+            ) : (
+              <>
+                <Button onClick={fixAll} type='button' variant='default'>
+                  Review and fix all…
+                </Button>
+                <span className='agents-hub-sync-hero-reassure'>Nothing changes until you approve</span>
+              </>
+            )}
+          </div>
         </div>
-        <div className={cn('agents-hub-sync-stat', summary.agentsAttention > 0 && 'is-warn')}>
-          <span className='n'>{summary.agentsAttention}</span>
-          <span className='l'>agents with drift</span>
+        <div className='agents-hub-sync-folder-strip'>
+          <IconFolder size={14} />
+          <span>Shared folder</span>
+          <span className='path'>{report.source.path}</span>
+          <span className='counts'>
+            · {sourceSkills} skills, {report.source.mdFiles.length} instruction files, {report.source.hookScriptCount}{' '}
+            hook scripts
+          </span>
+          <span className='spacer' />
+          {checked ? <span className='checked'>{checked}</span> : null}
+          {synced ? null : (
+            <Button
+              aria-label='Check again'
+              onClick={onRefresh}
+              size='sm'
+              title='Check again'
+              type='button'
+              variant='ghost'
+            >
+              <IconRefresh size={14} />
+            </Button>
+          )}
+          <Button onClick={() => onOpenFolder(report.source.path)} size='sm' type='button' variant='ghost'>
+            <IconExternalLink data-icon='inline-start' size={14} />
+            Open folder
+          </Button>
         </div>
-        <div className={cn('agents-hub-sync-stat', summary.danglingLinks > 0 && 'is-err')}>
-          <span className='n'>{summary.danglingLinks}</span>
-          <span className='l'>dangling symlinks</span>
+      </section>
+
+      <section className='agents-hub-sync-section'>
+        <div className='agents-hub-sync-section-header'>
+          <h3 className='agents-hub-sync-section-title'>What is shared</h3>
+          <span className='agents-hub-sync-section-hint'>How many agents use the shared copy</span>
         </div>
-        <div className='agents-hub-sync-stat'>
-          <span className='n'>{summary.staleLockEntries}</span>
-          <span className='l'>stale lock entries</span>
+        <div className='agents-hub-sync-coverage'>
+          <CoverageCard
+            active={part === 'skills'}
+            caption='Each agent gets a link to every shared skill.'
+            done={skillsLinked}
+            icon={<IconBook2 size={16} />}
+            label='Skills'
+            onClick={() => togglePart('skills')}
+            total={detected.length}
+          />
+          <CoverageCard
+            active={part === 'instructions'}
+            caption='Each agent is told to read your shared main.md.'
+            done={pointers}
+            icon={<IconFileText size={16} />}
+            label='Instructions'
+            onClick={() => togglePart('instructions')}
+            total={pointerTargets}
+          />
+          <CoverageCard
+            active={part === 'hooks'}
+            caption='Only Claude Code and Codex use them.'
+            done={hooksLinked}
+            icon={<IconTerminal size={16} />}
+            label='Hook scripts'
+            onClick={() => togglePart('hooks')}
+            total={hooksTargets}
+          />
         </div>
-      </div>
+      </section>
 
       <section className='agents-hub-sync-section'>
         <div className='agents-hub-sync-section-header'>
           <h3 className='agents-hub-sync-section-title'>
-            Problems <span className='sub'>fix individually, or let Sync all handle them</span>
+            {visible.length === 0
+              ? 'Nothing to fix'
+              : `${visible.length} ${visible.length === 1 ? 'thing' : 'things'} to fix`}
           </h3>
+          {part ? (
+            <button className='agents-hub-sync-link' onClick={() => setPart(undefined)} type='button'>
+              Show everything
+            </button>
+          ) : visible.length > 0 ? (
+            <span className='agents-hub-sync-section-hint'>
+              Fix one at a time, or all at once with the button above
+            </span>
+          ) : null}
         </div>
-        <div className='agents-hub-sync-card'>
-          {report.problems.length === 0 ? (
-            <div className='agents-hub-sync-row'>
-              <div className='agents-hub-sync-row-main'>
-                <span className='agents-hub-sync-icon-tile is-ok'>
-                  <IconCircleCheck size={14} />
+        {visible.length === 0 ? (
+          <div className='agents-hub-sync-card'>
+            <div className='agents-hub-sync-fix-row is-static'>
+              <span className='agents-hub-sync-icon-tile is-ok'>
+                <IconCircleCheck size={15} />
+              </span>
+              <div className='agents-hub-sync-fix-text'>
+                <span className='agents-hub-sync-fix-title'>
+                  {part && !synced ? 'Nothing to fix for this part.' : 'Every agent uses your shared folder.'}
                 </span>
-                <div className='agents-hub-sync-row-text'>
-                  <span className='agents-hub-sync-row-label'>Every agent points at the source.</span>
+                <span className='agents-hub-sync-fix-sub'>
+                  When you install a new agent, it shows up here until you sync it.
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <SyncFixList
+            onFix={(groups) => onOpenPlan('all', groups)}
+            onSelectAgent={onSelectAgent}
+            problems={visible}
+            report={report}
+          />
+        )}
+      </section>
+
+      {staleLock || untracked ? (
+        <section className='agents-hub-sync-section'>
+          {staleLock ? (
+            <>
+              <div className='agents-hub-sync-section-header'>
+                <h3 className='agents-hub-sync-section-title'>Optional cleanup</h3>
+                <span className='agents-hub-sync-section-hint'>Not included in "fix all" unless you turn it on</span>
+              </div>
+              <div className='agents-hub-sync-card'>
+                <div className='agents-hub-sync-fix-row is-static'>
+                  <span className='agents-hub-sync-icon-tile'>
+                    <IconLock size={15} />
+                  </span>
+                  <div className='agents-hub-sync-fix-text'>
+                    <span className='agents-hub-sync-fix-title'>Tidy the skills lock file</span>
+                    <span className='agents-hub-sync-fix-sub' title={staleLock.items.join('\n')}>
+                      {staleLock.count} {staleLock.count === 1 ? 'entry is' : 'entries are'} left over from skills you
+                      removed or renamed.
+                    </span>
+                  </div>
+                  <Switch
+                    aria-label='Tidy the skills lock file'
+                    checked={tidyLock}
+                    onCheckedChange={(value) => setTidyLock(value === true)}
+                  />
                 </div>
               </div>
-            </div>
-          ) : (
-            report.problems.map((problem) => <ProblemRow key={problem.kind} onFix={onFixProblem} problem={problem} />)
-          )}
-        </div>
-      </section>
-
-      <section className='agents-hub-sync-section'>
-        <div className='agents-hub-sync-section-header'>
-          <h3 className='agents-hub-sync-section-title'>
-            What is synced <span className='sub'>per agent, three things</span>
-          </h3>
-        </div>
-        <div className='agents-hub-sync-card'>
-          <div className='agents-hub-sync-row'>
-            <div className='agents-hub-sync-row-main'>
-              <span className='agents-hub-sync-icon-tile'>
-                <IconLink size={14} />
-              </span>
-              <div className='agents-hub-sync-row-text'>
-                <span className='agents-hub-sync-row-label'>
-                  Skills <Pill tone='ok'>{`${skillsLinked} linked`}</Pill>
-                  {summary.wholeFolderLinks > 0 ? (
-                    <Pill tone='warn'>{`${summary.wholeFolderLinks} whole-folder, to convert`}</Pill>
-                  ) : null}
-                  {summary.copiedSkillFolders > 0 ? (
-                    <Pill tone='warn'>{`${summary.copiedSkillFolders} copies`}</Pill>
-                  ) : null}
-                  {summary.danglingLinks > 0 ? <Pill tone='err'>{`${summary.danglingLinks} broken`}</Pill> : null}
-                </span>
-                <span className='agents-hub-sync-row-detail is-sans'>
-                  One relative link per skill in every agent folder. Whole-folder links are converted, so agent-local
-                  files always survive.
-                </span>
-              </div>
-            </div>
-            <div className='agents-hub-sync-row-control'>
-              <span className='agents-hub-sync-muted'>
-                {report.source.skills.filter((skill) => !skill.broken).length} in source
-              </span>
-            </div>
-          </div>
-          <div className='agents-hub-sync-row'>
-            <div className='agents-hub-sync-row-main'>
-              <span className='agents-hub-sync-icon-tile'>
-                <IconLink size={14} />
-              </span>
-              <div className='agents-hub-sync-row-text'>
-                <span className='agents-hub-sync-row-label'>
-                  Instructions (MDs) <Pill tone='ok'>{`${pointers} pointing at main.md`}</Pill>
-                  {pointerTargets - pointers > 0 ? (
-                    <Pill tone='warn'>{`${pointerTargets - pointers} to write`}</Pill>
-                  ) : null}
-                </span>
-                <span className='agents-hub-sync-row-detail is-sans'>
-                  A one-line entry file per agent that says "read ~/.agents/main.md". Never a symlink: several agents
-                  refuse linked instruction files.
-                </span>
-              </div>
-            </div>
-            <div className='agents-hub-sync-row-control'>
-              <span className='agents-hub-sync-muted'>
-                {report.source.mainMdExists ? 'main.md' : 'main.md missing'} +{' '}
-                {Math.max(report.source.mdFiles.length - 1, 0)} rule files
-              </span>
-            </div>
-          </div>
-          <div className='agents-hub-sync-row'>
-            <div className='agents-hub-sync-row-main'>
-              <span className='agents-hub-sync-icon-tile'>
-                <IconLink size={14} />
-              </span>
-              <div className='agents-hub-sync-row-text'>
-                <span className='agents-hub-sync-row-label'>
-                  Hook scripts <Pill tone='ok'>{`${hooksLinked} linked`}</Pill>
-                  <Pill>{`${detected.length - hooksTargets} n/a`}</Pill>
-                </span>
-                <span className='agents-hub-sync-row-detail is-sans'>
-                  Only the scripts folder is shared, into Claude Code and Codex. Each agent's hook config keeps its own
-                  format and is left alone.
-                </span>
-              </div>
-            </div>
-            <div className='agents-hub-sync-row-control'>
-              <span className='agents-hub-sync-muted'>{report.source.hooksDir}</span>
-            </div>
-          </div>
-        </div>
-      </section>
+            </>
+          ) : null}
+          {untracked ? (
+            <p className='agents-hub-sync-note' title={untracked.items.join('\n')}>
+              <IconInfoCircle size={14} />
+              {untracked.count} of your skills are not tracked by the skills CLI (your own and the ones Ghostex
+              bundles). That is expected, nothing to do.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }
