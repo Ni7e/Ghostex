@@ -504,22 +504,10 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         /*
-        CDXC:Workarea 2026-08-07:
-        A restored workspace keeps the sessions its panes surfaced at quit, but
-        their daemon providers may have gone to sleep (auto-sleep, or the
-        machine rebooted) while the app was closed. Attach alone cannot show
-        those: a sleeping session has no zmx provider to attach to. Wake each
-        pane's surfaced-but-sleeping session exactly once per restored project,
-        which respawns the agent session server-side and then attaches through
-        the ordinary lifecycle path. Later sleeps are user decisions, so the
-        project key is consumed on the first authoritative pass and never
-        re-armed.
-        */
-        /*
-        CDXC:Workarea 2026-09-19 WHY:
-        Only a return to the project resumes what its panes surfaced.
-        Starting an agent from the sidebar in a restored project that had not been visited since launch woke the sleeping session its pane surfaced, and that wake's result then selected the woken tab and took focus, so the new agent never appeared.
-        The pass therefore runs on the first focus snapshot that describes this project, and when that snapshot heads for a session no pane surfaces (a new agent, or a background row) it wakes nothing: the requested session owns the visit, and the covered sessions stay asleep until clicked like any sleeping tab.
+        CDXC:Workarea 2026-09-23 WHY:
+        A restored workspace keeps the sessions its panes surfaced at quit, but their daemon providers may have gone to sleep (auto-sleep, or the machine rebooted) while the app was closed, and attach alone cannot show a session with no zmx provider. So the first visit to each restored project wakes its panes' surfaced-but-sleeping sessions once; later sleeps are user decisions, so the project key is consumed on that pass and never re-armed.
+        Only a return to the project does this. It runs on the first focus snapshot that describes this project, and when that snapshot heads for a session no pane surfaces (a new agent, or a background row) it wakes nothing: the requested session owns the visit and the covered sessions stay asleep until clicked. Waking them anyway respawned sessions the user had not asked for, and before R7 the wake's result also took focus from the new agent.
+        Supersedes the 2026-08-07 note, which woke on the first authoritative pass whatever it was for.
         */
         let Some(project_id) = self.agents_workspace_project_id.clone() else {
             return;
