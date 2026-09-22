@@ -30,12 +30,15 @@ pub(super) struct HostCounters {
     pub(super) frames_published: u64,
     /// Effects performed or forwarded, by `Effect` variant name.
     pub(super) effects: BTreeMap<&'static str, u64>,
-    /// gxserver refusals, by the code they carried (`unknown` when they carried none).
+    /// Refused requests, as `<method>/<code>` (`refusals.rs`).
     pub(super) rpc_refusals: BTreeMap<String, u64>,
     /// Client-storage reads and writes that did not complete.
     pub(super) storage_refused: u64,
-    /// Renderer calls this build could not turn into an event.
-    pub(super) actions_unrouted: u64,
+    /// Renderer calls this build could not turn into an event, by method (a `brokerMessage` by its
+    /// `kind`). The names are code constants (`refusals::note_unrouted`).
+    pub(super) actions_unrouted: BTreeMap<&'static str, u64>,
+    /// Chunked transfers from the app runtime that broke and were retried (`transfers.rs`).
+    pub(super) transfers_refused: u64,
     /// Effects this build has no arm for, which is only possible when the core grows a variant:
     /// `Effect` is `#[non_exhaustive]` and `effects::route` spells out every one it knows.
     pub(super) effects_unrouted: u64,
@@ -110,6 +113,7 @@ impl HostDiagnostics {
                 "rpcRefusals": refusals,
                 "storageRefused": counters.storage_refused,
                 "actionsUnrouted": counters.actions_unrouted,
+                "transfersRefused": counters.transfers_refused,
                 "effectsUnrouted": counters.effects_unrouted,
                 "hostActionsSwallowed": counters.host_actions_swallowed,
                 // Spelled without `disabled`/`dropped` reading as a failure marker: the summary

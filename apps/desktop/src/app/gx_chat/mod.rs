@@ -26,7 +26,9 @@
 //!   the durable save outbox and its retry ladder, `saves.rs` connects that queue to a chat,
 //!   `dismissals.rs` folds the recovery markers a retirement leaves into ranges, `locale.rs` the
 //!   two formatted stamps the host owes the core.
-//! - `diagnostics.rs` writes the periodic counters, behind the usual two gates.
+//! - `transfers.rs` reassembles the app runtime's chunked broker messages.
+//! - `diagnostics.rs` writes the periodic counters, behind the usual two gates; `refusals.rs` names
+//!   a refused request and an unrouted call with code constants.
 
 mod boot;
 mod diagnostics;
@@ -40,10 +42,12 @@ mod identity;
 mod locale;
 mod outbox;
 mod queries;
+mod refusals;
 mod retained;
 mod saves;
 mod storage;
 mod store;
+mod transfers;
 mod worker;
 
 pub(crate) use identity::LOCAL_MACHINE_ID;

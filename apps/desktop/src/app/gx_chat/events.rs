@@ -36,9 +36,12 @@ pub(super) fn events_for(method: &str, arguments: &[Value]) -> Vec<Event> {
 /// The `resolve` the view sends after a `rpc` request settles.
 ///
 /// `arguments` is `[id, result, error]`, and the id is the one the core allocated: the view echoes
-/// `request["id"]` back verbatim, so unlike a replay there is no order matching to do here.
+/// `request["id"]` back verbatim, so unlike a replay there is no order matching to do here. A
+/// refusal is an answer like any other: it settles the request as `RpcOutcome::Err`, with or
+/// without a code, because a request the core never hears back about keeps its lane in flight for
+/// ever. The only call that yields no event is one with no usable id, and the caller counts it.
 pub(super) fn resolved(arguments: &[Value]) -> Option<Event> {
-    let request_id = arguments.first().and_then(Value::as_u64)?;
+    let request_id = arguments.first().and_then(request_id)?;
     let result = arguments.get(1).cloned().unwrap_or(Value::Null);
     let error = arguments.get(2).filter(|value| !value.is_null());
     let outcome = match error {
@@ -65,10 +68,33 @@ pub(super) fn resolved(arguments: &[Value]) -> Option<Event> {
     })
 }
 
-/// The seven `brokerMessage` kinds the QuickJS brain takes, minus the two the bridge owned.
+/// A request id as the view echoes it: the number the core allocated. A whole number that crossed
+/// as a float or a string is still that id.
+fn request_id(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| {
+            value
+                .as_f64()
+                .filter(|id| id.fract() == 0.0 && *id >= 0.0 && *id < 2f64.powi(53))
+                .map(|id| id as u64)
+        })
+        .or_else(|| value.as_str().and_then(|id| id.parse::<u64>().ok()))
+}
+
+/// What a broken chunked transfer does to the chat: the same retry a `reset` asks for, which is
+/// what `ChatTransfers`' failure callback runs (`controller.current().retry()`).
+pub(super) fn transfer_failed() -> Event {
+    Event::Connection(ConnectionUpdate::Resubscribed)
+}
+
+/// The seven `brokerMessage` kinds the QuickJS brain takes, minus the two the host answers
+/// elsewhere.
 ///
-/// `chunk` and `response` are the broker's own transfer and request plumbing; the Rust host has no
-/// broker, so a frame arrives whole and an answer arrives as `resolve`.
+/// `chunk` is reassembled by `transfers.rs` before it reaches this function, and a `response`
+/// answers a broker request id the Rust host never issues (its reads are `rpc`s, answered by
+/// `resolve`), so the one the relay can still send ("The shared chat service is starting.") is
+/// counted rather than routed.
 fn broker_events(message: Option<&Value>) -> Vec<Event> {
     let Some(message) = message else {
         return Vec::new();

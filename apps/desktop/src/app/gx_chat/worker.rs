@@ -28,10 +28,12 @@ use super::identity::ChatIdentity;
 use super::locale;
 use super::outbox::{self, Workers};
 use super::queries;
+use super::refusals;
 use super::retained;
 use super::saves;
 use super::storage;
 use super::store::ChatStore;
+use super::transfers::{self, Piece};
 
 /// What a drained chat hands its view. The same two cases `ChatRuntimeOutput` has, so the view's
 /// `pump` does not care which brain produced them.
@@ -281,6 +283,8 @@ pub(super) struct World {
     driving: Option<String>,
     /// Chats whose brain panicked. They are not rebuilt: the same input would panic again.
     disabled: std::collections::BTreeSet<String>,
+    /// The chunked transfer each chat is part way through receiving.
+    transfers: std::collections::BTreeMap<String, transfers::Transfer>,
 }
 
 fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
@@ -291,6 +295,8 @@ fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
             .wakes
             .values()
             .chain(world.retry_wakes.values())
+            .copied()
+            .chain(transfers::deadline(&world.transfers))
             .min()
             .map(|at| at.saturating_duration_since(Instant::now()));
         let command = match wait {
@@ -395,6 +401,7 @@ fn purge(world: &mut World, key: &str) {
     world.parked.remove(key);
     world.delivered.remove(key);
     world.held_requests.remove(key);
+    world.transfers.remove(key);
 }
 
 /// One command, or one pass of the due timers.
@@ -437,6 +444,8 @@ fn step(world: &mut World, command: Option<HostCommand>) {
             // how the app resolves a chat to one view already (`native_chat_for_generation`);
             // the replaced handle simply stops being drained.
             world.sinks.insert(key.clone(), sink);
+            // A transfer is the view's own subscription talking, and a new view subscribes afresh.
+            world.transfers.remove(&key);
             // `replayDraftSaves`: a save a previous run could not deliver is still in the
             // outbox, and opening its chat is what registers the writer that drains it.
             world.draft_workers.entry(key.clone()).or_default();
@@ -466,15 +475,43 @@ fn step(world: &mut World, command: Option<HostCommand>) {
                 return;
             }
             let events = if method == "resolve" {
-                note_rpc_refusal(world, &arguments);
+                refusals::note_rpc_refusal(&mut world.counters, &arguments);
                 saves::settle_draft_save(world, &key, &arguments);
-                events::resolved(&arguments).into_iter().collect()
+                let events: Vec<Event> = events::resolved(&arguments).into_iter().collect();
+                if events.is_empty() {
+                    refusals::note_unrouted(&mut world.counters, method, &arguments);
+                }
+                events
+            } else if method == "brokerMessage" && transfers::is_piece(arguments.first()) {
+                match transfers::accept(&mut world.transfers, &key, arguments.first()) {
+                    Piece::Pending => return,
+                    Piece::Complete(message) => {
+                        let message = [message];
+                        let events = events::events_for(method, &message);
+                        if events.is_empty() {
+                            refusals::note_unrouted(&mut world.counters, method, &message);
+                        }
+                        events
+                    }
+                    Piece::Failed => {
+                        world.counters.transfers_refused += 1;
+                        vec![events::transfer_failed()]
+                    }
+                }
             } else {
-                events::events_for(method, &arguments)
+                // `reset` is the runtime rebuilding itself, which abandons a transfer part way
+                // through (`transfers.clear()` in `native-host.ts`).
+                if method == "brokerMessage"
+                    && refusals::broker_kind_name(arguments.first()) == "brokerMessage.reset"
+                {
+                    world.transfers.remove(&key);
+                }
+                let events = events::events_for(method, &arguments);
+                if events.is_empty() {
+                    refusals::note_unrouted(&mut world.counters, method, &arguments);
+                }
+                events
             };
-            if events.is_empty() {
-                world.counters.actions_unrouted += 1;
-            }
             drive(world, &key, events);
         }
         Some(HostCommand::CallRaw { key, method, raw }) => {
@@ -483,7 +520,7 @@ fn step(world: &mut World, command: Option<HostCommand>) {
                 .unwrap_or_default();
             let events = events::events_for(method, &arguments);
             if events.is_empty() {
-                world.counters.actions_unrouted += 1;
+                refusals::note_unrouted(&mut world.counters, method, &arguments);
             }
             drive(world, &key, events);
         }
@@ -515,6 +552,12 @@ fn step(world: &mut World, command: Option<HostCommand>) {
             }
         }
         None => {
+            // A transfer that stopped arriving is failed at its deadline, as the TypeScript's
+            // own timer does, rather than waiting for a next piece that may never come.
+            for key in transfers::expire(&mut world.transfers) {
+                world.counters.transfers_refused += 1;
+                drive(world, &key, vec![events::transfer_failed()]);
+            }
             let due: Vec<String> = world
                 .retry_wakes
                 .iter()
@@ -556,38 +599,6 @@ fn settings_moved(world: &World, key: &str) -> Option<Event> {
     (settings.hide_account_emails != state.core.hide_account_emails
         || settings.title != state.core.title)
         .then(|| Event::SettingsChanged(Box::new(settings)))
-}
-
-/// Counts one gxserver refusal by its CODE, and only when the code is one.
-///
-/// CDXC:Diagnostics 2026-09-22 WHY:
-/// The code comes off the wire, so it is neither a code constant nor bounded: a daemon that
-/// answered with a sentence, a path or a token in that field would put it in a support log, and an
-/// unbounded map of them would also grow without limit. Anything that is not a short lower-case
-/// identifier is counted as `other`, and the map stops admitting new names at 24, which is what the
-/// summary prints anyway. The MESSAGE is never counted, only the code.
-fn note_rpc_refusal(world: &mut World, arguments: &[Value]) {
-    let Some(error) = arguments.get(2).filter(|value| !value.is_null()) else {
-        return;
-    };
-    let code = error
-        .get("code")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let named = code.len() <= 40
-        && !code.is_empty()
-        && code.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_-.".contains(&byte)
-        });
-    let code = if named { code } else { "other" };
-    let counted =
-        world.counters.rpc_refusals.len() < 24 || world.counters.rpc_refusals.contains_key(code);
-    let entry = if counted { code } else { "other" };
-    *world
-        .counters
-        .rpc_refusals
-        .entry(entry.to_string())
-        .or_insert(0) += 1;
 }
 
 /// Applies a burst of events to one chat, performs what the host owns, and drains a frame.
