@@ -86,6 +86,7 @@ fn normalized_path(value: &str) -> PathBuf {
             .unwrap_or_else(|_| PathBuf::from("/"))
             .join(expanded)
     };
+    let mut prefix: Option<std::ffi::OsString> = None;
     let mut parts: Vec<std::ffi::OsString> = Vec::new();
     for component in absolute.components() {
         match component {
@@ -94,10 +95,19 @@ fn normalized_path(value: &str) -> PathBuf {
                 parts.pop();
             }
             Component::Normal(part) => parts.push(part.to_os_string()),
-            Component::RootDir | Component::Prefix(_) => {}
+            // The drive or UNC prefix is part of the identity: dropping it made `C:\project` and `D:\project` the same folder.
+            Component::Prefix(value) => prefix = Some(value.as_os_str().to_os_string()),
+            Component::RootDir => {}
         }
     }
-    let mut result = PathBuf::from("/");
+    let mut result = match prefix {
+        Some(prefix) => {
+            let mut root = prefix;
+            root.push(std::path::MAIN_SEPARATOR_STR);
+            PathBuf::from(root)
+        }
+        None => PathBuf::from("/"),
+    };
     for part in parts {
         result.push(part);
     }
