@@ -447,7 +447,13 @@ pub fn bare_file_paths(text: &str) -> Vec<BareFilePath> {
         }
         let candidate = &without_leading[..without_leading.len() - trailing];
         let mention_path = if quoted_mention {
-            &candidate[2..candidate.len() - 1]
+            // `candidate.slice(2, -1)`, which CLAMPS: the two-character token `@"` satisfies both
+            // `startsWith('@"')` and `endsWith('"')` on the same quote, and JavaScript answers the
+            // empty string where `&candidate[2..1]` panics. A user typing `did you mean @" ?` took
+            // the chat window down (2026-09-22).
+            candidate
+                .get(2..candidate.len().saturating_sub(1))
+                .unwrap_or("")
         } else if candidate.starts_with('@') && !candidate.starts_with("@\"") {
             &candidate[1..]
         } else {

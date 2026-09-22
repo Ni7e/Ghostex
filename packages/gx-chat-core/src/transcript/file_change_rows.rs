@@ -40,8 +40,29 @@ fn relative_to(normalized_path: &str, root: &str, windows: bool) -> Option<Strin
             value.to_string()
         }
     };
+    // The comparison folds case but the SLICE must not use the folded length: Rust's
+    // `to_lowercase` is full Unicode and changes the byte length of several characters (U+212A
+    // folds 3 bytes to 1), so `root.len() + 1` could land past the end of the path or inside a
+    // character. The prefix is taken from the original string instead, and only after the folded
+    // test agrees.
     if comparable(normalized_path).starts_with(&format!("{}/", comparable(root))) {
-        return Some(normalized_path[root.len() + 1..].to_string());
+        if let Some(rest) = normalized_path.get(root.len() + 1..) {
+            return Some(rest.to_string());
+        }
+        // A case fold that changed the byte length: fall back to the longest prefix of
+        // `normalized_path` whose fold equals the root's, which is what the test just proved
+        // exists.
+        let folded_root = comparable(root);
+        for (offset, _) in normalized_path
+            .char_indices()
+            .chain(std::iter::once((normalized_path.len(), ' ')))
+        {
+            if comparable(&normalized_path[..offset]) == folded_root {
+                return normalized_path
+                    .get(offset + 1..)
+                    .map(std::string::ToString::to_string);
+            }
+        }
     }
     None
 }

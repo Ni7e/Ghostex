@@ -58,6 +58,15 @@ const SESSION_ID = 'gx-synthetic-hostile-session';
  * and a right-to-left override.
  */
 const NASTY_TEXT = [
+  // `@"` satisfies both `startsWith('@"')` and `endsWith('"')` on the SAME quote, which is the
+  // two-character token that panicked `bare_file_paths` on 2026-09-22. A user can type it.
+  'did you mean @" ?',
+  '@"',
+  // A blockquote plus an inline code path sends the node through the alert test, whose bound is
+  // the UTF-16 constant 60; byte 60 here is interior to the emoji.
+  `> \`a/b\` ${'x'.repeat(51)}\u{1F600}`,
+  // The alert NAME cut at byte 4, which is interior to the euro sign.
+  '`a/b`\n\n> [!no\u20ac]]',
   '\ud800 lone high surrogate',
   'lone low surrogate \udfff',
   'pair 😀 then half \ud83d',
@@ -420,6 +429,28 @@ async function main(): Promise<number> {
   await pump();
 
   phase('nasty text');
+  // 4a. The same text as a USER message body. `bare_paths` is `is_user`, so the bare-path scan
+  //     and the Markdown walk's alert test only run on this side, and both of them cut the text
+  //     at a fixed offset.
+  for (const text of NASTY_TEXT) {
+    frame(
+      envelope('sessionChatAppended', {
+        messages: [
+          {
+            id: `nasty-user-${frames}`,
+            role: 'user',
+            blocks: [{ type: 'text', text }],
+            timestamp: CLOCK_START,
+            source: 'transcript',
+            byteOffset: 2,
+          },
+        ],
+      })
+    );
+    await settle();
+  }
+  await pump();
+
   // 4b. The same text where a NAME is read rather than a body: the agent fleet's model and
   //     nickname, the task list, the terminal activity. `subagentModelLabel` walks a model name
   //     byte by byte looking for `gpt-` and `-codex`, which is where `a😀😀` panicked the core

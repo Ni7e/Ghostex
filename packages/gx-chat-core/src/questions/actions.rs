@@ -97,15 +97,27 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
         ActionKind::AsyncQuestionOption => {
             let projection = async_projection(state, prompt.as_ref(), notice.as_ref());
             let key = action.param("key").and_then(Value::as_str).unwrap_or("");
-            let index = action.param("index").and_then(Value::as_u64).unwrap_or(0) as u32;
-            let offered = projection.question.as_ref().is_some_and(|question| {
-                question.key == key
-                    && question
-                        .options
-                        .as_ref()
-                        .is_some_and(|options| (index as usize) < options.len())
+            // `options[command.index]`: an index that is absent, negative or past the end reads
+            // `undefined` in the TypeScript and the arm does nothing.
+            //
+            // CDXC:SessionChat 2026-09-22 WHY:
+            // The narrowing used to be `as u32` with a `0` default, so an index of 4294967296
+            // WRAPPED to 0, passed the length test below and answered the question with the first
+            // option on the user's behalf. The bound is checked before the cast now.
+            let index = action
+                .param("index")
+                .and_then(Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok());
+            let offered = index.is_some_and(|index| {
+                projection.question.as_ref().is_some_and(|question| {
+                    question.key == key
+                        && question
+                            .options
+                            .as_ref()
+                            .is_some_and(|options| (index as usize) < options.len())
+                })
             });
-            if !projection.disabled && offered {
+            if let (false, true, Some(index)) = (projection.disabled, offered, index) {
                 let session_key = state.identity.session_key.clone();
                 effects.extend(async_controller::select(
                     &mut state.questions.async_questions,

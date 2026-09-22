@@ -32,7 +32,9 @@ use crate::transcript::file_paths::{
 use crate::transcript::file_position::file_position_suffix;
 use crate::transcript::images::{image_source_pairs, ImageRef};
 use crate::transcript::json_text::stringify_pairs;
-use crate::transcript::jsstr::{ascii_lower, decode_uri, is_js_space, js_trim, split_lf};
+use crate::transcript::jsstr::{
+    ascii_lower, decode_uri, is_js_space, js_trim, split_lf, utf16_len, utf16_take,
+};
 
 /// Private-use character: never written by an agent, never rendered.
 pub const NATIVE_MARK: char = '\u{e000}';
@@ -312,10 +314,13 @@ fn is_quoted_alert(text: &str) -> bool {
     let Some(rest) = rest.strip_prefix("[!") else {
         return false;
     };
+    // Byte ranges through `get`, not `&rest[..n]`: the names are ASCII but `rest` is the user's
+    // text, and a name-length cut can land inside a character (`[!no\u{20ac}]]` cut at byte 4).
     ALERT_NAMES.into_iter().any(|name| {
-        rest.len() > name.len()
-            && rest[..name.len()].eq_ignore_ascii_case(name)
-            && rest.as_bytes()[name.len()] == b']'
+        rest.as_bytes()
+            .get(..name.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(name.as_bytes()))
+            && rest.as_bytes().get(name.len()) == Some(&b']')
     })
 }
 
@@ -571,11 +576,15 @@ fn collect_edits(
             // `markdown.slice(start ?? 0, 60)` in the TypeScript: an end index, not a length, so a
             // blockquote past offset 60 tests the empty string. Reproduced rather than corrected.
             let quoted_alert = matches!(node, Node::Blockquote(_)) && {
-                let start = span.map_or(0, |(start, _)| start);
-                let head = if start >= 60 {
-                    ""
-                } else {
-                    &markdown[start..60.min(markdown.len())]
+                // `markdown.slice(start ?? 0, 60)`: an END index in UTF-16 code units, not a
+                // length, so a blockquote past offset 60 tests the empty string. The bound is
+                // taken in code units here rather than in bytes, because `&markdown[start..60]`
+                // panics whenever byte 60 falls inside a character.
+                let start = span.map_or(0, |(start, _)| start).min(markdown.len());
+                let before = markdown.get(..start).map_or(0, utf16_len);
+                let head = match 60usize.checked_sub(before) {
+                    Some(units) => utf16_take(markdown.get(start..).unwrap_or(""), units),
+                    None => "",
                 };
                 is_quoted_alert(head)
             };
