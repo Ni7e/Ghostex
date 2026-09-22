@@ -187,7 +187,14 @@ async function main(): Promise<number> {
       else if (request.method === 'composer') {
         const composer = (request.params.composer ?? {}) as Record<string, unknown> & { operation: string };
         const { operation, ...rest } = composer;
-        value = await world.outside(() => backend.composer(operation, rest));
+        // The Chat Lab double answers a bare `true` for the two mode writes where the desktop host
+        // answers the flag it wrote (`native-composer.ts`: `return request.enabled === true`).
+        // Grading against the stub would grade the double, not the brain: a second `toggleSummary`
+        // would come back ON.
+        value =
+          operation === 'summary' || operation === 'verbose'
+            ? rest.enabled === true
+            : await world.outside(() => backend.composer(operation, rest));
       } else return;
       host.resolve(request.id, crossing(value));
     } catch (error) {
@@ -454,8 +461,8 @@ async function main(): Promise<number> {
         await act({ type: 'loadEarlier' });
         await act({ type: 'loadWork', id: firstUserId(), work: null });
         await act({ type: 'toggleSummary' });
-        await act({ type: 'setVerbose', verbose: true });
-        await act({ type: 'setVerbose', verbose: null });
+        await act({ type: 'setVerbose', enabled: true });
+        await act({ type: 'setVerbose', enabled: false });
         await act({ type: 'toggleSummary' });
       },
     },

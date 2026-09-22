@@ -144,6 +144,26 @@ impl BridgeTranslator {
         self.unmatched_answers
     }
 
+    /// The gxserver METHOD of every request still in flight, oldest first, for a report.
+    ///
+    /// Method names only: a request's parameters are the user's conversation and never leave the
+    /// translator. An entry here is a request the bridge never answered, which also makes every
+    /// later answer eligible to be handed to it instead of to the record it belongs to.
+    pub fn outstanding_methods(&self) -> Vec<String> {
+        self.outstanding
+            .iter()
+            .map(|pending| match &pending.method {
+                Some(method) => method.as_str().to_string(),
+                None => "composerBoot".to_string(),
+            })
+            .collect()
+    }
+
+    /// How many storage answers the core is still waiting for.
+    pub fn queued_storage_answers(&self) -> usize {
+        self.storage_answers.len()
+    }
+
     /// The revision the translator last drained.
     pub fn last_revision(&self) -> u64 {
         self.last_revision

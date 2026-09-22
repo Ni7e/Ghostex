@@ -167,7 +167,34 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
             }
             continue;
         };
+        let before_queue = translator.queued_storage_answers();
         let outcome = translator.feed(&mut core, call, context);
+        if std::env::var("GX_CHAT_STORAGE").is_ok() {
+            let number = record.get("n").and_then(Value::as_u64).unwrap_or_default();
+            let stores: Vec<String> = outcome
+                .effects
+                .iter()
+                .filter_map(|effect| match effect {
+                    ghostex_gx_chat_core::Effect::WriteStorage { key, .. } => {
+                        Some(format!("w:{}", key.store))
+                    }
+                    ghostex_gx_chat_core::Effect::ReadStorage { key } => {
+                        Some(format!("r:{}", key.store))
+                    }
+                    ghostex_gx_chat_core::Effect::FlushStorage { store } => {
+                        Some(format!("f:{store}"))
+                    }
+                    _ => None,
+                })
+                .collect();
+            let after = translator.queued_storage_answers();
+            if !stores.is_empty() || after != before_queue {
+                eprintln!(
+                    "n={number} m={method} raised=[{}] queue {before_queue}->{after}",
+                    stores.join(",")
+                );
+            }
+        }
         match kind {
             "in" => {
                 inputs += 1;
@@ -236,6 +263,19 @@ fn replay(input: &Path, utc_offset_minutes: i32) -> Result<Report, String> {
     // Storage answers the recording ran out of `resolve` records for are delivered at the end,
     // so a surface that reads one is not left loading in the last documents of the run.
     translator.flush_storage(&mut core, ChatContext::at(0.0));
+    // `GX_CHAT_REQUESTS=1` names the METHOD of every request the bridge never answered, oldest
+    // first. One of those is also what makes a later `resolve` land on the wrong record, because
+    // an answer that names nothing goes to the oldest request that could have produced it. Method
+    // names only: a request's parameters are the user's conversation.
+    if std::env::var("GX_CHAT_REQUESTS").is_ok() {
+        for method in translator.outstanding_methods() {
+            eprintln!("unanswered method={method}");
+        }
+        eprintln!(
+            "storage answers still queued: {}",
+            translator.queued_storage_answers()
+        );
+    }
     Ok(Report {
         name,
         records,

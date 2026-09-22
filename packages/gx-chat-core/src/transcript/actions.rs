@@ -84,14 +84,15 @@ pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext)
                 durable: false,
             }]
         }
+        // `verboseOverride = await composer('verbose', {enabled: command.enabled})`, and the host
+        // answers `request.enabled === true`: a BOOLEAN, never absent. So the gesture always pins
+        // the override, where an absent stored record is what leaves it following the setting.
         ActionKind::SetVerbose => {
-            let enabled = param(action, "enabled").and_then(Value::as_bool);
-            state.transcript_view.pending_verbose_override = Some(enabled);
+            let enabled = param(action, "enabled").and_then(Value::as_bool) == Some(true);
+            state.transcript_view.pending_verbose_override = Some(Some(enabled));
             vec![Effect::WriteStorage {
                 key: crate::composer::storage::verbose_key(&state.identity.session_key),
-                value: Some(
-                    crate::composer::storage::encode_verbose(enabled == Some(true)).to_string(),
-                ),
+                value: Some(crate::composer::storage::encode_verbose(enabled).to_string()),
                 durable: false,
             }]
         }
