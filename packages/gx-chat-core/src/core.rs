@@ -226,6 +226,16 @@ impl ChatCore {
         }
     }
 
+    /// Forgets what the host was last sent, so the next frame ships every channel whole.
+    ///
+    /// For a renderer that attaches to a core another renderer was drained from. The TypeScript
+    /// never needed it, because each view booted its own brain with nothing sent; a host that keeps
+    /// one core per session across views must call it, or the new view receives only the splice
+    /// against the rows the OLD view held and draws an empty transcript.
+    pub fn forget_sent(&mut self) {
+        self.sent = SentFrame::default();
+    }
+
     /// The id for the next request the core asks for.
     ///
     /// One counter for the whole core, on the state, because every family draws from it and

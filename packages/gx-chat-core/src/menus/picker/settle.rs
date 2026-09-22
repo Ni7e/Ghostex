@@ -277,18 +277,15 @@ fn settle_outbox_delivery(state: &mut ChatState, _context: &ChatContext) -> Vec<
     if state.session.pending_model_selection.is_absent() {
         return Vec::new();
     }
-    let mut params = serde_json::Map::new();
-    params.insert("model".to_string(), Value::String(intent.model.clone()));
-    params.insert("effort".to_string(), Value::String(intent.effort.clone()));
-    for (key, value) in &intent.options {
-        params.insert(key.clone(), value.clone());
-    }
-    if let Some(scope) = intent.scope {
-        params.insert(
-            "scope".to_string(),
-            Value::String(scope.as_str().to_string()),
-        );
-    }
+    // `select({ ...params, defer: true })`: the WHOLE intent, `options` nested and `id` included.
+    // gxserver reads `params.options` (`session_chat_model_selection::read_options`); spreading
+    // `mode` and `fastMode` to the top level made an options-only pick (Mode, Fast) read as a pick
+    // with no model and no options, which gxserver refuses as `invalidParams`, so the pick was
+    // retried every five seconds and never reached the agent.
+    let mut params = match serde_json::to_value(&intent) {
+        Ok(Value::Object(params)) => params,
+        _ => serde_json::Map::new(),
+    };
     params.insert("defer".to_string(), Value::Bool(true));
     let request_id = state.core.allocate_request_id();
     state.pickers.model_selection.delivering = true;
