@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,27 +22,33 @@ export function resolveLocalStartCodeSignIdentity(environment, installedAppPath)
   if (Object.hasOwn(environment, 'GHOSTEX_GPUI_SIGN_IDENTITY')) {
     return environment.GHOSTEX_GPUI_SIGN_IDENTITY ?? '';
   }
-  const identities = listCodeSigningIdentities(environment);
+  const listing = listCodeSigningIdentities(environment);
   const probeFailures = [];
-  for (const identity of preferredLocalStartCodeSignIdentities(identities)) {
+  for (const identity of preferredLocalStartCodeSignIdentities(listing.identities)) {
     const failure = identitySigningFailure(identity.name, environment);
     if (failure === undefined) {
+      rememberLocalStartCodeSignIdentity(identity.name, environment);
       return identity.name;
     }
     probeFailures.push(`  ${identity.name}: ${failure}`);
   }
   /*
-  CDXC:Build 2026-09-21 WHY:
+  CDXC:Build 2026-09-22 WHY:
   macOS keys folder permissions (Documents, removable volumes, and the rest of TCC) to the app's designated requirement. A certificate-signed build keeps one requirement across rebuilds; an ad-hoc build's requirement is its cdhash, so every rebuild is a new app to TCC and the permission prompts come back on each restart and session switch.
-  A start whose shell could not use the keychain used to warn once and install an ad-hoc build over the certificate-signed one, wiping the grants. Ad-hoc is now only for a machine with no certificate at all and no certificate-signed install, or an explicit GHOSTEX_GPUI_SIGN_IDENTITY=-. Every other case stops here, before the build, and prints codesign's own error so the keychain problem gets fixed instead of hidden. Supersedes the 2026-08-25 fall-back-to-ad-hoc behaviour.
+  A start whose shell could not use the keychain used to warn once and install an ad-hoc build over the certificate-signed one, wiping the grants; and once the install was ad-hoc, every later keychain-less start stayed ad-hoc without a word because nothing recorded that this computer has a certificate. The identity of every successful certificate start is now remembered per computer, and ad-hoc is only for a computer that has never signed with a certificate, or an explicit GHOSTEX_GPUI_SIGN_IDENTITY=-. Every other case stops here, before the build, and prints codesign's and security's own output so the keychain problem gets fixed instead of hidden. Supersedes the 2026-08-25 fall-back-to-ad-hoc behaviour.
   */
   const installedAuthority = installedAppPath ? readCertificateAuthority(installedAppPath, environment) : undefined;
-  if (probeFailures.length > 0 || installedAuthority) {
+  const rememberedIdentity = rememberedLocalStartCodeSignIdentity(environment);
+  if (probeFailures.length > 0 || installedAuthority || rememberedIdentity) {
     console.error(
       [
         probeFailures.length > 0
           ? `This shell lists code-signing identities but cannot sign with any of them:\n${probeFailures.join('\n')}`
-          : `${installedAppPath} is signed with "${installedAuthority}", but this shell lists no code-signing identity.`,
+          : installedAuthority
+            ? `${installedAppPath} is signed with "${installedAuthority}", but this shell lists no code-signing identity.`
+            : `This computer signs local Ghostex builds with "${rememberedIdentity}" (remembered in ${localStartCodeSignIdentityPath(environment)}), but this shell lists no code-signing identity.`,
+        ...(listing.output ? [`security find-identity -v -p codesigning said:\n${indent(listing.output)}`] : []),
+        `security list-keychains said:\n${indent(keychainSearchList(environment))}`,
         "An ad-hoc build would make macOS forget the app's folder permissions and ask again after every rebuild.",
         'Fix keychain access for this shell (unlock the login keychain, or run outside a sandboxed agent shell), or set GHOSTEX_GPUI_SIGN_IDENTITY=- to install an ad-hoc build on purpose.',
       ].join('\n')
@@ -53,6 +59,43 @@ export function resolveLocalStartCodeSignIdentity(environment, installedAppPath)
     'No Apple code-signing identity was found; using ad-hoc GPUI signing. macOS will ask for permissions again after GPUI rebuilds.'
   );
   return '-';
+}
+
+function indent(text) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => `  ${line}`)
+    .join('\n');
+}
+
+function localStartCodeSignIdentityPath(environment) {
+  const stateHome = environment.XDG_STATE_HOME?.trim();
+  const stateRoot = stateHome && path.isAbsolute(stateHome) ? stateHome : path.join(homedir(), '.local', 'state');
+  return path.join(stateRoot, 'ghostex', 'local-start', 'macos-code-sign-identity');
+}
+
+function rememberedLocalStartCodeSignIdentity(environment) {
+  try {
+    return readFileSync(localStartCodeSignIdentityPath(environment), 'utf8').trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function rememberLocalStartCodeSignIdentity(identityName, environment) {
+  const identityPath = localStartCodeSignIdentityPath(environment);
+  mkdirSync(path.dirname(identityPath), { recursive: true });
+  writeFileSync(identityPath, `${identityName}\n`);
+}
+
+function keychainSearchList(environment) {
+  const result = spawnSync('security', ['list-keychains'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: environment,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return result.error?.message ?? `${result.stdout}${result.stderr}`.trim();
 }
 
 function readCertificateAuthority(codePath, environment) {
@@ -121,10 +164,14 @@ function listCodeSigningIdentities(environment) {
     cwd: repoRoot,
     encoding: 'utf8',
     env: environment,
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
-  if (result.error || result.status !== 0) {
-    return [];
+  if (result.error) {
+    return { identities: [], output: result.error.message };
+  }
+  const output = `${result.stdout}${result.stderr}`.trim();
+  if (result.status !== 0) {
+    return { identities: [], output };
   }
   const identities = [];
   for (const line of result.stdout.split(/\r?\n/)) {
@@ -133,7 +180,7 @@ function listCodeSigningIdentities(environment) {
       identities.push({ hash: match[1], name: match[2] });
     }
   }
-  return identities;
+  return { identities, output };
 }
 
 export function withoutColorDisablingEnvironment(environment) {

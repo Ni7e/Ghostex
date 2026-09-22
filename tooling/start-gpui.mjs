@@ -677,13 +677,15 @@ function ensureLocalReferenceCheckouts() {
   });
 }
 
-function requirePinnedDependencyRevision(name, checkoutPath) {
+/**
+ * CDXC:Build 2026-09-22 WHY:
+ * Local starts must build dependency edits before their gitlinks are committed. Requiring the parent HEAD revision blocked valid local GPUI work; initialize missing submodules at the pin, but use an existing checkout as-is.
+ */
+function reportLocalDependencyRevision(name, checkoutPath) {
   const expectedRevision = dependencyGitOutput(repoRoot, ['rev-parse', `HEAD:.dependencies/${name}`]);
   const revision = dependencyGitOutput(checkoutPath, ['rev-parse', 'HEAD']);
   if (revision !== expectedRevision) {
-    throw new Error(
-      `GPUI dependency ${checkoutPath} is at ${revision || 'an unreadable revision'}, expected committed revision ${expectedRevision}. Refusing to alter an existing checkout because it may contain user work.`
-    );
+    logStartDetail(`Using local ${name} revision ${revision} (committed pin ${expectedRevision}).`);
   }
 }
 
@@ -701,7 +703,7 @@ function ensureReferenceCheckout({ name, requiredRelativePath }) {
       throw new Error(`GPUI dependency ${expectedPath} is incomplete after submodule initialization.`);
     }
   }
-  preparePinnedDependency(name, expectedPath);
+  reportLocalDependencyRevision(name, expectedPath);
 }
 
 function dependencySubmoduleIsUninitialized(name) {
@@ -726,10 +728,6 @@ function initializeDependencySubmodule(name) {
     env: startEnvironment,
     quietLabel: `${name} dependency checkout`,
   });
-}
-
-function preparePinnedDependency(name, checkoutPath) {
-  requirePinnedDependencyRevision(name, checkoutPath);
 }
 
 function dependencyGitOutput(checkoutPath, args) {

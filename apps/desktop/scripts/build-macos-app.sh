@@ -97,10 +97,30 @@ case "$(printf '%s' "$GHOSTEX_REQUIRE_SPARKLE" | tr '[:upper:]' '[:lower:]')" in
 	;;
 esac
 
-# Signing: unset identity keeps the historical ad-hoc dev signing. Release
-# builds pass the Developer ID identity; notarization is opt-in and uses the
-# same notarytool keychain profile as the macOS release pipeline.
+# Signing: release builds pass the Developer ID identity; notarization is
+# opt-in and uses the same notarytool keychain profile as the macOS release
+# pipeline. GHOSTEX_GPUI_SIGN_IDENTITY=- forces ad-hoc signing.
+#
+# CDXC:Build 2026-09-22 WHY:
+# An unset identity used to mean ad-hoc, so a packager run outside `bun run start` (an agent working around a failed start built the bundle here and hand-installed it with ditto and mv) shipped an ad-hoc app, whose designated requirement is its cdhash, so macOS forgot the app's folder permissions and asked again after every rebuild.
+# The local start records the certificate it signs with per computer (tooling/local-start-utils.mjs); an unset identity now means that certificate when the record exists, and ad-hoc only on a computer that has never signed with one. A certificate that cannot sign from this shell fails the build instead of degrading it.
 GHOSTEX_GPUI_SIGN_IDENTITY="${GHOSTEX_GPUI_SIGN_IDENTITY:-}"
+if [[ -z "$GHOSTEX_GPUI_SIGN_IDENTITY" ]]; then
+	remembered_identity_state_root="$HOME/.local/state"
+	if [[ "${XDG_STATE_HOME:-}" == /* ]]; then
+		remembered_identity_state_root="$XDG_STATE_HOME"
+	fi
+	remembered_identity_file="$remembered_identity_state_root/ghostex/local-start/macos-code-sign-identity"
+	if [[ -s "$remembered_identity_file" ]]; then
+		GHOSTEX_GPUI_SIGN_IDENTITY="$(head -n 1 "$remembered_identity_file")"
+		# A local certificate signs without a secure timestamp: the release
+		# pipeline sets the flag explicitly, and Apple's timestamp server is
+		# slow or unreachable offline.
+		GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG="${GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG:---timestamp=none}"
+		export GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG
+		echo "Signing with this computer's local-start identity: $GHOSTEX_GPUI_SIGN_IDENTITY"
+	fi
+fi
 GHOSTEX_GPUI_NOTARIZE="${GHOSTEX_GPUI_NOTARIZE:-0}"
 case "$(printf '%s' "$GHOSTEX_GPUI_NOTARIZE" | tr '[:upper:]' '[:lower:]')" in
 1 | true | yes | on)
@@ -1405,11 +1425,11 @@ stage_gpui_sparkle_framework_if_available
 # the small helper apps and seal the separately signed framework component into
 # the on-demand manifest.
 
-# Signing: unset GHOSTEX_GPUI_SIGN_IDENTITY keeps the historical ad-hoc --deep
-# re-sign for dev builds; a Developer ID identity runs the inside-out
-# hardened-runtime recipe in codesign-gpui-app.sh (macOS
-# codesign-ghostex-host.sh port), and GHOSTEX_GPUI_NOTARIZE=1 notarizes and
-# staples the app for distribution outside a DMG release.
+# Signing: an ad-hoc identity (-) runs the historical --deep re-sign; a
+# certificate identity runs the inside-out hardened-runtime recipe in
+# codesign-gpui-app.sh (macOS codesign-ghostex-host.sh port), and
+# GHOSTEX_GPUI_NOTARIZE=1 notarizes and staples the app for distribution
+# outside a DMG release.
 sign_gpui_app_bundle
 notarize_and_staple_gpui_app_if_requested
 # rsync of this bundle's contents does not copy wrapper Finder flags, so the
