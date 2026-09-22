@@ -116,7 +116,8 @@ function describe(left: { present: boolean; value: unknown }, right: { present: 
     return `numbers, actual - expected = ${b - a}${Number.isInteger(a) && Number.isInteger(b) ? '' : ' (fractional)'}`;
   }
   if (typeof a !== typeof b || Array.isArray(a) !== Array.isArray(b) || (a === null) !== (b === null)) {
-    return `types ${kindOf(a)} vs ${kindOf(b)}`;
+    const only = typeof a === 'string' ? `expected shape ${shape(a)}` : typeof b === 'string' ? `actual shape ${shape(b)}` : '';
+    return `types ${kindOf(a)} vs ${kindOf(b)}${only ? `; ${only}` : ''}`;
   }
   if (Array.isArray(a) && Array.isArray(b)) {
     return `arrays len ${a.length} vs ${b.length}`;
