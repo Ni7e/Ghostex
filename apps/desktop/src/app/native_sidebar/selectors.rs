@@ -173,16 +173,14 @@ impl GhostexGpuiApp {
             .on_mouse_down(MouseButton::Right, cx.listener(move |app, event: &gpui::MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 let mut items = Vec::new();
-                // CDXC:Spaces 2026-09-22 DECISION: User: a Space icon's menu is two labelled groups: "Manage" at the top (Edit Space, New Space) and "Sleep" at the bottom (Sleep Space, Sleep Inactive, Sleep Others). Sleep Space and Sleep Others sleep sessions and open views alike, all of which stay in place asleep; Sleep Inactive is the Space's idle sessions only. The Other button offers the same rows for the projects no Space claims.
+                // CDXC:Spaces 2026-09-22 DECISION: User: a Space icon's menu is two labelled groups: "Manage" at the top (Edit Space, New Space) and "Sleep" at the bottom, and the Sleep group shows only Sleep Inactive. This supersedes the same-day request for Sleep Space and Sleep Others on this menu. Sleep Inactive is the Space's idle sessions only. The Other button offers the same rows for the projects no Space claims.
                 items.push(json!({"label": "Manage", "heading": true}));
                 if menu_id != "other" { items.push(json!({"label": "Edit Space", "icon": "pencil", "command": {"type": "editSpace", "spaceId": menu_id}})); }
                 items.push(json!({"label": "New Space", "icon": "plus", "command": {"type": "editSpace"}}));
                 items.push(json!({"separator": true}));
                 items.push(json!({"label": "Sleep", "heading": true}));
                 let plans = app.gx_store_space_sleep_plans(&menu_id);
-                for (label, scope) in [("Sleep Space", SpaceSleepScope::Space), ("Sleep Inactive", SpaceSleepScope::Inactive), ("Sleep Others", SpaceSleepScope::Others)] {
-                    items.push(json!({"label": label, "icon": "moon", "disabled": !app.gx_store_space_sleep_has_work(plans.as_ref(), scope), "command": {"type": "sleepSpace", "spaceId": menu_id, "scope": scope.as_str()}}));
-                }
+                items.push(json!({"label": "Sleep Inactive", "icon": "moon", "disabled": !app.gx_store_space_sleep_has_work(plans.as_ref(), SpaceSleepScope::Inactive), "command": {"type": "sleepSpace", "spaceId": menu_id, "scope": SpaceSleepScope::Inactive.as_str()}}));
                 Self::show_native_sidebar_menu(&json!(items), event.position, scale, window, cx);
             }))
             .into_any_element()

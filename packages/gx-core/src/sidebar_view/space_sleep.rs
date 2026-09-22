@@ -1,12 +1,10 @@
 //! Sleep Space: the projects and rows a Space icon's "Sleep Space" acts on.
 //!
 //! CDXC:Spaces 2026-09-22 DECISION:
-//! User: right-clicking a Space's icon offers "Sleep Space", which sleeps everything in that
-//! Space: every session, and the views its projects have open ("if we have Docs View running
-//! there, browser tabs, all of those need to go to sleep. They should still be there, but just
-//! slept"), then asked for "Sleep Inactive" and "Sleep Others" beside it. A project's own Sleep is
-//! sessions only (`CDXC:SessionSleep 2026-09-21 DECISION` on `plan_bulk_request`); Sleep Space
-//! and Sleep Others are the actions that cover views too, because the user asked for it by name.
+//! User: the Space icon menu's Sleep group shows only Sleep Inactive. This supersedes the same-day
+//! request for Sleep Space and Sleep Others on that menu. Sleep Inactive is the Space's idle
+//! sessions. Sleep Space still means every session and open view in the Space, left in place
+//! asleep, and Sleep Others means the same outside it; the menu just no longer offers those two.
 //!
 //! The set is the Space's, not the drawn list's. The Space under the pointer need not be the
 //! selected one, and the drawn list is filtered to the selected Space, Show Hidden and the tag
@@ -45,7 +43,8 @@ impl SpaceSleepPlan {
     }
 }
 
-/// The three sleeps a Space icon's menu offers, resolved from one list build.
+/// The three sleeps a `sleepSpace` command can name, resolved from one list build.
+/// The Space icon menu offers only Sleep Inactive.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SpaceSleepPlans {
     pub space_id: String,

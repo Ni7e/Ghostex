@@ -1,9 +1,9 @@
 //! A Space icon's Sleep Space inside the app.
 //!
 //! CDXC:Spaces 2026-09-22 DECISION:
-//! User: "Sleep Space" sleeps everything in the Space, sessions and open views alike, and all of
-//! it stays in place asleep; "Sleep Others" does the same for everything outside the Space, and
-//! "Sleep Inactive" sleeps only the Space's idle sessions. gx-core names each set
+//! User: the Space icon menu shows only Sleep Inactive. Sleep Space still sleeps everything in the
+//! Space, sessions and open views alike, all of it staying in place asleep, and Sleep Others does
+//! the same outside the Space; Sleep Inactive sleeps only the Space's idle sessions. gx-core names each set
 //! (`plan_space_sleep`); this file performs the two halves of the chosen one in a fixed order. The views go first, because they are local and instant: the active
 //! project's awake views sleep through the tab strip's own Sleep (`sleep_titlebar_view`), so each
 //! tab stays in the strip as a sleeping one, and every other project of the Space keeps only
