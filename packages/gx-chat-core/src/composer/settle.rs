@@ -235,8 +235,41 @@ fn adopt_boot_read(state: &mut ChatState, read: &ComposerBootRead) {
     state.transcript_view.verbose_override = read.verbose_override.as_bool();
 }
 
+/// `requestSkills()`, which is `load()` in `packages/shared/session-chat-controller/skills.ts:36`.
+///
+/// CDXC:AgentSkills 2026-09-22 WHY:
+/// The guard is `loading || loaded`, and `loaded` is set only after a read SUCCEEDS
+/// (`skills.ts:42`, the CDXC at `skills.ts:13`), which is what makes a failed read retryable from
+/// the picker and a successful one not. `loaded` is `skills.is_some()` here, because a refusal
+/// publishes `{loading: false, error}` and leaves the list unset. Starting a read clears both the
+/// list and the error, the way `publish({loading: true})` replaces the whole record.
+pub fn load_skills(state: &mut ChatState) -> Vec<Effect> {
+    let sources = &mut state.composer.sources;
+    if sources.skills_loading || sources.skills.is_some() {
+        return Vec::new();
+    }
+    sources.skills = None;
+    sources.skills_error = None;
+    sources.skills_loading = true;
+    let request_id = state.core.allocate_request_id();
+    state.composer.sources.skills_request = Some(request_id);
+    vec![Effect::SendRpc {
+        request_id,
+        method: ChatRpcMethod::ReadSessionChatSkills,
+        params: Box::new(Value::Object(Default::default())),
+    }]
+}
+
 /// `computeSessionChatSkills` and `computeSessionChatFiles`: one read each, the first re-asked
-/// when the agent the session runs under changes.
+/// when the agent the session runs under changes, plus the two edges
+/// `NativeComposerSuggestions.projection` measures on every publish (`native-suggestions.ts:107`,
+/// `:109`).
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// `skill_active` and `file_active` had NO WRITER, so neither edge could ever fire: the `@` list
+/// never asked for the project files and opened on an empty catalog forever, and a `$` list whose
+/// read had failed could not be reopened into a retry. They are the popup's own memory of the last
+/// frame, so they are measured here, in the settle that stands in for `publish`.
 fn request_catalogs(state: &mut ChatState) -> Vec<Effect> {
     let mut effects = Vec::new();
     if !state.composer.boot_read {
@@ -245,22 +278,31 @@ fn request_catalogs(state: &mut ChatState) -> Vec<Effect> {
     let agent = state.session.session_agent_id.clone();
     let sources = &mut state.composer.sources;
     if sources.skills_agent != agent || !sources.skills_asked {
+        // The `useEffect` re-ran, so its `loaded` and `loading` latches are fresh closures again.
         sources.skills_asked = true;
         sources.skills_agent.clone_from(&agent);
         sources.skills = None;
-        sources.skills_error = None;
-        sources.skills_loading = true;
-        let request_id = state.core.allocate_request_id();
-        state.composer.sources.skills_request = Some(request_id);
-        effects.push(Effect::SendRpc {
-            request_id,
-            method: ChatRpcMethod::ReadSessionChatSkills,
-            params: Box::new(Value::Object(Default::default())),
-        });
+        sources.skills_loading = false;
+        effects.extend(load_skills(state));
     }
+    let (skill_active, file_active) = crate::composer::suggestions::picker_edges(
+        &state.composer.suggestions.text,
+        state.composer.suggestions.caret,
+        state.session.agent.as_deref(),
+        state.composer.suggestions.dismissed,
+    );
+    // `if (matches.skillPickerActive && !this.skillActive) sources.requestSkills();`, then the
+    // latch, in that order.
+    if skill_active && !state.composer.suggestions.skill_active {
+        effects.extend(load_skills(state));
+    }
+    state.composer.suggestions.skill_active = skill_active;
+    state.composer.suggestions.file_active = file_active;
     // `computeSessionChatFiles` reads nothing on mount: it hands back a `requestFiles` callback
-    // the `@` list calls the first time it opens, and `filesLoading` is false until then.
-    if state.composer.suggestions.file_active && !state.composer.sources.files_asked {
+    // the `@` list calls the first time it opens, and `filesLoading` is false until then. The
+    // callback's own `requested` latch is `files_asked`; the caller's guard is `files === undefined`.
+    if file_active && state.composer.sources.files.is_none() && !state.composer.sources.files_asked
+    {
         state.composer.sources.files_asked = true;
         state.composer.sources.files_loading = true;
         let request_id = state.core.allocate_request_id();
@@ -290,9 +332,11 @@ fn settle_catalog(state: &mut ChatState, request_id: u64, outcome: &RpcOutcome) 
                 );
                 sources.skills_error = None;
             }
-            RpcOutcome::Err { message, .. } => {
+            RpcOutcome::Err { .. } => {
+                // `publish({ loading: false, error: 'Could not load skills.' })`: one sentence the
+                // picker can show, never the daemon's own message (`skills.ts:45`).
                 sources.skills = None;
-                sources.skills_error = Some(message.clone());
+                sources.skills_error = Some(SKILLS_ERROR.to_string());
             }
         }
         return;
@@ -300,13 +344,19 @@ fn settle_catalog(state: &mut ChatState, request_id: u64, outcome: &RpcOutcome) 
     if sources.files_request == Some(request_id) {
         sources.files_request = None;
         sources.files_loading = false;
-        if let RpcOutcome::Ok { result } = outcome {
-            sources.files = Some(
-                result
-                    .get("files")
-                    .and_then(|files| serde_json::from_value(files.clone()).ok())
-                    .unwrap_or_default(),
-            );
-        }
+        // A refused listing answers an EMPTY list, not "not read yet" (`files.ts:27`): the `@`
+        // popup then draws "Listing project files…" without a spinner rather than staying open on
+        // a list that will never arrive.
+        sources.files = Some(match outcome {
+            RpcOutcome::Ok { result } => result
+                .get("files")
+                .and_then(|files| serde_json::from_value(files.clone()).ok())
+                .unwrap_or_default(),
+            RpcOutcome::Err { .. } => Vec::new(),
+        });
     }
 }
+
+/// The one sentence a failed skills read shows, whatever the daemon said
+/// (`packages/shared/session-chat-controller/skills.ts:45`).
+const SKILLS_ERROR: &str = "Could not load skills.";

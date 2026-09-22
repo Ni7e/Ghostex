@@ -338,12 +338,11 @@ fn suggestion_command(state: &mut ChatState, action: &UserAction) -> Vec<Effect>
     };
     let key = action.param("key").and_then(Value::as_str);
     if action.kind == ActionKind::SuggestionRetry {
-        state.composer.sources.skills = None;
-        return vec![Effect::SendRpc {
-            request_id: 0,
-            method: ChatRpcMethod::ReadSessionChatSkills,
-            params: Box::new(json!({})),
-        }];
+        // `sources.requestSkills()` and nothing else (`native-suggestions.ts:157`). It used to
+        // clear the list itself and issue a read under `request_id: 0`, which
+        // `allocate_request_id` never hands out, so `settle_catalog` could not match the answer
+        // and Retry emptied the picker for good.
+        return crate::composer::settle::load_skills(state);
     }
     if action.kind == ActionKind::SuggestionHighlight {
         // `Math.max(0, Math.min(command.index ?? 0, projection.rows.length - 1))`, in that order:

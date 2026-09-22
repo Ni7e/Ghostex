@@ -130,6 +130,32 @@ pub struct SuggestionMatches {
     pub file_open: bool,
 }
 
+/// Which of the two mention pickers the draft has open, without filtering either catalog.
+///
+/// `skillPickerActive` and `filePickerActive` are computed from the slash list and the trigger
+/// alone (`composer-suggestions.ts:83`, `:92`), never from the skills or the files, so the edge
+/// that decides to ASK for a catalog can be measured without cloning the catalog it is about to
+/// ask for. That is what lets `request_catalogs` run this on every event the way
+/// `NativeComposerSuggestions.projection` runs on every publish.
+pub fn picker_edges(
+    draft: &str,
+    caret: usize,
+    agent: Option<&str>,
+    dismissed: SuggestionDismissals,
+) -> (bool, bool) {
+    let slash_open = match slash_query(draft) {
+        Some(query) if !dismissed.slash => {
+            !filter_slash_commands(slash_commands_for_agent(agent), query).is_empty()
+        }
+        _ => false,
+    };
+    let kind = detect_composer_trigger(draft, Some(caret)).map(|trigger| trigger.kind);
+    (
+        kind == Some(TriggerKind::Skill) && !dismissed.skill && !slash_open,
+        kind == Some(TriggerKind::Path) && !dismissed.file && !slash_open,
+    )
+}
+
 /// Runs the three filters for one draft and caret.
 pub fn composer_suggestions(
     draft: &str,

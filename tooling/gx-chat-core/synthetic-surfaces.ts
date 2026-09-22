@@ -525,6 +525,32 @@ async function main(): Promise<number> {
         await act({ type: 'refresh' });
       },
     },
+    {
+      /*
+      The step above types its `@` with `editDraft`, which is not how the picker opens.
+      `NativeComposerSuggestions.update()` has exactly two callers, the `composerSelection` arm and
+      `recall` (`native-host.ts:821`, `:1200`), so a draft written any other way leaves the popup's
+      own text empty and `filePickerActive` false. No recording had ever opened either mention
+      picker, which is why `skillActive` and `filePickerActive` could have no counterpart in the
+      Rust core and every gate still read green: the `@` list never asked for the project files,
+      and a `$` list whose read had failed could not be reopened into a retry.
+      */
+      label: 'the two mention pickers, opened the way the renderer opens them',
+      run: async () => {
+        await act({ type: 'composerSelection', text: 'read $', caret: 6 });
+        await act({ type: 'composerSelection', text: 'read $rev', caret: 9 });
+        // Escape closes the `$` list; retyping the same token at the same offset leaves it closed.
+        await act({ type: 'suggestionDismiss' });
+        await act({ type: 'composerSelection', text: 'read $rev', caret: 9 });
+        await act({ type: 'composerSelection', text: 'look at @', caret: 9 });
+        await act({ type: 'composerSelection', text: 'look at @src/', caret: 13 });
+        await act({ type: 'suggestionPick', index: 0 });
+        // Back to a `$` list and press Retry on it, which is `requestSkills()` and nothing else.
+        await act({ type: 'composerSelection', text: 'then $wr', caret: 8 });
+        await act({ type: 'suggestionRetry' });
+        await act({ type: 'composerSelection', text: '', caret: 0 });
+      },
+    },
   ];
 
   for (const step of steps) await step.run();
