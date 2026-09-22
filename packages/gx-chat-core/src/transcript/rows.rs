@@ -96,6 +96,17 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
     // revision the frame's identity test reads.
     view.projection_rebuilt = true;
     state.transcript_view.row_details = row_details(state, context);
+    // `this.scheduleBackfill()` at the end of `update`: the zero-delay timer is armed by the
+    // publish that queued the placeholders, so the very next `tick` promotes them. Arming it
+    // from the settle instead waited for the NEXT event's settle, so on every real chat the first
+    // transcript shipped its older rows as placeholders one document longer than the live brain.
+    if state.transcript_view.has_pending_backfill() {
+        state.core.timers.arm_once(
+            crate::transcript::settle::BACKFILL_TIMER,
+            context.now_ms,
+            0.0,
+        );
+    }
 }
 
 /// Projects the newest batch of queued placeholders.
