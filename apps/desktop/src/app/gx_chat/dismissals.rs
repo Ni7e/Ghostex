@@ -36,6 +36,15 @@ struct Marker {
     revision: i64,
 }
 
+/// The markers of one draft, and the record their ranges live in.
+struct Group {
+    /// The `recoveryDismissed` suffix, which is `["<sessionKey>","<draftId>"]`.
+    key: String,
+    /// The `recovery` suffixes to remove once the ranges are committed.
+    names: Vec<String>,
+    revisions: Vec<(i64, i64)>,
+}
+
 /// Folds every dismissal marker of one session into its draft's ranges.
 ///
 /// Errors are the storage door's and are returned rather than swallowed, so the caller counts them;
@@ -44,7 +53,7 @@ pub(super) fn compact(session_key: &str, now_ms: i64) -> Result<(), &'static str
     let rows = storage::scan("recovery", &format!("{session_key}:"), now_ms)?;
     // Grouped by the record the ranges live in, which is the marker's OWN session key rather than
     // the scanned one: the value is what the TypeScript groups by.
-    let mut groups: Vec<(String, Vec<String>, Vec<(i64, i64)>)> = Vec::new();
+    let mut groups: Vec<Group> = Vec::new();
     for (suffix, raw) in rows {
         let Some(marker) = decode(&raw) else {
             continue;
@@ -61,29 +70,29 @@ pub(super) fn compact(session_key: &str, now_ms: i64) -> Result<(), &'static str
             )?;
         }
         let group_key = dismissal_suffix(&marker.session_key, &marker.draft_id);
-        match groups.iter_mut().find(|(key, _, _)| *key == group_key) {
-            Some((_, names, revisions)) => {
-                names.push(suffix);
-                revisions.push((marker.revision, marker.revision));
+        match groups.iter_mut().find(|group| group.key == group_key) {
+            Some(group) => {
+                group.names.push(suffix);
+                group.revisions.push((marker.revision, marker.revision));
             }
-            None => groups.push((
-                group_key,
-                vec![suffix],
-                vec![(marker.revision, marker.revision)],
-            )),
+            None => groups.push(Group {
+                key: group_key,
+                names: vec![suffix],
+                revisions: vec![(marker.revision, marker.revision)],
+            }),
         }
     }
-    for (group_key, names, revisions) in groups {
+    for group in groups {
         let key = StorageKey {
             store: "recoveryDismissed".to_string(),
-            suffix: group_key,
+            suffix: group.key,
         };
         let previous: Vec<(i64, i64)> = storage::read(&key, now_ms)?
             .filter(|raw| !raw.is_empty())
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_default();
-        storage::write(&key, Some(&ranges(previous, revisions)), now_ms)?;
-        for suffix in names {
+        storage::write(&key, Some(&ranges(previous, group.revisions)), now_ms)?;
+        for suffix in group.names {
             storage::write(
                 &StorageKey {
                     store: "recovery".to_string(),

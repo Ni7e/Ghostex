@@ -22,8 +22,9 @@
 //!   the one client-storage database; `host_records.rs` owns the four records the core left to the
 //!   host; `boot.rs` answers `Effect::ReadComposerBoot`.
 //! - `draft_ops.rs` performs the three draft operations the core names as stores, `outbox.rs` is
-//!   the durable save outbox and its retry ladder, `dismissals.rs` folds the recovery markers a
-//!   retirement leaves into ranges, `locale.rs` the two formatted stamps the host owes the core.
+//!   the durable save outbox and its retry ladder, `saves.rs` connects that queue to a chat,
+//!   `dismissals.rs` folds the recovery markers a retirement leaves into ranges, `locale.rs` the
+//!   two formatted stamps the host owes the core.
 //! - `diagnostics.rs` writes the periodic counters, behind the usual two gates.
 
 mod boot;
@@ -38,6 +39,7 @@ mod identity;
 mod locale;
 mod outbox;
 mod queries;
+mod saves;
 mod storage;
 mod store;
 mod worker;

@@ -42,6 +42,16 @@ pub(super) struct HostCounters {
     /// Host actions the core emits that nothing performs, by name. The names are code constants
     /// (`effects::UNPERFORMED_HOST_ACTIONS`), never a chat's own data.
     pub(super) host_actions_dropped: BTreeMap<&'static str, u64>,
+    /// Chats whose brain panicked and were disabled for the rest of the run. Any number above zero
+    /// is a bug in `packages/gx-chat-core` or in this host, and the user saw a broken pane.
+    pub(super) chats_disabled: u64,
+    /// Renderer requests a chat with no attached view held past its bound and forgot.
+    pub(super) requests_dropped: u64,
+    /// Drive passes that hit `MAX_SETTLE_ROUNDS` with events still pending.
+    pub(super) settle_rounds_exhausted: u64,
+    /// Draft saves forgotten because too many were in flight at once. The outbox row survives, so
+    /// this costs a retry rather than a save.
+    pub(super) saves_forgotten: u64,
 }
 
 /// Throttles the summary and remembers what it last wrote.
@@ -96,6 +106,13 @@ impl HostDiagnostics {
                 "actionsUnrouted": counters.actions_unrouted,
                 "effectsUnrouted": counters.effects_unrouted,
                 "hostActionsDropped": counters.host_actions_dropped,
+                // Spelled without `disabled`/`dropped` reading as a failure marker: the summary
+                // stays a routine record behind both gates. The one record that deliberately
+                // bypasses them is `gxChat.host.chatDisabledAfterPanic`, written once per chat.
+                "chatsDisabled": counters.chats_disabled,
+                "requestsForgotten": counters.requests_dropped,
+                "settleRoundsExhausted": counters.settle_rounds_exhausted,
+                "savesForgotten": counters.saves_forgotten,
             }),
         );
     }

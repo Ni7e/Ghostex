@@ -7,6 +7,7 @@
 //! `ChatRuntimeWorker` has (`call`, `call_raw`, `query`, `query_for_gesture`, `take_outputs`) so
 //! `apps/desktop/src/app/native_chat/` drives either brain through one shape.
 
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
 use std::thread;
@@ -22,11 +23,12 @@ use super::draft_ops;
 use super::effects::{self, Routed};
 use super::events;
 use super::frame;
-use super::host_records::{self, DraftVersion, PendingDraft, RecoveryCheckpoint};
+use super::host_records;
 use super::identity::ChatIdentity;
 use super::locale;
-use super::outbox::{self, DraftWorker, Workers};
+use super::outbox::{self, Workers};
 use super::queries;
+use super::saves;
 use super::storage;
 use super::store::ChatStore;
 
@@ -34,12 +36,19 @@ use super::store::ChatStore;
 /// `pump` does not care which brain produced them.
 pub(crate) enum ChatHostOutput {
     Drained(Value),
-    /// The host failed in a way the view should draw instead of the chat. Nothing raises it yet: a
-    /// `ChatCore` cannot fail to boot the way a QuickJS runtime can, and a storage refusal is
-    /// counted rather than fatal. The variant stays so the view's two arms keep matching.
-    #[allow(dead_code)]
+    /// The host failed in a way the view should draw instead of the chat. One thing raises it: a
+    /// panic inside the Rust brain, which disables that ONE chat (see [`disable_chat`]). A storage
+    /// refusal is counted rather than fatal.
     Error(String),
 }
+
+/// What a chat whose brain panicked draws instead of its transcript.
+///
+/// A whole sentence, and a constant one: it reaches the view's error banner, and a panic payload
+/// can carry anything the failing code was holding, which for this crate is the user's
+/// conversation.
+const HOST_PANIC_MESSAGE: &str =
+    "Chat could not be shown. Reopen this chat, or switch the chat brain back in Settings.";
 
 /// How deep a storage answer may feed back into the core within one drive pass.
 ///
@@ -216,25 +225,39 @@ fn spawn() -> mpsc::Sender<HostCommand> {
     commands
 }
 
+/// How many renderer requests one chat with no view attached may hold before the oldest go.
+///
+/// A chat is retained without a view for up to five minutes (`store.rs`), and the requests it
+/// raises in that window are the view's to perform, so they wait for one. The bound is what keeps a
+/// chat nobody reopens from growing a list nobody reads; 128 is well past what a retained chat's
+/// timers produce in five minutes.
+const MAX_HELD_REQUESTS: usize = 128;
+
 /// Every chat, and what the host counts about them.
 #[derive(Default)]
-struct World {
-    store: ChatStore,
+pub(super) struct World {
+    pub(super) store: ChatStore,
     sinks: std::collections::BTreeMap<String, Sink>,
     wakes: std::collections::BTreeMap<String, Instant>,
-    counters: HostCounters,
+    pub(super) counters: HostCounters,
     diagnostics: HostDiagnostics,
     /// The draft saves in flight, by request id, so the outbox row is cleared when gxserver has it.
-    draft_saves: std::collections::BTreeMap<u64, PendingDraft>,
+    pub(super) draft_saves: std::collections::BTreeMap<u64, host_records::PendingDraft>,
     /// One retry worker per chat, which drains what a refused save left in the outbox.
-    draft_workers: Workers,
+    pub(super) draft_workers: Workers,
     /// When each chat's retry ladder is next due. Its own map, because `wakes` is the core's timer
     /// and `Effect::SetTimer` owns that one exclusively.
-    retry_wakes: std::collections::BTreeMap<String, Instant>,
+    pub(super) retry_wakes: std::collections::BTreeMap<String, Instant>,
     /// The `composer('park')` answer a handoff owes its `draftSubmitted` request.
     parked: std::collections::BTreeMap<String, draft_ops::ParkResult>,
     /// Delivery receipts already written, so a re-read of the same synced draft writes nothing.
-    delivered: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    pub(super) delivered: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    /// What a chat with no attached view owes one, delivered when a view arrives.
+    held_requests: std::collections::BTreeMap<String, Vec<HostRequest>>,
+    /// The chat this thread is working on, so a panic knows which one to disable.
+    driving: Option<String>,
+    /// Chats whose brain panicked. They are not rebuilt: the same input would panic again.
+    disabled: std::collections::BTreeSet<String>,
 }
 
 fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
@@ -259,104 +282,20 @@ fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
             },
         };
         idle.store(false, Ordering::Release);
-        match command {
-            Some(HostCommand::Attach { identity, sink }) => {
-                let key = identity.retention_key();
-                {
-                    let retained = world.store.entry(&identity);
-                    retained.listeners = 1;
-                    retained.touched_at = Instant::now();
-                }
-                // One sink per chat. A second view of the same session replaces the first, which is
-                // how the app resolves a chat to one view already (`native_chat_for_generation`);
-                // the replaced handle simply stops being drained.
-                world.sinks.insert(key.clone(), sink);
-                // `replayDraftSaves`: a save a previous run could not deliver is still in the
-                // outbox, and opening its chat is what registers the writer that drains it.
-                world.draft_workers.entry(key.clone()).or_default();
-                world.retry_wakes.insert(key.clone(), Instant::now());
-                drive(&mut world, &key, Vec::new());
-            }
-            Some(HostCommand::Detach { key, sink }) => {
-                if world.sinks.get(&key).is_some_and(|held| held.id == sink) {
-                    world.sinks.remove(&key);
-                    if let Some(retained) = world.store.get_mut(&key) {
-                        retained.listeners = 0;
-                        retained.touched_at = Instant::now();
-                    }
-                }
-            }
-            Some(HostCommand::Call {
-                key,
-                method,
-                arguments,
-            }) => {
-                // A `resolve` is the answer to a request the core made, and the view echoes the
-                // core's own id back, so there is no order matching to do. A retry write is the
-                // one exception: it is the HOST's own request, numbered above every id the core
-                // can allocate, and the core must never see its answer.
-                if method == "resolve" && settle_retry_write(&mut world, &key, &arguments) {
-                    continue;
-                }
-                let events = if method == "resolve" {
-                    settle_draft_save(&mut world, &key, &arguments);
-                    events::resolved(&arguments).into_iter().collect()
-                } else {
-                    events::events_for(method, &arguments)
-                };
-                if events.is_empty() {
-                    world.counters.actions_unrouted += 1;
-                }
-                drive(&mut world, &key, events);
-            }
-            Some(HostCommand::CallRaw { key, method, raw }) => {
-                let arguments = serde_json::from_str::<Value>(&raw)
-                    .map(|value| vec![value])
-                    .unwrap_or_default();
-                let events = events::events_for(method, &arguments);
-                if events.is_empty() {
-                    world.counters.actions_unrouted += 1;
-                }
-                drive(&mut world, &key, events);
-            }
-            Some(HostCommand::Query {
-                key,
-                method,
-                arguments,
-                reply,
-            }) => {
-                let answer = world.store.get(&key).and_then(|retained| {
-                    let context = context(retained.core.state());
-                    queries::answer(retained.core.state(), context, method, &arguments)
-                });
-                let _ = reply.send(answer);
-                // A query changes nothing, so it does not drain; the view uses the answer at once.
-                continue;
-            }
-            None => {
-                let due: Vec<String> = world
-                    .retry_wakes
-                    .iter()
-                    .filter(|(_, at)| **at <= Instant::now())
-                    .map(|(key, _)| key.clone())
-                    .collect();
-                for key in due {
-                    world.retry_wakes.remove(&key);
-                    drain_outbox(&mut world, &key);
-                }
-                let due: Vec<String> = world
-                    .wakes
-                    .iter()
-                    .filter(|(_, at)| **at <= Instant::now())
-                    .map(|(key, _)| key.clone())
-                    .collect();
-                for key in due {
-                    world.wakes.remove(&key);
-                    drive(&mut world, &key, vec![Event::Tick]);
-                }
-            }
+        // CDXC:SessionChat 2026-09-22 WHY:
+        // ONE thread carries every chat, so a panic in one chat's rules would otherwise end all of
+        // them AND leave `COMMANDS` holding a sender nobody reads: every later call would succeed
+        // into a dead channel, every chat would freeze with no error drawn, and `idle` would be
+        // left false so each paint's pure query would wait out its timeout. The panic is caught
+        // per command instead: the one chat is dropped, its view is told, and the thread goes on.
+        // The live QuickJS path is untouched by all of this, and an unwind cannot be avoided by
+        // being careful, because `packages/gx-chat-core` indexes and unwraps like any other crate.
+        if std::panic::catch_unwind(AssertUnwindSafe(|| step(&mut world, command))).is_err() {
+            disable_chat(&mut world);
         }
-        world.store.prune();
+        for (key, session_key) in world.store.prune() {
+            purge(&mut world, &key, &session_key);
+        }
         world.counters.sessions_retained = world.store.len();
         world.counters.sessions_evicted = world.store.evicted;
         let counters = world.counters.clone();
@@ -364,22 +303,231 @@ fn run(commands: mpsc::Receiver<HostCommand>, idle: Arc<AtomicBool>) {
     }
 }
 
+/// Drops the chat this thread was working on when its brain panicked.
+///
+/// The chat is REMOVED rather than reset: `World` is only assumed-unwind-safe because the one piece
+/// of state a panicking core can have left half written is that chat's own entry, and dropping it
+/// is what makes that true. Rebuilding it is not offered either, because the input that panicked
+/// is on its way back in as soon as the view retries.
+fn disable_chat(world: &mut World) {
+    let Some(key) = world.driving.take() else {
+        return;
+    };
+    let session_key = world
+        .store
+        .get(&key)
+        .map(|retained| retained.session_key.clone())
+        .unwrap_or_default();
+    world.store.remove(&key);
+    purge(world, &key, &session_key);
+    world.disabled.insert(key.clone());
+    if let Some(sink) = world.sinks.remove(&key) {
+        let posted = sink
+            .outputs
+            .send(ChatHostOutput::Error(HOST_PANIC_MESSAGE.to_string()))
+            .is_ok();
+        if posted {
+            (sink.wake)();
+        }
+    }
+    world.counters.chats_disabled += 1;
+    // Unconditional: "panic" in the event name is what `support_logs` reads as an important
+    // diagnostic, and a chat whose brain died is one the user can see. Counts only, as ever: no
+    // key, no session id, and never the payload, which is whatever the failing code was holding.
+    crate::support_logs::append(
+        crate::support_logs::GpuiSupportLog::SessionChat,
+        "gxChat.host.chatDisabledAfterPanic",
+        serde_json::json!({ "chatsDisabled": world.counters.chats_disabled }),
+    );
+}
+
+/// Forgets everything keyed by one chat, so a map does not outlive the chat it belongs to.
+fn purge(world: &mut World, key: &str, session_key: &str) {
+    world.wakes.remove(key);
+    world.retry_wakes.remove(key);
+    world.draft_workers.remove(key);
+    world.parked.remove(key);
+    world.delivered.remove(key);
+    world.held_requests.remove(key);
+    if !session_key.is_empty() {
+        world
+            .draft_saves
+            .retain(|_, draft| draft.session_key != session_key);
+    }
+}
+
+/// One command, or one pass of the due timers.
+///
+/// `driving` names the chat this pass belongs to for as long as the pass runs, so a panic anywhere
+/// inside it disables the right chat rather than none. The timer pass sets it per chat, because it
+/// walks several.
+fn step(world: &mut World, command: Option<HostCommand>) {
+    world.driving = match &command {
+        Some(HostCommand::Attach { identity, .. }) => Some(identity.retention_key()),
+        Some(
+            HostCommand::Detach { key, .. }
+            | HostCommand::Call { key, .. }
+            | HostCommand::CallRaw { key, .. }
+            | HostCommand::Query { key, .. },
+        ) => Some(key.clone()),
+        None => None,
+    };
+    match command {
+        Some(HostCommand::Attach { identity, sink }) => {
+            let key = identity.retention_key();
+            // A chat whose brain panicked is not rebuilt, and its view is told again rather than
+            // being left drawing an empty pane.
+            if world.disabled.contains(&key) {
+                let posted = sink
+                    .outputs
+                    .send(ChatHostOutput::Error(HOST_PANIC_MESSAGE.to_string()))
+                    .is_ok();
+                if posted {
+                    (sink.wake)();
+                }
+                return;
+            }
+            {
+                let retained = world.store.entry(&identity);
+                retained.listeners = 1;
+                retained.touched_at = Instant::now();
+            }
+            // One sink per chat. A second view of the same session replaces the first, which is
+            // how the app resolves a chat to one view already (`native_chat_for_generation`);
+            // the replaced handle simply stops being drained.
+            world.sinks.insert(key.clone(), sink);
+            // `replayDraftSaves`: a save a previous run could not deliver is still in the
+            // outbox, and opening its chat is what registers the writer that drains it.
+            world.draft_workers.entry(key.clone()).or_default();
+            world.retry_wakes.insert(key.clone(), Instant::now());
+            drive(world, &key, Vec::new());
+        }
+        Some(HostCommand::Detach { key, sink }) => {
+            if world.sinks.get(&key).is_some_and(|held| held.id == sink) {
+                world.sinks.remove(&key);
+                if let Some(retained) = world.store.get_mut(&key) {
+                    retained.listeners = 0;
+                    retained.touched_at = Instant::now();
+                }
+            }
+        }
+        Some(HostCommand::Call {
+            key,
+            method,
+            arguments,
+        }) => {
+            // A `resolve` is the answer to a request the core made, and the view echoes the
+            // core's own id back, so there is no order matching to do. A retry write is the
+            // one exception: it is the HOST's own request, numbered above every id the core
+            // can allocate, and the core must never see its answer.
+            if method == "resolve" && saves::settle_retry_write(world, &key, &arguments) {
+                return;
+            }
+            let events = if method == "resolve" {
+                note_rpc_refusal(world, &arguments);
+                saves::settle_draft_save(world, &key, &arguments);
+                events::resolved(&arguments).into_iter().collect()
+            } else {
+                events::events_for(method, &arguments)
+            };
+            if events.is_empty() {
+                world.counters.actions_unrouted += 1;
+            }
+            drive(world, &key, events);
+        }
+        Some(HostCommand::CallRaw { key, method, raw }) => {
+            let arguments = serde_json::from_str::<Value>(&raw)
+                .map(|value| vec![value])
+                .unwrap_or_default();
+            let events = events::events_for(method, &arguments);
+            if events.is_empty() {
+                world.counters.actions_unrouted += 1;
+            }
+            drive(world, &key, events);
+        }
+        Some(HostCommand::Query {
+            key,
+            method,
+            arguments,
+            reply,
+        }) => {
+            let answer = world.store.get(&key).and_then(|retained| {
+                let context = context(retained.core.state());
+                queries::answer(retained.core.state(), context, method, &arguments)
+            });
+            // A query changes nothing, so it does not drain; the view uses the answer at once.
+            let _ = reply.send(answer);
+        }
+        None => {
+            let due: Vec<String> = world
+                .retry_wakes
+                .iter()
+                .filter(|(_, at)| **at <= Instant::now())
+                .map(|(key, _)| key.clone())
+                .collect();
+            for key in due {
+                world.retry_wakes.remove(&key);
+                world.driving = Some(key.clone());
+                saves::drain_outbox(world, &key);
+            }
+            world.driving = None;
+            let due: Vec<String> = world
+                .wakes
+                .iter()
+                .filter(|(_, at)| **at <= Instant::now())
+                .map(|(key, _)| key.clone())
+                .collect();
+            for key in due {
+                world.wakes.remove(&key);
+                drive(world, &key, vec![Event::Tick]);
+            }
+        }
+    }
+}
+
+/// Counts one gxserver refusal by its CODE, and only when the code is one.
+///
+/// CDXC:Diagnostics 2026-09-22 WHY:
+/// The code comes off the wire, so it is neither a code constant nor bounded: a daemon that
+/// answered with a sentence, a path or a token in that field would put it in a support log, and an
+/// unbounded map of them would also grow without limit. Anything that is not a short lower-case
+/// identifier is counted as `other`, and the map stops admitting new names at 24, which is what the
+/// summary prints anyway. The MESSAGE is never counted, only the code.
+fn note_rpc_refusal(world: &mut World, arguments: &[Value]) {
+    let Some(error) = arguments.get(2).filter(|value| !value.is_null()) else {
+        return;
+    };
+    let code = error
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let named = code.len() <= 40
+        && !code.is_empty()
+        && code.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_-.".contains(&byte)
+        });
+    let code = if named { code } else { "other" };
+    let counted =
+        world.counters.rpc_refusals.len() < 24 || world.counters.rpc_refusals.contains_key(code);
+    let entry = if counted { code } else { "other" };
+    *world
+        .counters
+        .rpc_refusals
+        .entry(entry.to_string())
+        .or_insert(0) += 1;
+}
+
 /// Applies a burst of events to one chat, performs what the host owns, and drains a frame.
 fn drive(world: &mut World, key: &str, events: Vec<Event>) {
     if world.store.get(key).is_none() {
         return;
     }
+    world.driving = Some(key.to_string());
     let mut pending = events;
-    let mut requests: Vec<HostRequest> = Vec::new();
+    // Whatever this chat owed a view it did not have, in the order it was raised. An empty list
+    // for every chat with a view attached, which is every chat a gesture reaches.
+    let mut requests: Vec<HostRequest> = world.held_requests.remove(key).unwrap_or_default();
     let mut rounds = 0usize;
-    // The boot read is one per chat, and it is the first thing the core asks for.
-    let needs_boot = world
-        .store
-        .get(key)
-        .is_some_and(|retained| !retained.booted);
-    if needs_boot && let Some(retained) = world.store.get_mut(key) {
-        retained.booted = true;
-    }
     while !pending.is_empty() && rounds < MAX_SETTLE_ROUNDS {
         rounds += 1;
         let mut answers: Vec<Event> = Vec::new();
@@ -388,6 +536,7 @@ fn drive(world: &mut World, key: &str, events: Vec<Event>) {
             // and writes the store's own counters.
             let (effects, session_key) = {
                 let Some(retained) = world.store.get_mut(key) else {
+                    world.driving = None;
                     return;
                 };
                 retained.touched_at = Instant::now();
@@ -411,7 +560,7 @@ fn drive(world: &mut World, key: &str, events: Vec<Event>) {
                         {
                             world.counters.effects_unrouted += 1;
                         }
-                        note_draft_save(world, &session_key, &request);
+                        saves::note_draft_save(world, &session_key, &request);
                         requests.push(adopt_park_answer(world, key, *request));
                     }
                     // A gesture the core asked to have replayed at itself, which joins this
@@ -432,8 +581,15 @@ fn drive(world: &mut World, key: &str, events: Vec<Event>) {
         }
         pending.append(&mut answers);
     }
-    record_deliveries(world, key);
+    // A chain deeper than the cap leaves events unapplied, which is a rule the core grew and this
+    // host never expected. It is counted rather than logged, because the events themselves are the
+    // user's conversation.
+    if !pending.is_empty() {
+        world.counters.settle_rounds_exhausted += 1;
+    }
+    saves::record_deliveries(world, key);
     publish(world, key, requests);
+    world.driving = None;
 }
 
 /// A handoff's `draftSubmitted` carries what `composer('park')` minted, which is the host's.
@@ -465,68 +621,6 @@ fn adopt_park_answer(world: &mut World, key: &str, mut request: HostRequest) -> 
             .insert("draftVersion".into(), park.draft_version);
     }
     request
-}
-
-/// Writes the sent history for every draft gxserver reports it delivered, once each.
-///
-/// `onDeliveredDrafts` in `native-host.ts` hands the receipts to `composer('deliveries')`, which is
-/// `recordDeliveredSessionChatDrafts`. The core folds them onto `session.synced_draft`
-/// (`merge_draft_state`), so the host reads them there rather than needing a callback into the
-/// core. The stored receipt set is the real de-duplication; the in-memory set only keeps a chat
-/// that re-reads the same snapshot from touching disk again.
-fn record_deliveries(world: &mut World, key: &str) {
-    let Some(retained) = world.store.get(key) else {
-        return;
-    };
-    let Some(deliveries) = retained
-        .core
-        .state()
-        .session
-        .synced_draft
-        .as_ref()
-        .and_then(|draft| draft.get("deliveredDrafts"))
-        .and_then(Value::as_array)
-        .filter(|deliveries| !deliveries.is_empty())
-        .cloned()
-    else {
-        return;
-    };
-    let now_ms = now_millis();
-    let seen = world.delivered.entry(key.to_string()).or_default();
-    let mut refusals = 0u64;
-    for delivery in deliveries {
-        let (Some(id), Some(project_id), Some(session_id)) = (
-            delivery.get("id").and_then(Value::as_str),
-            delivery.get("projectId").and_then(Value::as_str),
-            delivery.get("sessionId").and_then(Value::as_str),
-        ) else {
-            continue;
-        };
-        if !seen.insert(id.to_string()) {
-            continue;
-        }
-        if host_records::record_delivered_draft(
-            id,
-            project_id,
-            session_id,
-            delivery
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default(),
-            delivery
-                .get("deliveredAt")
-                .and_then(Value::as_str)
-                .unwrap_or_default(),
-            now_ms,
-        )
-        .is_err()
-        {
-            // A refused write must be retried rather than remembered as done.
-            seen.remove(id);
-            refusals += 1;
-        }
-    }
-    world.counters.storage_refused += refusals;
 }
 
 /// Performs one host-side effect and queues the event that answers it.
@@ -614,7 +708,9 @@ fn perform(
         // send must not deliver while a revision gxserver has not acknowledged is still queued.
         Effect::FlushStorage { store } => {
             let drained = outbox::pending(session_key, now_ms).is_empty();
-            if !drained && let Some(request) = next_retry_write(world, key, session_key, now_ms) {
+            if !drained
+                && let Some(request) = saves::next_retry_write(world, key, session_key, now_ms)
+            {
                 requests.push(request);
             }
             answers.push(Event::StorageWritten {
@@ -701,8 +797,26 @@ fn write_storage(
 }
 
 /// Drains a frame and posts it, when it carries anything.
-fn publish(world: &mut World, key: &str, requests: Vec<HostRequest>) {
+///
+/// CDXC:SessionChat 2026-09-22 WHY:
+/// A chat with no attached view HOLDS its requests rather than dropping them. The transport is the
+/// view's (`effects.rs`), and a retained chat still ticks, so the requests a timer raises have
+/// nowhere to go for as long as five minutes. Dropped, they took the core's own bookkeeping with
+/// them: a `SendRpc` it never gets an answer to leaves its lane marked in flight for ever, which is
+/// how the model-selection outbox and the draft retry worker each wedged on the first tick after a
+/// chat was closed. The document itself was never at risk, because a drain with no sink does not
+/// advance the revision and a new view reads the whole snapshot.
+pub(super) fn publish(world: &mut World, key: &str, requests: Vec<HostRequest>) {
     let Some(last_revision) = world.sinks.get(key).map(|sink| sink.last_revision) else {
+        if !requests.is_empty() {
+            let held = world.held_requests.entry(key.to_string()).or_default();
+            held.extend(requests);
+            if held.len() > MAX_HELD_REQUESTS {
+                let dropped = held.len() - MAX_HELD_REQUESTS;
+                held.drain(..dropped);
+                world.counters.requests_dropped += dropped as u64;
+            }
+        }
         return;
     };
     let Some(retained) = world.store.get_mut(key) else {
@@ -763,7 +877,7 @@ fn context(state: &ghostex_gx_chat_core::ChatState) -> ChatContext {
         .with_formatted_times(locale::formatted_times(state, utc_offset_minutes))
 }
 
-fn now_millis() -> i64 {
+pub(super) fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|since| since.as_millis() as i64)
@@ -798,9 +912,9 @@ fn effect_name(effect: &Effect) -> &'static str {
 
 /// Counts a host action nothing performs, by its own name.
 ///
-/// The three in [`effects::UNPERFORMED_HOST_ACTIONS`] are the core calling itself through a door
-/// that does not exist yet. The counter is what makes that visible in `gxChat.host.summary` rather
-/// than leaving a model pick, a slash-command send or an agent hand-off silently doing nothing.
+/// The names in [`effects::UNPERFORMED_HOST_ACTIONS`] are the core calling itself through a door
+/// that does not exist. The counter is what makes that visible in `gxChat.host.summary` rather than
+/// leaving a gesture silently doing nothing.
 fn note_unperformed(world: &mut World, effect: &Effect) {
     let Effect::HostAction { action, .. } = effect else {
         return;
@@ -812,168 +926,4 @@ fn note_unperformed(world: &mut World, effect: &Effect) {
         return;
     };
     *world.counters.host_actions_dropped.entry(name).or_insert(0) += 1;
-}
-
-/// Writes the durable save outbox and the recovery checkpoint a draft save owes.
-///
-/// CDXC:Drafts 2026-09-10 DECISION:
-/// User: unsaved edits must survive unavailable connections and retry across restarts, with visible
-/// save failures, and saving must work quietly in the background without a routine saving indicator
-/// while typing. The two records belong to the HOST, not the brain: the core reads neither and a
-/// platform-neutral crate cannot own a disk-backed retry worker. The outbox row is written BEFORE
-/// the call goes out, so a crash between the two leaves the save to be retried rather than lost.
-fn note_draft_save(world: &mut World, session_key: &str, request: &HostRequest) {
-    if request.kind != ghostex_gx_chat_core::RequestKind::Rpc
-        || request.method != ghostex_gx_chat_core::ChatRpcMethod::SetSessionChatDraft.as_str()
-    {
-        return;
-    }
-    let Some(request_id) = request.id else {
-        return;
-    };
-    let version = request
-        .params
-        .get("version")
-        .or_else(|| request.params.get("draftVersion"));
-    let Some(version) = version.and_then(|value| {
-        Some(DraftVersion {
-            draft_id: value.get("draftId")?.as_str()?.to_string(),
-            revision: value.get("revision")?.as_i64()?,
-        })
-    }) else {
-        return;
-    };
-    let content = request
-        .params
-        .get("content")
-        .or_else(|| request.params.get("text"))
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let now_ms = now_millis();
-    let draft = PendingDraft {
-        client_id: request
-            .params
-            .get("clientId")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        session_key: session_key.to_string(),
-        content: content.clone(),
-        version: version.clone(),
-        updated_at: now_ms,
-    };
-    if host_records::queue_draft_save(&draft, now_ms).is_err() {
-        world.counters.storage_refused += 1;
-    }
-    if host_records::preserve_draft_revision(
-        &RecoveryCheckpoint {
-            session_key: session_key.to_string(),
-            text: content,
-            updated_at: now_ms,
-            version: Some(version),
-            dismissed: None,
-        },
-        now_ms,
-    )
-    .is_err()
-    {
-        world.counters.storage_refused += 1;
-    }
-    world.draft_saves.insert(request_id, draft);
-}
-
-/// Clears the outbox row once gxserver acknowledged the save, and arms the ladder when it did not.
-///
-/// A refusal leaves the row where it is, which is what makes the save retry at all: the stored
-/// record IS the queue, so a save is not lost when the app quits between two attempts.
-fn settle_draft_save(world: &mut World, key: &str, arguments: &[Value]) {
-    let Some(request_id) = arguments.first().and_then(Value::as_u64) else {
-        return;
-    };
-    let Some(draft) = world.draft_saves.remove(&request_id) else {
-        return;
-    };
-    if arguments.get(2).is_some_and(|error| !error.is_null()) {
-        // The row it queued is still in the outbox, and that row is the queue, so the in-flight
-        // entry is dropped rather than kept: keeping it would grow a map nothing ever reads again.
-        arm_retry(world, key, true);
-        return;
-    }
-    if outbox::acknowledge(&draft.session_key, &draft.version, now_millis()).is_err() {
-        world.counters.storage_refused += 1;
-    }
-    let worker = world.draft_workers.entry(key.to_string()).or_default();
-    worker.failures = 0;
-}
-
-/// The answer to a retry write of this host's own, which the core must never see.
-///
-/// A retry is numbered from [`outbox::HOST_REQUEST_ID_BASE`], above every id
-/// `ChatCore::allocate_request_id` can reach, so one glance at the id says whose answer this is.
-fn settle_retry_write(world: &mut World, key: &str, arguments: &[Value]) -> bool {
-    let Some(request_id) = arguments.first().and_then(Value::as_u64) else {
-        return false;
-    };
-    if request_id < outbox::HOST_REQUEST_ID_BASE {
-        return false;
-    }
-    let failed = arguments.get(2).is_some_and(|error| !error.is_null());
-    let now_ms = now_millis();
-    let Some(worker) = world.draft_workers.get_mut(key) else {
-        return true;
-    };
-    let Some(cleared) = outbox::settle(worker, request_id, failed, now_ms) else {
-        return true;
-    };
-    if cleared {
-        // The queue is drained one row at a time, in the order the revisions were typed.
-        drain_outbox(world, key);
-    } else {
-        arm_retry(world, key, false);
-    }
-    true
-}
-
-/// Sends the next pending save of one chat, if the view is there to perform it.
-fn drain_outbox(world: &mut World, key: &str) {
-    let Some(session_key) = world
-        .store
-        .get(key)
-        .map(|retained| retained.session_key.clone())
-    else {
-        return;
-    };
-    let now_ms = now_millis();
-    let Some(request) = next_retry_write(world, key, &session_key, now_ms) else {
-        return;
-    };
-    publish(world, key, vec![request]);
-}
-
-/// The next retry write, or `None` when one is in flight or nothing is pending.
-fn next_retry_write(
-    world: &mut World,
-    key: &str,
-    session_key: &str,
-    now_ms: i64,
-) -> Option<HostRequest> {
-    let worker = world.draft_workers.entry(key.to_string()).or_default();
-    outbox::next_write(worker, session_key, now_ms)
-}
-
-/// Arms the retry ladder after a refused save.
-///
-/// `count` is whether this refusal is the worker's own to count: a save the CORE issued is not one
-/// of the worker's attempts, but it is the event that starts the ladder, which is exactly what
-/// `queueDraftSave`'s `void flushDraftSaves(...)` did on the TypeScript side.
-fn arm_retry(world: &mut World, key: &str, count: bool) {
-    let worker: &mut DraftWorker = world.draft_workers.entry(key.to_string()).or_default();
-    if count {
-        worker.failures = worker.failures.saturating_add(1);
-    }
-    let delay = outbox::retry_delay_ms(worker.failures);
-    world.retry_wakes.insert(
-        key.to_string(),
-        Instant::now() + Duration::from_millis(delay),
-    );
 }

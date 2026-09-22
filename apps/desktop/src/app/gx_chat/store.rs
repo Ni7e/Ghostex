@@ -43,8 +43,6 @@ pub(super) struct Retained {
     pub(super) touched_at: Instant,
     /// When this chat's size was last measured.
     measured_at: Option<Instant>,
-    /// The boot read is one per chat, not one per attached view.
-    pub(super) booted: bool,
 }
 
 impl Retained {
@@ -57,7 +55,6 @@ impl Retained {
             listeners: 0,
             touched_at: Instant::now(),
             measured_at: None,
-            booted: false,
         }
     }
 
@@ -110,12 +107,23 @@ impl ChatStore {
         self.retained.len()
     }
 
-    /// Drops what the four limits no longer keep.
+    /// Drops one chat, whatever its limits say. The caller owns the reason.
+    pub(super) fn remove(&mut self, key: &str) {
+        self.retained.remove(key);
+    }
+
+    /// Drops what the four limits no longer keep, and names what it dropped.
     ///
     /// A chat with a listener is never dropped, whatever its size: the view attached to it is
     /// drawing from it. An oversized chat is DISPOSED rather than sliced, because slicing the
     /// transcript would leave the server's pagination cursor pointing at a row that is gone.
-    pub(super) fn prune(&mut self) {
+    ///
+    /// The answer is `(retention key, storage session key)` per dropped chat, because the maps
+    /// BESIDE this one are keyed by both and a chat's entry in them must not outlive the chat: the
+    /// timers, the retry worker, the park answer, the held requests and the delivery ids are all
+    /// per chat, and the saves in flight are per session key.
+    pub(super) fn prune(&mut self) -> Vec<(String, String)> {
+        let mut dropped: Vec<(String, String)> = Vec::new();
         let mut expired: Vec<String> = Vec::new();
         for (key, retained) in self.retained.iter_mut() {
             if retained.listeners > 0 {
@@ -126,7 +134,9 @@ impl ChatStore {
             }
         }
         for key in expired {
-            self.retained.remove(&key);
+            if let Some(retained) = self.retained.remove(&key) {
+                dropped.push((key, retained.session_key));
+            }
             self.evicted += 1;
         }
         while self.retained.len() > MAX_RETAINED_SESSIONS {
@@ -141,8 +151,11 @@ impl ChatStore {
                 // reason to tear down a chat somebody is looking at.
                 break;
             };
-            self.retained.remove(&oldest);
+            if let Some(retained) = self.retained.remove(&oldest) {
+                dropped.push((oldest, retained.session_key));
+            }
             self.evicted += 1;
         }
+        dropped
     }
 }
