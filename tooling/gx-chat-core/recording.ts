@@ -11,9 +11,14 @@
  */
 import { NATIVE_CHAT_REPLAY_FORMAT } from '@/packages/shared/session-chat-controller/native-host-replay';
 
-export const RECORDING_ROOT = '/tmp/gx-chat';
+/**
+ * `GX_CHAT_ROOT` moves the whole gate (recordings, expected, actual, reports) to a private directory,
+ * so an agent grading a snapshot of a live recording is not rewritten by another agent's gate run.
+ * `GX_CHAT_ACTUAL_DIR` moves only the Rust side's output, as `examples/replay.rs` reads it.
+ */
+export const RECORDING_ROOT = process.env.GX_CHAT_ROOT || '/tmp/gx-chat';
 export const EXPECTED_ROOT = `${RECORDING_ROOT}/expected`;
-export const ACTUAL_ROOT = `${RECORDING_ROOT}/actual`;
+export const ACTUAL_ROOT = process.env.GX_CHAT_ACTUAL_DIR || `${RECORDING_ROOT}/actual`;
 
 export interface ReplayHeader {
   v: number;

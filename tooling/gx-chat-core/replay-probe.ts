@@ -169,8 +169,9 @@ function label(line: unknown): string {
 
 function main(): void {
   const options = parseOptions(process.argv.slice(2));
-  const expected = readLines(`/tmp/gx-chat/expected/${options.name}.jsonl`);
-  const actual = readLines(`/tmp/gx-chat/actual/${options.name}.jsonl`);
+  const root = process.env.GX_CHAT_ROOT || '/tmp/gx-chat';
+  const expected = readLines(`${root}/expected/${options.name}.jsonl`);
+  const actual = readLines(`${process.env.GX_CHAT_ACTUAL_DIR || `${root}/actual`}/${options.name}.jsonl`);
   const compared = Math.min(expected.length, actual.length);
   const documentOf = (line: unknown): unknown => (line as { document?: unknown }).document ?? line;
 

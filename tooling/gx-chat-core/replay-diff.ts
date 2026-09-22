@@ -35,6 +35,9 @@
 
 import { readFileSync } from 'node:fs';
 
+/** `GX_CHAT_ROOT` and `GX_CHAT_ACTUAL_DIR`, as `recording.ts` reads them. */
+const ROOT = process.env.GX_CHAT_ROOT || '/tmp/gx-chat';
+
 interface Options {
   expected: string;
   actual: string;
@@ -92,8 +95,8 @@ function parseOptions(argv: readonly string[]): Options {
     }
   }
   return {
-    actual: actual || `/tmp/gx-chat/actual/${name}.jsonl`,
-    expected: expected || `/tmp/gx-chat/expected/${name}.jsonl`,
+    actual: actual || `${process.env.GX_CHAT_ACTUAL_DIR || `${ROOT}/actual`}/${name}.jsonl`,
+    expected: expected || `${ROOT}/expected/${name}.jsonl`,
     keys,
     ignore,
     limit,

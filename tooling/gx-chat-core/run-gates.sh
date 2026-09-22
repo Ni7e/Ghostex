@@ -61,7 +61,10 @@ set -u
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 crate="$root/packages/gx-chat-core"
-recordings="/tmp/gx-chat"
+# `GX_CHAT_ROOT` grades a private directory instead (a snapshot of a recording the app is still
+# writing), with its own expected, actual and reports beside it.
+recordings="${GX_CHAT_ROOT:-/tmp/gx-chat}"
+export GX_CHAT_ACTUAL_DIR="${GX_CHAT_ACTUAL_DIR:-$recordings/actual}"
 fast=0
 regenerate=0
 stale_fails=0

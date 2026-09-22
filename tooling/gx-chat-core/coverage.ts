@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import { actionKinds } from './coverage-actions';
 
 const ROOT = join(import.meta.dir, '..', '..');
-const RECORDINGS = '/tmp/gx-chat';
+const RECORDINGS = process.env.GX_CHAT_ROOT || '/tmp/gx-chat';
 
 /** The wire spellings of an enum written with the crate's `kinds!`-style table. */
 function wireSpellings(source: string, from: string, to: string): string[] {
