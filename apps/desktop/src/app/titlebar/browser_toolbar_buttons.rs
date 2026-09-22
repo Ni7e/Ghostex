@@ -27,6 +27,7 @@ use gpui::Styled as _;
 use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
+use gpui_component::ElementExt as _;
 use gpui_component::Sizable as _;
 use gpui_component::Size as ComponentSize;
 use gpui_component::h_flex;
@@ -168,6 +169,7 @@ impl GhostexGpuiApp {
         } else {
             None
         };
+        let trigger_bounds = std::rc::Rc::new(std::cell::Cell::new(None));
         div()
             .id(format!(
                 "ghostex-gpui-browser-toolbar-button-{}-{id}",
@@ -186,6 +188,10 @@ impl GhostexGpuiApp {
             } else {
                 browser_toolbar_disabled_icon_color()
             })
+            .on_prepaint({
+                let trigger_bounds = trigger_bounds.clone();
+                move |bounds, _, _| trigger_bounds.set(Some(bounds))
+            })
             .when(enabled, |this| {
                 this.hover(|this| {
                     this.bg(titlebar_button_hover_color())
@@ -193,7 +199,7 @@ impl GhostexGpuiApp {
                 })
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    cx.listener(move |this, _: &gpui::MouseDownEvent, window, cx| {
                         match action {
                             BrowserToolbarAction::Back
                             | BrowserToolbarAction::Forward
@@ -217,7 +223,14 @@ impl GhostexGpuiApp {
                                 this.show_browser_history_popup(pane_id, window, cx);
                             }
                             BrowserToolbarAction::ProfileMenu => {
-                                this.show_browser_profile_menu(pane_id, event.position, window, cx);
+                                if let Some(trigger_bounds) = trigger_bounds.get() {
+                                    this.show_browser_profile_menu(
+                                        pane_id,
+                                        trigger_bounds,
+                                        window,
+                                        cx,
+                                    );
+                                }
                             }
                             BrowserToolbarAction::DevTools => {
                                 this.toggle_browser_devtools_from_toolbar(pane_id, window, cx);

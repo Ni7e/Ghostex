@@ -3,15 +3,17 @@
 //! User: remote dev servers must use the exact Resources dropdown width, sizes, fonts, and style; the Resources implementation supersedes the HTML mockup's proportions.
 use crate::*;
 
-/// CDXC:Titlebar 2026-09-21 DECISION:
-/// User: the Tips, Resources and Dev servers dropdowns get the Ask Ghostex menu's roundness instead of a hard square look, with the layout unchanged.
+/// CDXC:Titlebar 2026-09-22 DECISION:
+/// User: the Tips, Resources, Dev servers and Notifications dropdowns get the Ask Ghostex menu's roundness instead of a hard square look, with the layout unchanged, and they take the background colour the sidebar shows instead of the near-black menu fill.
 /// The panel matches the menu's 8px corners and cards its 6px rows; small buttons, chips and icon tiles take a slightly smaller radius so they stay proportionate.
-/// SEE-ALSO: titlebar/popup_menu_builders.rs `titlebar_popup_menu_with_scroll_behavior`.
+/// SEE-ALSO: titlebar/popup_menu_builders.rs `titlebar_popup_menu_with_scroll_behavior`, helpers/titlebar.rs `titlebar_background`.
 pub(super) const RESOURCE_PANEL_RADIUS: f32 = 8.0;
 pub(super) const RESOURCE_CARD_RADIUS: f32 = 6.0;
 pub(super) const RESOURCE_CONTROL_RADIUS: f32 = 5.0;
 
 /// The frame alone paints the panel fill: a square child fill would cover its rounded corners.
+/// `titlebar_background` is the sidebar's own flat base, the solid counterpart of the gradient the
+/// sidebar paints across its height.
 pub(super) fn resource_panel_frame() -> gpui::Div {
     div()
         .relative()
@@ -20,7 +22,7 @@ pub(super) fn resource_panel_frame() -> gpui::Div {
         .rounded(px(RESOURCE_PANEL_RADIUS))
         .border_1()
         .border_color(titlebar_popup_menu_border_color())
-        .bg(titlebar_popup_menu_background())
+        .bg(titlebar_background())
         .text_color(chrome_ink())
 }
 

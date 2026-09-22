@@ -5,7 +5,7 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    StatefulInteractiveElement as _, Styled as _, Window, deferred, div, px,
 };
 use gpui_component::tooltip::ManagedTooltipExt as _;
 use gpui_component::tooltip::ManagedTooltipPlacement;
@@ -38,13 +38,17 @@ const SIDEBAR_USAGE_INSET: f32 = 8.0;
 /// pads one character less, while under-estimating would let a card overflow its column.
 const SIDEBAR_USAGE_BADGE_ADVANCE: f32 = 0.65;
 
-/// An account this close to its limit lights the Commands row's toggle while the
-/// strip is hidden, so putting the strip away never puts the warning away.
+/// The Commands row's height and top padding (navigation.rs); the peek sits on the row.
+const SIDEBAR_FOOTER_ROW_HEIGHT: f32 = 36.0;
+const SIDEBAR_FOOTER_ROW_TOP_PADDING: f32 = 5.0;
+
+/// An account this close to its limit lights the Commands row's pin while the
+/// strip is unpinned, so putting the strip away never puts the warning away.
 const SIDEBAR_USAGE_ALERT_PRESSURE: f64 = 0.9;
 
 impl GhostexGpuiApp {
-    /// CDXC:Sidebar 2026-09-20 DECISION:
-    /// User: the account usage meters sit at the bottom of the sidebar, above the Commands row, and are hidden by default. The chart button in the Commands row, immediately left of the Settings gear, shows every account at once, four per row, and clicking it again hides them; that button is the only toggle. This supersedes the earlier rule that the strip started as a single collapsed row of the accounts closest to their limit and was its own toggle: with the strip hidden by default there is nothing to collapse, and a strip that is asked for shows everything it has.
+    /// CDXC:Sidebar 2026-09-22 DECISION:
+    /// User: hovering the account usage button at the bottom of the sidebar shows the accounts floating over the bottom of the list, without pushing the content or the scroll area; the button itself looks like a pin, and clicking it pins the strip in place, where it sits above the Commands row as before. This supersedes the 2026-09-20 rule that the chart button was a plain show/hide toggle: a click still pins and unpins, and a hover now peeks.
     ///
     /// CDXC:Sidebar 2026-09-20 DECISION:
     /// User: each meter is a card with its own background, the cards fill their column so the rows line up, and their content is centred, which is the `space-around` look the user asked for: the gap from the sidebar's edge to the first card's content matches the gap from the last card's content to the other edge. The strip also sits lower, with more room between the session list and the first row of cards.
@@ -60,6 +64,59 @@ impl GhostexGpuiApp {
         if !self.sidebar_usage_visible {
             return None;
         }
+        self.render_native_sidebar_usage_strip(appearance, window, cx)
+    }
+
+    /// The unpinned strip, floating over the bottom of the list while the pin or the strip
+    /// itself is hovered. It is a deferred, absolutely placed child of the sidebar root, so the
+    /// list and its scroll area keep their size.
+    pub(crate) fn render_native_sidebar_usage_peek(
+        &self,
+        appearance: &SidebarAppearance,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        if self.sidebar_usage_visible
+            || !(self.native_sidebar.usage_pin_hovered || self.native_sidebar.usage_peek_hovered)
+        {
+            return None;
+        }
+        let strip = self.render_native_sidebar_usage_strip(appearance, window, cx)?;
+        let scale = appearance.scale;
+        // The peek's box reaches down to the top of the pin's own hitbox (the Commands row's
+        // 5px top padding sits between them), so a pointer sliding from the pin up into a card
+        // never crosses a strip of nothing that would have closed the peek halfway.
+        let bottom = (SIDEBAR_FOOTER_ROW_HEIGHT - SIDEBAR_FOOTER_ROW_TOP_PADDING) * scale;
+        Some(
+            deferred(
+                div()
+                    .id("native-sidebar-usage-peek")
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .bottom(px(bottom))
+                    .bg(titlebar_background())
+                    .border_t_1()
+                    .border_color(appearance.hover)
+                    .on_hover(cx.listener(|app, hovered: &bool, _, cx| {
+                        if app.native_sidebar.usage_peek_hovered != *hovered {
+                            app.native_sidebar.usage_peek_hovered = *hovered;
+                            cx.notify();
+                        }
+                    }))
+                    .child(strip),
+            )
+            .with_priority(6)
+            .into_any_element(),
+        )
+    }
+
+    fn render_native_sidebar_usage_strip(
+        &self,
+        appearance: &SidebarAppearance,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
         let mut meters = self.account_usage_meters();
         if meters.is_empty() {
             return None;
@@ -156,9 +213,9 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
-    /// The Commands row's account-usage button: the only way the strip is shown
-    /// or hidden. It carries a dot while the strip is hidden and an account is
-    /// close to a limit, so hiding the meters never hides the warning.
+    /// The Commands row's account-usage pin: hovering it peeks the strip, clicking it
+    /// pins or unpins it. It carries a dot while the strip is unpinned and an account is
+    /// close to a limit, so putting the meters away never puts the warning away.
     pub(crate) fn render_native_sidebar_usage_toggle(
         &self,
         appearance: &SidebarAppearance,
@@ -180,6 +237,8 @@ impl GhostexGpuiApp {
         Some(
             div()
                 .id("native-sidebar-usage-toggle")
+                .role(gpui::Role::Button)
+                .aria_label("Account usage")
                 .relative()
                 .h(px(28.0 * scale))
                 .w(px(34.0 * scale))
@@ -192,8 +251,18 @@ impl GhostexGpuiApp {
                 .cursor_default()
                 .when(visible, |button| button.bg(appearance.hover))
                 .hover(|button| button.bg(appearance.hover))
+                .on_hover(cx.listener(|app, hovered: &bool, _, cx| {
+                    if app.native_sidebar.usage_pin_hovered != *hovered {
+                        app.native_sidebar.usage_pin_hovered = *hovered;
+                        cx.notify();
+                    }
+                }))
                 .child(titlebar_svg_icon(
-                    "titlebar/chart-bar.svg",
+                    if visible {
+                        "titlebar/pin-filled.svg"
+                    } else {
+                        "titlebar/pin.svg"
+                    },
                     15.0 * scale,
                     if visible {
                         titlebar_active_text_color()
@@ -222,9 +291,9 @@ impl GhostexGpuiApp {
                     move |window, cx| {
                         titlebar_tooltip(
                             if visible {
-                                "Hide account usage"
+                                "Unpin account usage"
                             } else {
-                                "Account usage"
+                                "Pin account usage"
                             },
                             window,
                             cx,
