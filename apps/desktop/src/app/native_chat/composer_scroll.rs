@@ -5,8 +5,15 @@ use gpui::{
 use serde_json::json;
 
 impl NativeChatView {
+    /// CDXC:SessionChat 2026-09-23 SEE-ALSO: `sessionChatKeepComposerExpanded` in `packages/shared/ghostex-settings/types.ts` holds the user's decision; a missing key reads as its default, on.
     pub(super) fn composer_collapse_eligible(&self) -> bool {
-        self.maximized_window.is_none()
+        let keep_expanded = crate::shared_settings::shared_sidebar_settings_snapshot()
+            .object()
+            .get("sessionChatKeepComposerExpanded")
+            .and_then(serde_json::Value::as_bool)
+            != Some(false);
+        !keep_expanded
+            && self.maximized_window.is_none()
             && !(self.snapshot["questionCard"]["visible"] == true
                 && self.snapshot["prompt"]["kind"] == "question")
             && self.snapshot["composerCollapseEligible"] == true

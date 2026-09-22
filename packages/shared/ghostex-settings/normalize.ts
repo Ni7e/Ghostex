@@ -713,6 +713,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       'sessionChatFileEditPreviews',
       DEFAULT_ghostex_SETTINGS.sessionChatFileEditPreviews
     ),
+    sessionChatKeepComposerExpanded: readBoolean(
+      source,
+      'sessionChatKeepComposerExpanded',
+      DEFAULT_ghostex_SETTINGS.sessionChatKeepComposerExpanded
+    ),
     sessionChatVerboseMode: readBoolean(
       source,
       'sessionChatVerboseMode',

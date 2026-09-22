@@ -402,7 +402,7 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'sidebarCollapseAnimationDurationMs',
           subtitle:
-            'Set how quickly sidebar sections, groups, and projects expand or collapse, and how quickly the floating sidebar and sessions column slide in from the window edge. Set to 0 for no animation.',
+            'Set how quickly sidebar sections, groups, and projects expand or collapse, and how quickly the floating sidebar and Agents Panel slide in from the window edge. Set to 0 for no animation.',
           title: 'Collapse animation speed',
         },
         {
@@ -598,6 +598,12 @@ export function getSettingsSearchSectionDefinitions() {
           subtitle:
             'Show the first seven code lines in each file edit. Turn off to show only the path and change counts.',
           title: 'Show file edit previews',
+        },
+        {
+          key: 'sessionChatKeepComposerExpanded',
+          subtitle:
+            'Keep the desktop chat box at full size while you scroll the transcript instead of shrinking it as you scroll up and growing it back at the end.',
+          title: 'Keep chat box expanded while scrolling',
         },
         {
           key: 'sessionChatSimpleMode',

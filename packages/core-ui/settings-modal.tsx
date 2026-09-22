@@ -1571,7 +1571,7 @@ export function SettingsModal({
                             ) : null}
                             {mainSettingVisible(settingsSearch.sidebar, 'sidebarCollapseAnimationDurationMs') ? (
                               <SliderNumberField
-                                description='Duration in milliseconds for expanding and collapsing sidebar sections, groups, and projects, and for the floating sidebar and sessions column sliding in from the window edge. Set to 0 for instant changes.'
+                                description='Duration in milliseconds for expanding and collapsing sidebar sections, groups, and projects, and for the floating sidebar and Agents Panel sliding in from the window edge. Set to 0 for instant changes.'
                                 label='Collapse Animation Duration'
                                 {...getSettingModificationProps('sidebarCollapseAnimationDurationMs')}
                                 max={MAX_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS}
@@ -1892,6 +1892,15 @@ export function SettingsModal({
                                 label='Show file edit previews'
                                 {...getSettingModificationProps('sessionChatFileEditPreviews')}
                                 onChange={(checked) => updateDraft('sessionChatFileEditPreviews', checked)}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.chat, 'sessionChatKeepComposerExpanded') ? (
+                              <ToggleField
+                                checked={draft.sessionChatKeepComposerExpanded}
+                                description='Keep the desktop chat box at full size while you scroll the transcript instead of shrinking it as you scroll up and growing it back at the end.'
+                                label='Keep chat box expanded while scrolling'
+                                {...getSettingModificationProps('sessionChatKeepComposerExpanded')}
+                                onChange={(checked) => updateDraft('sessionChatKeepComposerExpanded', checked)}
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.chat, 'sessionChatVerboseMode') ? (

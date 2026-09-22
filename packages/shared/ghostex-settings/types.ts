@@ -625,6 +625,10 @@ export type ghostexSettings = {
    * User: file edits default to a single collapsed row; Chat settings can opt into seven-line previews.
    */
   sessionChatFileEditPreviews: boolean;
+  /** CDXC:SessionChat 2026-09-23 DECISION:
+   * User: add a setting that stops the GPUI chat box from animating up and down, enabled by default until its animation issues are fixed. While on, scrolling the transcript never collapses the desktop chat box.
+   */
+  sessionChatKeepComposerExpanded: boolean;
   /**
    * CDXC:Theming 2026-06-15-11:24:
    * Custom chrome colors are scoped to the sidebar and native titlebar only.
