@@ -24,6 +24,7 @@
 use std::collections::BTreeMap;
 
 use ghostex_gx_protocol::ChatMessage;
+use serde_json::Value;
 
 use crate::document::{DeferredWorkRow, RowDetails, TranscriptItem};
 use crate::transcript::deferred_work::{DeferredWalk, DeferredWorkCache};
@@ -55,8 +56,12 @@ pub struct TranscriptViewState {
     pub deferred: BTreeMap<String, Vec<ChatMessage>>,
     /// The messages whose full projection has been built, with the source each was built from.
     ///
-    /// A row not in here, and not inside the eager tail, ships as a plain-text placeholder.
-    pub projected: BTreeMap<String, ChatMessage>,
+    /// `NativeChatPresentation.modelsById`. A row not in here, and not inside the eager tail, ships
+    /// as a plain-text placeholder. The model rides beside the source so an unchanged message is
+    /// never parsed twice: a working session publishes once a second, and re-projecting a long
+    /// transcript's markdown on every publish is exactly the cost the TypeScript cache exists to
+    /// avoid.
+    pub projected: BTreeMap<String, ProjectedMessage>,
     /// Ids queued for the next backfill batch, in the order the last projection met them.
     pub backfill: Vec<String>,
     /// Bumped by every applied batch, so the next publish differs and the rows ship.
@@ -99,6 +104,18 @@ pub struct TranscriptViewState {
     /// `sentTranscriptItems === transcriptItems`, and a rebuilt list is a new array even when
     /// every row in it was reused.
     pub projection_revision: u64,
+}
+
+/// One message's full projection, with the source it was built from.
+///
+/// The source is what decides whether the entry still applies (`sameSessionChatMessage`), and what
+/// an open row's detail is read from: folding merges a tool-only message INTO the assistant turn
+/// above it, so the blocks a row's index points at are the anchor's merged blocks as projected, not
+/// the raw message's.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectedMessage {
+    pub source: ChatMessage,
+    pub model: Value,
 }
 
 /// What `NativeChatPresentation.update` decides on.

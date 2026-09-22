@@ -7,8 +7,6 @@
 use ghostex_gx_protocol::Tri;
 
 use crate::document::Document;
-use crate::session::composition::compose;
-use crate::session::constants::DEFAULT_COMMAND_CATALOG;
 use crate::session::view_state::select_view_state;
 use crate::session::working::{is_working, publish_status, working_signal};
 use crate::state::{ChatContext, ChatState};
@@ -16,10 +14,6 @@ use crate::state::{ChatContext, ChatState};
 /// Writes family a's keys into `into`.
 pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
     let session = &state.session;
-    let catalog: Vec<String> = DEFAULT_COMMAND_CATALOG
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect();
 
     // A locally accepted send owns the working presentation immediately. It stays pending until
     // the authoritative transcript advances past that user turn, bridging the gap before host or
@@ -27,10 +21,13 @@ pub fn document(state: &ChatState, context: &ChatContext, into: &mut Document) {
     let signal = working_signal(state);
     let working = is_working(state);
 
-    let composed = compose(state, &catalog, None, working);
+    // `ChatCore::republish` composes the list into `state.messages.composed` before any document
+    // is assembled, and only the row count is read here; composing it again per assembly (twice
+    // per event, over the whole transcript) was most of a long chat's per-tick cost.
+    let composed_rows = state.messages.composed.len();
     let status = publish_status(&session.server_status, working, session.error.is_some());
 
-    into.view = select_view_state(&status, composed.len(), session.error.as_deref());
+    into.view = select_view_state(&status, composed_rows, session.error.as_deref());
     into.status = status.as_str().to_string();
     into.working = working;
     into.working_signal = signal && !session.interrupted;

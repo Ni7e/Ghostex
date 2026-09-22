@@ -8,7 +8,9 @@ use ghostex_gx_protocol::{ChatBlock, ChatMessage, ChatRole};
 use serde_json::{Map, Value};
 
 use crate::document::TranscriptItem;
-use crate::state::{ChatContext, ChatState, TranscriptViewState, EAGER_TAIL_ITEMS};
+use crate::state::{
+    ChatContext, ChatState, ProjectedMessage, TranscriptViewState, EAGER_TAIL_ITEMS,
+};
 use crate::transcript::agent_message::{
     agent_display_name, parse_agent_message, parse_inter_agent_message,
 };
@@ -300,8 +302,6 @@ pub struct ProjectionScope<'a> {
     /// The rows a `loadWork` read brought back, keyed by the turn's user-message id. A child
     /// transcript has none of its own.
     pub deferred: &'a BTreeMap<String, Vec<ChatMessage>>,
-    /// The messages whose full projection has been built, with the source each was built from.
-    pub projected: &'a BTreeMap<String, ChatMessage>,
     /// `/root` for the session, the child's own path inside the subagent viewer.
     pub agent_path: &'a str,
     /// Shortens the paths on file-change cards. Module level in the TypeScript, so both instances
@@ -316,38 +316,87 @@ pub fn scope<'a>(state: &'a ChatState, view: &'a TranscriptViewState) -> Project
         working: is_working(state),
         summary: view.summary_mode,
         deferred: &view.deferred,
-        projected: &view.projected,
         agent_path: &view.agent_path,
         working_directory: view.working_directory.as_deref(),
+    }
+}
+
+/// The per-message cache one presentation instance owns (`modelsById`), keyed by message id.
+pub type ProjectionCache = BTreeMap<String, ProjectedMessage>;
+
+/// `NativeChatPresentation.message`: the cached projection when the source is data-identical,
+/// otherwise a fresh one, which is cached in its place.
+pub fn project_cached(
+    cache: &mut ProjectionCache,
+    scope: &ProjectionScope<'_>,
+    context: &ChatContext,
+    message: &ChatMessage,
+) -> Value {
+    if let Some(entry) = cache.get(&message.id) {
+        if entry.source == *message {
+            return entry.model.clone();
+        }
+    }
+    let model = project_message(message, scope.agent_path, scope.working_directory, context);
+    cache.insert(
+        message.id.clone(),
+        ProjectedMessage {
+            source: message.clone(),
+            model: model.clone(),
+        },
+    );
+    model
+}
+
+/// `pruneModels`: once the cache is well past the transcript's size, drop every entry whose id is
+/// no longer in the transcript or its deferred rows.
+fn prune_cache(cache: &mut ProjectionCache, scope: &ProjectionScope<'_>) {
+    if cache.len() <= scope.messages.len() * 2 + 64 {
+        return;
+    }
+    let mut live: std::collections::BTreeSet<&str> = scope
+        .messages
+        .iter()
+        .map(|message| message.id.as_str())
+        .collect();
+    for rows in scope.deferred.values() {
+        live.extend(rows.iter().map(|row| row.id.as_str()));
+    }
+    let stale: Vec<String> = cache
+        .keys()
+        .filter(|id| !live.contains(id.as_str()))
+        .cloned()
+        .collect();
+    for id in stale {
+        cache.remove(&id);
     }
 }
 
 struct Builder<'a> {
     scope: &'a ProjectionScope<'a>,
     context: &'a ChatContext,
+    cache: &'a mut ProjectionCache,
     eager_from: usize,
     backfill: Vec<String>,
 }
 
 impl Builder<'_> {
-    fn projected(&self, message: &ChatMessage) -> bool {
-        self.scope.projected.get(&message.id) == Some(message)
-    }
-
-    fn project(&self, message: &ChatMessage) -> Value {
-        project_message(
-            message,
-            self.scope.agent_path,
-            self.scope.working_directory,
-            self.context,
-        )
+    /// `projected`: the cached model when the cache holds this exact message.
+    fn projected(&self, message: &ChatMessage) -> Option<Value> {
+        self.cache
+            .get(&message.id)
+            .filter(|entry| entry.source == *message)
+            .map(|entry| entry.model.clone())
     }
 
     /// The full projection when it is cheap or the row is near the tail; otherwise a stable
     /// plain-text stand-in queued for backfill.
     fn message_or_placeholder(&mut self, message: &ChatMessage, eager: bool) -> Value {
-        if eager || self.projected(message) {
-            return self.project(message);
+        if let Some(model) = self.projected(message) {
+            return model;
+        }
+        if eager {
+            return project_cached(self.cache, self.scope, self.context, message);
         }
         self.backfill.push(message.id.clone());
         placeholder(message)
@@ -370,13 +419,22 @@ fn message_id(item: &TranscriptItem) -> String {
     }
 }
 
-/// The whole transcript list for the state as it stands.
+/// The whole transcript list for the state as it stands, against a copy of its cache.
+///
+/// For the pure readers (`rows`, `document`) on the turns before the first refresh; the refresh
+/// itself builds against the state's own cache so what it projects is kept.
 pub fn build(state: &ChatState, context: &ChatContext) -> Projection {
-    build_scope(&scope(state, &state.transcript_view), context)
+    let mut cache = state.transcript_view.projected.clone();
+    build_scope(&scope(state, &state.transcript_view), context, &mut cache)
 }
 
-/// The whole transcript list for one presentation instance's scope.
-pub fn build_scope(scope: &ProjectionScope, context: &ChatContext) -> Projection {
+/// The whole transcript list for one presentation instance's scope, projecting through (and
+/// into) that instance's cache.
+pub fn build_scope(
+    scope: &ProjectionScope,
+    context: &ChatContext,
+    cache: &mut ProjectionCache,
+) -> Projection {
     let projection: TranscriptProjection =
         project_chat_transcript(scope.messages, scope.working, &[]);
     let summary = scope.summary;
@@ -388,6 +446,7 @@ pub fn build_scope(scope: &ProjectionScope, context: &ChatContext) -> Projection
     let mut builder = Builder {
         scope,
         context,
+        cache,
         eager_from: length.saturating_sub(EAGER_TAIL_ITEMS),
         backfill: Vec::new(),
     };
@@ -539,40 +598,18 @@ pub fn build_scope(scope: &ProjectionScope, context: &ChatContext) -> Projection
         .map(|turn| (&turn.user, turn.final_message.as_ref()))
         .collect();
     let minimap = crate::extras::minimap::project_minimap_turns(&turns, &item_index);
+    let backfill = builder.backfill;
+    prune_cache(cache, scope);
     Projection {
         items,
         final_ids: projection.final_ids,
-        backfill: builder.backfill,
+        backfill,
         minimap,
     }
 }
 
 /// What an open row shows, read from the message the row was projected from: a tool's arguments and
 /// result, or a file card's diff.
-/// The rows a detail can be asked for: the folded transcript, plus each completed turn's own work
-/// list, which is folded separately.
-///
-/// The TypeScript reads this out of its projection cache, which is keyed by the id of whatever was
-/// projected. Folding merges a tool-only message INTO the assistant turn above it, so the blocks a
-/// row's index points at are the anchor's merged blocks, not the raw message's. Rebuilding the same
-/// two lists is how that is reproduced without a cache.
-fn detail_sources(scope: &ProjectionScope) -> Vec<ChatMessage> {
-    let projection = project_chat_transcript(scope.messages, scope.working, &[]);
-    let mut sources = projection.rendered.clone();
-    for item in &projection.items {
-        if let RenderItem::CompletedWork(turn) = item {
-            let work =
-                completed_chat_work(turn, scope.deferred.get(&turn.user.id).map(Vec::as_slice));
-            for message in work {
-                if !sources.iter().any(|seen| seen.id == message.id) {
-                    sources.push(message);
-                }
-            }
-        }
-    }
-    sources
-}
-
 pub fn row_detail(
     state: &ChatState,
     context: &ChatContext,
@@ -581,27 +618,23 @@ pub fn row_detail(
     index: usize,
 ) -> Option<Value> {
     let _ = context;
-    row_detail_scope(
-        &scope(state, &state.transcript_view),
-        kind,
-        message_id,
-        index,
-    )
+    row_detail_scope(&state.transcript_view.projected, kind, message_id, index)
 }
 
-/// The same detail, read against one presentation instance's own sources.
+/// The same detail, read against one presentation instance's own cache.
 ///
-/// `native-host.ts:424` is `presentation.rowDetail(...) ?? subagentViewer.rowDetail(...)`: the open
-/// row belongs to whichever of the two transcripts holds a message with that id, and only the
-/// viewer's own projector can answer for a child's row.
+/// `rowDetail` reads `this.modelsById.get(messageId)?.source`: the message as it was PROJECTED,
+/// which for a folded tool-only message is the anchor's merged blocks, and nothing at all for a row
+/// still drawn as a placeholder. `native-host.ts:424` is `presentation.rowDetail(...) ??
+/// subagentViewer.rowDetail(...)`: the open row belongs to whichever of the two transcripts
+/// projected a message with that id, and only the viewer's own cache can answer for a child's row.
 pub fn row_detail_scope(
-    scope: &ProjectionScope,
+    cache: &ProjectionCache,
     kind: &str,
     message_id: &str,
     index: usize,
 ) -> Option<Value> {
-    let sources = detail_sources(scope);
-    let source = sources.iter().find(|message| message.id == message_id)?;
+    let source = &cache.get(message_id)?.source;
     let (files, tools) = message_tool_rows(source);
     if kind == "file" {
         let change = files.get(index)?;

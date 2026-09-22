@@ -47,7 +47,6 @@ fn scope<'a>(
         // A subagent transcript is always read in normal mode.
         summary: false,
         deferred: &view.deferred,
-        projected: &view.projected,
         agent_path: &view.agent_path,
         working_directory,
     }
@@ -93,14 +92,17 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
     if state.extras.subagent.view.projection_inputs.as_ref() == Some(&inputs) {
         return;
     }
+    let mut cache = std::mem::take(&mut state.extras.subagent.view.projected);
     let projection = {
         let view = &state.extras.subagent.view;
         build_scope(
             &scope(view, &rows, working, view.working_directory.as_deref()),
             context,
+            &mut cache,
         )
     };
     let view = &mut state.extras.subagent.view;
+    view.projected = cache;
     view.items = projection.items;
     view.final_ids = projection.final_ids;
     view.backfill = projection.backfill;
@@ -122,16 +124,9 @@ pub fn rows(state: &ChatState, _context: &ChatContext) -> Vec<TranscriptItem> {
 /// `None` when the id belongs to the session's own transcript, which is what makes
 /// `presentation.rowDetail(...) ?? subagentViewer.rowDetail(...)` pick the right one.
 pub fn row_detail(state: &ChatState, kind: &str, message_id: &str, index: usize) -> Option<Value> {
-    let page = state.extras.subagent.page.as_ref()?;
-    let rows = page_messages(page);
-    let view = &state.extras.subagent.view;
+    state.extras.subagent.page.as_ref()?;
     row_detail_scope(
-        &scope(
-            view,
-            &rows,
-            state.extras.subagent.working,
-            view.working_directory.as_deref(),
-        ),
+        &state.extras.subagent.view.projected,
         kind,
         message_id,
         index,
@@ -167,11 +162,25 @@ pub fn advance(state: &mut ChatState, context: &ChatContext) -> bool {
         .len()
         .saturating_sub(crate::state::BACKFILL_BATCH);
     let batch: Vec<String> = view.backfill.split_off(batch_start);
-    for id in batch {
-        if let Some(message) = rows.iter().find(|message| message.id == id) {
-            view.projected.insert(id, message.clone());
+    let mut cache = std::mem::take(&mut view.projected);
+    {
+        let view = &state.extras.subagent.view;
+        let scope = scope(
+            view,
+            &rows,
+            state.extras.subagent.working,
+            view.working_directory.as_deref(),
+        );
+        for id in batch {
+            if let Some(message) = rows.iter().find(|message| message.id == id) {
+                crate::transcript::presentation::project_cached(
+                    &mut cache, &scope, context, message,
+                );
+            }
         }
     }
+    let view = &mut state.extras.subagent.view;
+    view.projected = cache;
     view.backfill_revision += 1;
     refresh(state, context);
     true

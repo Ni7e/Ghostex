@@ -74,7 +74,15 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
     if state.transcript_view.projection_inputs.as_ref() == Some(&inputs) {
         return;
     }
-    let projection = presentation::build(state, context);
+    // Built against the state's OWN cache, so every message this pass projects is kept for the
+    // next one; `presentation::build` works on a copy and is for the pure readers.
+    let mut cache = std::mem::take(&mut state.transcript_view.projected);
+    let projection = presentation::build_scope(
+        &presentation::scope(state, &state.transcript_view),
+        context,
+        &mut cache,
+    );
+    state.transcript_view.projected = cache;
     // The rail rides in the same result object as the items in `NativeChatPresentation.update`, so
     // it is produced by this pass and stored on its owner's state.
     state.extras.minimap = projection.minimap;
@@ -115,12 +123,16 @@ pub fn advance(state: &mut ChatState, context: &ChatContext) -> bool {
                 .cloned()
         })
         .collect();
-    for message in sources {
-        state
-            .transcript_view
-            .projected
-            .insert(message.id.clone(), message);
+    // `for (const message of this.backfill.splice(-BACKFILL_BATCH)) this.message(message)`: each
+    // is projected NOW and cached, so the refresh below reads whole rows for them.
+    let mut cache = std::mem::take(&mut state.transcript_view.projected);
+    {
+        let scope = presentation::scope(state, &state.transcript_view);
+        for message in &sources {
+            presentation::project_cached(&mut cache, &scope, context, message);
+        }
     }
+    state.transcript_view.projected = cache;
     state.transcript_view.backfill_revision += 1;
     refresh(state, context);
     true

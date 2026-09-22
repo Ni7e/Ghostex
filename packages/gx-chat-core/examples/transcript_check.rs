@@ -108,6 +108,9 @@ fn main() -> ExitCode {
         );
 
         if let Some(Value::Array(requests)) = case.get("rowDetails") {
+            // `rowDetail` reads the projection cache `update()` filled, so the details are asked
+            // of a state the projection has run over, the way `publish` runs it before any drain.
+            transcript::rows::refresh(&mut state, &context);
             state.transcript_view.open_rows = requests
                 .iter()
                 .map(|request| ghostex_gx_chat_core::state::OpenRow {

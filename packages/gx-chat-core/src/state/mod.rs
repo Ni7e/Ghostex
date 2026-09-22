@@ -30,6 +30,6 @@ pub use crate::state::questions::{
 };
 pub use crate::state::session::{SessionIdentity, SessionState};
 pub use crate::state::transcript_view::{
-    ProjectionInputs,
+    ProjectedMessage, ProjectionInputs,
     OpenRow, RewindRequest, TranscriptViewState, BACKFILL_BATCH, EAGER_TAIL_ITEMS, ROOT_AGENT_PATH,
 };

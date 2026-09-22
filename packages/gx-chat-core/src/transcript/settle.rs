@@ -35,7 +35,10 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
         if key.store == crate::composer::storage::SUMMARY_STORE {
             if let (Some(next), None) = (state.transcript_view.pending_summary_mode.take(), error) {
                 state.transcript_view.summary_mode = next;
-                state.transcript_view.invalidate();
+                // `update` sees `summary !== this.summary` and rebuilds the list; the projection
+                // cache is NOT thrown away (only a new agent path or working directory does that),
+                // so the rows that were whole stay whole in the other mode.
+                state.transcript_view.projection_inputs = None;
             }
         }
         if key.store == crate::composer::storage::VERBOSE_STORE {
