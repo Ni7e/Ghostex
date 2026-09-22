@@ -26,6 +26,8 @@ pub const MODEL_MENU_PROVIDERS: [ModelPickerProvider; 5] = [
     ModelPickerProvider::Antigravity,
 ];
 pub const MODEL_MENU_FAVORITES_TAB: &str = "favorites";
+/// `AUTO_MODEL_VALUE`: the row the agent picks for you, pinned first on its own tab.
+const AUTO_MODEL_VALUE: &str = "auto";
 pub const MODEL_MENU_SEARCH_PLACEHOLDER: &str = "Search models…";
 pub const MODEL_MENU_SHORTCUT_ROWS: usize = 9;
 
@@ -337,10 +339,15 @@ pub fn model_menu_rows(
         };
         ranked.push((entry, favorite, index, rank));
     }
-    // `sort` by rank, then favorites first, then catalog order; stable, as JavaScript's is.
+    // `pinned`: the user's 2026-09-22 decision in `model-menu.ts` ("make Auto show up at the top
+    // here"): on an agent's own tab Auto sorts above a starred model; a search still ranks it.
+    let pinned = |entry: &ModelMenuEntry| !favorites_tab && entry.value == AUTO_MODEL_VALUE;
+    // `sort` by rank, then Auto, then favorites first, then catalog order; stable, as
+    // JavaScript's is.
     ranked.sort_by(|left, right| {
         left.3
             .cmp(&right.3)
+            .then_with(|| pinned(right.0).cmp(&pinned(left.0)))
             .then_with(|| right.1.cmp(&left.1))
             .then_with(|| left.2.cmp(&right.2))
     });
