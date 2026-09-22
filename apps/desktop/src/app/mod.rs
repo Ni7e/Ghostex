@@ -88,6 +88,7 @@ pub(crate) mod session_pane_placement;
 pub(crate) mod sidebar_agent_launch_placeholder;
 pub(crate) mod sidebar_direct_focus;
 pub(crate) mod sidebar_dispatch;
+mod sleeping_tab_focus;
 pub(crate) mod space_editor_modal_lifecycle;
 pub(crate) mod stashed_prompt_jump;
 pub(crate) mod status_pet;

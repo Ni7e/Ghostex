@@ -78,7 +78,7 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
   focusSession(
     sessionId: string,
     originalMessage?: SidebarToExtensionMessage,
-    options?: { keepView?: boolean; preferredInterface?: PreferredAgentInterface }
+    options?: { keepSleeping?: boolean; keepView?: boolean; preferredInterface?: PreferredAgentInterface }
   ): Promise<void>;
   postSidebarSessionFocusConfirmation(sessionId: string): void;
   focusLocalWorkspaceSession(
@@ -86,6 +86,7 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
     sessionId: string,
     options?: {
       forceRemount?: boolean;
+      keepSleeping?: boolean;
       keepView?: boolean;
       placement?: GpuiWorkspaceTerminalFocusPlacement;
       preferredInterface?: PreferredAgentInterface;
@@ -98,6 +99,7 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
     placementTargetSessionId?: string,
     options?: {
       forceRemount?: boolean;
+      keepSleeping?: boolean;
       keepView?: boolean;
       placement?: GpuiWorkspaceTerminalFocusPlacement;
       preferredInterface?: PreferredAgentInterface;
@@ -286,7 +288,7 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     this: GpuiSidebarRuntime,
     sessionId: string,
     originalMessage?: SidebarToExtensionMessage,
-    options?: { keepView?: boolean; preferredInterface?: PreferredAgentInterface }
+    options?: { keepSleeping?: boolean; keepView?: boolean; preferredInterface?: PreferredAgentInterface }
   ): Promise<void> {
     /*
     CDXC:Navigation 2026-09-11 DECISION:
@@ -371,6 +373,19 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
           )
         ),
     };
+    if (
+      options?.keepSleeping &&
+      createGpuiSidebarSettings(this.runtimeSettings).clickToWakeSleepingSessions &&
+      this.isSleepingLocalPresentationSession(reference.projectId, reference.sessionId)
+    ) {
+      // An indirect selection shows the wake placeholder instead of waking (CDXC:SessionSleep 2026-09-23 on `select_sleeping_local_workspace_tab`).
+      this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId, {
+        ...focusOptions,
+        keepSleeping: true,
+      });
+      this.publishPresentation('patch');
+      return;
+    }
     if (this.isSleepingLocalPresentationSession(reference.projectId, reference.sessionId)) {
       /*
       CDXC:FocusRouting 2026-09-20 WHY:
@@ -439,6 +454,7 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     sessionId: string,
     options?: {
       forceRemount?: boolean;
+      keepSleeping?: boolean;
       keepView?: boolean;
       placement?: GpuiWorkspaceTerminalFocusPlacement;
       preferredInterface?: PreferredAgentInterface;
@@ -465,6 +481,7 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     placementTargetSessionId?: string,
     options?: {
       forceRemount?: boolean;
+      keepSleeping?: boolean;
       keepView?: boolean;
       placement?: GpuiWorkspaceTerminalFocusPlacement;
       preferredInterface?: PreferredAgentInterface;
@@ -487,6 +504,7 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
       ...(options?.preferredInterface ? { preferredInterface: options.preferredInterface } : {}),
       ...(options?.startupRestore ? { startupRestore: true } : {}),
       ...(options?.wakeSleeping ? { wakeSleeping: true } : {}),
+      ...(options?.keepSleeping ? { keepSleeping: true } : {}),
       ...(options?.keepView ? { keepView: true } : {}),
       projectId,
       sessionId,

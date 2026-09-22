@@ -80,6 +80,7 @@ impl GhostexGpuiApp {
                     startup_restore: false,
                     keep_view: false,
                     wake_sleeping: false,
+                    keep_sleeping: false,
                 },
                 cx,
             );
@@ -508,12 +509,16 @@ impl GhostexGpuiApp {
         A restored workspace keeps the sessions its panes surfaced at quit, but their daemon providers may have gone to sleep (auto-sleep, or the machine rebooted) while the app was closed, and attach alone cannot show a session with no zmx provider. So the first visit to each restored project wakes its panes' surfaced-but-sleeping sessions once; later sleeps are user decisions, so the project key is consumed on that pass and never re-armed.
         Only a return to the project does this. It runs on the first focus snapshot that describes this project, and when that snapshot heads for a session no pane surfaces (a new agent, or a background row) it wakes nothing: the requested session owns the visit and the covered sessions stay asleep until clicked. Waking them anyway respawned sessions the user had not asked for, and before R7 the wake's result also took focus from the new agent.
         Supersedes the 2026-08-07 note, which woke on the first authoritative pass whatever it was for.
+        With Click to Wake Sleeping Panes on, the pass wakes nothing at all and those panes show their wake placeholder; see the SessionSleep decision on `select_sleeping_local_workspace_tab`.
         */
         let Some(project_id) = self.agents_workspace_project_id.clone() else {
             return;
         };
         if focus_state.active_project_id.as_deref() != Some(project_id.as_str())
             || !self.startup_restore_wake_pending.remove(&project_id)
+            || gpui_click_to_wake_sleeping_sessions_from_shared_settings(
+                &shared_settings::shared_sidebar_settings_snapshot(),
+            )
         {
             return;
         }
@@ -1731,7 +1736,7 @@ impl GhostexGpuiApp {
 
     /// Shared tail of both keep-view paths: reveal the tab in its strip,
     /// publish the selection to the sidebar, persist, and repaint.
-    fn finish_local_workspace_terminal_background_selection(
+    pub(crate) fn finish_local_workspace_terminal_background_selection(
         &mut self,
         key: &GpuiLocalWorkspaceSessionKey,
         pane_id: WorkspacePaneId,

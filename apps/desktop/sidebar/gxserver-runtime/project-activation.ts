@@ -16,7 +16,7 @@ import {
 } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import { postGpuiSidebarRuntimeFactsReveal } from './sidebar-runtime-facts';
 
-const clientStorage = storageScope(["projectLastSession"]);
+const clientStorage = storageScope(['projectLastSession']);
 
 const storagePrefix = 'ghostex.gpui.project-last-session.v1:';
 const pendingReveals = new WeakMap<GpuiSidebarRuntime, string>();
@@ -55,8 +55,9 @@ export function rememberGpuiProjectSession(runtime: GpuiSidebarRuntime, projectI
 }
 
 /**
- * CDXC:Projects 2026-09-05 DECISION:
- * User: opening a project from Quick Access selects and wakes its last agent/terminal, or creates the default agent in Chat mode (a terminal when Terminal is the default), and focuses its input.
+ * CDXC:Projects 2026-09-23 DECISION:
+ * User: opening a project from Quick Access selects its last agent/terminal, or creates the default agent in Chat mode (a terminal when Terminal is the default), and focuses its input.
+ * A sleeping last session is selected without waking it and shows its wake placeholder while Click to Wake Sleeping Panes is on; this supersedes the 2026-09-05 wording that woke it (CDXC:SessionSleep 2026-09-23 on `select_sleeping_local_workspace_tab`).
  * Refresh before choosing so a restored project cannot look empty merely because its sidebar snapshot has not arrived yet.
  */
 export function activateGpuiProject(runtime: GpuiSidebarRuntime, projectId: string): Promise<void> {
@@ -89,6 +90,7 @@ export function activateGpuiProject(runtime: GpuiSidebarRuntime, projectId: stri
       pendingReveals.set(runtime, projectId);
       if (selected) {
         await runtime.focusSession(sidebarId(selected.sessionId), undefined, {
+          keepSleeping: true,
           preferredInterface: selected.kind === 'agent' ? 'chat' : 'terminal',
         });
         return;

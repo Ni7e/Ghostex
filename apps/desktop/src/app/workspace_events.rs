@@ -1002,10 +1002,16 @@ impl GhostexGpuiApp {
         survives is its first clause, which this branch still implements — landing on another project
         selects the session in the background and leaves that project's remembered view alone.
         */
-        if message.keep_view
+        let keeps_view = message.keep_view
             && self.view_panel_open()
-            && !self.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key)
+            && !self.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key);
+        if message.keep_sleeping
+            && !message.force_remount
+            && self.select_sleeping_local_workspace_tab(&key, keeps_view, cx)
         {
+            return;
+        }
+        if keeps_view {
             self.select_local_workspace_terminal_keeping_view(&key, message.wake_sleeping, cx);
             return;
         }
