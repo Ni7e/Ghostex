@@ -23,7 +23,6 @@ use crate::app::consts::*;
 use crate::app::element::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
-use crate::app::render::browser_sleeping_placeholder::BROWSER_SLEEPING_PLACEHOLDER_GROUP;
 use crate::*;
 
 impl GhostexGpuiApp {
@@ -334,22 +333,20 @@ impl GhostexGpuiApp {
                     workspace_background_color()
                 }
             })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.focus_project_editor_surface(mode, window, cx);
-                    cx.notify();
-                }),
-            )
             .when(mode == TitlebarMode::Browser, |this| {
-                this.group(BROWSER_SLEEPING_PLACEHOLDER_GROUP)
-                    .cursor_pointer()
-                    .child(self.render_browser_sleeping_placeholder_content())
+                this.child(self.render_browser_sleeping_placeholder_card(cx))
             })
             .when(mode != TitlebarMode::Browser, |this| {
-                this.child(project_editor_sleeping_placeholder_copy(signature))
+                this.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.focus_project_editor_surface(mode, window, cx);
+                        cx.notify();
+                    }),
+                )
+                .child(project_editor_sleeping_placeholder_copy(signature))
             })
             .into_any_element()
     }
