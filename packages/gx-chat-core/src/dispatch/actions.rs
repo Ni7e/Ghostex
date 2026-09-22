@@ -182,6 +182,7 @@ pub fn dispatch(state: &mut ChatState, action: &UserAction, context: &ChatContex
     // Every `action` call is its own promise, so what it awaits is a chain of its own. A dispatch
     // nested inside another (the controller's own `restoreReturned` effect) hands the outer chain
     // back when it returns.
+    state.core.quiet_action = renders_nothing(&action.kind);
     let outer_chain = state.core.publish_chain;
     state.core.begin_publish_chain();
     let effects = dispatch_action(state, action, context);
@@ -282,6 +283,21 @@ fn clears_error(kind: &ActionKind) -> bool {
 /// and the subagent viewer) are handled before the switch and end in `publish(chat); return;`
 /// (native-host.ts:783-796). An effect one of them asks for is answered later and publishes again
 /// through its own `changed()` callback, not by ending this arm.
+/// The kinds whose arm touches only `native-host.ts`'s module variables and publishes without a
+/// `useState` setter, so the controller does not re-render: the at-once publishers, the composer
+/// collapse, and the renderer's measurements and caret reports.
+fn renders_nothing(kind: &ActionKind) -> bool {
+    publishes_at_once(kind)
+        || matches!(
+            kind,
+            ActionKind::ComposerScroll
+                | ActionKind::ComposerExpand
+                | ActionKind::MeasureComposer
+                | ActionKind::MeasureContextStatus
+                | ActionKind::ComposerSelection
+        )
+}
+
 fn publishes_at_once(kind: &ActionKind) -> bool {
     matches!(
         kind,

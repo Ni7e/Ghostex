@@ -87,6 +87,10 @@ pub struct CoreState {
     /// `publish(controller.current())` (the fleet clock, a backfill batch, an action's close)
     /// ships the LAST render's values, which is what the account panel's clock reads.
     pub render_requested: bool,
+    /// This dispatch is an action that only moves the host module's own variables (the composer
+    /// collapse, a measurement, an open row, a panel, the search) and publishes without calling
+    /// a controller setter, so no render ran even when the document changed.
+    pub quiet_action: bool,
     /// The answers an action that is still in flight publishes on.
     ///
     /// `action` in `native-host.ts` is `async`: its closing `publish(controller.current())` runs

@@ -310,7 +310,8 @@ impl ChatCore {
         // A publish that follows a state change re-rendered the controller, and the render is
         // where `nativeAccountPanel` reads the clock; one that did not (a fleet tick, a backfill
         // batch, an action's close) ships the last render's panel.
-        if rendered || state_moved || !self.published_once {
+        let quiet = std::mem::take(&mut self.state.core.quiet_action);
+        if rendered || (state_moved && !quiet) || !self.published_once {
             // The LAST render of the call is the one that published, and a call that renders
             // twice (a page answer, then the loading flag) reads its panel clock twice.
             self.state.menus.panel_clock_ms = Some(self.context.clock_read(usize::MAX));
