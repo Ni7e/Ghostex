@@ -546,24 +546,64 @@ fn seed_read_settled(
         {
             return request_resync(state, context);
         }
+        // The carriage's `setAvailableAgents(result.availableAgents ?? null)` and the options'
+        // setter take new objects, which re-renders and publishes even when nothing moved.
+        let before = FrameIdentity::capture(state);
+        let moved = carries_new_agents(read);
         apply_draft_agent_carriage(state, read);
         apply_selected_options(state, read.state.selected_options.as_ref());
         if read.state.screen_probed == Some(true) {
             state.session.screen_probed = true;
+        }
+        if moved || before != FrameIdentity::capture(state) {
+            state.core.request_render();
         }
         return Vec::new();
     }
     state.messages.last_frame_at_ms = context.now_ms;
     state.messages.position.epoch = Some(read.epoch);
     state.messages.position.seq = read.seq;
-    apply_draft_agent_carriage(state, read);
-    apply_authoritative(state, read, true, context);
+    apply_read_result(state, read, context);
     if matches!(read.status, ghostex_gx_protocol::ChatStatus::Starting)
         && inside_seed_window(state, context)
     {
         schedule_seed_retry(state, context);
     }
     Vec::new()
+}
+
+/// `applyDraftAgentCarriage(result); applyAuthoritative(result, …)` for a seed or resync read,
+/// and the render the live brain runs when that handed a setter a new object.
+///
+/// A read result is parsed fresh, so every object it carries is new to the setters: the
+/// frame's rule ([`side_state_moves`]) plus `setAvailableAgents(result.availableAgents ?? null)`
+/// and `setSwitchableAgents(...)`, which a read carries and an ordinary frame does not. The core
+/// published a read only when the document changed, so a resync that confirmed what was on
+/// screen shipped nothing where the live brain re-rendered and published.
+fn apply_read_result(
+    state: &mut ChatState,
+    read: &ghostex_gx_protocol::ReadSessionChatResult,
+    context: &ChatContext,
+) {
+    let before = FrameIdentity::capture(state);
+    let moved = side_state_moves(state, read.lifecycle.as_ref(), true, &read.state)
+        || carries_new_agents(read);
+    apply_draft_agent_carriage(state, read);
+    apply_authoritative(state, read, true, context);
+    if moved || before != FrameIdentity::capture(state) {
+        state.core.request_render();
+    }
+}
+
+/// `setAvailableAgents(result.availableAgents ?? null)` and `setSwitchableAgents(...)` handed a
+/// freshly parsed array.
+fn carries_new_agents(read: &ghostex_gx_protocol::ReadSessionChatResult) -> bool {
+    read.available_agents.is_some()
+        || read
+            .switchable_agents
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|rows| !rows.is_empty())
 }
 
 /// The resync read's answer.
@@ -605,8 +645,7 @@ fn resync_read_settled(
         Some(seen) => seen.seq,
         None => read.seq,
     };
-    apply_draft_agent_carriage(state, read);
-    apply_authoritative(state, read, true, context);
+    apply_read_result(state, read, context);
     if outrun {
         schedule_resync_follow_up(state, context);
     } else {
