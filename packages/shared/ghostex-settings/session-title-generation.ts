@@ -47,7 +47,7 @@ export function getSessionTitleGenerationCommandPreview(
       Settings must preview the same internal Codex title-generation command gxserver runs. Include `--ephemeral` so users see that generated titles do not create restorable Codex sessions.
       */
       return createSessionTitleGenerationHereDocPreview(
-        `${permissionCommand} exec --ephemeral --skip-git-repo-check -m gpt-5.6-luna -c 'model_reasoning_effort="low"'`,
+        `${permissionCommand} exec --ephemeral --skip-git-repo-check -m gpt-6-luna -c 'model_reasoning_effort="low"'`,
         prompt
       );
     case 'cursor':

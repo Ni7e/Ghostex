@@ -1751,7 +1751,7 @@ pub(crate) fn build_title_generation_command(
         "codex" => {
             let command = enforce_required_agent_permission_flag(command, "codex");
             let command = format!(
-                "{command} exec --ephemeral --skip-git-repo-check -m gpt-5.6-luna -c 'model_reasoning_effort=\"low\"'"
+                "{command} exec --ephemeral --skip-git-repo-check -m gpt-6-luna -c 'model_reasoning_effort=\"low\"'"
             );
             create_here_doc_command(&command, delimiter, prompt)
         }

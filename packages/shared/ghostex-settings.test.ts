@@ -392,7 +392,7 @@ describe('normalizeghostexSettings', () => {
     The Settings and first-time modal title-agent dropdowns must show the exact command template Ghostex sends, including model ids from each installed CLI's local model catalog.
     */
     expect(getSessionTitleGenerationCommandPreview('codex')).toBe(
-      "codex --yolo exec --ephemeral --skip-git-repo-check -m gpt-5.6-luna -c 'model_reasoning_effort=\"low\"' <<'PROMPT'\n<title generation prompt>\nPROMPT"
+      "codex --yolo exec --ephemeral --skip-git-repo-check -m gpt-6-luna -c 'model_reasoning_effort=\"low\"' <<'PROMPT'\n<title generation prompt>\nPROMPT"
     );
     expect(getSessionTitleGenerationCommandPreview('cursor')).toBe(
       "cursor-agent --print --yolo --trust --model cursor-grok-4.5-low --output-format text '<title generation prompt>'"
