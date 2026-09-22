@@ -38,6 +38,7 @@ pub fn dispatch(state: &mut ChatState, event: &Event, context: &ChatContext) -> 
             (key, at)
         })
         .collect();
+    state.core.publish_chain = None;
     let mut effects = route(state, event, context);
     // Every family carries state a pure `document` cannot derive, and every family has `try`,
     // `catch` and `finally` bodies that run when a call it started answers. That is the mutating

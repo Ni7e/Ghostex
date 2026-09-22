@@ -90,10 +90,7 @@ fn settle_awaits(state: &mut ChatState, event: &Event) -> Vec<Effect> {
             request_id,
             outcome,
         } => {
-            let awaited = state
-                .core
-                .publish_awaits
-                .contains(&PublishAwait::Rpc(*request_id));
+            let awaited = state.core.awaits(&PublishAwait::Rpc(*request_id));
             state
                 .core
                 .settle_publish_await(&PublishAwait::Rpc(*request_id));

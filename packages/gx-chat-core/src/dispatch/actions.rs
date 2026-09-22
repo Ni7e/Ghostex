@@ -179,6 +179,23 @@ pub fn dispatch(state: &mut ChatState, action: &UserAction, context: &ChatContex
     // (`native-host.ts`, the top of `action`): until the boot read answers there is no controller,
     // so every gesture is dropped. The renderer's first `measureContextStatus` lands in that
     // window on every real chat, which is why the TypeScript keeps its `[0]` and the core must too.
+    // Every `action` call is its own promise, so what it awaits is a chain of its own. A dispatch
+    // nested inside another (the controller's own `restoreReturned` effect) hands the outer chain
+    // back when it returns.
+    let outer_chain = state.core.publish_chain;
+    state.core.begin_publish_chain();
+    let effects = dispatch_action(state, action, context);
+    if outer_chain.is_some() {
+        state.core.publish_chain = outer_chain;
+    }
+    effects
+}
+
+fn dispatch_action(
+    state: &mut ChatState,
+    action: &UserAction,
+    context: &ChatContext,
+) -> Vec<Effect> {
     if !state.core.controller_started {
         return if matches!(action.kind, ActionKind::Retry) {
             crate::session::events::restart_boot(state)

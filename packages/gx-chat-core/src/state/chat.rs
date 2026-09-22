@@ -94,13 +94,23 @@ pub struct CoreState {
     /// draft write, its flush and its delivery) publishes once, after the LAST of them. The family
     /// that continues the chain records the next answer with [`CoreState::publish_after`] from its
     /// own settle, and the publish is asked for at the end of the dispatch that empties the list.
-    pub publish_awaits: Vec<PublishAwait>,
-    /// An answer an in-flight action was waiting on arrived during the dispatch running right now.
+    ///
+    /// One chain PER ACTION, keyed by the number beside each entry: every `action` call is its own
+    /// promise, so an arm that never hears back (a chrome refresh whose stashed-prompt read the
+    /// host never answers) must not hold the closing publish of another arm that did. With one
+    /// shared list, a picture read answered while such a refresh hung published nothing.
+    pub publish_awaits: Vec<(u64, PublishAwait)>,
+    /// The chain [`CoreState::publish_after`] adds to during this dispatch: the action being
+    /// dispatched, or the chain whose answer just settled (its continuation is the same arm).
+    pub publish_chain: Option<u64>,
+    /// The last chain number handed out.
+    pub publish_chain_counter: u64,
+    /// The chains an answer settled during the dispatch running right now.
     ///
     /// The decision is deferred to the end of the dispatch because the family that owns the chain
     /// settles AFTER family a, which is where the answer is matched: publishing on the spot would
     /// end an arm that has just asked for its next step.
-    pub await_settled: bool,
+    pub settled_chains: Vec<u64>,
     /// The controller exists, which is only true once the composer boot read has answered.
     ///
     /// Every publish in `native-host.ts` is written `if (controller) publish(controller.current())`
@@ -173,6 +183,7 @@ impl CoreState {
     /// never suspends, and its closing publish runs on the action's own turn.
     pub fn publish_after(&mut self, effects: &[crate::effect::Effect]) -> bool {
         use crate::effect::Effect;
+        let chain = self.current_publish_chain();
         let mut awaited = false;
         for effect in effects {
             let await_on = match effect {
@@ -189,7 +200,7 @@ impl CoreState {
                 Effect::ReadStorageBatch { keys } => {
                     for key in keys {
                         awaited = true;
-                        let await_on = PublishAwait::Storage(key.clone());
+                        let await_on = (chain, PublishAwait::Storage(key.clone()));
                         if !self.publish_awaits.contains(&await_on) {
                             self.publish_awaits.push(await_on);
                         }
@@ -199,7 +210,7 @@ impl CoreState {
                 Effect::WriteStorageBatch { writes } => {
                     for write in writes {
                         awaited = true;
-                        let await_on = PublishAwait::Storage(write.key.clone());
+                        let await_on = (chain, PublishAwait::Storage(write.key.clone()));
                         if !self.publish_awaits.contains(&await_on) {
                             self.publish_awaits.push(await_on);
                         }
@@ -209,11 +220,34 @@ impl CoreState {
                 _ => continue,
             };
             awaited = true;
+            let await_on = (chain, await_on);
             if !self.publish_awaits.contains(&await_on) {
                 self.publish_awaits.push(await_on);
             }
         }
         awaited
+    }
+
+    /// The chain this dispatch adds to, starting one when none is open.
+    fn current_publish_chain(&mut self) -> u64 {
+        match self.publish_chain {
+            Some(chain) => chain,
+            None => self.begin_publish_chain(),
+        }
+    }
+
+    /// Opens a new chain for an action about to be dispatched and makes it the current one.
+    pub fn begin_publish_chain(&mut self) -> u64 {
+        self.publish_chain_counter += 1;
+        self.publish_chain = Some(self.publish_chain_counter);
+        self.publish_chain_counter
+    }
+
+    /// Whether an in-flight action is waiting on this answer.
+    pub fn awaits(&self, await_on: &PublishAwait) -> bool {
+        self.publish_awaits
+            .iter()
+            .any(|(_, pending)| pending == await_on)
     }
 
     /// Takes this answer off the chain an action is waiting on.
@@ -225,10 +259,12 @@ impl CoreState {
         if let Some(at) = self
             .publish_awaits
             .iter()
-            .position(|pending| pending == await_on)
+            .position(|(_, pending)| pending == await_on)
         {
-            self.publish_awaits.remove(at);
-            self.await_settled = true;
+            let (chain, _) = self.publish_awaits.remove(at);
+            self.settled_chains.push(chain);
+            // A continuation the owning family asks for from its settle is the same arm.
+            self.publish_chain = Some(chain);
         }
     }
 
@@ -237,8 +273,16 @@ impl CoreState {
     /// `action` is `async` and its closing `publish(controller.current())` runs after the LAST
     /// `await` in the arm, so a chain that continued into a new request publishes nothing yet.
     pub fn finish_publish_awaits(&mut self) {
-        if std::mem::take(&mut self.await_settled) {
-            if self.publish_awaits.is_empty() {
+        self.publish_chain = None;
+        let settled = std::mem::take(&mut self.settled_chains);
+        if !settled.is_empty() {
+            let ended = settled.iter().any(|chain| {
+                !self
+                    .publish_awaits
+                    .iter()
+                    .any(|(pending, _)| pending == chain)
+            });
+            if ended {
                 self.request_publish();
             } else {
                 // The arm asked for its next step instead of ending. Its `publish` has not run, so
