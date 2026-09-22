@@ -68,6 +68,7 @@ impl GpuiExtensionPlacement {
 pub(crate) struct GpuiInstalledExtension {
     pub(crate) id: String,
     pub(crate) title: String,
+    pub(crate) description: String,
     pub(crate) icon_image: Arc<Image>,
     pub(crate) declared_permissions: HashSet<GpuiExtensionPermission>,
     pub(crate) granted_permissions: HashSet<GpuiExtensionPermission>,

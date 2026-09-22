@@ -11,6 +11,7 @@ use gpui::ParentElement as _;
 use gpui::Styled as _;
 use gpui::Window;
 use gpui::div;
+use gpui::img;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
 use gpui_component::h_flex;
@@ -47,10 +48,21 @@ impl ViewPickerGroup {
 }
 
 /// One line under a view's name in the picker. Built-ins say what the view is for in the product's
-/// own words; an extension or custom view has no description of its own to show.
+/// own words; an installed extension's line comes from its manifest instead (see
+/// `render_view_picker_card`), and a custom view has none.
+///
+/// CDXC:Workarea 2026-09-23 DECISION:
+/// User: the line under each card stays one row by shortening the sentence, not with an ellipsis. Linear, Jira, and GitHub keep their longer sentences in Settings.
 fn view_picker_description(mode: TitlebarMode) -> &'static str {
+    if let Some(provider) = mode.website_provider() {
+        return match provider.id.as_str() {
+            "linear" => "Your team's issues and projects.",
+            "jira" => "The team board beside your work.",
+            "github" => "Opens from the project's origin.",
+            _ => provider.description.as_str(),
+        };
+    }
     match mode {
-        mode if mode.website_provider().is_some() => &mode.website_provider().unwrap().description,
         mode if mode.is_storybook() => "Annotate your project’s components.",
         TitlebarMode::Source => "Edit and search project files.",
         TitlebarMode::Browser => "Open a local app or any website.",
@@ -193,7 +205,31 @@ impl GhostexGpuiApp {
     ) -> impl IntoElement {
         let mode = item.mode;
         let available = item.is_available;
-        let description = view_picker_description(mode);
+        // CDXC:Extensions 2026-09-23 DECISION:
+        // User: each extension card in the view picker shows the extension's own icon and manifest description, kept to one line; hovering the card shows the whole description.
+        let extension = match mode {
+            TitlebarMode::Extension(id) if mode.is_addon_view() => self
+                .extensions_snapshot
+                .installed
+                .get(id.as_str())
+                .filter(|extension| extension.enabled),
+            _ => None,
+        };
+        let extension_description = extension
+            .map(|extension| gpui::SharedString::from(extension.description.clone()))
+            .filter(|description| !description.is_empty());
+        let description: gpui::SharedString = extension_description
+            .clone()
+            .unwrap_or_else(|| view_picker_description(mode).into());
+        let icon = match extension {
+            Some(extension) => img(extension.icon_image.clone())
+                .size(px(15.0))
+                .flex_shrink_0()
+                .into_any_element(),
+            None => {
+                titlebar_svg_icon(mode.tab_icon(), 15.0, titlebar_icon_color()).into_any_element()
+            }
+        };
         let shortcut = view_picker_shortcut(mode);
         let dashed = mode.is_addon_view();
         div()
@@ -216,6 +252,9 @@ impl GhostexGpuiApp {
             .bg(titlebar_popup_menu_background())
             .cursor_default()
             .when(!available, |this| this.opacity(0.5))
+            .when_some(extension_description.clone(), |this, description| {
+                this.tooltip(move |window, cx| titlebar_tooltip(description.clone(), window, cx))
+            })
             .when(available, |this| {
                 this.hover(|this| this.bg(titlebar_active_segment_color()))
                     .on_mouse_down(
@@ -233,11 +272,7 @@ impl GhostexGpuiApp {
                     .min_w_0()
                     .items_center()
                     .gap(px(8.0))
-                    .child(titlebar_svg_icon(
-                        mode.tab_icon(),
-                        15.0,
-                        titlebar_icon_color(),
-                    ))
+                    .child(icon)
                     .child(
                         div()
                             .flex_1()
@@ -257,6 +292,12 @@ impl GhostexGpuiApp {
                         .text_size(px(12.0))
                         .line_height(px(16.0))
                         .text_color(titlebar_inactive_text_color())
+                        .when(extension_description.is_some(), |this| {
+                            this.min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                        })
                         .child(description),
                 )
             })

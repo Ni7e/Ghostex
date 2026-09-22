@@ -120,6 +120,9 @@ fn parse_installed_extension(value: &serde_json::Value) -> Option<GpuiInstalledE
     let manifest = object.get("manifest")?.as_object()?;
     let state = object.get("state")?.as_object()?;
     let title = text(manifest.get("title"))?.to_string();
+    let description = text(manifest.get("description"))
+        .unwrap_or_default()
+        .to_string();
     let icon_image = extension_icon_image(&id, text(manifest.get("icon"))?)?;
     let declared_permissions = parse_permissions(manifest.get("permissions"));
     let granted_permissions = parse_permissions(state.get("grantedPermissions"));
@@ -165,6 +168,7 @@ fn parse_installed_extension(value: &serde_json::Value) -> Option<GpuiInstalledE
     Some(GpuiInstalledExtension {
         id,
         title,
+        description,
         icon_image,
         declared_permissions,
         granted_permissions,

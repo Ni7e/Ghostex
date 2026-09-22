@@ -100,7 +100,8 @@ impl TitlebarMode {
     }
 
     /// The glyph the view panel's tab strip and the `+` menu draw beside a view's name. Extension
-    /// and custom views share the puzzle glyph because their manifests carry no icon.
+    /// and custom views share the puzzle glyph here; the view picker draws an installed
+    /// extension's own manifest icon instead.
     pub(crate) fn tab_icon(self) -> &'static str {
         match self {
             mode if mode
@@ -109,7 +110,13 @@ impl TitlebarMode {
             {
                 "titlebar/brand-github.svg"
             }
-            mode if mode.website_provider().is_some() => TITLEBAR_ICON_WORLD,
+            mode if mode.website_provider().is_some() => {
+                match mode.website_provider().map(|provider| provider.id.as_str()) {
+                    Some("linear") => "titlebar/brand-linear.svg",
+                    Some("jira") => "titlebar/brand-jira.svg",
+                    _ => TITLEBAR_ICON_WORLD,
+                }
+            }
             mode if mode.is_storybook() => TITLEBAR_ICON_LAYOUT_BOARD_SPLIT,
             Self::Agents => TITLEBAR_ICON_LAYOUT_COLUMNS,
             Self::Source => TITLEBAR_ICON_CODE,
