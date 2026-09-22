@@ -439,6 +439,13 @@ fn step(world: &mut World, command: Option<HostCommand>) {
                 let retained = world.store.entry(&identity);
                 retained.listeners = 1;
                 retained.touched_at = Instant::now();
+                // CDXC:SessionChat 2026-09-23 WHY:
+                // A new view starts with no rows, and a RETAINED core remembers what the previous
+                // view was sent: its next frame was a splice against rows the new view never had,
+                // so a chat switched away from and back to drew an empty transcript. The new view
+                // must be sent every channel whole, which is what each QuickJS view got by booting
+                // its own brain.
+                retained.core.forget_sent();
             }
             // One sink per chat. A second view of the same session replaces the first, which is
             // how the app resolves a chat to one view already (`native_chat_for_generation`);

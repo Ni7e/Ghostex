@@ -9,7 +9,7 @@ use super::diagnostics::HostCounters;
 /// How many distinct refusal names the summary keeps, which is what it prints anyway.
 const MAX_REFUSAL_NAMES: usize = 24;
 
-/// Counts one refused request as `<method>/<code>`.
+/// Counts one refused request as `<method>.<code>`.
 ///
 /// CDXC:Diagnostics 2026-09-23 WHY:
 /// Supersedes the 2026-09-22 count by code alone, which could not say WHICH request failed: the
@@ -35,7 +35,9 @@ pub(super) fn note_rpc_refusal(counters: &mut HostCounters, arguments: &[Value])
         Some(_) => "other",
         None => transport_class(error.get("message").and_then(Value::as_str)),
     };
-    let name = format!("{method}/{class}");
+    // `.`, never `/`: `support_logs` redacts any string holding a slash, key or value, as a path,
+    // which is how the second live run read `{"[redacted]": 2}`.
+    let name = format!("{method}.{class}");
     let admitted = counters.rpc_refusals.len() < MAX_REFUSAL_NAMES
         || counters.rpc_refusals.contains_key(&name);
     let name = if admitted { name } else { "other".to_string() };

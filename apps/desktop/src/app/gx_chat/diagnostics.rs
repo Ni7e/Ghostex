@@ -30,7 +30,7 @@ pub(super) struct HostCounters {
     pub(super) frames_published: u64,
     /// Effects performed or forwarded, by `Effect` variant name.
     pub(super) effects: BTreeMap<&'static str, u64>,
-    /// Refused requests, as `<method>/<code>` (`refusals.rs`).
+    /// Refused requests, as `<method>.<code>` (`refusals.rs`).
     pub(super) rpc_refusals: BTreeMap<String, u64>,
     /// Client-storage reads and writes that did not complete.
     pub(super) storage_refused: u64,
