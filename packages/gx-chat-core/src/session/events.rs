@@ -5,7 +5,7 @@
 //! the Rust core folds into one place because the broker and the per-view runtime are both gone.
 
 use crate::effect::Effect;
-use crate::event::{ComposerBootRead, ConnectionUpdate, Event, StartConfig};
+use crate::event::{ChatSettings, ComposerBootRead, ConnectionUpdate, Event, StartConfig};
 use crate::session::apply::{
     apply_authoritative, apply_draft_agent_carriage, apply_selected_options,
 };
@@ -176,6 +176,13 @@ pub fn boot_read(
     state.core.controller_started = true;
     state.identity.client_id = read.client_id.clone();
     state.identity.session_key = read.session_key.clone();
+    // `adoptNativeChatSettings(result.chatSettings)` (`native-host.ts:649`): the boot read is
+    // where the two settings FIRST arrive, before any push. Without it the core masked no account
+    // text until a `chatSettings` broker message came, which on a real session never does.
+    if let Ok(settings) = serde_json::from_value::<ChatSettings>(read.chat_settings.clone()) {
+        state.core.hide_account_emails = settings.hide_account_emails;
+        state.core.title = settings.title;
+    }
     let config = state.session.boot_config.clone().unwrap_or_default();
     state.core.preview_settings = config.preview.clone();
     // The `sessionChanged` branch of the subscribe effect (`controller.ts:853`): the agent

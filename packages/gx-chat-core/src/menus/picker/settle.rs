@@ -62,6 +62,23 @@ pub fn settle(
     state.pickers.model_menu_context = inputs.menu;
     state.pickers.catalogs = inputs.catalogs;
     match event {
+        // The boot read's own copies (`native-host.ts:647`): `adoptAgentModelCatalog(
+        // result.modelCatalog)` then `adoptNativeContextPreferences(result.contextPreferences)`,
+        // both before the controller starts. The catalog the host has cached is what every pill
+        // and menu draws from until a push arrives, and it can be newer than the bundled one.
+        Event::ComposerBootRead(read) => {
+            if let Some(parsed) = parse_agent_model_catalog(&read.model_catalog) {
+                let current = std::mem::take(&mut state.menus.model_catalog);
+                state.menus.model_catalog = current.newer(parsed);
+                state.menus.model_catalog_generation =
+                    state.menus.model_catalog_generation.wrapping_add(1);
+            }
+            for agent in [ContextDetailsAgent::Claude, ContextDetailsAgent::Codex] {
+                let value = read.context_preferences.get(agent.as_str());
+                *state.pickers.context.preferences.get_mut(agent) =
+                    crate::menus::context::preferences::normalize_preferences(value, agent);
+            }
+        }
         // To fold into family e1: `menus.model_catalog` is e1's field and this adoption belongs
         // in an e1 settle. Nothing routed `ModelCatalogChanged` anywhere, so the option catalog
         // stayed empty and every menu, pill and context row drew as "no catalog"; adopting it
