@@ -311,7 +311,9 @@ impl ChatCore {
         // where `nativeAccountPanel` reads the clock; one that did not (a fleet tick, a backfill
         // batch, an action's close) ships the last render's panel.
         if rendered || state_moved || !self.published_once {
-            self.state.menus.panel_clock_ms = Some(self.context.now_ms);
+            // The LAST render of the call is the one that published, and a call that renders
+            // twice (a page answer, then the loading flag) reads its panel clock twice.
+            self.state.menus.panel_clock_ms = Some(self.context.clock_read(usize::MAX));
         }
         self.document = assemble(&self.state, &self.context);
         self.parts = frame_parts(&self.state, &self.context);
