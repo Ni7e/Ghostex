@@ -23,7 +23,9 @@ use crate::state::{ChatContext, ChatState};
 pub fn handle(state: &mut ChatState, action: &UserAction, context: &ChatContext) -> Vec<Effect> {
     let now = context.now_ms;
     match action.kind {
-        ActionKind::ToggleModelPicker => toggle_model_picker(state, action, now),
+        ActionKind::ToggleModelPicker => {
+            toggle_model_picker(state, action, now, &context.random_id(0))
+        }
         ActionKind::ModelPickerMeasure => {
             if let (Some(picker), Some(size)) = (picker_mut(state), pane_size(action, "size")) {
                 picker.measure(size, controls_height(action));
@@ -138,9 +140,14 @@ fn controls_height(action: &UserAction) -> Option<f64> {
 /// `toggleModelPicker`: a second press closes the open picker, the first one opens it on the
 /// selection this session is heading for.
 ///
-/// The request id is the host's, because the core has no random source: the renderer sends
-/// `requestId` with the action.
-fn toggle_model_picker(state: &mut ChatState, action: &UserAction, now: f64) -> Vec<Effect> {
+/// The request id is the host's when the renderer sends one; otherwise it is the turn's own
+/// `crypto.randomUUID()`, which is where `createModelPickerRequest` gets it in the TypeScript.
+fn toggle_model_picker(
+    state: &mut ChatState,
+    action: &UserAction,
+    now: f64,
+    random_id: &str,
+) -> Vec<Effect> {
     if let Some(picker) = state.pickers.model_picker.as_mut() {
         picker.finish(false, None, now);
         return Vec::new();
@@ -162,11 +169,14 @@ fn toggle_model_picker(state: &mut ChatState, action: &UserAction, now: f64) -> 
         .map(|intent| intent.effort.clone())
         .filter(|effort| !effort.is_empty())
         .or_else(|| menu.effort_value.clone());
+    // `createModelPickerRequest` mints its own id with `crypto.randomUUID()`
+    // (`model-picker-request.ts:90`), so an action that carries none gets the turn's id rather
+    // than an empty string.
     let request_id = action
         .param("requestId")
         .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| random_id.to_string(), str::to_string);
     let Some(request) = create_model_picker_request(
         &state.menus.model_catalog,
         provider,

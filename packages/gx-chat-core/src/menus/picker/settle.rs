@@ -52,6 +52,15 @@ pub fn settle(
     // Family e1's `observe` has already rebuilt the option store this turn, so the scoped key is
     // current before the outbox is read against it.
     adopt_scoped_outbox(state);
+    // CDXC:SessionChat 2026-09-22 WHY:
+    // `PickersState::model_menu_context` and `catalogs` had NO writer, so every arm that reads
+    // them (`toggleModelPicker`, the model menu's pick and its scope line, the picker's own
+    // settle) bailed on `None` and the model picker could not be opened at all. The TypeScript
+    // reads `chat.modelProvider` and `chat.sessionOptions` off `controller.current()`, a fresh
+    // computation, so recomputing them once per event here is the same read.
+    let inputs = crate::menus::picker::inputs::menu_inputs(state, context);
+    state.pickers.model_menu_context = inputs.menu;
+    state.pickers.catalogs = inputs.catalogs;
     match event {
         // To fold into family e1: `menus.model_catalog` is e1's field and this adoption belongs
         // in an e1 settle. Nothing routed `ModelCatalogChanged` anywhere, so the option catalog

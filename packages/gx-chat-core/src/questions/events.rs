@@ -223,7 +223,16 @@ pub fn storage_written(
             }
             let prompt = InteractivePrompt::parse(state.session.prompt.as_ref());
             match prompt.filter(InteractivePrompt::is_question) {
-                Some(prompt) => Some(crate::questions::actions::advance(state, &prompt)),
+                Some(prompt) => {
+                    let effects = crate::questions::actions::advance(state, &prompt);
+                    // Still the same `questionOption` arm: `await composer('questionWrite')` has
+                    // answered and the arm walked on to `await chat.answerPrompt(...)`, so the
+                    // CLOSING publish is owed to that call, not to this one. Without this the
+                    // answer's own turn looked like the end of the arm and shipped a snapshot the
+                    // TypeScript ships one round trip later.
+                    state.core.publish_after(&effects);
+                    Some(effects)
+                }
                 None => Some(Vec::new()),
             }
         }
