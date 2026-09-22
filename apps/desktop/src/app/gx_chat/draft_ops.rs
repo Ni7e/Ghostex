@@ -37,7 +37,14 @@ pub(super) struct ParkResult {
 /// The stored draft is cleared only when it still holds exactly the submitted revision, the outbox
 /// row and the recovery checkpoints of that revision are retired, and the prompt joins the sent
 /// history. A send that raced an edit leaves the newer text alone.
-pub(super) fn submitted(session_key: &str, value: &Value, now_ms: i64) -> Result<(), &'static str> {
+///
+/// `refusals` counts the one write in here that is allowed to fail: see the sent-history call.
+pub(super) fn submitted(
+    session_key: &str,
+    value: &Value,
+    now_ms: i64,
+    refusals: &mut u64,
+) -> Result<(), &'static str> {
     let text = value
         .get("text")
         .and_then(Value::as_str)
@@ -63,13 +70,27 @@ pub(super) fn submitted(session_key: &str, value: &Value, now_ms: i64) -> Result
     // `recordSentSessionChatMessage(text, sessionKey)`, the one call site the Step 4 host was
     // missing: without it Up-arrow recall and the Saved prompts Sent tab stay empty under the Rust
     // brain while the QuickJS brain kept filling them.
-    host_records::record_sent_prompt(
+    //
+    // CDXC:SavedPrompts 2026-09-22 WHY:
+    // Its refusal is COUNTED, never returned. `recordSentSessionChatMessage` catches its own write
+    // failure and answers false, with the reason written next to the catch: "Delivery has already
+    // succeeded; a history write must not restore and resend the prompt." Returned from here it
+    // became a refused `composer('submitted')`, which the core reads as a failed submission and
+    // answers by putting the text back in the composer, so a full or refusing `sentHistory` store
+    // would have offered the user a prompt gxserver had already taken and invited them to send it
+    // twice. Everything above this line still propagates: those are the stored draft, the outbox
+    // row and the recovery checkpoints, and the TypeScript arm lets each of them throw.
+    if host_records::record_sent_prompt(
         text,
         Some(session_key),
         None,
         &iso_from_millis(now_ms),
         now_ms,
-    )?;
+    )
+    .is_err()
+    {
+        *refusals += 1;
+    }
     Ok(())
 }
 

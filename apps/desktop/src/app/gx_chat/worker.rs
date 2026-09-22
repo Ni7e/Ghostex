@@ -834,7 +834,12 @@ fn write_storage(
         .and_then(|raw| serde_json::from_str(raw).ok())
         .unwrap_or(Value::Null);
     match storage_key.store.as_str() {
-        DRAFT_SUBMITTED_STORE => draft_ops::submitted(session_key, &payload, now_ms),
+        DRAFT_SUBMITTED_STORE => {
+            let mut refusals = 0u64;
+            let settled = draft_ops::submitted(session_key, &payload, now_ms, &mut refusals);
+            world.counters.storage_refused += refusals;
+            settled
+        }
         DRAFT_PARK_STORE => {
             let park = draft_ops::park(session_key, &payload, now_ms)?;
             world.parked.insert(key.to_string(), park);
