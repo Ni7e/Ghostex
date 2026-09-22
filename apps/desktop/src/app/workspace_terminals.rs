@@ -457,7 +457,7 @@ impl GhostexGpuiApp {
         {
             self.attach_surfaced_remote_workspace_terminals(&remote_machine_id, cx);
         }
-        self.resume_restored_workspace_surfaced_terminals(cx);
+        self.resume_restored_workspace_surfaced_terminals(focus_state, cx);
         let Some(tab_sessions) = focus_state.active_project_tab_sessions.as_deref() else {
             return;
         };
@@ -500,6 +500,7 @@ impl GhostexGpuiApp {
 
     pub(crate) fn resume_restored_workspace_surfaced_terminals(
         &mut self,
+        focus_state: &GpuiGxserverPresentationFocusState,
         cx: &mut gpui::Context<Self>,
     ) {
         /*
@@ -514,10 +515,18 @@ impl GhostexGpuiApp {
         project key is consumed on the first authoritative pass and never
         re-armed.
         */
+        /*
+        CDXC:Workarea 2026-09-19 WHY:
+        Only a return to the project resumes what its panes surfaced.
+        Starting an agent from the sidebar in a restored project that had not been visited since launch woke the sleeping session its pane surfaced, and that wake's result then selected the woken tab and took focus, so the new agent never appeared.
+        The pass therefore runs on the first focus snapshot that describes this project, and when that snapshot heads for a session no pane surfaces (a new agent, or a background row) it wakes nothing: the requested session owns the visit, and the covered sessions stay asleep until clicked like any sleeping tab.
+        */
         let Some(project_id) = self.agents_workspace_project_id.clone() else {
             return;
         };
-        if !self.startup_restore_wake_pending.remove(&project_id) {
+        if focus_state.active_project_id.as_deref() != Some(project_id.as_str())
+            || !self.startup_restore_wake_pending.remove(&project_id)
+        {
             return;
         }
         let surfaced = self
@@ -530,6 +539,25 @@ impl GhostexGpuiApp {
                     .map(|session_id| (pane_id, session_id))
             })
             .collect::<Vec<_>>();
+        if let Some(requested_session_id) = focus_state.focused_session_id.as_deref()
+            && !surfaced.iter().any(|(_, session_id)| {
+                match self.workspace_terminal_key_for_shell_session(*session_id) {
+                    Some(GpuiWorkspaceTerminalSessionKey::Local(key)) => {
+                        key.session_id == requested_session_id
+                    }
+                    Some(GpuiWorkspaceTerminalSessionKey::Remote(key)) => {
+                        gpui_remote_scoped_session_id(
+                            &key.remote_machine_id,
+                            &key.project_id,
+                            &key.session_id,
+                        ) == requested_session_id
+                    }
+                    None => false,
+                }
+            })
+        {
+            return;
+        }
         let focused_pane_id = self.agents_workspace.focused_pane;
         for (pane_id, session_id) in surfaced {
             if self
