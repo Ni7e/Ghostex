@@ -655,6 +655,9 @@ fn page_read_settled(
         )
         .cloned()
         .collect();
+    for message in &older {
+        state.messages.note_arrival(message, false);
+    }
     let mut rows = older.clone();
     rows.extend(state.messages.list.iter().cloned());
     state.messages.replace_list(&rows);

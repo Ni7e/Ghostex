@@ -118,7 +118,14 @@ pub struct MessagesState {
     /// moves when a message arrives carrying its own `deferredWork` and stays when
     /// `applyAuthoritative` carries the old object over (`{ ...message, deferredWork: old... }`).
     pub deferred_objects: BTreeMap<String, u64>,
-    /// The last token handed out in `deferred_objects`.
+    /// Which OBJECT each message is, by message id: moved every time the message arrives in a
+    /// read, a frame or a page, because each of those hands the controller a new object.
+    ///
+    /// A row outside the eager tail ships as a placeholder until its backfill batch runs, and the
+    /// placeholder is cached per message OBJECT (`placeholders` is a `WeakMap`), so the same row
+    /// arriving again before it is backfilled is a new placeholder, a new item, and a splice.
+    pub message_objects: BTreeMap<String, u64>,
+    /// The last token handed out in `deferred_objects` and `message_objects`.
     pub deferred_object_counter: u64,
 }
 
@@ -128,10 +135,13 @@ impl MessagesState {
         self.composition_identity = self.composition_identity.wrapping_add(1);
     }
 
-    /// `message` arrived as a new object: its `deferredWork`, if it has one, is a new one too.
-    pub fn note_new_deferred_object(&mut self, message: &ChatMessage) {
-        if message.deferred_work.is_some() {
-            self.deferred_object_counter += 1;
+    /// `message` arrived as a new object. Its `deferredWork`, if it has one, is a new one too
+    /// unless `carried` (`{ ...message, deferredWork: old.deferredWork }`).
+    pub fn note_arrival(&mut self, message: &ChatMessage, carried: bool) {
+        self.deferred_object_counter += 1;
+        self.message_objects
+            .insert(message.id.clone(), self.deferred_object_counter);
+        if message.deferred_work.is_some() && !carried {
             self.deferred_objects
                 .insert(message.id.clone(), self.deferred_object_counter);
         }

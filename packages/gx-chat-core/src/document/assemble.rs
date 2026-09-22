@@ -47,24 +47,69 @@ pub struct FrameParts {
     pub item_identities: Vec<u64>,
 }
 
+/// The object identity of one transcript item, beside its value.
+///
+/// `reuseItems` keeps an item only when every field is the same object. Two fields can be a new
+/// object with the same value: a completed turn's `deferred` (the user message's own
+/// `deferredWork`) and a PLACEHOLDER row, which is cached per message object until its backfill
+/// batch runs. A fully projected row keeps its object across arrivals (the projection cache
+/// compares by value), so it contributes nothing.
+fn item_identity(state: &ChatState, item: &TranscriptItem) -> u64 {
+    let placeholder = |message: &crate::document::ProjectedMessage| -> u64 {
+        if message.get("pending").and_then(serde_json::Value::as_bool) != Some(true) {
+            return 0;
+        }
+        message
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|id| state.messages.message_objects.get(id))
+            .copied()
+            .unwrap_or_default()
+    };
+    // Order-sensitive, so two items whose parts moved in opposite directions still differ.
+    let mix = |seed: u64, part: u64| seed.wrapping_mul(0x0100_0000_01b3).wrapping_add(part);
+    match item {
+        TranscriptItem::Message { message } => placeholder(message),
+        TranscriptItem::Summary {
+            user,
+            final_message,
+            work,
+            ..
+        } => work.iter().fold(
+            mix(
+                placeholder(user),
+                final_message.as_ref().map_or(0, placeholder),
+            ),
+            |seed, row| mix(seed, placeholder(row)),
+        ),
+        TranscriptItem::CompletedWork {
+            id,
+            deferred,
+            work,
+            artifacts,
+            final_message,
+            ..
+        } => {
+            let deferred = deferred
+                .as_ref()
+                .and_then(|_| state.messages.deferred_objects.get(id))
+                .copied()
+                .unwrap_or_default();
+            work.iter()
+                .chain(artifacts.iter())
+                .chain(final_message.iter())
+                .fold(deferred, |seed, row| mix(seed, placeholder(row)))
+        }
+        TranscriptItem::Unknown(_) => 0,
+    }
+}
+
 /// Everything a frame carries beside the document.
 pub fn frame_parts(state: &ChatState, context: &ChatContext) -> FrameParts {
     let items = transcript::rows(state, context);
     let item_identities = items
         .iter()
-        .map(|item| match item {
-            TranscriptItem::CompletedWork {
-                id,
-                deferred: Some(_),
-                ..
-            } => state
-                .messages
-                .deferred_objects
-                .get(id)
-                .copied()
-                .unwrap_or_default(),
-            _ => 0,
-        })
+        .map(|item| item_identity(state, item))
         .collect();
     FrameParts {
         items,

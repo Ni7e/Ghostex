@@ -96,7 +96,7 @@ impl MessagesState {
                 .and_then(|at| self.list.get(*at))
                 .is_some_and(|stored| stored == message);
             if landed {
-                self.note_new_deferred_object(message);
+                self.note_arrival(message, false);
             }
         }
     }
