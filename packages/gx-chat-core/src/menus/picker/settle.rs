@@ -67,9 +67,11 @@ pub fn settle(
         // both before the controller starts. The catalog the host has cached is what every pill
         // and menu draws from until a push arrives, and it can be newer than the bundled one.
         Event::ComposerBootRead(read) => {
+            // `adoptAgentModelCatalog` replaces the lineup outright: the host's copy is the
+            // service's, and only a gxserver push is compared by `updatedAt` (in the socket,
+            // before it ever reaches the brain).
             if let Some(parsed) = parse_agent_model_catalog(&read.model_catalog) {
-                let current = std::mem::take(&mut state.menus.model_catalog);
-                state.menus.model_catalog = current.newer(parsed);
+                state.menus.model_catalog = parsed;
                 state.menus.model_catalog_generation =
                     state.menus.model_catalog_generation.wrapping_add(1);
             }
@@ -84,9 +86,9 @@ pub fn settle(
         // stayed empty and every menu, pill and context row drew as "no catalog"; adopting it
         // here is what makes the replay comparable at all.
         Event::ModelCatalogChanged { catalog } => {
+            // The broker's `catalog` message is `adoptAgentModelCatalog(message.catalog)` too.
             if let Some(parsed) = parse_agent_model_catalog(catalog) {
-                let current = std::mem::take(&mut state.menus.model_catalog);
-                state.menus.model_catalog = current.newer(parsed);
+                state.menus.model_catalog = parsed;
                 // `adoptAgentModelCatalog` parses into a fresh object and `replaceCatalog` swaps
                 // it in unconditionally, so the option store rebuilds even on an identical push.
                 state.menus.model_catalog_generation =
