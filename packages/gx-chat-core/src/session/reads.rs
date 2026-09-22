@@ -62,6 +62,20 @@ pub fn issue_read(
     if let Some(offset) = before_offset {
         params.insert("beforeOffset".to_string(), Value::from(offset));
     }
+    // `loadEarlier` reads through `transport.readHistory` (`native-host.ts`), which is
+    // `rpc('readSessionChat', { ...params, historyMode: params.detail ? 'detail' : 'turns' })`, with
+    // `preserveNewest` while a working session has no user turn on screen yet. Without the two the
+    // page came back as a plain window rather than as history.
+    if matches!(kind, ReadKind::Page) {
+        let preserve_newest = crate::session::working::is_working(state)
+            && !state
+                .messages
+                .list
+                .iter()
+                .any(|message| matches!(message.role, ghostex_gx_protocol::ChatRole::User));
+        params.insert("preserveNewest".to_string(), Value::Bool(preserve_newest));
+        params.insert("historyMode".to_string(), Value::from("turns"));
+    }
     Effect::SendRpc {
         request_id,
         method: ChatRpcMethod::ReadSessionChat,

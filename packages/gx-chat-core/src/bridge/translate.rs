@@ -47,6 +47,11 @@ struct Outstanding {
     /// `None` for the boot read, which answers with a [`ComposerBootRead`] rather than an
     /// [`RpcOutcome`].
     method: Option<ChatRpcMethod>,
+    /// A `readSessionChat` that asked for history (`historyMode`), which answers with
+    /// `historyMode` in its payload; the seed and resync reads answer without it. Two reads of the
+    /// same method can answer out of order (a resync overtaking an older page), so this is what
+    /// keeps each answer on its own read.
+    history: bool,
 }
 
 /// The host half of a shadow run: client storage, the outstanding-request map, and the draining
@@ -215,15 +220,19 @@ impl BridgeTranslator {
         for effect in effects {
             match effect {
                 Effect::SendRpc {
-                    request_id, method, ..
+                    request_id,
+                    method,
+                    params,
                 } => self.outstanding.push_back(Outstanding {
                     request_id: *request_id,
                     method: Some(method.clone()),
+                    history: params.get("historyMode").is_some(),
                 }),
                 Effect::ReadComposerBoot { request_id } => {
                     self.outstanding.push_back(Outstanding {
                         request_id: *request_id,
                         method: None,
+                        history: false,
                     });
                 }
                 Effect::ReadStorage { key }
@@ -510,15 +519,32 @@ impl BridgeTranslator {
                 return self.storage_answers.remove(queued).map(|(_, event)| event);
             }
         }
-        let at = self
-            .outstanding
-            .iter()
-            .position(|pending| match (&pending.method, boot) {
-                (None, true) => true,
-                (None, false) => false,
-                (Some(_), true) => false,
-                (Some(method), false) => shape.answers(method),
-            });
+        // Two `readSessionChat`s can answer out of order (a resync overtaking an older page), and
+        // gxserver says which kind each answer is: a history page carries `historyMode`, a live
+        // read its `fingerprint`. The Chat Lab's preview backend carries neither, and is paired on
+        // order alone as before.
+        let read_kind = if result.get("historyMode").is_some() {
+            Some(true)
+        } else if result.get("fingerprint").is_some() {
+            Some(false)
+        } else {
+            None
+        };
+        let answers = |pending: &Outstanding| match (&pending.method, boot) {
+            (None, true) => true,
+            (None, false) => false,
+            (Some(_), true) => false,
+            (Some(method), false) => shape.answers(method),
+        };
+        let at = read_kind
+            .and_then(|history| {
+                self.outstanding.iter().position(|pending| {
+                    answers(pending)
+                        && pending.method == Some(ChatRpcMethod::ReadSessionChat)
+                        && pending.history == history
+                })
+            })
+            .or_else(|| self.outstanding.iter().position(answers));
         let Some(at) = at else {
             // Not an answer to anything the core asked for: it is the other brain's own storage
             // round trip, and the core has a storage answer of its own waiting for this turn: the
