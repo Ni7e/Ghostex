@@ -83,11 +83,9 @@ pub fn document(state: &ChatState, _context: &ChatContext, into: &mut Document) 
         attach: composer.actions.attach,
         terminal: composer.actions.terminal,
     };
-    into.composer_chrome = composer.chrome.clone().projection(
-        &composer.note,
-        state.transcript_view.summary_mode,
-        state.session.agent_session_id.as_deref(),
-    );
+    into.composer_chrome = composer
+        .chrome
+        .projection(&composer.note, state.transcript_view.summary_mode);
     into.note = composer.note.document();
 
     let card_visible = notice_visible(state);

@@ -191,20 +191,27 @@ impl ComposerChromeState {
         true
     }
 
-    /// The composer's own buttons: the note dot, the stash badge, and the pressed states.
-    pub fn projection(
-        &mut self,
-        note: &NoteState,
-        summary_mode: bool,
-        agent_session_id: Option<&str>,
-    ) -> ComposerChrome {
+    /// The two latches `projection()` sets before it answers.
+    ///
+    /// CDXC:SessionChat 2026-09-22 WHY:
+    /// They used to be set inside `projection`, which `document()` could only call on a CLONE
+    /// because it holds `&ChatState`, so both were thrown away every frame. `agent_session_id`
+    /// stayed `None` and the stash badge never counted a prompt stashed under the agent session,
+    /// and `note_owned` stayed false so every refresh re-read a note the editor already owned and
+    /// the presence dot kept showing a note the user had just cleared. The latches belong to the
+    /// settle, which runs on the real state before the document is assembled.
+    pub fn adopt(&mut self, note_open: bool, agent_session_id: Option<&str>) {
         let agent_session_id = agent_session_id.map(str::to_string);
         if self.agent_session_id != agent_session_id {
             self.agent_session_id = agent_session_id;
         }
-        if note.open {
+        if note_open {
             self.note_owned = true;
         }
+    }
+
+    /// The composer's own buttons: the note dot, the stash badge, and the pressed states.
+    pub fn projection(&self, note: &NoteState, summary_mode: bool) -> ComposerChrome {
         let text = if self.note_owned {
             if note.open || note.edited {
                 note.value.as_str()

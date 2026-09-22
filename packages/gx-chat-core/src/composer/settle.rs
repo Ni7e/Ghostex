@@ -199,6 +199,14 @@ pub fn settle(state: &mut ChatState, event: &Event, context: &ChatContext) -> Ve
         _ => {}
     }
     effects.extend(request_catalogs(state));
+    // The two latches `NativeComposerChrome.projection` sets on the way to its answer. They live
+    // here because `document()` holds `&ChatState` and could only set them on a clone.
+    let note_open = state.composer.note.open;
+    let agent_session_id = state.session.agent_session_id.clone();
+    state
+        .composer
+        .chrome
+        .adopt(note_open, agent_session_id.as_deref());
     // `rewindEnabled` is `sendBlockedReason(state) === null`, which is family d's rule read by
     // family b. `document::assemble` runs b before d, so the answer is cached here rather than
     // read out of a half-built document.
