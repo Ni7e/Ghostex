@@ -95,6 +95,9 @@ impl GhostexGpuiApp {
         let browser_url = shell_layout_state.browser_tabs.active_address_value();
         let project_editor_auto_sleep_policy = ProjectEditorAutoSleepPolicySnapshot::read_current();
         let gpui_pet_overlay_reduce_motion_enabled = gpui_macos_reduce_motion_enabled();
+        // GPUI's own flag is what `cx.reduce_motion()` answers (the panel slides, the composer), and
+        // nothing else feeds it the system setting.
+        cx.set_reduce_motion(gpui_pet_overlay_reduce_motion_enabled);
         let app_modal_window_id = Rc::new(Cell::new(None));
         let app_modal_window_id_for_app = app_modal_window_id.clone();
         let startup_restore_wake_pending = shell_layout_state
@@ -294,6 +297,7 @@ impl GhostexGpuiApp {
                 sidebar_timer_presentations_replayed_after_ready: false,
                 sidebar_primary_agent_launcher_id: None,
                 native_app_modal: None,
+                native_automate: None,
                 new_thread_picker_window: None,
                 new_thread_picker: None,
                 new_thread_picker_visible: false,
@@ -498,7 +502,9 @@ impl GhostexGpuiApp {
                 agent_hook_status_request_in_flight: false,
                 sidebar: None,
                 native_sidebar: Default::default(),
+                native_kanban: Default::default(),
                 floating_reveal: Default::default(),
+                panel_motion: Default::default(),
                 gx_store: Default::default(),
                 browser_surfaces: HashMap::new(),
                 browser_address_inputs: HashMap::new(),

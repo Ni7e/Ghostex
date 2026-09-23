@@ -294,7 +294,8 @@ impl GhostexGpuiApp {
                     }
                 } else if self.active_mode != mode {
                     ShellKeyboardOwner::Nothing
-                } else if self.website_home_setup_visible(mode) {
+                } else if self.website_home_setup_visible(mode) || mode == TitlebarMode::Kanban {
+                    // Kanban is drawn natively (app/native_kanban/): no page to hand keys to.
                     ShellKeyboardOwner::GpuiViewPanelSurface
                 } else if mode.is_project_editor_mode() {
                     ShellKeyboardOwner::WorkareaPage(mode)

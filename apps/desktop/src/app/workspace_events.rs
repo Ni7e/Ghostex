@@ -581,6 +581,12 @@ impl GhostexGpuiApp {
         if !request_id_valid {
             return;
         }
+        if self.route_native_automate_board_response(response, cx) {
+            return;
+        }
+        if self.native_kanban_receive_conversation_response(response, cx) {
+            return;
+        }
         let response_json = response.to_string();
         for slot_key in [
             ProjectWorkareaCefSurfaceSlotKey::Kanban,

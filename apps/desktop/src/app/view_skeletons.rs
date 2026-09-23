@@ -781,41 +781,231 @@ fn kanban_skeleton(paint: &SkeletonPaint) -> Div {
     div().flex().flex_col().child(toolbar).child(board)
 }
 
+/// The Automate page (`native_automate/render.rs`): the header with its eyebrow and project title,
+/// the Automations / Runs / Triage tabs, refresh and + Automation, then the automation list beside
+/// the selected automation's detail, at the real page's padding and split so loading reads as the
+/// page filling in.
 fn automate_skeleton(paint: &SkeletonPaint) -> Div {
-    let toolbar = div()
-        .h(px(48.0))
+    let tab = |width: f32, active: bool| {
+        div()
+            .h(px(32.0))
+            .px(px(12.0))
+            .flex()
+            .items_center()
+            .rounded(px(8.0))
+            .when(active, |this| this.bg(paint.panel))
+            .child(pill(paint, width, 9.0))
+    };
+    let header = div()
+        .w_full()
         .flex_shrink_0()
         .flex()
         .items_center()
-        .gap(px(10.0))
-        .px(px(20.0))
-        .child(pill(paint, 150.0, 18.0))
-        .child(pill(paint, 84.0, 18.0));
-    let rows = div()
-        .flex_1()
-        .min_h_0()
-        .flex()
-        .flex_col()
-        .gap(px(10.0))
-        .px(px(20.0))
-        .pt(px(6.0))
-        .children([0.42, 0.3, 0.5, 0.36, 0.46, 0.28].into_iter().map(|width| {
+        .gap(px(16.0))
+        .child(
             div()
-                .h(px(46.0))
-                .flex_shrink_0()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(pill(paint, 76.0, 7.0))
+                .child(pill(paint, 64.0, 11.0)),
+        )
+        .child(
+            div()
+                .flex()
+                .gap(px(4.0))
+                .child(tab(74.0, true))
+                .child(tab(36.0, false))
+                .child(tab(42.0, false)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
                 .flex()
                 .items_center()
+                .justify_end()
                 .gap(px(14.0))
-                .px(px(14.0))
-                .rounded(px(8.0))
-                .border_1()
-                .border_color(paint.fill)
-                .child(glyph(paint, 22.0))
-                .child(line(paint, width, 10.0))
-                .child(div().flex_1())
-                .child(pill(paint, 64.0, 16.0))
-        }));
-    div().flex().flex_col().child(toolbar).child(rows)
+                .child(glyph(paint, 16.0))
+                .child(
+                    div()
+                        .w(px(116.0))
+                        .h(px(32.0))
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .px(px(12.0))
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(paint.hairline)
+                        .child(glyph(paint, 12.0))
+                        .child(pill(paint, 60.0, 9.0)),
+                ),
+        );
+    // (title width, has a status tag, subtitle width)
+    let rows: [(f32, bool, f32); 4] = [
+        (150.0, true, 230.0),
+        (104.0, true, 170.0),
+        (128.0, false, 196.0),
+        (88.0, true, 150.0),
+    ];
+    let list = div()
+        .w(relative(0.45))
+        .min_w(px(280.0))
+        .h_full()
+        .flex_shrink_0()
+        .flex()
+        .flex_col()
+        .gap(px(1.0))
+        .p(px(8.0))
+        .border_r_1()
+        .border_color(paint.hairline)
+        .children(
+            rows.into_iter()
+                .enumerate()
+                .map(|(index, (title, tag, subtitle))| {
+                    div()
+                        .w_full()
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(12.0))
+                        .px(px(12.0))
+                        .py(px(12.0))
+                        .rounded(px(8.0))
+                        .when(index == 0, |this| this.bg(paint.panel))
+                        .child(
+                            div()
+                                .size(px(6.0))
+                                .flex_shrink_0()
+                                .rounded_full()
+                                .bg(paint.fill),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(px(10.0))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(8.0))
+                                        .child(pill(paint, title, 10.0))
+                                        .when(tag, |this| this.child(pill(paint, 40.0, 7.0))),
+                                )
+                                .child(pill(paint, subtitle, 7.0)),
+                        )
+                        .child(
+                            div()
+                                .w(px(32.0))
+                                .h(px(20.0))
+                                .flex_shrink_0()
+                                .rounded(px(6.0))
+                                .bg(paint.fill),
+                        )
+                }),
+        );
+    let card = || {
+        div()
+            .w_full()
+            .flex_shrink_0()
+            .flex()
+            .flex_col()
+            .rounded(px(12.0))
+            .border_1()
+            .border_color(paint.panel)
+            .bg(paint.panel)
+    };
+    let prompt = card().gap(px(12.0)).p(px(16.0)).children(
+        [0.94, 0.86, 0.9, 0.8, 0.92, 0.55]
+            .into_iter()
+            .map(|width| line(paint, width, 9.0)),
+    );
+    let details = card().children(
+        [(64.0, 150.0), (60.0, 90.0), (44.0, 70.0), (40.0, 100.0)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (label, value))| {
+                div()
+                    .h(px(44.0))
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .when(index > 0, |this| {
+                        this.border_t_1().border_color(paint.panel)
+                    })
+                    .child(pill(paint, label, 9.0))
+                    .child(pill(paint, value, 9.0))
+            }),
+    );
+    let detail = div().flex_1().min_w(px(320.0)).h_full().min_h_0().child(
+        div()
+            .w_full()
+            .max_w(px(672.0))
+            .mx_auto()
+            .flex()
+            .flex_col()
+            .gap(px(24.0))
+            .p(px(24.0))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(16.0))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(12.0))
+                            .child(pill(paint, 52.0, 8.0))
+                            .child(pill(paint, 180.0, 13.0)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(18.0))
+                            .pt(px(6.0))
+                            .child(glyph(paint, 16.0))
+                            .child(glyph(paint, 16.0))
+                            .child(glyph(paint, 16.0)),
+                    ),
+            )
+            .child(prompt)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(pill(paint, 52.0, 8.0))
+                    .child(details),
+            ),
+    );
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(14.0))
+        .p(px(20.0))
+        .child(header)
+        .child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .flex()
+                .pt(px(4.0))
+                .border_t_1()
+                .border_color(paint.hairline)
+                .child(list)
+                .child(detail),
+        )
 }
 
 fn storybook_skeleton(paint: &SkeletonPaint) -> Div {

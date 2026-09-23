@@ -51,6 +51,15 @@ impl GhostexGpuiApp {
             );
             return;
         }
+        // The native Automate view has no page to reload; Reload refetches its automations.
+        if mode == TitlebarMode::Automate
+            && self.project_editor_shell.is_mode_awake(mode)
+            && let Some(view) = self.native_automate.clone()
+        {
+            view.update(cx, |view, cx| view.load(cx));
+            cx.notify();
+            return;
+        }
         let surface = if mode == TitlebarMode::Browser {
             self.browser_surface_for_pane(self.browser_tabs.focused_pane)
         } else {

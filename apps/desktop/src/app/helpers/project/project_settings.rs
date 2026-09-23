@@ -549,6 +549,9 @@ pub(crate) fn gpui_project_snapshot_is_quick_automations_overview(
     gpui_active_project_id_from_snapshot(snapshot) == Some(GPUI_QUICK_AUTOMATIONS_PROJECT_ID)
 }
 
+// Unused since Automate became a native view (app/native_automate/); kept while the React
+// Automate page is.
+#[allow(dead_code)]
 pub(crate) fn automate_workarea_runtime_url_from_project_snapshot(
     snapshot: &GpuiProjectSnapshot,
     runtime_settings: &cef::SidebarRuntimeSettingsSnapshot,

@@ -2017,6 +2017,8 @@ impl GhostexGpuiApp {
         self.apply_gpui_command_pane_side_from_saved_settings(settings_snapshot);
         refresh_gpui_visual_settings(settings_snapshot);
         apply_gpui_component_theme(cx);
+        self.native_kanban_notify_appearance(cx);
+        self.native_automate_notify_appearance(cx);
         self.refresh_sidebar_runtime_settings_from_shared_settings(settings_snapshot, cx);
         self.coerce_active_mode_to_available_project_context(cx);
         self.prune_project_workarea_runtime_cef_surfaces_for_current_gates(cx);
