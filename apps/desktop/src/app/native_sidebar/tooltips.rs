@@ -6,6 +6,10 @@ use gpui_component::{
 };
 
 use super::session_list::SESSION_INSET_X;
+use crate::app::helpers::{
+    titlebar_popup_menu_background, titlebar_popup_menu_border_color,
+    titlebar_popup_menu_foreground, window_glass_active_in,
+};
 
 /**
 CDXC:Sidebar 2026-09-21 DECISION: A session or project tooltip "needs to not go out of the sidebar. It has to remain inside it with some padding from the right and left", its width matches the width of the actual card, and it sits right below the card rather than floating lower. Cards sit at different insets (collections, the scroll gutter), so a session's span is its card's own painted bounds, recorded while it is hovered; `sidebar_tooltip` drops the stock bubble margins so the two line up.
@@ -58,6 +62,9 @@ pub(super) fn sidebar_free_width_tooltip(
     sidebar_tooltip_sized(text, span, false, scale, window, cx)
 }
 
+/**
+CDXC:Sidebar 2026-09-23 DECISION: User: the session tooltip, a flat near-black box on the tinted glass sidebar, should "look more fitting". It takes the sidebar menus' shape (8px corners, the menus' soft ink outline and tinted menu colour), and under window glass that colour is slightly see-through so the frosted sidebar's tint carries into it; it stays nearly opaque because an in-window tooltip cannot blur the rows beneath it. The first line (the title) reads as the heading; the state and id lines beneath it are smaller, muted and cut short on one line each.
+*/
 fn sidebar_tooltip_sized(
     text: String,
     span: SidebarTooltipSpan,
@@ -68,6 +75,13 @@ fn sidebar_tooltip_sized(
 ) -> AnyView {
     let card_width = (span.right - span.left).max(0.0);
     let content_width = px((card_width - 16.0 * scale - 2.0).max(0.0));
+    let menu = titlebar_popup_menu_background();
+    let background = if window_glass_active_in(window) {
+        menu.opacity(0.9)
+    } else {
+        menu
+    };
+    let secondary = titlebar_popup_menu_foreground().opacity(0.6);
     Tooltip::element(move |_, _| {
         let lines = text.lines().filter(|line| !line.trim().is_empty());
         v_flex()
@@ -78,23 +92,32 @@ fn sidebar_tooltip_sized(
                     lines.max_w(content_width)
                 }
             })
-            .gap(px(3.0 * scale))
+            .gap(px(2.0 * scale))
             .children(lines.enumerate().map(|(index, line)| {
-                div()
-                    .text_size(px(12.0 * scale))
-                    .font_weight(if index == 0 {
-                        FontWeight::MEDIUM
-                    } else {
-                        FontWeight::NORMAL
-                    })
-                    .child(line.to_owned())
+                let row = div().min_w_0();
+                if index == 0 {
+                    row.pb(px(1.0 * scale))
+                        .text_size(px(12.5 * scale))
+                        .line_height(px(17.0 * scale))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(line.to_owned())
+                } else {
+                    row.truncate()
+                        .text_size(px(11.0 * scale))
+                        .line_height(px(15.0 * scale))
+                        .text_color(secondary)
+                        .child(line.to_owned())
+                }
             }))
     })
     .when(fill_span, |bubble| bubble.w(px(card_width)))
     .mx_0()
     .mt(px(2.0 * scale))
     .mb_0()
-    .py(px(6.0 * scale))
-    .px(px(8.0 * scale))
+    .py(px(7.0 * scale))
+    .px(px(9.0 * scale))
+    .rounded(px(8.0 * scale))
+    .bg(background)
+    .border_color(titlebar_popup_menu_border_color())
     .build(window, cx)
 }

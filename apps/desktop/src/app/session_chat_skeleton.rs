@@ -56,14 +56,24 @@ pub(crate) fn skeleton_pulse() -> (Duration, f32) {
 
 impl GhostexGpuiApp {
     /// The skeleton for a chat-mode tab that has no chat view yet (a staged session or a placeholder awaiting its created session).
+    ///
+    /// CDXC:Theming 2026-09-23 WHY:
+    /// This is what an Agents pane shows at startup for the few seconds before its chat view mounts, and it is drawn by
+    /// the app rather than by a chat view, so it never passed through `on_window_glass`: under window glass it painted
+    /// the theme's chat colour fully opaque over the frosted work area. It takes the settled chat's glass layering: no
+    /// fill of its own, and the composer and skeleton bars as washes.
     pub(crate) fn render_session_chat_skeleton(&self) -> AnyElement {
-        session_chat_skeleton(&ChatAppearance::current(&serde_json::Value::Null))
+        let glass = crate::app::helpers::window_glass_active();
+        session_chat_skeleton(
+            &ChatAppearance::current(&serde_json::Value::Null).on_window_glass(glass),
+            glass,
+        )
     }
 }
 
 /// CDXC:SessionChat 2026-09-23 DECISION:
 /// User: never show a transcript skeleton alone; keep the composer and status line at the bottom while the session is still being mapped. A mounted chat owns the editable input; this brief pre-view state reserves the same regions, including while a held next-tab key defers mounting.
-fn session_chat_skeleton(p: &ChatAppearance) -> AnyElement {
+fn session_chat_skeleton(p: &ChatAppearance, glass: bool) -> AnyElement {
     let s = p.scale;
     div()
         .size_full()
@@ -73,7 +83,11 @@ fn session_chat_skeleton(p: &ChatAppearance) -> AnyElement {
         .flex_col()
         .items_center()
         .overflow_hidden()
-        .bg(p.background)
+        .bg(if glass {
+            gpui::transparent_black()
+        } else {
+            p.background
+        })
         .child(
             div()
                 .id("session-chat-pane-skeleton")

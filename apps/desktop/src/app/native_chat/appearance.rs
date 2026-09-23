@@ -82,8 +82,8 @@ impl ChatAppearance {
     }
 
     /// The same tinted menu tone at full strength, for chat popups whose windows are transparent
-    /// rather than blurred (the suggestions popover, whose window is larger than its card), where a
-    /// thinned fill would show the transcript through it unblurred.
+    /// rather than blurred (the suggestions popover off glass and in the maximized composer), where
+    /// a thinned fill would show the transcript through it unblurred.
     pub(crate) fn menu_opaque(&self) -> Hsla {
         self.menu
     }

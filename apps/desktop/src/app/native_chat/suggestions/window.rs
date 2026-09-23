@@ -144,6 +144,9 @@ impl NativeChatView {
         );
         let chat = cx.entity();
         let parent = self.config.parent_native_view;
+        // Under window glass the popup's window blurs what is behind it, rounded to the card.
+        let glass = crate::app::helpers::window_glass_active_for(Some(source));
+        let corner_radius = px(SPEC.radius_px * p.scale);
         self.suggestions.opening = true;
         cx.defer(move |cx| {
             let placement = visible
@@ -205,6 +208,11 @@ impl NativeChatView {
             }
             let result = placement.map(|(card, origin, display_id)| {
                 let frame = window_frame(card);
+                let display_id = crate::app::window::popup_frame::display_at(
+                    Bounds::new(origin + frame.origin, frame.size).center(),
+                    cx,
+                )
+                .or(display_id);
                 cx.open_window(
                     WindowOptions {
                         window_bounds: Some(WindowBounds::Windowed(Bounds::new(
@@ -221,12 +229,17 @@ impl NativeChatView {
                         is_minimizable: false,
                         app_id: crate::gpui_platform_window_app_id(),
                         icon: crate::gpui_platform_window_icon(),
-                        window_background: gpui::WindowBackgroundAppearance::Transparent,
+                        window_background: if glass {
+                            gpui::WindowBackgroundAppearance::Blurred
+                        } else {
+                            gpui::WindowBackgroundAppearance::Transparent
+                        },
                         ..Default::default()
                     },
                     {
                         let chat = chat.clone();
                         move |window, cx| {
+                            window.set_background_corner_radius(corner_radius);
                             attach_suggestion_window(window, parent);
                             let panel = cx.new(|cx| {
                                 let subscription = cx.observe(&chat, |_, _, cx| cx.notify());
