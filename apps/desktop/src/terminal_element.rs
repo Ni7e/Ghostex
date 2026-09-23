@@ -102,6 +102,10 @@ gpui::actions!(
 
 pub(crate) const TERMINAL_KEY_CONTEXT: &str = "GhostexGpuiTerminal";
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
+/// How long the previous frame may stand in for a displayed zmx viewer after a
+/// resize-and-claim before the local reflow is shown after all. The daemon's
+/// post-claim refresh normally lands (and ends the hold) well inside this.
+const ZMX_REFLOW_HOLD: Duration = Duration::from_millis(250);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 5.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 24.0;
 /// Extra pointer room beside the track that keeps a revealed bar up while the
@@ -647,6 +651,13 @@ pub struct TerminalView {
     /// CDXC:Zmx 2026-09-19 WHY:
     /// A parked terminal sits at the zmx resting grid, so the first prepaint of a displayed slot resizes it and claims the grid, and the daemon resizes the session. A held "next tab" key passed one such terminal per key repeat. While the app holds the claim (the selection is still moving, app/gx_store/burst.rs) the prepaint keeps the parked grid and claims nothing; the app releases the hold when the selection settles, and the next prepaint resizes and claims once.
     zmx_grid_claim_held: bool,
+    /// CDXC:Zmx 2026-09-24 WHY:
+    /// Resizing a displayed zmx viewer used to paint the local VT reflow immediately, and the daemon's post-claim refresh then overwrote it a few frames later with the authoritative grid; the two reflows diverge (loop.zig handleVisibility), so every sidebar toggle registered as a flicker.
+    /// While a hold token is armed, the prepaint that resizes and claims keeps the previous frame on screen, and the first PTY wakeup — or the expiry timer it spawns, for a dead or slow daemon — swaps the refreshed frame in.
+    /// Terminals without zmx visibility claims keep the immediate refresh.
+    zmx_reflow_hold: Option<u64>,
+    /// Monotonic token distinguishing the hold the current expiry timer armed from a newer one.
+    zmx_reflow_hold_seq: u64,
     /// CDXC:Terminal 2026-09-18 WHY:
     /// Every PTY wakeup used to refresh the grid snapshot and notify, and gpui redraws the whole window on any notify, so a hidden agent terminal streaming output behind its chat view redrew the window on every chunk.
     /// A parked or chat-mode terminal only marks its snapshot stale; the next prepaint of a displayed slot takes the fresh frame. Titles and pwd still sync so the sidebar stays current.
@@ -779,6 +790,8 @@ impl TerminalView {
             pending_zmx_visible_announce: false,
             zmx_visibility_claims_enabled: false,
             zmx_grid_claim_held: false,
+            zmx_reflow_hold: None,
+            zmx_reflow_hold_seq: 0,
             displayed: true,
             snapshot_stale: false,
             last_prepaint: None,
@@ -801,6 +814,7 @@ impl TerminalView {
         self.focused = false;
         self.pending_zmx_visible_announce = false;
         self.zmx_visibility_claims_enabled = false;
+        self.zmx_reflow_hold = None;
         self.frame = None;
         self.row_cache = Vec::new();
         self.cached_metrics = None;
@@ -852,6 +866,7 @@ impl TerminalView {
     /// a parked terminal must not claim the grid.
     pub fn resize_grid(&mut self, cols: u16, rows: u16, cx: &mut Context<Self>) {
         self.pending_zmx_visible_announce = false;
+        self.zmx_reflow_hold = None;
         if (cols, rows) == self.model.size() {
             return;
         }
@@ -1015,6 +1030,13 @@ impl TerminalView {
                 let drawn_recently = self
                     .last_prepaint
                     .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1));
+                // Output applied after a resize-and-claim is the daemon's
+                // authoritative grid: the reflow hold's job is done. The
+                // grid was resized while the previous frame stood in, so the
+                // cached row layouts belong to the old geometry.
+                if self.zmx_reflow_hold.take().is_some() {
+                    self.row_cache.clear();
+                }
                 if self.displayed || drawn_recently {
                     self.refresh_snapshot();
                     self.sync_title_and_pwd(cx);
@@ -2487,6 +2509,12 @@ impl TerminalView {
             false
         };
         let grid_changed = !self.zmx_grid_claim_held && !held && (cols, rows) != self.model.size();
+        // A displayed zmx viewer keeps its previous frame on screen across a
+        // resize-and-claim (`zmx_reflow_hold`): the local reflow below is
+        // always overwritten by the daemon's post-claim refresh moments
+        // later, and painting both is the flicker a sidebar toggle shows.
+        let hold_reflow =
+            grid_changed && self.zmx_visibility_claims_enabled && self.frame.is_some();
         if self.frame.is_none() || grid_changed {
             // Resize reflows the vt grid synchronously, so take the fresh
             // frame now instead of waiting for the SIGWINCH redraw wakeup.
@@ -2495,8 +2523,10 @@ impl TerminalView {
             if !self.zmx_grid_claim_held {
                 let _ = self.model.resize(cols, rows, cell_width_px, cell_height_px);
             }
-            self.row_cache.clear();
-            self.refresh_snapshot();
+            if !hold_reflow {
+                self.row_cache.clear();
+                self.refresh_snapshot();
+            }
         }
         if (self.pending_zmx_visible_announce && !held)
             || (self.zmx_visibility_claims_enabled && grid_changed)
@@ -2509,6 +2539,26 @@ impl TerminalView {
             let _ = self.model.write_input(
                 crate::terminal_model::zmx_client_visible_sequence(rows, cols).as_bytes(),
             );
+            if hold_reflow {
+                // The claim is out; the daemon's full-screen refresh ends the
+                // hold from `handle_event`. The timer is the liveness bound
+                // for a dead or stalled daemon: show the local reflow then.
+                self.zmx_reflow_hold_seq += 1;
+                let hold = self.zmx_reflow_hold_seq;
+                self.zmx_reflow_hold = Some(hold);
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(ZMX_REFLOW_HOLD).await;
+                    let _ = this.update(cx, |view, cx| {
+                        if view.zmx_reflow_hold == Some(hold) {
+                            view.zmx_reflow_hold = None;
+                            view.row_cache.clear();
+                            view.refresh_snapshot();
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
+            }
         }
 
         if self.update_scroll_button_visibility() {
