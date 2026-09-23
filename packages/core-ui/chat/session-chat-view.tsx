@@ -2079,6 +2079,7 @@ export function SessionChatView({
                               // CDXC:SessionChat 2026-09-14 WHY: Sharing the composer's session key makes React retain duplicate composers during reconciliation; the status line needs its own per-session identity.
                               key={`session-status:${sessionKey}`}
                               hasConfiguredItems={hasConfiguredStatusLineItems}
+                              loading={chat.view.kind === 'loading' || chat.view.kind === 'starting'}
                               items={starredContextDetails}
                             />
                           </div>

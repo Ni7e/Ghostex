@@ -12,6 +12,30 @@ use std::{
     rc::Rc,
 };
 
+/// CDXC:SessionChat 2026-09-23 DECISION:
+/// User: a loading agent chat must keep its composer and status line visible, using the existing skeleton treatment for unknown values. React's SessionChatStatusLine and the pre-view shell use this same geometry.
+pub(crate) fn status_line_skeleton(p: &ChatAppearance) -> AnyElement {
+    static GEOMETRY: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| {
+        serde_json::from_str(include_str!(
+            "../../../../../packages/shared/session-chat-presentation/status-line-skeleton.json"
+        )).expect("status line skeleton geometry")
+    });
+    div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .h(px(STATUS_LINE_ROW_HEIGHT * p.scale))
+        .gap(px(GEOMETRY["gap"].as_f64().unwrap() as f32 * p.scale))
+        .children(GEOMETRY["widths"].as_array().unwrap().iter().map(|width| {
+            div()
+                .w(px(width.as_f64().unwrap() as f32 * p.scale))
+                .h(px(GEOMETRY["height"].as_f64().unwrap() as f32 * p.scale))
+                .rounded_full()
+                .bg(p.muted.opacity(0.24))
+        }))
+        .into_any_element()
+}
+
 /// One status-line row: the value of `SESSION_CHAT_STATUS_LINE_ROW_HEIGHT_PX` in
 /// `packages/shared/session-chat-presentation/status-line-layout.ts`, which React applies as the
 /// `min-height` of `.ghostex-chat-status-line.is-reserved`.
@@ -138,7 +162,11 @@ impl NativeChatView {
     /// (`sessionChatStatusLineReserved` in the shared `status-line-layout.ts`). The shared
     /// controller answers it; until it has, the last answer for this session stands.
     pub(super) fn status_line_reserved(&self) -> bool {
-        self.status_line_reserved
+        self.status_line_reserved || self.status_line_loading()
+    }
+
+    fn status_line_loading(&self) -> bool {
+        !self.composer_ready || matches!(self.snapshot["status"].as_str(), Some("loading" | "starting"))
     }
 
     pub(super) fn adopt_status_line_reservation(&mut self) {
@@ -218,6 +246,11 @@ impl NativeChatView {
         cx: &Context<Self>,
     ) -> AnyElement {
         let scale = appearance.scale;
+        if self.snapshot["contextMeter"]["starred"].as_array().is_none_or(Vec::is_empty)
+            && (self.status_line_loading() || self.status_line_reserved)
+        {
+            return status_line_skeleton(appearance);
+        }
         let mut style = window.text_style();
         style.font_family = appearance.font.clone().into();
         let mut widths = Vec::new();

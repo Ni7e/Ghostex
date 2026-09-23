@@ -61,7 +61,8 @@ impl GhostexGpuiApp {
     }
 }
 
-/// A full chat pane drawn as the transcript skeleton on the chat background.
+/// CDXC:SessionChat 2026-09-23 DECISION:
+/// User: never show a transcript skeleton alone; keep the composer and status line at the bottom while the session is still being mapped. A mounted chat owns the editable input; this brief pre-view state reserves the same regions, including while a held next-tab key defers mounting.
 fn session_chat_skeleton(p: &ChatAppearance) -> AnyElement {
     let s = p.scale;
     div()
@@ -69,7 +70,8 @@ fn session_chat_skeleton(p: &ChatAppearance) -> AnyElement {
         .min_w_0()
         .min_h_0()
         .flex()
-        .justify_center()
+        .flex_col()
+        .items_center()
         .overflow_hidden()
         .bg(p.background)
         .child(
@@ -78,10 +80,31 @@ fn session_chat_skeleton(p: &ChatAppearance) -> AnyElement {
                 .role(gpui::Role::Status)
                 .aria_label("Loading conversation…")
                 .w_full()
+                .flex_1()
+                .min_h_0()
+                .overflow_hidden()
                 .max_w(px(768.0 * s))
                 .px(px(16.0 * s))
                 .pt(px(SKELETON.top_padding * s))
                 .child(skeleton_rows(p)),
+        )
+        .child(
+            div().w_full().max_w(px(768.0 * s)).flex_shrink_0()
+                .flex().flex_col().gap(px(8.0 * s))
+                .px(px(16.0 * s)).pt(px(16.0 * s)).pb(px(12.0 * s))
+                .child(
+                    div().w_full().rounded(px(22.0 * s)).border_1()
+                        .border_color(p.composer_border).bg(p.composer_background)
+                        .px(px(16.0 * s)).py(px(10.0 * s))
+                        .flex().flex_col().gap(px(6.0 * s))
+                        .child(div().h(px(72.0 * s)).text_size(px(14.0 * s))
+                            .line_height(px(24.0 * s)).text_color(p.muted.opacity(0.6))
+                            .child(ghostex_gx_chat_core::composer::policy::DESKTOP_COMPOSER_PLACEHOLDER))
+                        .child(div().h(px(28.0 * s)).flex().items_center().justify_between()
+                            .child(div().w(px(52.0 * s)).h(px(10.0 * s)).rounded_full().bg(p.primary.opacity(0.24)))
+                            .child(div().size(px(24.0 * s)).rounded(px(6.0 * s)).bg(p.primary.opacity(0.24)))),
+                )
+                .child(crate::app::native_chat::context_meter::status_line_skeleton(p)),
         )
         .into_any_element()
 }
