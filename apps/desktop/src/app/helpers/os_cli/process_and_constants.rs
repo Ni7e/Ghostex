@@ -289,15 +289,12 @@ pub(crate) fn find_app_bundle_root(path: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn file_url(path: &std::path::Path) -> String {
-    format!("file://{}", path.to_string_lossy())
-}
-
-#[cfg(target_os = "windows")]
-pub(crate) fn file_url(path: &std::path::Path) -> String {
-    let normalized = path.to_string_lossy().replace('\\', "/");
-    format!("file:///{}", normalized.trim_start_matches('/'))
+/// CDXC:CefRuntime 2026-09-23 WHY:
+/// Bootstrap delivery pins the requested document URL to CEF's loaded URL; unescaped spaces in Program Files made those identities differ and left Find without its server connection.
+pub(crate) fn file_url(path: &std::path::Path) -> anyhow::Result<String> {
+    gpui::http_client::Url::from_file_path(path)
+        .map(String::from)
+        .map_err(|_| anyhow::anyhow!("CEF entry path must be an absolute file path"))
 }
 
 /// CDXC:Docs 2026-09-10 WHY:

@@ -125,15 +125,11 @@ pub const SESSION_CHAT_COMPOSER_NOT_READY: &str =
     "The agent's input box is not on screen, so nothing was sent.";
 const SESSION_CHAT_CLAUDE_SETTINGS_NOT_DISMISSED: &str =
     "Claude Code settings did not close to reveal the input box, so nothing was sent.";
-/*
-Esc in the kitty CSI-u encoding (CSI 27 u). Ghostex agent sessions always run
-under zmx, whose VT layer answers the kitty keyboard-protocol query, so Claude
-Code runs with the protocol enabled and a lone 0x1b byte is never delivered as
-an Esc keypress (it reads as the ambiguous start of a sequence and is dropped).
-Verified live 2026-08-01 against Claude Code v2.1.220 on a zmx pty: "\x1b" did
-not interrupt a running turn; "\x1b[27u" interrupted immediately. Crossterm-
-based TUIs (codex) parse CSI-u Esc as well, so one encoding covers both.
-*/
+/// CDXC:SessionChat 2026-09-23 WHY:
+/// Native Windows Codex reads console input records through ConPTY, which turns a bare Escape into VK_ESCAPE but does not decode CSI-u Escape. Chat Stop's CSI-u write left a live turn streaming until physical Escape interrupted it. POSIX zmx (including WSL) retains CSI-u: bare Escape was dropped by kitty-enabled Claude Code in the verified 2026-08-01 flow.
+#[cfg(windows)]
+pub const SESSION_CHAT_INTERRUPT: &str = "\u{1b}";
+#[cfg(not(windows))]
 pub const SESSION_CHAT_INTERRUPT: &str = "\u{1b}[27u";
 /*
 Shift+Tab in the kitty CSI-u encoding (CSI 9 ; 2 u — Tab with the Shift

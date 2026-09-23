@@ -38,7 +38,7 @@ pub(crate) fn gpui_connect_remote_gxserver(
     gpui_connect_remote_gxserver_platform(config, install_approved, progress_tx)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn gpui_connect_remote_gxserver_platform(
     _config: GpuiRemoteMachineConfig,
     _install_approved: bool,
@@ -50,7 +50,7 @@ pub(crate) fn gpui_connect_remote_gxserver_platform(
     )
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_connect_remote_gxserver_platform(
     config: GpuiRemoteMachineConfig,
     install_approved: bool,
@@ -92,7 +92,7 @@ pub(crate) fn gpui_connect_remote_gxserver_platform(
     result
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_connect_remote_gxserver_platform_inner(
     config: GpuiRemoteMachineConfig,
     install_approved: bool,
@@ -234,7 +234,7 @@ pub(crate) fn gpui_connect_remote_gxserver_platform_inner(
         GpuiRemoteTokenKeychainResult::Failed => {
             return GpuiRemoteGxserverConnectResult::without_connection(
                 GpuiRemoteGxserverConnectState::KeychainFailed,
-                "Could not store the remote gxserver token in Keychain.",
+                "Could not store the remote gxserver token in secure system storage.",
             );
         }
     }
@@ -284,8 +284,11 @@ pub(crate) fn gpui_remote_sanitized_process_failure(
     result: &GpuiRemoteProcessResult,
 ) -> String {
     let stderr = result.stderr.trim().to_ascii_lowercase();
+    if stderr.contains("netcat-openbsd") {
+        return "SSH password authentication on Linux requires netcat-openbsd. Install it on this computer, then reconnect.".to_string();
+    }
     if stderr.contains("saved ssh password") || stderr.contains("ssh password helper") {
-        return "Ghostex could not read the saved SSH password from Keychain. Open Remote settings and save the password again.".to_string();
+        return "Ghostex could not read the saved SSH password from secure system storage. Open Remote settings and save the password again.".to_string();
     }
     if stderr.is_empty() {
         if result.exit_code == 124 {
@@ -360,6 +363,7 @@ pub(crate) fn gpui_remote_process_failure_is_ssh_transport(
     [
         "saved ssh password",
         "ssh password helper",
+        "netcat-openbsd",
         "permission denied",
         "could not resolve hostname",
         "connection refused",
@@ -372,7 +376,7 @@ pub(crate) fn gpui_remote_process_failure_is_ssh_transport(
     .any(|needle| stderr.contains(needle))
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_probe_remote_execution_target(
     config: &GpuiRemoteMachineConfig,
 ) -> Result<GpuiRemoteExecutionTarget, GpuiRemoteExecutionTargetProbeError> {

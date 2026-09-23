@@ -59,7 +59,11 @@ export function rememberGpuiProjectSession(runtime: GpuiSidebarRuntime, projectI
  * User: opening a project from Quick Access selects and wakes its last agent/terminal, or creates the default agent in Chat mode (a terminal when Terminal is the default), and focuses its input.
  * Refresh before choosing so a restored project cannot look empty merely because its sidebar snapshot has not arrived yet.
  */
-export function activateGpuiProject(runtime: GpuiSidebarRuntime, projectId: string): Promise<void> {
+export function activateGpuiProject(
+  runtime: GpuiSidebarRuntime,
+  projectId: string,
+  options: { createSessionIfEmpty?: boolean } = {}
+): Promise<void> {
   const previous = activations.get(runtime) ?? Promise.resolve();
   const activation = previous
     .then(async () => {
@@ -100,6 +104,10 @@ export function activateGpuiProject(runtime: GpuiSidebarRuntime, projectId: stri
       } else {
         runtime.focusProjectId(projectId);
         runtime.publishPresentation('patch');
+      }
+      if (options.createSessionIfEmpty === false) {
+        pendingReveals.delete(runtime);
+        return;
       }
       const groupId = remote
         ? createGpuiRemotePresentationGroupId(remote.machineId, remote.projectId)

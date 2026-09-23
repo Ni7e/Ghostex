@@ -129,6 +129,7 @@ pub(crate) enum GpuiSidebarCommandMetadataWrite {
         command: Option<String>,
         command_id: Option<String>,
         icon: Option<String>,
+        links: Vec<GpuiTitlebarActionLink>,
         name: String,
         play_completion_sound: bool,
         scope: GpuiSidebarCommandScope,

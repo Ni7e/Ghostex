@@ -55,12 +55,23 @@ pub(crate) fn gpui_read_remote_ssh_password_from_keychain(
     Ok(password)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_remote_ssh_askpass_script(
     config: &GpuiRemoteMachineConfig,
 ) -> Result<Option<GpuiRemoteAskpassScript>, String> {
     if !config.has_saved_password {
         return Ok(None);
+    }
+    #[cfg(target_os = "linux")]
+    if !Command::new("/usr/bin/nc")
+        .arg("-h")
+        .output()
+        .is_ok_and(|output| {
+            String::from_utf8_lossy(&output.stdout).contains("-U")
+                || String::from_utf8_lossy(&output.stderr).contains("-U")
+        })
+    {
+        return Err("SSH password authentication on Linux requires netcat-openbsd (nc with Unix socket support).".to_string());
     }
     let unique_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -115,6 +126,7 @@ pub(crate) fn gpui_remote_ssh_askpass_script(
         while !server_cancel.load(Ordering::Acquire) {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
                     support_logs::append_temporary(
                         support_logs::GpuiSupportLog::TerminalFocus,
                         "TEMP.remoteNewTerminal.askpassRequested",
@@ -140,7 +152,8 @@ pub(crate) fn gpui_remote_ssh_askpass_script(
                         let _ = stream.write_all(b"\n");
                         password.fill(0);
                     }
-                    break;
+                    // CDXC:RemoteMachines 2026-09-23 WHY:
+                    // The retained terminal wrapper retries SSH after a disconnect. Keep this broker available until its owner drops it so every handshake can read the current saved password.
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));
@@ -157,7 +170,7 @@ pub(crate) fn gpui_remote_ssh_askpass_script(
     }))
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_remote_ssh_askpass_environment(
     askpass: Option<&GpuiRemoteAskpassScript>,
 ) -> Option<HashMap<String, String>> {
@@ -174,7 +187,7 @@ pub(crate) fn gpui_remote_ssh_askpass_environment(
     Some(environment)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_run_remote_process(
     executable: &str,
     arguments: &[String],
@@ -241,7 +254,7 @@ pub(crate) fn gpui_run_remote_process(
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_run_remote_process_with_stdin_file(
     executable: &str,
     arguments: &[String],
@@ -334,7 +347,7 @@ pub(crate) fn gpui_run_remote_process_with_stdin_file(
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_remote_process_launch_input_is_safe(
     executable: &str,
     arguments: &[String],
@@ -353,7 +366,7 @@ pub(crate) fn gpui_remote_process_launch_input_is_safe(
     true
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_terminate_remote_process(child: &mut Child) {
     unsafe extern "C" {
         fn kill(pid: i32, sig: i32) -> i32;

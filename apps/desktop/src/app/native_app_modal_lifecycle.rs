@@ -49,6 +49,7 @@ impl GhostexGpuiApp {
         self.remove_native_app_modal_window(cx);
         let window_size = size(px(width), px(initial_height));
         let options = WindowOptions {
+            kind: crate::app::window::popup_frame::child_window_kind(),
             window_bounds: Some(WindowBounds::Windowed(gpui::Bounds::centered_at(
                 self.main_window_bounds.center(),
                 window_size,
@@ -67,7 +68,11 @@ impl GhostexGpuiApp {
         let view_out = view_slot.clone();
         let window = cx
             .open_window(options, move |window, cx| {
-                window.set_window_title("");
+                window.set_window_title(if cfg!(target_os = "windows") {
+                    kind.window_title()
+                } else {
+                    ""
+                });
                 window.activate_window();
                 let view = build(window, cx);
                 *view_out.borrow_mut() = Some(view.clone().into_any());

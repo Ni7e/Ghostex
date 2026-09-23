@@ -5,6 +5,7 @@ changed. See `core.ts` for how the runtime's methods are re-attached.
 */
 import { GPUI_GXSERVER_CHATS_GROUP_ID } from './constants';
 import type { GpuiSidebarRuntime } from './core';
+import { activateGpuiProject } from './project-activation';
 import { createGpuiGitToastId, hasGpuiGitShortStatusChanges } from './helpers/git';
 import { normalizeNonEmptyString, stringFromRecord } from './helpers/records';
 import {
@@ -548,6 +549,11 @@ export const gpuiSidebarRuntimeWorktreeMethods = {
     );
   },
 
+  /**
+   * CDXC:Worktrees 2026-09-23 WHY:
+   * Changing only activeProjectId leaves the parent's session focused, so the next presentation refresh selects the parent again.
+   * Open Existing selects and reveals the worktree's remembered session; an empty optional prompt must not create an agent in an empty worktree.
+   */
   async openExistingProjectWorktree(
     this: GpuiSidebarRuntime,
     message: Extract<SidebarToExtensionMessage, { type: 'createProjectWorktree' }>,
@@ -576,8 +582,9 @@ export const gpuiSidebarRuntimeWorktreeMethods = {
     }
     if (prompt && agent) {
       await this.createAgentSessionForProject(gxserverWorktreeProject, agent, prompt);
+    } else {
+      await activateGpuiProject(this, gxserverWorktreeProject.projectId, { createSessionIfEmpty: false });
     }
-    this.focusProjectId(gxserverWorktreeProject.projectId);
   },
 
   postProjectWorktreesResult(
@@ -1500,7 +1507,7 @@ export const gpuiSidebarRuntimeWorktreeMethods = {
     for (let index = 0; index < 50; index += 1) {
       const name = index === 0 ? baseSlug : `${baseSlug}-${index + 1}`;
       const branch = name;
-      const path = `${parentDirectory}/${projectFolderName}-${name}`;
+      const path = `${parentDirectory.replace(/\/$/u, '')}/${projectFolderName}-${name}`;
       const [branchCheck, pathCheck] = await Promise.all([
         this.client.rpc<GxserverTypedOperationResult>('/api/runGitAction', {
           action: 'verifyRef',

@@ -70,6 +70,7 @@ pub(crate) struct GpuiQuickAccessWindow {
     /// keyboard moves and re-ranked queries reveal their row.
     suppress_scroll: bool,
     last_load_more: Option<std::time::Instant>,
+    was_active: bool,
     focus_handle: FocusHandle,
     subscriptions: Vec<Subscription>,
 }
@@ -92,6 +93,13 @@ impl GpuiQuickAccessWindow {
                 }
             },
         );
+        let activation = cx.observe_window_activation(window, |this: &mut Self, window, cx| {
+            if window.is_window_active() {
+                this.was_active = true;
+            } else if this.was_active {
+                this.close(cx);
+            }
+        });
         search.update(cx, |input, cx| input.focus(window, cx));
         Self {
             host,
@@ -115,8 +123,9 @@ impl GpuiQuickAccessWindow {
             tag_composer_anchor: None,
             suppress_scroll: false,
             last_load_more: None,
+            was_active: window.is_window_active(),
             focus_handle: cx.focus_handle(),
-            subscriptions: vec![change],
+            subscriptions: vec![change, activation],
         }
     }
 

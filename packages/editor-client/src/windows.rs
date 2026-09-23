@@ -38,6 +38,17 @@ pub fn bundled_executable(executable: &Path) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// CDXC:PromptEditor 2026-09-23 WHY:
+/// Session CLIs run from the separately staged gxserver package, outside the desktop bundle, so ancestor lookup cannot find the editor shipped by the Windows installer.
+pub fn installed_executable() -> Option<PathBuf> {
+    env::var_os("ProgramW6432")
+        .filter(|value| !value.is_empty())
+        .or_else(|| env::var_os("ProgramFiles").filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+        .map(|dir| dir.join("Ghostex/resources/GhostexEditor/GhostexEditor.exe"))
+        .filter(|candidate| candidate.is_file())
+}
+
 /// CDXC:PromptEditor 2026-09-16 WHY:
 /// Windows named pipes reject socket receive/send timeouts. Poll nonblocking I/O with deadlines so the CLI and desktop cannot hang on a stalled editor daemon.
 /// SEE-ALSO: apps/editor/desktop/src/main.rs and the desktop/CLI editor_daemon clients share this pipe name and newline-delimited JSON protocol.

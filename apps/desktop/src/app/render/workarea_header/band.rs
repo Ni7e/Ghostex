@@ -32,6 +32,10 @@ impl GhostexGpuiApp {
     /// rectangle from the previous frame. Nothing here overlaps anything: the header row, the
     /// divider gap and the strip are non-overlapping siblings of one row, and only the band as a
     /// whole floats over the content beneath it, which is the overlap the user already approved.
+    ///
+    /// CDXC:Titlebar 2026-09-23 DECISION:
+    /// User: on Windows, close, minimize and maximize must always stay at the very top right of the app, even when the sidebar or another column is shown.
+    /// The rightmost band region owns the caption controls as fixed-width siblings, preserving the column divider alignment and the space available to each region's other controls.
     pub(crate) fn render_workarea_header(
         &self,
         window: &mut Window,
@@ -47,6 +51,13 @@ impl GhostexGpuiApp {
         } else {
             WORKAREA_HEADER_HEIGHT
         };
+        #[cfg(target_os = "windows")]
+        let mut window_controls = Some(
+            self.render_titlebar_window_controls(window, cx)
+                .into_any_element(),
+        );
+        #[cfg(not(target_os = "windows"))]
+        let mut window_controls: Option<gpui::AnyElement> = None;
         h_flex()
             .absolute()
             .top_0()
@@ -67,7 +78,12 @@ impl GhostexGpuiApp {
                             .flex_basis(relative(0.0))
                             .min_w(px(WORKAREA_AGENTS_COLUMN_MIN_WIDTH))
                     })
-                    .child(self.render_workarea_header_row(window, cx)),
+                    .child(self.render_workarea_header_row(window, cx))
+                    .children(if !hosts_tab_strip && trailing_reserve == 0.0 {
+                        window_controls.take()
+                    } else {
+                        None
+                    }),
             )
             .when(hosts_tab_strip, |band| {
                 band.child(
@@ -98,18 +114,32 @@ impl GhostexGpuiApp {
                         .min_h_0()
                         .min_w(px(WORKAREA_VIEW_PANEL_MIN_WIDTH))
                         .overflow_hidden()
-                        .child(self.render_view_tab_strip(strip_mode, cx)),
+                        .child(
+                            div()
+                                .flex()
+                                .flex_1()
+                                .min_w_0()
+                                .h_full()
+                                .child(self.render_view_tab_strip(strip_mode, cx)),
+                        )
+                        .children(if trailing_reserve == 0.0 {
+                            window_controls.take()
+                        } else {
+                            None
+                        }),
                 )
             })
             .when(trailing_reserve > 0.0, |band| {
                 // The band paints no fill of its own, so the 1px under the shorter tab strip shows
                 // the panel beneath; the command pane's reserved width keeps the workspace colour.
                 band.child(
-                    div()
+                    h_flex()
                         .flex_shrink_0()
                         .h_full()
                         .w(px(trailing_reserve))
-                        .bg(workspace_background_color()),
+                        .bg(workspace_background_color())
+                        .justify_end()
+                        .children(window_controls.take()),
                 )
             })
     }
@@ -157,6 +187,10 @@ impl GhostexGpuiApp {
                 - self.workarea_header_trailing_dock_reserve(window))
             .max(0.0);
         if !self.workarea_header_hosts_view_tab_strip() {
+            #[cfg(target_os = "windows")]
+            if self.workarea_header_trailing_dock_reserve(window) == 0.0 {
+                return (band_width - 3.0 * TITLEBAR_WINDOW_BUTTON_WIDTH).max(0.0);
+            }
             return band_width;
         }
         let split_span = (band_width - WORKSPACE_SPLIT_HANDLE_THICKNESS).max(0.0);

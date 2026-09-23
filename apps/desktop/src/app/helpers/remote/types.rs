@@ -205,7 +205,7 @@ impl From<&GpuiRemoteAttachSessionReference> for GpuiRemoteAttachSessionKey {
 
 pub(crate) struct GpuiRemoteAttachTerminalPlan {
     pub(crate) agent_icon: Option<&'static str>,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) askpass: Option<GpuiRemoteAskpassScript>,
     pub(crate) clipboard_command: String,
     pub(crate) terminal_command: String,
@@ -451,7 +451,7 @@ pub(crate) struct GpuiRemoteAskpassScript {
     pub(crate) script: PathBuf,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) struct GpuiRemoteSpawnedTunnel {
     pub(crate) child: Child,
     pub(crate) _askpass: Option<GpuiRemoteAskpassScript>,

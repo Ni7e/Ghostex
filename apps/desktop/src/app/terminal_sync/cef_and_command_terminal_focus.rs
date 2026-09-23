@@ -238,7 +238,10 @@ impl GhostexGpuiApp {
                 support_logs::append(
                     support_logs::GpuiSupportLog::CrashReports,
                     "gpui.nativeService.startFailed",
-                    serde_json::json!({"error": error}),
+                    serde_json::json!({
+                        "error": error.lines().next().unwrap_or_default(),
+                        "stack": error.lines().skip(1).take(12).collect::<Vec<_>>(),
+                    }),
                 );
                 false
             }

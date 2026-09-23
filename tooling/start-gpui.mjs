@@ -105,6 +105,11 @@ const startEnvironment = withoutPowerShell7ModulePaths(
   withoutColorDisablingEnvironment({ ...process.env, ...isolatedInstance?.environment })
 );
 const windowsArch = process.arch === 'arm64' ? 'arm64' : 'x64';
+/**
+ * CDXC:PlatformSupport 2026-09-23 WHY:
+ * Native PowerShell development can precede the matching WSL release asset. Honor the packager's explicit opt-out instead of forcing a release download before the native build can start.
+ */
+const requireWindowsWslRuntime = process.env.GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME !== '0';
 const explicitWindowsWslArchive = process.env.GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE?.trim();
 const explicitWindowsWslCodeServerArchive = process.env.GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE?.trim();
 const windowsCodeServerIdentity = targetsWindows
@@ -167,8 +172,9 @@ const buildEnvironment = {
   ...(targetsWindows
     ? {
         GHOSTEX_WINDOWS_ARCH: windowsArch,
-        GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME: '1',
-        GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: windowsWslArchive,
+        GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME: requireWindowsWslRuntime ? '1' : '0',
+        GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE:
+          requireWindowsWslRuntime || explicitWindowsWslArchive ? windowsWslArchive : '',
         GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: windowsWslCodeServerArchive,
         GHOSTEX_CODE_SERVER_COMPONENT_VERSION: windowsCodeServerIdentity.componentVersion,
         ...(isWsl && !startVerbose ? { GHOSTEX_WINDOWS_BUILD_PROGRESS_PATH: `/proc/${process.pid}/fd/1` } : {}),
@@ -193,7 +199,7 @@ const platformLabel = isDarwin
   : targetsWindows
     ? isWsl
       ? 'Windows via WSL2'
-      : 'Windows, WSL2'
+      : requireWindowsWslRuntime ? 'Windows, WSL2' : 'Windows, PowerShell'
     : 'Linux';
 logStartStep(`Checking local GPUI resources (${platformLabel})...`);
 ensureLocalReferenceCheckouts();
@@ -531,7 +537,7 @@ async function downloadPublicReleaseAsset(tag, assetName, destination) {
 }
 
 async function ensureWindowsWslRuntimeArchive() {
-  if (!existsSync(windowsWslArchive)) {
+  if ((requireWindowsWslRuntime || explicitWindowsWslArchive) && !existsSync(windowsWslArchive)) {
     if (explicitWindowsWslArchive) {
       throw new Error(`GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE does not exist: ${windowsWslArchive}`);
     }
@@ -1168,7 +1174,20 @@ async function stopRunningGxserverControlPlaneBeforeLaunch(stagedAppPath) {
     return;
   }
 
-  const health = await fetchGxserverJson('/api/health/server', { method: 'GET', token });
+  const endpoints = isWindows
+    ? windowsGxserverEndpoints(stagedAppPath)
+    : [{ baseUrl: gxserverBaseUrl }];
+  for (const endpoint of endpoints) {
+    await stopGxserverEndpointBeforeLaunch(endpoint, token, expectedBuildIdentity);
+  }
+  if (endpoints.length === 0) logStartDetail('No running gxserver control plane found.');
+}
+
+async function stopGxserverEndpointBeforeLaunch({ baseUrl, pid }, token, expectedBuildIdentity) {
+  const health = await fetchGxserverJson('/api/health/server', { baseUrl, method: 'GET', token });
+  if (pid && (!health || health.product !== 'gxserver' || health.pid !== pid)) {
+    throw new Error(`Could not verify the gxserver listener owned by pid ${pid} at ${baseUrl}.`);
+  }
   if (!health || health.product !== 'gxserver') {
     logStartDetail('No running gxserver control plane found.');
     return;
@@ -1186,8 +1205,8 @@ async function stopRunningGxserverControlPlaneBeforeLaunch(stagedAppPath) {
   } else {
     logStartDetail(`Stopping running gxserver control plane (${stopReason}).`);
   }
-  await fetchGxserverJson('/api/control/stop', { method: 'POST', token });
-  const stopped = await waitForGxserverStop(token, 5000);
+  await fetchGxserverJson('/api/control/stop', { baseUrl, method: 'POST', token });
+  const stopped = await waitForGxserverStop(baseUrl, token, 5000);
   if (!stopped) {
     throw new Error('gxserver stop was requested, but the old control plane is still responding.');
   }
@@ -1240,17 +1259,48 @@ function ghostexStateDir() {
 }
 
 /**
- * CDXC:ServerDaemon 2026-09-18 WHY:
- * On native Windows the control-plane port follows the terminal backend setting (gpui_local_gxserver_api_port: 58746 for PowerShell, 58744 for WSL), so the fixed macOS port reaches nothing.
- * Use the port the running gxserver advertises in runtime/server.json rather than re-deriving that setting here; no file means no control plane is running.
+ * CDXC:ServerDaemon 2026-09-23 WHY:
+ * A previous daemon's shutdown could remove its replacement's runtime metadata while the replacement still owned its listening socket. Discover Windows listeners from the exact installed, staged, or managed CLI package executable's process, and retain that endpoint through shutdown polling; metadata disappearance is not proof the server stopped. This supersedes discovery solely from runtime/server.json.
  */
-function windowsGxserverBaseUrl() {
-  const metadataPath = path.join(ghostexStateDir(), 'gxserver', 'runtime', 'server.json');
-  if (!existsSync(metadataPath)) {
-    return undefined;
+function windowsGxserverEndpoints(stagedAppPath) {
+  const configuredHome = startEnvironment.GHOSTEX_HOME?.trim();
+  const dataDir = configuredHome && path.isAbsolute(configuredHome)
+    ? configuredHome
+    : path.join(startEnvironment.LOCALAPPDATA?.trim() || path.join(homedir(), 'AppData', 'Local'), 'Ghostex', 'Data');
+  const script = `
+$ErrorActionPreference = 'Stop'
+$serverPaths = ConvertFrom-Json -InputObject $env:GHOSTEX_START_SERVER_PATHS
+$servers = @(Get-Process gxserver -ErrorAction SilentlyContinue | Where-Object { $_.Path -in $serverPaths })
+$listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue)
+@($servers | ForEach-Object {
+  $serverProcess = $_
+  $listeners | Where-Object { $_.OwningProcess -eq $serverProcess.Id -and $_.LocalAddress -eq '127.0.0.1' } | ForEach-Object {
+    @{ pid = $serverProcess.Id; port = $_.LocalPort }
   }
-  const port = Number(JSON.parse(readFileSync(metadataPath, 'utf8')).port);
-  return Number.isInteger(port) && port > 0 ? `http://127.0.0.1:${port}` : undefined;
+}) | ConvertTo-Json -Compress
+`;
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 15000,
+    env: {
+      ...withoutPowerShell7ModulePaths(startEnvironment),
+      GHOSTEX_START_SERVER_PATHS: JSON.stringify(
+        [
+          ...[installedAppPath, stagedAppPath].map((directory) => path.join(directory, 'resources', 'native', 'gxserver.exe')),
+          path.join(dataDir, 'gxserver', 'package', 'bin', 'gxserver.exe'),
+        ]
+      ),
+    },
+  });
+  if (result.status !== 0) {
+    throw new Error(`Could not inspect Windows gxserver listeners: ${result.stderr || result.error || 'PowerShell failed'}`);
+  }
+  const records = JSON.parse(result.stdout.trim() || '[]');
+  return (Array.isArray(records) ? records : [records]).map(({ pid, port }) => ({
+    baseUrl: `http://127.0.0.1:${port}`,
+    pid,
+  }));
 }
 
 function readGxserverToken() {
@@ -1273,23 +1323,19 @@ function readGxserverToken() {
   return undefined;
 }
 
-async function waitForGxserverStop(token, timeoutMs) {
+async function waitForGxserverStop(baseUrl, token, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const health = await fetchGxserverJson('/api/health/server', { method: 'GET', token, timeoutMs: 500 });
+    const health = await fetchGxserverJson('/api/health/server', { baseUrl, method: 'GET', token, timeoutMs: 500 });
     if (!health) {
       return true;
     }
     await sleep(100);
   }
-  return !(await fetchGxserverJson('/api/health/server', { method: 'GET', token, timeoutMs: 500 }));
+  return !(await fetchGxserverJson('/api/health/server', { baseUrl, method: 'GET', token, timeoutMs: 500 }));
 }
 
-async function fetchGxserverJson(pathname, { method, token, timeoutMs = 1000 }) {
-  const baseUrl = isWindows ? windowsGxserverBaseUrl() : gxserverBaseUrl;
-  if (!baseUrl) {
-    return undefined;
-  }
+async function fetchGxserverJson(pathname, { baseUrl, method, token, timeoutMs = 1000 }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {

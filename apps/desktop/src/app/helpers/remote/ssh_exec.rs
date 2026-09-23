@@ -14,7 +14,7 @@ use std::{
 use crate::app::helpers::*;
 use crate::*;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_run_remote_ssh(
     config: &GpuiRemoteMachineConfig,
     remote_command: &str,
@@ -28,7 +28,7 @@ pub(crate) fn gpui_run_remote_ssh(
     )
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_run_remote_ssh_in_execution_target(
     config: &GpuiRemoteMachineConfig,
     execution_target: &GpuiRemoteExecutionTarget,
@@ -39,7 +39,7 @@ pub(crate) fn gpui_run_remote_ssh_in_execution_target(
     gpui_run_remote_ssh_raw(config, command.as_str(), timeout)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_run_remote_ssh_in_windows_wsl(
     config: &GpuiRemoteMachineConfig,
     distribution: Option<&str>,
@@ -50,7 +50,7 @@ pub(crate) fn gpui_run_remote_ssh_in_windows_wsl(
     gpui_run_remote_ssh_raw(config, command.as_str(), timeout)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_run_remote_ssh_raw(
     config: &GpuiRemoteMachineConfig,
     remote_command: &str,
@@ -62,10 +62,10 @@ pub(crate) fn gpui_run_remote_ssh_raw(
     };
     let askpass = match gpui_remote_ssh_askpass_script(config) {
         Ok(askpass) => askpass,
-        Err(_) => {
+        Err(message) => {
             return GpuiRemoteProcessResult {
                 exit_code: 126,
-                stderr: "Could not prepare SSH password helper.".to_string(),
+                stderr: message,
                 stdout: String::new(),
             };
         }
@@ -81,7 +81,7 @@ pub(crate) fn gpui_run_remote_ssh_raw(
     )
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_run_remote_ssh_with_stdin_file_in_execution_target(
     config: &GpuiRemoteMachineConfig,
     execution_target: &GpuiRemoteExecutionTarget,
@@ -95,10 +95,10 @@ pub(crate) fn gpui_run_remote_ssh_with_stdin_file_in_execution_target(
     };
     let askpass = match gpui_remote_ssh_askpass_script(config) {
         Ok(askpass) => askpass,
-        Err(_) => {
+        Err(message) => {
             return GpuiRemoteProcessResult {
                 exit_code: 126,
-                stderr: "Could not prepare SSH password helper.".to_string(),
+                stderr: message,
                 stdout: String::new(),
             };
         }
@@ -118,7 +118,7 @@ pub(crate) fn gpui_run_remote_ssh_with_stdin_file_in_execution_target(
     )
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_upload_terminal_attachment_to_remote(
     config: &GpuiRemoteMachineConfig,
     execution_target: &GpuiRemoteExecutionTarget,
@@ -224,7 +224,7 @@ pub(crate) fn gpui_upload_terminal_attachment_to_remote(
     })
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn gpui_upload_terminal_attachment_to_remote(
     _config: &GpuiRemoteMachineConfig,
     _execution_target: &GpuiRemoteExecutionTarget,
@@ -233,7 +233,7 @@ pub(crate) fn gpui_upload_terminal_attachment_to_remote(
     Err("Remote attachments are unavailable in this GPUI build.".to_string())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_upload_terminal_clipboard_image_to_remote(
     config: &GpuiRemoteMachineConfig,
     execution_target: &GpuiRemoteExecutionTarget,
@@ -268,7 +268,7 @@ pub(crate) fn gpui_upload_terminal_clipboard_image_to_remote(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn gpui_upload_terminal_clipboard_image_to_remote(
     _config: &GpuiRemoteMachineConfig,
     _execution_target: &GpuiRemoteExecutionTarget,
@@ -304,15 +304,13 @@ pub(crate) fn gpui_terminal_attachment_sanitized_filename(path: &Path) -> Result
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_remote_ssh_client_options(has_saved_password: bool) -> Vec<String> {
     /*
     CDXC:RemoteMachines 2026-06-24-14:34:
     Password-backed GPUI Remote machines use the same SSH askpass boundary as Swift: disable BatchMode, allow exactly one password prompt, and have the helper read the saved credential from Keychain. Key-only machines keep BatchMode so SSH cannot hang waiting for interactive input.
     */
     let mut arguments = vec![
-        "-o".to_string(),
-        "UseKeychain=yes".to_string(),
         "-o".to_string(),
         "AddKeysToAgent=yes".to_string(),
         "-o".to_string(),
@@ -326,6 +324,8 @@ pub(crate) fn gpui_remote_ssh_client_options(has_saved_password: bool) -> Vec<St
         "-o".to_string(),
         "StrictHostKeyChecking=accept-new".to_string(),
     ];
+    #[cfg(target_os = "macos")]
+    arguments.extend(["-o".to_string(), "UseKeychain=yes".to_string()]);
     if has_saved_password {
         arguments.extend([
             "-o".to_string(),
@@ -343,7 +343,7 @@ pub(crate) fn gpui_remote_ssh_client_options(has_saved_password: bool) -> Vec<St
     arguments
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn gpui_remote_ssh_client_options(has_saved_password: bool) -> Vec<String> {
     let mut arguments = vec![
         "-o".to_string(),
@@ -365,7 +365,7 @@ pub(crate) fn gpui_remote_ssh_client_options(has_saved_password: bool) -> Vec<St
     arguments
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_remote_ssh_target_arguments(
     config: &GpuiRemoteMachineConfig,
 ) -> Result<Vec<String>, String> {
@@ -382,7 +382,7 @@ pub(crate) fn gpui_remote_ssh_target_arguments(
     Ok(arguments)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn gpui_remote_ssh_target_arguments(
     config: &GpuiRemoteMachineConfig,
 ) -> Result<Vec<String>, String> {
@@ -459,7 +459,7 @@ pub(crate) fn gpui_login_shell_remote_command(command: &str) -> String {
 /// CDXC:RemoteMachines 2026-09-18 WHY:
 /// A managed tunnel must own its SSH process and forwarding socket. Reusing a user-configured multiplexing master can make the child exit successfully before the readiness probe and leaves tunnel shutdown tied to an unrelated master.
 /// SEE-ALSO: tunnel_and_auth.rs, browser_tunnel.rs, source_code_server.rs.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_remote_ssh_tunnel_options(has_saved_password: bool) -> Vec<String> {
     let mut arguments = gpui_remote_ssh_client_options(has_saved_password);
     arguments.extend([

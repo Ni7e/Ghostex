@@ -258,6 +258,7 @@ impl GhostexGpuiApp {
             px(new_thread_picker_window_height(agent_count)),
         );
         let options = WindowOptions {
+            kind: crate::app::window::popup_frame::child_window_kind(),
             window_bounds: Some(WindowBounds::Windowed(gpui::Bounds::centered_at(
                 self.main_window_bounds.center(),
                 window_size,
@@ -280,7 +281,11 @@ impl GhostexGpuiApp {
         let picker_out = picker_slot.clone();
         self.new_thread_picker_window = cx
             .open_window(options, move |window, cx| {
-                window.set_window_title("");
+                window.set_window_title(if cfg!(target_os = "windows") {
+                    "Ghostex New Thread"
+                } else {
+                    ""
+                });
                 crate::app::window::popup_frame::strip_gpui_popup_window_frame(window);
                 if visible {
                     window.activate_window();

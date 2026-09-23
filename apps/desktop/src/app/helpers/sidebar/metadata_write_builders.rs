@@ -155,6 +155,11 @@ pub(crate) fn gpui_sidebar_command_metadata_write_from_command(
                     .and_then(|value| gpui_trimmed_nonempty_str(Some(value)))
                     .map(str::to_string),
                 icon,
+                links: if action_type == "terminal" {
+                    gpui_titlebar_action_links_from_sidebar_command_button(command)
+                } else {
+                    Vec::new()
+                },
                 name,
                 play_completion_sound: action_type == "terminal"
                     && command
@@ -291,6 +296,7 @@ pub(crate) fn gpui_sidebar_command_mutation_params(
             command_id,
             scope: _,
             icon,
+            links,
             name,
             play_completion_sound,
             show_on_project_row,
@@ -315,6 +321,23 @@ pub(crate) fn gpui_sidebar_command_mutation_params(
             gpui_insert_optional_nonempty_string(&mut params, "command", command.as_deref());
             gpui_insert_optional_nonempty_string(&mut params, "commandId", command_id.as_deref());
             gpui_insert_optional_nonempty_string(&mut params, "icon", icon.as_deref());
+            params.insert(
+                "links".to_string(),
+                serde_json::Value::Array(
+                    links
+                        .iter()
+                        .map(|link| {
+                            serde_json::json!({
+                                "url": link.url,
+                                "target": match link.target {
+                                    GpuiTitlebarActionLinkTarget::Integrated => "integrated",
+                                    GpuiTitlebarActionLinkTarget::External => "external",
+                                },
+                            })
+                        })
+                        .collect(),
+                ),
+            );
             params.insert("name".to_string(), serde_json::Value::String(name.clone()));
             params.insert(
                 "playCompletionSound".to_string(),

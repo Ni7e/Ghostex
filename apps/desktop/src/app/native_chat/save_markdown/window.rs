@@ -59,6 +59,7 @@ impl NativeChatView {
                 let origin = origin + gpui::point(px(0.0), (window.bounds().size.height - window.viewport_size().height).max(px(0.0)));
                 (gpui::Bounds::new(origin, pane.size), window.display(cx).map(|display| display.id()))
             }).and_then(|(bounds, display_id)| cx.open_window(WindowOptions {
+                kind: crate::app::window::popup_frame::child_window_kind(),
                 window_bounds: Some(WindowBounds::Windowed(bounds)), display_id,
                 app_id: crate::gpui_platform_window_app_id(), icon: crate::gpui_platform_window_icon(),
                 focus: true, show: true, is_resizable: false, is_minimizable: false, is_movable: false, titlebar: None,

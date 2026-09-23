@@ -41,7 +41,7 @@ pub(crate) fn gpui_titlebar_gxserver_daemon_status() -> serde_json::Value {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_on_demand_gxserver_asset_key(
     target: &GpuiRemoteInstallTarget,
 ) -> Option<&'static str> {
@@ -55,7 +55,7 @@ pub(crate) fn gpui_on_demand_gxserver_asset_key(
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_on_demand_gxserver_archive(
     target: &GpuiRemoteInstallTarget,
     progress_tx: Option<&mpsc::UnboundedSender<GpuiRemoteGxserverConnectProgress>>,
@@ -66,13 +66,12 @@ pub(crate) fn gpui_on_demand_gxserver_archive(
             state: GpuiRemoteGxserverConnectState::UnsupportedRemotePlatform,
         });
     };
-    let Some(resources_dir) = gpui_app_bundle_resources_dir() else {
+    let Some(manifest_path) = on_demand_component_manifest_path() else {
         return Err(GpuiOnDemandArchiveFailure {
             message: "Could not locate the app's sealed on-demand resource manifest.".to_string(),
             state: GpuiRemoteGxserverConnectState::InstallFailed,
         });
     };
-    let manifest_path = resources_dir.join("Web/on-demand-resources.json");
     let manifest = component_store::OnDemandManifest::load(&manifest_path).map_err(|message| {
         GpuiOnDemandArchiveFailure {
             message,
@@ -120,7 +119,7 @@ pub(crate) fn gpui_on_demand_gxserver_archive(
         })
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_install_gxserver_archive_and_read_token(
     config: &GpuiRemoteMachineConfig,
     execution_target: &GpuiRemoteExecutionTarget,

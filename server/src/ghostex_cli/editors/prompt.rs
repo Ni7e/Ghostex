@@ -65,12 +65,54 @@ pub fn prompt_editor_command(args: &[String]) -> CliResult<()> {
             "selectionDurationMs": selection_duration_ms,
             "selectionKind": selection.kind,
         });
-        return floating_monaco_editor_command_with_trace(args, &trace);
+        let original = match std::fs::read(&resolved_file_path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(CliError::Other(format!(
+                    "Could not read the prompt before editing: {error}"
+                )))
+            }
+        };
+        let status = floating_monaco_editor_command_with_trace(args, &trace)?;
+        finish_external_prompt_edit(status.as_deref(), &resolved_file_path, original.as_deref())?;
+        return Ok(());
     }
     if selection.kind == "code-server" {
         return run_code_server_prompt_editor(&selection.command_args, &cwd);
     }
     run_editor_inline(&selection.command_args, &cwd)
+}
+
+/// CDXC:PromptEditor 2026-09-23 WHY:
+/// Agent CLIs interpret a nonzero EDITOR exit as a launch failure, even after the user intentionally cancels.
+/// The EDITOR adapter restores the original input and succeeds on explicit cancellation; the direct floating-editor command retains its cancellation status for other consumers.
+fn finish_external_prompt_edit(
+    status: Option<&str>,
+    path: &str,
+    original: Option<&[u8]>,
+) -> CliResult<()> {
+    if status == Some("cancelled") {
+        let restored = if let Some(original) = original {
+            if std::fs::read(path).ok().as_deref() == Some(original) {
+                Ok(())
+            } else {
+                std::fs::write(path, original)
+            }
+        } else {
+            match std::fs::remove_file(path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                result => result,
+            }
+        };
+        if let Err(error) = restored {
+            return Err(CliError::Other(format!(
+                "Could not restore the cancelled prompt: {error}"
+            )));
+        }
+        crate::ghostex_cli::set_exit_code(0);
+    }
+    Ok(())
 }
 
 pub(super) fn prompt_editor_backend_from_environment() -> String {
@@ -341,16 +383,18 @@ pub(super) fn is_usable_machine_editor_command(command: &str) -> bool {
 
 pub(super) fn is_ghostex_prompt_editor_command(command: &str) -> bool {
     let trimmed = command.trim();
-    let mut executable = trimmed.split_whitespace().next().unwrap_or("");
-    // /^['"]|['"]$/gu — strip one leading and one trailing quote character.
-    if executable.starts_with('\'') || executable.starts_with('"') {
-        executable = &executable[1..];
-    }
-    if executable.ends_with('\'') || executable.ends_with('"') {
-        executable = &executable[..executable.len() - 1];
-    }
-    let executable_name = executable.rsplit('/').next().unwrap_or("");
+    let (executable, arguments) = match trimmed.chars().next() {
+        Some(quote @ ('\'' | '"')) => trimmed[1..]
+            .split_once(quote)
+            .unwrap_or((&trimmed[1..], "")),
+        _ => trimmed
+            .split_once(char::is_whitespace)
+            .unwrap_or((trimmed, "")),
+    };
+    let executable_name = executable.rsplit(['/', '\\']).next().unwrap_or("");
     executable_name == "prompt-editor"
+        || (matches!(executable_name, "ghostex" | "ghostex.exe")
+            && arguments.split_whitespace().next() == Some("prompt-editor"))
         || trimmed.contains("ghostex prompt-editor")
         || (trimmed.contains("ghostex-cli.mjs") && trimmed.contains("prompt-editor"))
         || trimmed.contains("floating-monaco-editor")

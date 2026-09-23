@@ -474,6 +474,7 @@ pub async fn run_gxserver_foreground(
     );
     let presentation_event_sequence = Arc::new(Mutex::new(()));
     let (shutdown_tx, _) = broadcast::channel(8);
+    crate::zmx::set_zmx_process_identity_shutdown(shutdown_tx.subscribe());
     let local_host = config.listeners.local.host.clone();
     let local_port = config.listeners.local.port;
     let automation_runtime = AutomationRuntime::new(
@@ -650,11 +651,19 @@ pub async fn run_gxserver_foreground(
         let _ = shutdown_for_signal.send(());
     });
 
+    let cleanup_paths = paths.clone();
+    let cleanup_owner = metadata.clone();
+    let (metadata_cleanup_tx, metadata_cleanup_rx) = tokio::sync::oneshot::channel();
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             let _ = shutdown_rx.recv().await;
+            // Remove discovery while this daemon still holds the listener: a replacement
+            // cannot publish its record between our ownership check and unlink.
+            let _ =
+                metadata_cleanup_tx.send(remove_runtime_metadata(&cleanup_paths, &cleanup_owner));
         })
         .await;
+    let metadata_cleanup_result = metadata_cleanup_rx.await;
     /*
     CDXC:ServerDaemon 2026-09-16 WHY:
     Everything from here to the return runs after the listener has closed, while clients already see "connection refused" and may start a replacement daemon.
@@ -698,9 +707,9 @@ pub async fn run_gxserver_foreground(
     shutdown_tail_steps.push(("tailcatStop", step_started.elapsed().as_millis()));
     serve_result.with_context(|| "run gxserver HTTP listener")?;
 
-    let step_started = std::time::Instant::now();
-    remove_runtime_metadata(&paths)?;
-    shutdown_tail_steps.push(("runtimeMetadataRemove", step_started.elapsed().as_millis()));
+    if let Ok(result) = metadata_cleanup_result {
+        result?;
+    }
     let step_started = std::time::Instant::now();
     stop_all_zmx_title_observers(&state);
     stop_all_session_chat_followers(&state);

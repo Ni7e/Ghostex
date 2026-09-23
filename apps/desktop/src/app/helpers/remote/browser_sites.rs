@@ -53,7 +53,7 @@ impl RemoteBrowserSite {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn discover_remote_browser_sites(
     config: &GpuiRemoteMachineConfig,
     target: &GpuiRemoteExecutionTarget,
@@ -103,7 +103,7 @@ pub(crate) fn discover_remote_browser_sites(
     Ok(sites)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn discover_remote_browser_sites(
     _: &GpuiRemoteMachineConfig,
     _: &GpuiRemoteExecutionTarget,

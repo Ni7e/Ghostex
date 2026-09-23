@@ -814,7 +814,7 @@ impl GhostexGpuiApp {
         {
             return;
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         let env_vars = plan
             .askpass
             .as_ref()
@@ -832,7 +832,7 @@ impl GhostexGpuiApp {
                 ]
             })
             .unwrap_or_default();
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         let env_vars = Vec::new();
         let payload = AgentsTerminalExplicitLaunchPayload {
             working_directory: None,
@@ -856,7 +856,7 @@ impl GhostexGpuiApp {
                 },
                 payload,
             );
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         if let Some(askpass) = plan.askpass {
             self.remote_attach_askpass_scripts
                 .insert(key.clone(), askpass);

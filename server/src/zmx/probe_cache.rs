@@ -63,12 +63,37 @@ struct ProcessIdentitiesCache {
     /// Every name requested recently, with the time it was last requested.
     recent_names: HashMap<String, Instant>,
     snapshot: Option<CachedProcessIdentities>,
+    shutdown: Option<tokio::sync::broadcast::Receiver<()>>,
 }
 
 static EXISTING_SESSION_NAMES_CACHE: OnceLock<Mutex<Option<CachedExistingSessionNames>>> =
     OnceLock::new();
 static PROCESS_IDENTITIES_CACHE: OnceLock<Mutex<ProcessIdentitiesCache>> = OnceLock::new();
 static PROCESS_IDENTITIES_PROBE: Mutex<()> = Mutex::new(());
+
+/// CDXC:ServerDaemon 2026-09-23 WHY:
+/// Blocking identity readers can already be queued on the probe mutex when their async owners are aborted. Windows shutdown then ran three consecutive five-second process snapshots. Retain the daemon's shutdown receiver here so queued readers stop at the shared probe boundary instead of starting another subprocess.
+pub(crate) fn set_zmx_process_identity_shutdown(shutdown: tokio::sync::broadcast::Receiver<()>) {
+    let cache =
+        PROCESS_IDENTITIES_CACHE.get_or_init(|| Mutex::new(ProcessIdentitiesCache::default()));
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.shutdown = Some(shutdown);
+}
+
+fn ensure_process_identity_probe_active(cache: &ProcessIdentitiesCache) -> ZmxEndpointResult<()> {
+    if cache
+        .shutdown
+        .as_ref()
+        .is_some_and(|shutdown| shutdown.is_closed() || !shutdown.is_empty())
+    {
+        return Err(ZmxEndpointError::DependencyUnavailable(
+            "gxserver is shutting down.".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 pub(crate) fn invalidate_zmx_process_identity_cache() {
     if let Some(cache) = PROCESS_IDENTITIES_CACHE.get() {
@@ -118,6 +143,7 @@ pub fn read_cached_zmx_session_process_identities(
         let mut guard = cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        ensure_process_identity_probe_active(&guard)?;
         let now = Instant::now();
         for name in session_names {
             guard.recent_names.insert(name.clone(), now);
@@ -138,6 +164,7 @@ pub fn read_cached_zmx_session_process_identities(
         let guard = cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        ensure_process_identity_probe_active(&guard)?;
         if let Some(snapshot) = fresh_process_snapshot(&guard, session_names, home_dir) {
             return Ok(select_identities(&snapshot.identities, session_names));
         }
@@ -154,6 +181,7 @@ pub fn read_cached_zmx_session_process_identities(
         let mut guard = cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        ensure_process_identity_probe_active(&guard)?;
         if guard.generation == generation {
             guard.snapshot = Some(CachedProcessIdentities {
                 fetched_at: Instant::now(),

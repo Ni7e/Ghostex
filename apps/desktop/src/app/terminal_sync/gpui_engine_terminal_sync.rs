@@ -49,7 +49,7 @@ impl GhostexGpuiApp {
                         })
                 });
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             let retained_askpass = self
                 .agents_gpui_terminal_viewer_recipes

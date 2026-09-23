@@ -12,7 +12,7 @@ use std::{
 pub(crate) struct RemoteBrowserTunnel {
     pub(crate) port: u16,
     child: Mutex<Child>,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     _askpass: Option<GpuiRemoteAskpassScript>,
 }
 
@@ -39,7 +39,7 @@ impl Drop for RemoteBrowserTunnel {
 /// CDXC:Browser 2026-09-05 WHY:
 /// SSH dynamic forwarding preserves localhost origins, form bodies and cross-port API/WebSocket traffic without rewriting documents.
 /// Each remote browser context uses its machine's tunnel; the app UI keeps its own local network context.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn start_remote_browser_tunnel(
     config: &GpuiRemoteMachineConfig,
 ) -> Result<RemoteBrowserTunnel, String> {
@@ -97,7 +97,7 @@ pub(crate) fn start_remote_browser_tunnel(
     Err("The browser tunnel could not connect. Check the machine's SSH connection and forwarding permissions.".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn start_remote_browser_tunnel(
     _: &GpuiRemoteMachineConfig,
 ) -> Result<RemoteBrowserTunnel, String> {

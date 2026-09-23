@@ -341,6 +341,7 @@ impl ChatOptionMenu {
         cx.defer(move |cx| {
             let result = cx.open_window(
                 WindowOptions {
+                    kind: crate::app::window::popup_frame::child_window_kind(),
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: None,
                     focus: true,
@@ -513,6 +514,17 @@ impl ChatOptionMenu {
 }
 
 impl NativeChatView {
+    pub(crate) fn active_option_menu_source(&self, cx: &gpui::App) -> Option<gpui::WindowId> {
+        let active = cx.active_window()?.window_id();
+        let menu = self.option_menu.as_ref()?.read(cx);
+        (!menu.closed
+            && menu
+                .windows
+                .iter()
+                .any(|handle| handle.window_id() == active))
+        .then_some(menu.source.window_id())
+    }
+
     pub(in crate::app::native_chat) fn show_option_menu(
         &mut self,
         kind: &str,

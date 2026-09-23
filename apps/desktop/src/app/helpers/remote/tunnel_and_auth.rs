@@ -16,7 +16,7 @@ use std::{
 use crate::app::helpers::*;
 use crate::*;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_open_remote_gxserver_tunnel(
     config: &GpuiRemoteMachineConfig,
     execution_target: &GpuiRemoteExecutionTarget,
@@ -57,7 +57,7 @@ pub(crate) fn gpui_open_remote_gxserver_tunnel(
     })
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_remote_code_server_component_platform(
     config: &GpuiRemoteMachineConfig,
     execution_target: &GpuiRemoteExecutionTarget,
@@ -84,7 +84,7 @@ pub(crate) fn gpui_remote_code_server_component_platform(
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_spawn_remote_gxserver_tunnel(
     config: &GpuiRemoteMachineConfig,
     execution_target: &GpuiRemoteExecutionTarget,
@@ -173,7 +173,7 @@ pub(crate) fn gpui_remote_gxserver_candidate_ports() -> Vec<u16> {
     ports
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_wait_for_remote_authenticated_health(
     local_port: u16,
     token: &str,
@@ -420,7 +420,7 @@ pub(crate) fn gpui_save_remote_machine_password_to_keychain(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn gpui_save_remote_machine_password_to_keychain(
     _remote_machine_id: &str,
     _password: &str,
@@ -450,7 +450,7 @@ pub(crate) fn gpui_save_remote_gxserver_token_to_keychain(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn gpui_save_remote_gxserver_token_to_keychain(
     _remote_machine_id: &str,
     _token: &str,

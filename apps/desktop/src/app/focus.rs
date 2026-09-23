@@ -1980,7 +1980,7 @@ impl GhostexGpuiApp {
         self.remove_agents_chat_surface_for_session(shell_session_id, cx);
         if let Some(remote_key) = scoped_remote_key.as_ref() {
             self.remote_attach_sessions.remove(remote_key);
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             self.remote_attach_askpass_scripts.remove(remote_key);
         }
         let removed_keys = self

@@ -24,7 +24,9 @@ pub(crate) fn header_panel_toggle_button(
     size_reduction: f32,
     enabled: bool,
 ) -> gpui::Stateful<gpui::Div> {
-    let button = div()
+    // One shape on every OS, so the sidebar's Search row can reserve the same width for its two
+    // leading toggles everywhere (native_sidebar/navigation.rs).
+    div()
         .id(id)
         .relative()
         .flex()
@@ -32,44 +34,32 @@ pub(crate) fn header_panel_toggle_button(
         .h(px(TITLEBAR_CONTROL_HEIGHT - size_reduction))
         .items_center()
         .justify_center()
+        .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
         .rounded(px(TITLEBAR_BUTTON_RADIUS))
         .cursor_default()
+        // Windows: occlude the ancestor Drag hitbox so WM_NCHITTEST keeps the button in the client
+        // area (see the CDXC:PlatformSupport note in action_buttons.rs).
+        .when(cfg!(target_os = "windows"), |this| this.occlude())
         .when(enabled, |this| {
             this.hover(|this| this.bg(titlebar_button_hover_color()))
-        });
-    #[cfg(target_os = "macos")]
-    let button = button.px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING)).child(
-        div()
-            .flex()
-            .ml(px(TITLEBAR_SIDEBAR_COLLAPSE_ICON_LEFT_OFFSET))
-            .mt(px(TITLEBAR_SIDEBAR_COLLAPSE_ICON_TOP_OFFSET))
-            .items_center()
-            .justify_center()
-            .child(titlebar_svg_icon(
-                icon,
-                TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE - size_reduction,
-                if enabled {
-                    titlebar_active_text_color()
-                } else {
-                    titlebar_disabled_text_color()
-                },
-            )),
-    );
-    #[cfg(not(target_os = "macos"))]
-    let button = button
-        .w(px(TITLEBAR_BUTTON_WIDTH - size_reduction))
-        .border_r_1()
-        .border_color(titlebar_button_border_color())
-        .child(titlebar_svg_icon(
-            icon,
-            TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE - size_reduction,
-            if enabled {
-                titlebar_icon_color()
-            } else {
-                titlebar_disabled_text_color()
-            },
-        ));
-    button
+        })
+        .child(
+            div()
+                .flex()
+                .ml(px(TITLEBAR_SIDEBAR_COLLAPSE_ICON_LEFT_OFFSET))
+                .mt(px(TITLEBAR_SIDEBAR_COLLAPSE_ICON_TOP_OFFSET))
+                .items_center()
+                .justify_center()
+                .child(titlebar_svg_icon(
+                    icon,
+                    TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE - size_reduction,
+                    if enabled {
+                        titlebar_active_text_color()
+                    } else {
+                        titlebar_disabled_text_color()
+                    },
+                )),
+        )
 }
 
 impl GhostexGpuiApp {
@@ -110,10 +100,6 @@ impl GhostexGpuiApp {
 
         CDXC:Sidebar 2026-06-26-10:04:
         The GPUI header sidebar button toggles the same in-shell collapsed chrome state as Cmd+B and the shared command-palette action. Collapse hides the sidebar and divider siblings without writing sidebarWidth, so the user's expanded width is restored on the next toggle.
-
-        Windows and Linux do not have traffic lights to clear. Their collapse
-        control uses the same full-height 42px segmented frame as the other
-        toggles, mirrored with a trailing divider.
         */
         header_panel_toggle_button(
             "ghostex-gpui-sidebar-collapse",

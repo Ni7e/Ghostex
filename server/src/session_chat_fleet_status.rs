@@ -76,13 +76,23 @@ pub(crate) fn read_fleet(
     }
 }
 
+/// CDXC:ServerDaemon 2026-09-23 WHY:
+/// Aborting the async task does not stop its blocking fleet scan. Windows shutdown kept spawning history probes for other sessions for 25 seconds after the listener closed, holding the installed executable open. Keep the shutdown receiver inside that scan so it stops between probes even after its async owner is aborted.
 pub(crate) fn spawn_fleet_status_task(state: &Arc<AppState>) -> tokio::task::JoinHandle<()> {
     let state = state.clone();
     let mut shutdown = state.shutdown_tx.subscribe();
     tokio::spawn(async move {
         loop {
             let state = state.clone();
-            let _ = tokio::task::spawn_blocking(move || refresh_fleet_status(&state)).await;
+            shutdown = match tokio::task::spawn_blocking(move || {
+                refresh_fleet_status(&state, &shutdown);
+                shutdown
+            })
+            .await
+            {
+                Ok(shutdown) => shutdown,
+                Err(_) => return,
+            };
             tokio::select! {
                 _ = shutdown.recv() => break,
                 _ = tokio::time::sleep(Duration::from_secs(5)) => {}
@@ -91,7 +101,11 @@ pub(crate) fn spawn_fleet_status_task(state: &Arc<AppState>) -> tokio::task::Joi
     })
 }
 
-fn refresh_fleet_status(state: &AppState) {
+fn refresh_fleet_status(state: &AppState, shutdown: &tokio::sync::broadcast::Receiver<()>) {
+    let stopping = || shutdown.is_closed() || !shutdown.is_empty();
+    if stopping() {
+        return;
+    }
     let Ok(db) = open_gxserver_database(&state.paths) else {
         return;
     };
@@ -117,11 +131,17 @@ fn refresh_fleet_status(state: &AppState) {
         .filter_map(|session| session.get("zmxName").and_then(serde_json::Value::as_str))
         .map(str::to_string)
         .collect::<Vec<_>>();
+    if stopping() {
+        return;
+    }
     let _ = crate::zmx::read_cached_zmx_session_process_identities(
         &candidate_names,
         &state.paths.home_dir,
     );
     for session in sessions {
+        if stopping() {
+            return;
+        }
         let agent = session_chat_agent_for_session(&session);
         if !matches!(
             session_chat_option_agent(agent.as_deref()),
@@ -160,6 +180,9 @@ fn refresh_fleet_status(state: &AppState) {
         } else {
             None
         };
+        if stopping() {
+            return;
+        }
         let fleet = read_fleet(
             &session,
             capture.as_ref().map(|capture| capture.text.as_str()),
@@ -172,6 +195,9 @@ fn refresh_fleet_status(state: &AppState) {
                 .and_then(|cache| cache.get(&key).and_then(|entry| entry.value.fleet.clone()))
                 .map(|fleet| fleet.unavailable())
         });
+        if stopping() {
+            return;
+        }
         let observation = match session_chat_option_agent(agent.as_deref()) {
             Some(SessionChatOptionAgent::Codex) => Some(None),
             Some(SessionChatOptionAgent::Claude) => capture.map(|capture| {

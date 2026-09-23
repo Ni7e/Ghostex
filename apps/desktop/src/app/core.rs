@@ -347,7 +347,7 @@ pub struct GhostexGpuiApp {
     // CDXC:Workarea 2026-09-12: app-wide Agents and Wide pane layouts. See GpuiViewPaneLayouts.
     pub(crate) view_pane_layouts: GpuiViewPaneLayouts,
     pub(crate) sidebar_visibility_memory: GpuiSidebarVisibilityMemory,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) remote_attach_askpass_scripts:
         HashMap<GpuiRemoteAttachSessionKey, GpuiRemoteAskpassScript>,
     /*
@@ -605,7 +605,7 @@ pub struct GhostexGpuiApp {
     the temp script and stops its password server, so it must outlive the
     terminal and no longer.
     */
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) command_remote_attach_askpass_scripts:
         HashMap<CommandSessionId, GpuiRemoteAskpassScript>,
     pub(crate) pending_command_gxserver_cleanup: HashSet<GpuiLocalWorkspaceSessionKey>,

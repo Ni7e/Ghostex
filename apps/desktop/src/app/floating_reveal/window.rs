@@ -171,11 +171,18 @@ impl GhostexGpuiApp {
             self.close_floating_reveal(cx);
             return false;
         }
-        // A panel over a window the user has switched away from is not what the gesture promised.
-        // AppKit decides this inside the panel host, from the key window; the other two backends
-        // have to read it here, from the window the poll already holds.
+        // CDXC:Sidebar 2026-09-23 WHY:
+        // The sessions reveal takes keyboard focus, and interacting with either floating panel or its chat's child windows can activate another window. Main-window inactivity alone therefore dismissed the Windows reveal on the next poll; keep the panel while its own interaction owns focus.
         #[cfg(not(target_os = "macos"))]
-        if !window.is_window_active() && self.floating_reveal.panel.is_some() {
+        if !window.is_window_active()
+            && !self.floating_reveal_chat_child_active(cx)
+            && self.floating_reveal.panel.as_ref().is_some_and(|panel| {
+                !panel
+                    .window
+                    .update(cx, |_, window, _| window.is_window_active())
+                    .unwrap_or(false)
+            })
+        {
             self.close_floating_reveal(cx);
             return false;
         }

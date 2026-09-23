@@ -34,8 +34,8 @@ const service = await build({
     // native ones. The service then threw on `indexedDB` inside nativeService.start(), which left the
     // sidebar blank and, because initialize_cef bails when the native service is down, CEF never started.
     // Match either separator, and hand esbuild a real path: URL.pathname keeps a slash before the drive letter.
-    plugin.onResolve({ filter: /(?:^|[\/])(?:browser|database)$/ }, args => {
-      if (!/[\/]packages[\/]client-storage[\/]/.test(args.importer)) return;
+    plugin.onResolve({ filter: /(?:^|[\\/])(?:browser|database)$/ }, args => {
+      if (!/[\\/]packages[\\/]client-storage[\\/]/.test(args.importer)) return;
       const file = args.path.endsWith('browser') ? 'native-preferences.ts' : 'native-database.ts';
       return { path: fileURLToPath(new URL('../packages/client-storage/adapters/' + file, import.meta.url)) };
     });
@@ -44,4 +44,7 @@ const service = await build({
 });
 for (const path of Object.keys(service.metafile.inputs)) {
   if (/node_modules\/(react|react-dom)(\/|$)/.test(path)) throw new Error(`Native services cannot import React: ${path}`);
+  if (/(?:^|[\\/])packages[\\/]client-storage[\\/]adapters[\\/](?:browser|database)\.ts$/.test(path)) {
+    throw new Error(`Native services must use native storage adapters: ${path}`);
+  }
 }

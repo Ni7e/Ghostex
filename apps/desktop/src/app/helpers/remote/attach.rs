@@ -145,7 +145,7 @@ pub(crate) fn gpui_remote_attach_terminal_plan_from_result(
         config.ssh_host.as_str(),
         config.ssh_port,
     );
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     let askpass = if interactive_attach {
         gpui_remote_ssh_askpass_script(config)?
     } else {
@@ -153,7 +153,7 @@ pub(crate) fn gpui_remote_attach_terminal_plan_from_result(
     };
     Ok(GpuiRemoteAttachTerminalPlan {
         agent_icon,
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         askpass,
         clipboard_command,
         terminal_command,

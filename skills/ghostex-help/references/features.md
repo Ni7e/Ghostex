@@ -55,10 +55,13 @@ The **view panel toggle** in the work area header (Cmd+Option+B,
 the view this project last had open, and shows **Open a view** when the project
 has no tabs yet. Closing it leaves your sessions at full width. The header itself
 carries the project breadcrumb, Start, Open and Commit, the **⋯** button (Ask
-Ghostex, Tips & Tricks, Resources, Dev servers, Extensions and Customize), **Hide sidebar**,
-the chat-icon **Toggle Agents Panel** button beside it (it hides or shows the Agents
-Panel while a view is open, the same thing Expand side panel does, and leaves the
-sidebar alone), and the command terminal toggle. When an update is available, a download button
+Ghostex, Tips & Tricks, Resources, Dev servers, Extensions and Customize), and the
+command terminal toggle. **Hide sidebar** and the chat-icon **Toggle Agents Panel**
+button beside it (it hides or shows the Agents Panel while a view is open, the same
+thing Expand side panel does, and leaves the sidebar alone) sit at the top left of the
+sidebar, and move to the start of the header while the sidebar is hidden, so they
+stay in the same spot. The sidebar's top row also moves the window when you drag
+it. When an update is available, a download button
 appears just before the project name. On Linux the button opens the release
 notes with an **Open download page** button instead of installing the update;
 install the new package the same way you installed Ghostex.
@@ -1054,13 +1057,16 @@ sessions, so any client can control agents on any machine.
 - **CLI**: `ghostex attach <selector>` attaches to a session from any terminal,
   including over SSH.
 
-Windows computers accept both Android and macOS desktop connections over SSH.
+Windows computers accept Android, macOS, and Linux desktop connections over SSH.
 Install Ghostex on Windows, enable SSH, and add the Windows address with your
 Windows username. The connection uses the Windows Environment selected in
 Windows Ghostex: native PowerShell with Windows folders, or the selected WSL
 distribution with Linux folders. Windows agent CLIs must be installed for native
 PowerShell projects. After changing the Windows environment and restarting the
 Windows app, reconnect the phone or remote desktop machine to use that environment.
+The connecting computer keeps its own local environment: a Linux or macOS client
+can work with Windows paths and PowerShell sessions on the connected computer.
+Linux stores saved SSH passwords in the desktop keyring.
 
 Related settings: Settings > Remote (all rows are user-only; open them with
 `ghostex settings open --tab remote`), `hideKeepAwakeTitlebarControl` and the

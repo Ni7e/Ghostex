@@ -270,6 +270,7 @@ pub(super) fn prepare_gxserver(
     progress(WindowsWslSetupPhase::Checking);
     let backend = resolve(preference)?;
     let ResolvedWindowsTerminalBackend::Wsl { distribution } = &backend else {
+        super::native_package::refresh_existing()?;
         return Ok(backend);
     };
     let paths = resolve_wsl_ghostex_paths(distribution)?;

@@ -66,10 +66,11 @@ impl GhostexGpuiApp {
         CDXC:Titlebar 2026-09-20 WHY:
         With the sidebar expanded the window's top-left belongs to the sidebar's own Search row,
         which reserves the macOS traffic lights there. Collapsed, this header is what sits in that
-        corner, so it reserves them instead. Windows and Linux reserve nothing on the left; their
-        caption buttons are trailing children of this same header.
+        corner, so it draws the sidebar toggles at the Search row's `SIDEBAR_TOGGLE_LEADING_X`.
+        Windows and Linux have no lights to clear; their caption buttons are trailing children of
+        this same header.
         CDXC:Titlebar 2026-09-21 WHY:
-        Collapsed, the reveal's edge strip sits left of this header, so the reserve is measured from
+        Collapsed, the reveal's edge strip sits left of this header, so the inset is measured from
         the window edge minus that strip. Without it the sidebar toggle drew 10px right of where the
         docked sidebar's Search row draws it.
         */
@@ -79,7 +80,7 @@ impl GhostexGpuiApp {
             } else {
                 0.0
             };
-            (WINDOW_CONTROLS_LEADING_RESERVE - strip).max(WORKAREA_HEADER_EDGE_PADDING)
+            (SIDEBAR_TOGGLE_LEADING_X - strip).max(0.0)
         } else {
             WORKAREA_HEADER_EDGE_PADDING
         };
@@ -90,30 +91,27 @@ impl GhostexGpuiApp {
             .max_w(px(620.0))
             .min_w_0()
             .items_center()
-            // On macOS the docked sidebar's Search row draws the toggle (native_sidebar/navigation.rs).
+            // While docked, the sidebar's Search row draws the toggle (native_sidebar/navigation.rs).
             // The docked Search row puts the button's top at 5pt, while this 36pt row centres the
             // 27pt button at 4.5pt; the half point keeps it from jumping when the sidebar collapses.
-            .when(
-                self.sidebar_collapsed || !cfg!(target_os = "macos"),
-                |this| {
-                    this.child(
-                        div()
-                            .relative()
-                            .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
-                            .child(self.render_sidebar_collapse_button(cx)),
-                    )
-                    // The Agents Panel toggle follows the sidebar toggle wherever that one is
-                    // drawn; while the docked Search row owns it, that row draws this one too. The
-                    // 4pt is that row's gap, so the icon does not jump when the sidebar collapses.
-                    .child(
-                        div()
-                            .relative()
-                            .ml(px(4.0))
-                            .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
-                            .child(self.render_workarea_header_agents_toggle(cx)),
-                    )
-                },
-            )
+            .when(self.sidebar_collapsed, |this| {
+                this.child(
+                    div()
+                        .relative()
+                        .top(px(0.5))
+                        .child(self.render_sidebar_collapse_button(cx)),
+                )
+                // The Agents Panel toggle follows the sidebar toggle wherever that one is
+                // drawn; while the docked Search row owns it, that row draws this one too. The
+                // 4pt is that row's gap, so the icon does not jump when the sidebar collapses.
+                .child(
+                    div()
+                        .relative()
+                        .ml(px(4.0))
+                        .top(px(0.5))
+                        .child(self.render_workarea_header_agents_toggle(cx)),
+                )
+            })
             /*
             CDXC:Navigation 2026-08-19:
             Back/Forward sit LEFT of the project name, next to the sidebar

@@ -2534,6 +2534,7 @@ dependencies = [
  "image",
  "instant",
  "libc",
+ "oo7",
  "percent-encoding",
  "portable-pty",
  "qrcode",

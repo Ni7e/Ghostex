@@ -319,7 +319,7 @@ pub(crate) enum GpuiRemoteIdePathKind {
     File,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn gpui_open_remote_path_in_windows_wsl_editor(
     config: &GpuiRemoteMachineConfig,
     execution_target: &GpuiRemoteExecutionTarget,
@@ -397,7 +397,7 @@ pub(crate) fn gpui_open_remote_path_in_windows_wsl_editor(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn gpui_open_remote_path_in_windows_wsl_editor(
     _config: &GpuiRemoteMachineConfig,
     _execution_target: &GpuiRemoteExecutionTarget,

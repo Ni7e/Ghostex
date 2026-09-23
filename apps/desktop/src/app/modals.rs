@@ -1403,11 +1403,13 @@ impl GhostexGpuiApp {
                         cx,
                     );
                     modal_window.resize(window_size);
-                    modal_window.set_window_title(if modal.has_titlebar() {
-                        &window_title
-                    } else {
-                        ""
-                    });
+                    modal_window.set_window_title(
+                        if cfg!(target_os = "windows") || modal.has_titlebar() {
+                            &window_title
+                        } else {
+                            ""
+                        },
+                    );
                     modal_window.activate_window();
                     modal_window.refresh();
                 });
@@ -1474,6 +1476,7 @@ impl GhostexGpuiApp {
             window_size,
         ));
         let options = WindowOptions {
+            kind: crate::app::window::popup_frame::child_window_kind(),
             window_bounds: Some(window_bounds),
             app_id: gpui_platform_window_app_id(),
             focus: true,
@@ -1483,7 +1486,7 @@ impl GhostexGpuiApp {
             window_min_size: Some(modal.window_min_size(&open_message)),
             display_id: self.main_window_display_id,
             titlebar: modal.has_titlebar().then(|| gpui::TitlebarOptions {
-                title: Some(window_title.into()),
+                title: Some(window_title.clone().into()),
                 appears_transparent: false,
                 traffic_light_position: None,
             }),
@@ -1521,7 +1524,11 @@ impl GhostexGpuiApp {
         self.app_modal_window = cx
             .open_window(options, |modal_window, cx| {
                 if !modal.has_titlebar() {
-                    modal_window.set_window_title("");
+                    modal_window.set_window_title(if cfg!(target_os = "windows") {
+                        &window_title
+                    } else {
+                        ""
+                    });
                 }
                 modal_window.activate_window();
                 /*

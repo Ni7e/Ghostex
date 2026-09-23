@@ -70,7 +70,7 @@ pub(crate) fn gpui_cef_html_entry_url(env_var: &str, entry_file_name: &str) -> R
             .join("Contents/Resources/sidebar")
             .join(entry_file_name);
         if bundled.exists() {
-            return Ok(file_url(&bundled));
+            return file_url(&bundled);
         }
     }
 
@@ -86,7 +86,7 @@ pub(crate) fn gpui_cef_html_entry_url(env_var: &str, entry_file_name: &str) -> R
     if let Some(exe_dir) = executable.parent() {
         let packaged = exe_dir.join("dist/sidebar").join(entry_file_name);
         if packaged.exists() {
-            return Ok(file_url(&packaged));
+            return file_url(&packaged);
         }
     }
 
@@ -94,7 +94,7 @@ pub(crate) fn gpui_cef_html_entry_url(env_var: &str, entry_file_name: &str) -> R
         .join("dist/sidebar")
         .join(entry_file_name);
     if local.exists() {
-        return Ok(file_url(&local));
+        return file_url(&local);
     }
 
     anyhow::bail!("GPUI CEF workarea bundle entry was not found")

@@ -443,15 +443,24 @@ export function createGpuiExistingWorktreeOptions(
 }
 
 export function gpuiProjectNameFromPath(path: string): string {
-  return path.split('/').filter(Boolean).at(-1) ?? 'Project';
+  return gpuiProjectPathSeparators(path).split('/').filter(Boolean).at(-1) ?? 'Project';
 }
 
+/**
+ * CDXC:Worktrees 2026-09-23 WHY:
+ * Worktree targets are siblings of a registered project on its owning computer. Rebuilding every parent with a leading slash turns C:/dev/project into /C:/dev, which Windows rejects before Git runs; preserve drive and UNC roots as well as POSIX paths.
+ */
 export function gpuiDirname(path: string): string {
-  const parts = path.replace(/\/+$/u, '').split('/').filter(Boolean);
-  if (parts.length <= 1) {
-    return '/';
-  }
-  return `/${parts.slice(0, -1).join('/')}`;
+  const normalized = gpuiProjectPathSeparators(path);
+  const root = normalized.match(/^(?:[a-z]:\/|\/\/[^/]+\/[^/]+\/?|\/)/iu)?.[0] ?? '';
+  const trimmed = normalized.replace(/\/+$/u, '');
+  const separator = trimmed.lastIndexOf('/');
+  if (separator < root.length) return root || '.';
+  return trimmed.slice(0, separator);
+}
+
+function gpuiProjectPathSeparators(path: string): string {
+  return /^(?:[a-z]:[\\/]|\\\\|\/\/)/iu.test(path) ? path.replace(/\\/gu, '/') : path;
 }
 
 export function gpuiWorktreeSlugFromPrompt(prompt: string): string {

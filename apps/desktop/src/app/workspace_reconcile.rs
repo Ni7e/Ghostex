@@ -1241,7 +1241,7 @@ impl GhostexGpuiApp {
         */
         self.command_remote_action_sessions =
             command_remote_action_sessions_from_command_model(&self.command_pane);
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         self.command_remote_attach_askpass_scripts.clear();
         self.command_gxserver_attach_pending.clear();
         self.command_terminal_launch_payload_source

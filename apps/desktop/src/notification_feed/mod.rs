@@ -402,6 +402,8 @@ impl GhostexGpuiApp {
 
         div()
             .id("ghostex-gpui-sidebar-notifications-bell")
+            // Windows: the sidebar's top row is a Drag region (native_sidebar/navigation.rs).
+            .when(cfg!(target_os = "windows"), |this| this.occlude())
             .relative()
             .flex()
             .h_full()

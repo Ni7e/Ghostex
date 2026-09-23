@@ -217,8 +217,18 @@ nothing on the left.
 #[cfg(target_os = "macos")]
 pub(crate) const WINDOW_CONTROLS_LEADING_RESERVE: f32 = 79.0;
 
+/// CDXC:Titlebar 2026-09-23 DECISION:
+/// User: on Windows and Linux the Toggle sidebar and Agents Panel buttons sit at the top left of
+/// the sidebar, as on macOS, from the same code; the only difference is that macOS clears its
+/// traffic lights first. This is the button's window x on every OS, whichever of the docked
+/// Search row or the collapsed header draws it. Off macOS it is the reveal edge strip's width, so
+/// the collapsed header, which starts right of that strip, draws it flush and it does not move.
+#[cfg(target_os = "macos")]
+pub(crate) const SIDEBAR_TOGGLE_LEADING_X: f32 = WINDOW_CONTROLS_LEADING_RESERVE;
+
 #[cfg(not(target_os = "macos"))]
-pub(crate) const WINDOW_CONTROLS_LEADING_RESERVE: f32 = 0.0;
+pub(crate) const SIDEBAR_TOGGLE_LEADING_X: f32 =
+    crate::app::floating_reveal::model::FLOATING_REVEAL_EDGE_WIDTH;
 
 /// Height of the header's own controls (buttons, split buttons, mode tabs).
 pub(crate) const TITLEBAR_CONTROL_HEIGHT: f32 = 27.0;
@@ -237,9 +247,9 @@ menu, hotkeys, and restored-mode coercion all refuse it in one place.
 pub(crate) const TITLEBAR_REMOTE_SOURCE_DISABLED_REASON: &str =
     "Code is currently disabled for remote projects";
 
-/// Fixed square width kept only for the non-macOS leading toggle and the
-/// Windows/Linux caption-control gap; trailing buttons size to their icon now.
-#[cfg(not(target_os = "macos"))]
+/// Fixed square width kept only for the Linux caption-control gap; every other header button sizes
+/// to its icon now.
+#[cfg(target_os = "linux")]
 pub(crate) const TITLEBAR_BUTTON_WIDTH: f32 = 42.0;
 
 /*

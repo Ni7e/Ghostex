@@ -439,12 +439,15 @@ pub(crate) fn is_agent_status_boundary_char(ch: char) -> bool {
         )
 }
 
+/// CDXC:SessionTitles 2026-09-22 WHY:
+/// Elevated ConPTY shells prefix their executable title with Administrator. That shell context must be filtered just like the unelevated path or waking a session overwrites its chosen name.
 pub(crate) fn is_windows_default_powershell_title(title: &str) -> bool {
     let normalized = title.trim().to_ascii_lowercase().replace('/', "\\");
     let path = normalized
-        .strip_suffix(" .")
+        .strip_prefix("administrator:")
         .unwrap_or(&normalized)
-        .trim_end();
+        .trim_start();
+    let path = path.strip_suffix(" .").unwrap_or(path).trim_end();
     let bytes = path.as_bytes();
     bytes.len() >= 3
         && bytes[0].is_ascii_alphabetic()

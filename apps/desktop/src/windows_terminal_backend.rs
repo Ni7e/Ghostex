@@ -94,6 +94,8 @@ pub(crate) fn reload_preference_for_setup() {
 
 #[cfg(windows)]
 mod native;
+#[cfg(windows)]
+mod native_package;
 #[cfg(target_os = "windows")]
 mod platform;
 

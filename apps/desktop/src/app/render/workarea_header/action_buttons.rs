@@ -1,5 +1,5 @@
 //! The header's trailing half: the Start / Open / Commit split buttons, the ⋯ menu, the two panel
-//! toggles, and the platform caption controls on Windows and Linux.
+//! toggles, and the platform caption controls on Linux.
 
 use std::time::Duration;
 
@@ -28,7 +28,7 @@ use crate::app::helpers::*;
 use crate::app::window::*;
 use crate::*;
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use gpui::WindowControlArea;
 
 /// CDXC:Theming 2026-09-20 WHY:
@@ -521,16 +521,6 @@ impl GhostexGpuiApp {
                     .child(buttons),
             )
             .child(pinned);
-        #[cfg(target_os = "windows")]
-        let controls = controls
-            .child(
-                div()
-                    .id("ghostex-gpui-workarea-header-window-controls-gap")
-                    .h_full()
-                    .w(px(TITLEBAR_BUTTON_WIDTH))
-                    .window_control_area(WindowControlArea::Drag),
-            )
-            .child(self.render_titlebar_window_controls(window, cx));
         #[cfg(target_os = "linux")]
         let controls = controls.when(
             matches!(

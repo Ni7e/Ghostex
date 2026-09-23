@@ -168,6 +168,7 @@ impl GhostexGpuiApp {
         };
         h_flex()
             .id("ghostex-gpui-titlebar-window-controls")
+            .flex_shrink_0()
             .h_full()
             .items_center()
             .child(self.render_titlebar_window_control(GpuiWindowCaptionControl::Minimize, cx))
@@ -185,6 +186,7 @@ impl GhostexGpuiApp {
             .id(control.element_id())
             .relative()
             .flex()
+            .flex_shrink_0()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .w(px(TITLEBAR_WINDOW_BUTTON_WIDTH))
             .items_center()

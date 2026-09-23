@@ -583,6 +583,8 @@ const CODEX_SESSION_META_HEAD_BYTES: u64 = 128 * 1024;
 
 pub(crate) struct CodexSessionMeta {
     pub(crate) session_id: String,
+    pub(crate) cwd: Option<String>,
+    pub(crate) timestamp: Option<String>,
     pub(crate) forked_from_id: Option<String>,
     pub(crate) forked_from_ordinal_exclusive: Option<u64>,
     pub(crate) history_base: Option<CodexHistoryBase>,
@@ -608,6 +610,8 @@ pub(crate) fn read_codex_session_meta(path: &Path) -> Option<CodexSessionMeta> {
         extract_string(payload.get("session_id")).or_else(|| extract_string(payload.get("id")))?;
     Some(CodexSessionMeta {
         session_id,
+        cwd: extract_string(payload.get("cwd")),
+        timestamp: extract_string(payload.get("timestamp")),
         forked_from_id: extract_string(payload.get("forked_from_id")),
         forked_from_ordinal_exclusive: payload
             .get("forked_from_ordinal_exclusive")

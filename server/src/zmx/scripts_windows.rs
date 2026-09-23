@@ -135,6 +135,8 @@ pub(crate) fn build_zmx_shell_provider_command(input: ZmxShellProviderCommandInp
     )
 }
 
+/// CDXC:PromptEditor 2026-09-23 WHY:
+/// Apply the editor handshake after the PowerShell profile and pin it to this server's sibling CLI; bare `ghostex` selected an obsolete package from PATH even after the desktop and editor were updated.
 #[allow(clippy::too_many_arguments)]
 fn start(
     program: &str,
@@ -162,10 +164,16 @@ fn start(
             environment.insert(key.into(), value);
         }
     }
-    // CDXC:PromptEditor 2026-09-14 WHY:
-    // Apply Ghostex's editor handshake after the user's PowerShell profile; otherwise profile-assigned VS Code blocks chat/terminal transfers.
+    let cli = std::env::current_exe()
+        .expect("resolve running gxserver for the session editor")
+        .with_file_name("ghostex.exe");
+    let editor = format!("\"{}\" prompt-editor", cli.to_string_lossy());
+    // The profile runs after ConPTY applies launch.cwd and may change location.
+    // Restore the selected project before any agent command can run.
     let startup = format!(
-        "$env:GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL=$env:VISUAL; $env:GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR=$env:EDITOR; $env:VISUAL='ghostex prompt-editor'; $env:EDITOR=$env:VISUAL; $env:GHOSTEX_PROMPT_EDITING_ENABLED='1'; {}",
+        "Set-Location -LiteralPath {} -ErrorAction Stop; $env:GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL=$env:VISUAL; $env:GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR=$env:EDITOR; $env:VISUAL={}; $env:EDITOR=$env:VISUAL; $env:GHOSTEX_PROMPT_EDITING_ENABLED='1'; {}",
+        quote(cwd),
+        quote(&editor),
         startup.unwrap_or_default().trim_end_matches(['\r', '\n'])
     );
     let launch = json!({"name": name, "cwd": cwd,

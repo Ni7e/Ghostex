@@ -35,9 +35,9 @@ fn source_code_server_spawn_host_runtime(
         target.endpoint,
         SourceCodeServerRuntimeEndpoint::Remote { .. }
     ) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         return source_code_server_spawn_remote_runtime(target, startup_deadline);
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         return Err("Remote Source runtime is unavailable from this SSH host.".to_string());
     }
     if source_code_server_health_check() {

@@ -165,6 +165,10 @@ pub(crate) fn fork_initial_rename_target(
     })
 }
 
+/// CDXC:SessionFork 2026-09-23 WHY:
+/// The generic 150ms text/Enter path left Windows Codex fork renames in the composer and marked them applied before delivery.
+/// Use the chat sender's composer and paste verification, and await its completion inside this background task before reporting the rename applied.
+/// Codex can finish this rename before exposing its rollout through a hook or open handle. Record the same pending rename as the manual flow so its exact post-request session-index confirmation also supplies the fork identity and inherited chat history before the first prompt.
 pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialRenameTarget) {
     /*
     CDXC:SessionFork 2026-07-11:
@@ -180,7 +184,7 @@ pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialR
     slash command lands as literal text in whatever screen IS up.
     */
     tokio::spawn(async move {
-        crate::session_chat_composer::wait_for_session_chat_composer_by_ids(
+        let readiness = crate::session_chat_composer::wait_for_session_chat_composer_by_ids(
             &state.paths,
             state.metadata.server_id.as_str(),
             &target.project_id,
@@ -192,52 +196,99 @@ pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialR
             },
         )
         .await;
-        let Ok(db) = open_gxserver_database(&state.paths) else {
-            return;
-        };
-        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
-        let Ok(Some(session)) = repository.get_session(&target.project_id, &target.session_id)
-        else {
-            return;
+        let session = {
+            let Ok(db) = open_gxserver_database(&state.paths) else {
+                return;
+            };
+            let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+            let Ok(Some(session)) = repository.get_session(&target.project_id, &target.session_id)
+            else {
+                return;
+            };
+            session
         };
         if read_runtime_text(&session, "gxserverForkInitialRenameStatus").as_deref()
             != Some("pending")
             || read_runtime_text(&session, "gxserverFirstPromptAutoTitleStatus").is_some()
+            || read_runtime_text(&session, "pendingAgentTitleRequestTitle")
+                .is_some_and(|title| title != target.title)
         {
             return;
         }
         let command = agent_session_title_command(Some(&target.agent_name), &target.title);
-        // CDXC:SessionChat 2026-08-23: see the auto-title dispatch.
-        crate::session_chat_app_command::record_session_chat_app_command(
-            &target.project_id,
-            &target.session_id,
-            &command,
-        );
-        let mut params = Map::new();
-        params.insert("projectId".to_string(), json!(target.project_id.clone()));
-        params.insert("sessionId".to_string(), json!(target.session_id.clone()));
-        params.insert(
-            "diagnosticInputSource".to_string(),
-            json!("fork-title-command"),
-        );
-        params.insert("submit".to_string(), Value::Bool(true));
-        params.insert("text".to_string(), Value::String(command));
-        let status = if dispatch_zmx_session_interaction_endpoint(
-            &repository,
-            "/api/sendSessionMessage",
-            &params,
-        )
-        .is_ok()
-        {
-            "applied"
+        let completion = if matches!(
+            readiness,
+            crate::session_chat_composer::SessionChatComposerWait::Ready
+                | crate::session_chat_composer::SessionChatComposerWait::Unknown
+        ) {
+            if target.agent_name == "codex" {
+                let Ok(db) = open_gxserver_database(&state.paths) else {
+                    return;
+                };
+                let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+                if crate::agents::request_session_rename(
+                    &repository,
+                    &crate::agents::LifecycleParams {
+                        project_id: target.project_id.clone(),
+                        session_id: target.session_id.clone(),
+                    },
+                    json!({"title": target.title, "titleSource": "placeholder"})
+                        .as_object()
+                        .expect("rename parameters"),
+                    &state.paths.home_dir,
+                )
+                .is_err()
+                {
+                    return;
+                }
+            }
+            // CDXC:SessionChat 2026-08-23: see the auto-title dispatch.
+            crate::session_chat_app_command::record_session_chat_app_command(
+                &target.project_id,
+                &target.session_id,
+                &command,
+            );
+            crate::session_chat_send::enqueue_session_write_sequence_with_completion(
+                &session,
+                &target.project_id,
+                &target.session_id,
+                "fork-title-command",
+                crate::session_chat_send::build_session_chat_message_steps(
+                    Some(&target.agent_name),
+                    &command,
+                    &[],
+                    false,
+                ),
+                None,
+            )
+            .ok()
         } else {
-            "failed"
+            None
         };
+        let status = match completion {
+            Some(completion) => {
+                if matches!(completion.await, Ok(Ok(()))) {
+                    "applied"
+                } else {
+                    "failed"
+                }
+            }
+            _ => "failed",
+        };
+        let Ok(db) = open_gxserver_database(&state.paths) else {
+            return;
+        };
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
         let Ok(Some(latest_session)) =
             repository.get_session(&target.project_id, &target.session_id)
         else {
             return;
         };
+        if read_runtime_text(&latest_session, "gxserverForkInitialRenameStatus").as_deref()
+            != Some("pending")
+        {
+            return;
+        }
         let mut runtime_settings = latest_session
             .get("runtimeSettings")
             .and_then(Value::as_object)
@@ -256,6 +307,13 @@ pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialR
             Value::Object(runtime_settings),
         );
         let _ = repository.update_session(&update);
+        if status == "applied" && target.agent_name == "codex" {
+            schedule_agent_title_metadata_check(
+                state.clone(),
+                target.project_id.clone(),
+                target.session_id.clone(),
+            );
+        }
         schedule_delta_for_ids(&state, &target.project_id, &target.session_id);
     });
 }

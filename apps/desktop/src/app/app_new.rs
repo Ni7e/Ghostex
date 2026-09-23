@@ -236,7 +236,7 @@ impl GhostexGpuiApp {
                 view_pane_layouts: shell_layout_state.view_pane_layouts,
                 sidebar_visibility_memory,
                 remote_attach_sessions: shell_layout_state.remote_attach_sessions,
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
                 remote_attach_askpass_scripts: HashMap::new(),
                 project_workarea_runtime_cef_surfaces: HashMap::new(),
                 sidebar_runtime_settings_snapshot,
@@ -308,7 +308,7 @@ impl GhostexGpuiApp {
                 command_gxserver_session_mappings: restored_command_gxserver_session_mappings,
                 command_gxserver_attach_pending: HashSet::new(),
                 command_remote_action_sessions: restored_command_remote_action_sessions,
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
                 command_remote_attach_askpass_scripts: HashMap::new(),
                 pending_command_gxserver_cleanup,
                 command_gxserver_cleanup_in_flight: HashSet::new(),

@@ -21,6 +21,17 @@ use crate::*;
 const FLOATING_REVEAL_DISMISS_DELAY_MS: u64 = 200;
 
 impl GhostexGpuiApp {
+    /// CDXC:Sidebar 2026-09-23 WHY:
+    /// Chat menus, pickers and previews own separate windows. Moving focus or the pointer into a child opened by the floating chat must keep its source panel alive, just as a sidebar menu does.
+    pub(super) fn floating_reveal_chat_child_active(&self, cx: &gpui::App) -> bool {
+        let Some(panel) = self.floating_reveal.panel.as_ref() else {
+            return false;
+        };
+        self.native_chat_views.values().any(|chat| {
+            chat.read(cx).active_child_window_source(cx) == Some(panel.window.window_id())
+        })
+    }
+
     pub(super) fn sync_floating_reveal_host(
         &mut self,
         requested: bool,
@@ -61,6 +72,7 @@ impl GhostexGpuiApp {
             })
             .unwrap_or(false);
         let mut inside = hovered
+            || self.floating_reveal_chat_child_active(cx)
             || self.floating_reveal.edge_hovered
             // Beside a docked sidebar the pointer that opened the panel is still over the sidebar.
             || (self.floating_reveal.sidebar_hovered && !self.sidebar_collapsed)

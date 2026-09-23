@@ -116,10 +116,13 @@ pub fn floating_editor_command(args: &[String]) -> CliResult<()> {
 // ---------------------------------------------------------------------------
 
 pub fn floating_monaco_editor_command(args: &[String]) -> CliResult<()> {
-    floating_monaco_editor_command_with_trace(args, &json!({}))
+    floating_monaco_editor_command_with_trace(args, &json!({})).map(|_| ())
 }
 
-fn floating_monaco_editor_command_with_trace(args: &[String], trace: &Value) -> CliResult<()> {
+fn floating_monaco_editor_command_with_trace(
+    args: &[String],
+    trace: &Value,
+) -> CliResult<Option<String>> {
     /*
     CDXC:PromptEditor 2026-07-05 (ported): Monaco prompt editing is served by
     the resident GhostexEditor daemon. Keep the EDITOR-facing status-file
@@ -182,7 +185,7 @@ fn floating_monaco_editor_command_with_trace(args: &[String], trace: &Value) -> 
     );
 
     let result = match outcome {
-        Ok(()) => Ok(()),
+        Ok(status) => Ok(Some(status)),
         Err(error) => {
             append_prompt_editor_timeline_log(
                 "cli.monaco.failed",
@@ -207,6 +210,7 @@ fn floating_monaco_editor_command_with_trace(args: &[String], trace: &Value) -> 
                 &machine_editor_args(&editor_command, &resolved_file_path),
                 &cwd,
             )
+            .map(|_| None)
         }
     };
 
@@ -229,7 +233,7 @@ fn run_monaco_daemon_session(
     status_file: &str,
     originating_session_id: Option<&str>,
     command_started_at: Instant,
-) -> Result<(), EditorError> {
+) -> Result<String, EditorError> {
     let socket_path = resolve_ghostex_editor_socket_path().map_err(EditorError::new)?;
     let daemon_started_at = Instant::now();
     let daemon = connect_or_start_ghostex_editor_daemon(&socket_path)?;
@@ -283,7 +287,7 @@ fn run_monaco_daemon_session(
         stash_saved_prompt_editor_content(resolved_file_path, originating_session_id, request_id);
     }
     crate::ghostex_cli::set_exit_code(if status == "saved" { 0 } else { 1 });
-    Ok(())
+    Ok(status)
 }
 
 fn stash_saved_prompt_editor_content(
@@ -1108,6 +1112,7 @@ fn resolve_ghostex_editor_executable() -> Option<String> {
     if let Some(executable) = std::env::current_exe()
         .ok()
         .and_then(|executable| ghostex_editor_client::bundled_executable(&executable))
+        .or_else(ghostex_editor_client::installed_executable)
     {
         return Some(executable.to_string_lossy().into_owned());
     }
@@ -1230,8 +1235,13 @@ fn ghostex_editor_unavailable_message(detail: Option<&str>) -> String {
     let detail = detail
         .map(|message| format!(" {message}"))
         .unwrap_or_default();
+    let installation = if cfg!(target_os = "macos") {
+        "install /Applications/GhostexEditor.app"
+    } else {
+        "reinstall Ghostex with its bundled editor"
+    };
     format!(
-        "Ghostex standalone editor unavailable; using the machine/default editor. Set GHOSTEX_EDITOR_APP or install /Applications/GhostexEditor.app.{detail}"
+        "Ghostex standalone editor unavailable; using the machine/default editor. Set GHOSTEX_EDITOR_APP or {installation}.{detail}"
     )
 }
 

@@ -18,6 +18,10 @@ pub(in crate::app::native_chat) struct ModelPickerWindowState {
 }
 
 impl ModelPickerWindowState {
+    pub(in crate::app::native_chat) fn window_id(&self) -> Option<gpui::WindowId> {
+        self.handle.map(|handle| handle.window_id())
+    }
+
     pub(in crate::app::native_chat) fn is_open(&self) -> bool {
         self.handle.is_some()
     }
@@ -128,6 +132,7 @@ impl NativeChatView {
             let result = geometry.and_then(|(bounds, display_id)| {
                 cx.open_window(
                     WindowOptions {
+                        kind: crate::app::window::popup_frame::child_window_kind(),
                         window_bounds: Some(WindowBounds::Windowed(bounds)),
                         display_id,
                         app_id: crate::gpui_platform_window_app_id(),
