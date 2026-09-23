@@ -87,13 +87,15 @@ impl GhostexGpuiApp {
         Some((shell_session_id, pane_id))
     }
 
-    /// CDXC:Workarea 2026-09-22 DECISION:
+    /// CDXC:Workarea 2026-09-23 DECISION:
     /// User: a session row dragged from the sidebar onto a terminal or chat pane splits that pane
-    /// the way a dragged tab did, so the tab bar is not needed to split. Edges only: there is no
-    /// centre zone, because selecting the row already shows it in the focused pane. Only local
-    /// sessions of the active project drop; other rows show no zone. The pane hides its surfaces
-    /// for the zones the moment the drag enters a pane rather than when it starts, so reordering
-    /// rows in the sidebar leaves the terminals alone.
+    /// the way a dragged tab did, so the tab bar is not needed to split, and "allow dragging to the
+    /// center": the middle of a pane shows the dragged session in that pane, replacing what it
+    /// showed. This supersedes the 2026-09-22 edges-only rule. Only local sessions of the active
+    /// project drop; other rows show no zone, and neither does the middle of the pane already
+    /// showing the session. The pane hides its surfaces for the zones the moment the drag enters a
+    /// pane rather than when it starts, so reordering rows in the sidebar leaves the terminals
+    /// alone.
     pub(crate) fn update_sidebar_session_pane_drag_feedback(
         &mut self,
         event: &DragMoveEvent<SidebarDrag>,
@@ -116,7 +118,9 @@ impl GhostexGpuiApp {
         }
         self.begin_workspace_tab_drag(cx);
         let zone = workspace_pane_body_drop_zone(event.bounds, event.event.position);
-        if matches!(zone, WorkspaceDropZone::Center)
+        let already_shown_here = source_pane_id == pane_id
+            && self.agents_workspace.active_session_in_pane(pane_id) == Some(session_id);
+        if (matches!(zone, WorkspaceDropZone::Center) && already_shown_here)
             || self
                 .agents_workspace
                 .workspace_tab_edge_drop_is_single_tab_own_pane_noop(source_pane_id, pane_id, zone)
@@ -124,7 +128,6 @@ impl GhostexGpuiApp {
             self.clear_workspace_drop_feedback(cx);
             return;
         }
-        let _ = session_id;
         self.set_workspace_drop_feedback(
             Some(WorkspaceDropFeedback {
                 pane_id,
@@ -146,9 +149,7 @@ impl GhostexGpuiApp {
             Some(WorkspaceDropFeedback {
                 pane_id,
                 target: WorkspaceDropTarget::PaneBody(zone),
-            }) if pane_id == target_pane_id && !matches!(zone, WorkspaceDropZone::Center) => {
-                Some(zone)
-            }
+            }) if pane_id == target_pane_id => Some(zone),
             _ => None,
         };
         self.finish_workspace_tab_drag_state(cx);
