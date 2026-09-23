@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+## 10.2.0 - 2026-09-23
+
+**Ghostex 10.2.0 is out.** Window glass that shows your desktop, your wallpaper or a picture of your choice through the app, a new Theme page in Settings, panels that slide open and closed, a faster native Kanban board and Automate page, drag panes by their grip, and a round of Windows and Linux improvements.
+
+### ✨ Window glass
+- **See your desktop through Ghostex.** The sidebar, sessions, terminals and chat can show a blurred view of what is behind the window. Glass is on in dark mode by default; turn it on or off with Enable Transparency in Settings > Theme.
+- **Choose what the glass shows.** Desktop and windows shows everything behind Ghostex, Wallpaper only shows just your desktop picture, and Custom image blurs a picture you pick, with a separate picture for dark mode and light mode.
+- **Tune how much shows through.** Sidebar tint and Work area tint set each area on its own, in dark mode and in light mode, so either can be the darker one. Always glass keeps it on in light mode too.
+
+### 🎨 A Theme page in Settings
+- **Theme has its own page, right below General.** It starts with Appearance, a card for each dark and light theme showing the window in its colours, and Enable Transparency; Advanced holds colours, chat and terminal themes, glass and the app icon.
+- **Pick your look while getting started.** The last Get started panel offers the same Appearance, theme and transparency choices, and they apply right away.
+
+### 🗂 Panes, views and the board
+- **Panels slide open and closed.** The sidebar, side panel, Agents Panel and command pane slide in and out; set Panel animations to Off, Slow, Normal or Fast, and Reduce Motion always opens them instantly.
+- **Kanban and Automate are faster and match your theme.** Both are now drawn by Ghostex itself, so they open instantly, follow your theme colours and take the keyboard like the rest of the app.
+- **Move or close a pane from its grip.** While the screen is split, the focused pane has a small bar along its top: click it to close the pane (its sessions keep running) or merge all panes, or drag it onto another pane.
+- **Drop a session in the middle of a pane to show it there.** Dropping on a pane's edge still opens a new split.
+- **Sleeping panes show a slim pill** with the session's icon, title and Resume, instead of a large card.
+- **Opening a project or restarting Ghostex no longer wakes its sleeping sessions.** They show their Resume bar until you click the pane or press a key, while clicking a sidebar row still wakes them, thanks to @banozz.
+- **Cmd+Option+Arrow moves between session panes and Commands**, skipping the view panel.
+- **Middle-click an empty spot in a command pane's tab bar** to close all of its terminals at once.
+
+### 🧭 Sidebar
+- **Hide sidebar and Toggle Agents Panel sit at the top left of the sidebar on every computer,** and dragging the sidebar's top row moves the window.
+- **A narrow sidebar keeps its buttons.** When the top row runs out of room, Search and Notifications move into the sidebar menu.
+- **Switching Spaces fades the list** as it slides, from the Spaces row and from the menu alike.
+- **Hover the window's left edge to float a collapsed sidebar.** The hover zone is now invisible, so nothing is drawn over your work.
+
+### 💬 Chat
+- **Cursor chats get a status line and Context details.** Hover the status line and click the pen after its last item to choose what it shows, for Claude Code, Codex and Cursor.
+- **The chat box collapses while you scroll again by default,** and in a short pane, such as half of a stacked split, it stays collapsed until you click it.
+- **Paste images into question answers.**
+- **Sessions that are still loading show the chat box and status line right away,** and the chat box takes focus as soon as the agent picker closes.
+- **The account switch card uses the compact account tiles.**
+
+### 🪟 Windows and Linux
+- **Close, minimize and maximize stay at the top right on Windows,** even with the sidebar or a view open.
+- **Linux computers can connect to Windows computers over SSH,** and Linux keeps saved SSH passwords in the desktop keyring.
+- **Windows terminals keep their output, interrupts and sessions more reliably,** and file dialogs and popups open correctly.
+
+### 🩹 Fixes
+- **Claude sends go through even when its chat box was partly erased on screen.**
+- **Waking a Claude session never resumes a conversation from another project.**
+- **A new agent started right after a restart appears straight away** instead of being replaced by a woken session.
+- **Custom Claude profiles and projects on different Windows drives are told apart correctly,** thanks to @banozz.
+
 ## 10.1.0 - 2026-09-23
 
 **Ghostex 10.1.0 is out.** Linear, Jira, GitHub, Storybook and Terminal views, light and dark theme presets, a Trust and Remember answer for folder trust prompts, drag a session onto a pane to split, account usage that peeks on hover, and the newest Claude, Codex, Cursor and Grok models.
