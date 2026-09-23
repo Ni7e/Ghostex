@@ -34,3 +34,26 @@ pub(crate) mod hotkeys_and_palette {
     include!(concat!(env!("OUT_DIR"), "/hotkeys_and_palette.rs"));
 }
 pub(crate) use hotkeys_and_palette::*;
+
+#[allow(dead_code, unused_imports)]
+mod storybook {
+    use crate::*;
+    include!(concat!(env!("OUT_DIR"), "/storybook.rs"));
+}
+
+/// The desktop's project website providers are read from settings and installed extensions; the browser build offers no views, so no mode is ever a website.
+pub(crate) struct WebsiteProvider {
+    pub(crate) id: String,
+}
+
+impl WebsiteProvider {
+    pub(crate) fn automatic(&self) -> bool {
+        false
+    }
+}
+
+impl TitlebarMode {
+    pub(crate) fn website_provider(self) -> Option<&'static WebsiteProvider> {
+        None
+    }
+}

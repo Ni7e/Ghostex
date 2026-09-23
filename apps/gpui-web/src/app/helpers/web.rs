@@ -7,7 +7,12 @@ use serde_json::Value;
 /// `prefers-reduced-motion`, which is where a browser exposes the system setting the desktop reads from AppKit.
 pub(crate) fn gpui_macos_reduce_motion_enabled() -> bool {
     web_sys::window()
-        .and_then(|window| window.match_media("(prefers-reduced-motion: reduce)").ok().flatten())
+        .and_then(|window| {
+            window
+                .match_media("(prefers-reduced-motion: reduce)")
+                .ok()
+                .flatten()
+        })
         .is_some_and(|query| query.matches())
 }
 
@@ -53,4 +58,24 @@ pub(crate) fn gpui_extension_view_presentation(
 /// The desktop also plays its copy feedback here; the page only writes the clipboard.
 pub(crate) fn gpui_copy_to_clipboard(item: gpui::ClipboardItem, cx: &mut gpui::App) {
     cx.write_to_clipboard(item);
+}
+
+/// Window glass blurs the desktop behind a native window; a canvas has nothing behind it to blur, so glass is never on here.
+pub(crate) fn window_glass_active() -> bool {
+    false
+}
+
+pub(crate) fn window_glass_active_in(_window: &gpui::Window) -> bool {
+    false
+}
+
+pub(crate) fn window_glass_active_for(_window: Option<gpui::AnyWindowHandle>) -> bool {
+    false
+}
+
+pub(crate) const WINDOW_GLASS_MENU_ALPHA: f32 = 0.78;
+
+/// The sidebar's opaque fill, which is what the desktop draws with glass off.
+pub(crate) fn sidebar_chrome_fill(_glass: bool, angle: f32) -> gpui::Background {
+    crate::app::helpers::sidebar_chrome_gradient_fill(angle)
 }

@@ -39,13 +39,22 @@ pub(crate) struct GhostexGpuiApp {
     /// The session the work area shows.
     pub(crate) open_session: Option<ghostex_gx_core::SessionKey>,
     /// Every chat opened in this page, with the shell id its view was given.
-    pub(crate) terminals: HashMap<ghostex_gx_core::SessionKey, Entity<crate::terminal_element::TerminalView>>,
+    pub(crate) terminals:
+        HashMap<ghostex_gx_core::SessionKey, Entity<crate::terminal_element::TerminalView>>,
     /// Whether the work area shows the open session's terminal instead of its chat.
     pub(crate) show_terminal: bool,
     pub(crate) linked_session_opened: bool,
     /// The presentation each chat last published, handed back as `initialPresentation` when its view is made again.
     pub(crate) chat_presentations: HashMap<ghostex_gx_core::SessionKey, Value>,
-    pub(crate) native_chats: HashMap<ghostex_gx_core::SessionKey, (TerminalSessionId, Entity<crate::app::native_chat::state::NativeChatView>)>,
+    pub(crate) native_chats: HashMap<
+        ghostex_gx_core::SessionKey,
+        (
+            TerminalSessionId,
+            Entity<crate::app::native_chat::state::NativeChatView>,
+        ),
+    >,
+    pub(crate) notification_feed_state: crate::notification_feed::GpuiNotificationFeedState,
+    pub(crate) titlebar_notification_bell_bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
 }
 
 impl GhostexGpuiApp {
@@ -65,6 +74,8 @@ impl GhostexGpuiApp {
             terminals: HashMap::new(),
             show_terminal: false,
             linked_session_opened: false,
+            notification_feed_state: Default::default(),
+            titlebar_notification_bell_bounds: Rc::new(std::cell::Cell::new(None)),
         }
     }
 
@@ -94,8 +105,43 @@ impl GhostexGpuiApp {
         div().into_any_element()
     }
 
-    pub(crate) fn render_sidebar_collapse_button(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn render_sidebar_collapse_button(
+        &self,
+        _icon_color: Option<Hsla>,
+        _cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         div()
+    }
+
+    /// The Agents Panel toggle folds the panel behind an open view; the browser build opens no views.
+    pub(crate) fn render_workarea_header_agents_toggle(
+        &self,
+        _icon_color: Option<Hsla>,
+        _cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+    }
+
+    /// The bell is never shown here (`titlebar_notification_bell_visible`), so neither is its dropdown.
+    pub(crate) fn toggle_gpui_titlebar_notifications_popup(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+    }
+
+    /// The desktop's quick model picker hotkey; the chat's own model pill opens the picker here.
+    pub(crate) fn request_focused_session_model_picker(&mut self, _cx: &mut Context<Self>) -> bool {
+        false
+    }
+
+    /// Configured hotkeys run through the desktop's modal host bridge, which the browser build does not have.
+    pub(crate) fn handle_gpui_app_modal_sidebar_command(
+        &mut self,
+        _message: Value,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
     }
 
     pub(crate) fn react_to_native_sidebar_session_click(
@@ -135,7 +181,18 @@ impl GhostexGpuiApp {
     }
 
     /// Sleep Space needs the daemon's per-space work list, which the web store does not read yet.
-    pub(crate) fn gx_store_space_sleep_has_work(&self, _space_id: &str) -> bool {
+    pub(crate) fn gx_store_space_sleep_plans(
+        &self,
+        _space_id: &str,
+    ) -> Option<ghostex_gx_core::SpaceSleepPlans> {
+        None
+    }
+
+    pub(crate) fn gx_store_space_sleep_has_work(
+        &self,
+        _plans: Option<&ghostex_gx_core::SpaceSleepPlans>,
+        _scope: ghostex_gx_core::SpaceSleepScope,
+    ) -> bool {
         false
     }
 
@@ -144,4 +201,6 @@ impl GhostexGpuiApp {
     pub(crate) fn reclaim_gpui_root_for_chrome_input_focus(&mut self) {}
     pub(crate) fn drop_pending_browser_keyboard_handoff(&mut self) {}
     pub(crate) fn persist_shell_layout_state(&self) {}
+    /// Session rows cannot be dragged onto panes here, so there is no pane drag to finish.
+    pub(crate) fn finish_workspace_tab_drag(&mut self, _cx: &mut Context<Self>) {}
 }

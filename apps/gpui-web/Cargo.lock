@@ -1985,6 +1985,7 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "futures",
+ "ghostex-gx-chat-core",
  "ghostex-gx-core",
  "ghostex-gx-protocol",
  "gpui",
@@ -2002,6 +2003,16 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "web-time",
+]
+
+[[package]]
+name = "ghostex-gx-chat-core"
+version = "0.1.0"
+dependencies = [
+ "ghostex-gx-protocol",
+ "markdown",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

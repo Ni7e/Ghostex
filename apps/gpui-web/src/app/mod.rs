@@ -1,6 +1,7 @@
 //! CDXC:WebGpui 2026-09-22 WHY: the entries in this folder that are symlinks ARE the desktop app's source files, compiled here unchanged. Symlinks rather than `#[path]` attributes because rustc resolves the nested `mod` lines of a `#[path]`-loaded file as if it were a `mod.rs`, which breaks every desktop file that has a sibling directory (`consts.rs` + `consts/`). Real files in this folder are the web replacements for the desktop's native-only halves.
 pub(crate) mod chat_host;
 pub(crate) mod consts;
+pub(crate) mod element;
 pub(crate) mod floating_reveal;
 pub(crate) mod gx_store;
 pub(crate) mod helpers;
