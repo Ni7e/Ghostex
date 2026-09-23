@@ -40,7 +40,7 @@ impl GhostexGpuiApp {
         } else {
             &snapshot.search_shortcut
         };
-        let more_menu = snapshot.more_menu.clone();
+        let mut more_menu = snapshot.more_menu.clone();
         /*
         CDXC:Sidebar 2026-09-20 DECISION:
         User: with the titlebar row deleted, the sidebar's Search row is what sits in the window's
@@ -74,12 +74,11 @@ impl GhostexGpuiApp {
         };
         let compact = self.sidebar_width < compact_below * scale;
         /*
-        CDXC:Sidebar 2026-09-20 WHY:
-        At `SIDEBAR_MIN_WIDTH` the macOS traffic-light reserve leaves the Search row about 110
-        points for three buttons, so a compact row that kept all of them would have painted its last
-        one over the divider and the work area. The row is clipped, and it drops what cannot fit
-        instead: the search button always stays, the notification bell goes first because its badge
-        also shows up in the menu, and the sidebar menu button is the last to go.
+        CDXC:Sidebar 2026-09-23 DECISION:
+        User: when the top row has no room for all its buttons, Search and Notifications leave the
+        row and become the top two items of the sidebar menu, with a separator below them. They
+        move together, and the menu button always stays because it now holds both. This
+        supersedes the 2026-09-20 rule that kept Search and dropped the bell first, then the menu.
         */
         let compact_button_slot = 38.0 * scale;
         /*
@@ -107,7 +106,35 @@ impl GhostexGpuiApp {
             }
             - sidebar_toggle_width
             - 5.0 * scale;
-        let compact_fits = |buttons: f32| !compact || compact_room >= buttons * compact_button_slot;
+        let bell_visible = !footer && self.titlebar_notification_bell_visible();
+        let overflowed = !footer
+            && compact
+            && compact_room < (if bell_visible { 3.0 } else { 2.0 }) * compact_button_slot;
+        if overflowed && let Some(items) = more_menu.as_array_mut() {
+            let search_label = match shortcut.as_deref() {
+                Some(shortcut) if !shortcut.is_empty() => format!("{label} ({shortcut})"),
+                _ => label.to_owned(),
+            };
+            let mut leading = vec![json!({
+                "label": search_label,
+                "icon": "search",
+                "command": {"type": "sidebarAction", "action": action_id},
+            })];
+            if bell_visible {
+                let unread = self.notification_feed_state.unread_count;
+                leading.push(json!({
+                    "label": if unread > 0 {
+                        format!("Notifications ({})", crate::notification_feed::notification_feed_badge_label(unread))
+                    } else {
+                        "Notifications".to_owned()
+                    },
+                    "icon": "bell",
+                    "command": {"type": "openNotifications"},
+                }));
+            }
+            leading.push(json!({"separator": true}));
+            items.splice(0..0, leading);
+        }
         let icon_path = if footer {
             "titlebar/bolt.svg"
         } else {
@@ -173,96 +200,93 @@ impl GhostexGpuiApp {
             everything beside it keeps its own box. Below the compact width the label stops being
             drawn at all rather than being clipped to nothing.
             */
-            .child(if compact {
-                div()
-                    .id(format!("native-sidebar-{label}"))
-                    .role(gpui::Role::Button)
-                    .aria_label(tooltip_label.clone())
-                    .when(cfg!(target_os = "windows"), |button| button.occlude())
-                    .h(px(28.0 * scale))
-                    .w(px(34.0 * scale))
-                    .rounded(px(5.0 * scale))
-                    .flex()
-                    .flex_shrink_0()
-                    .items_center()
-                    .justify_center()
-                    .cursor_default()
-                    .hover(|row| row.bg(appearance.hover))
-                    .child(titlebar_svg_icon(
-                        icon_path,
-                        15.0 * scale,
-                        titlebar_active_text_color().opacity(0.52),
-                    ))
-                    .on_click(cx.listener(move |app, _, _, cx| {
-                        cx.stop_propagation();
-                        app.dispatch_native_sidebar_ui(
-                            json!({"type": "sidebarAction", "action": action_id}),
-                            cx,
-                        );
-                    }))
-                    .managed_discrete_tooltip_with_placement(
-                        ManagedTooltipPlacement::Right,
-                        tooltip_delay,
-                        move |window, cx| titlebar_tooltip(tooltip_label.clone(), window, cx),
-                    )
-                    .into_any_element()
-            } else {
-                h_flex()
-                    .id(format!("native-sidebar-{label}"))
-                    .role(gpui::Role::Button)
-                    .aria_label(tooltip_label.clone())
-                    .when(cfg!(target_os = "windows"), |button| button.occlude())
-                    .flex_1()
-                    .h(px((if footer { 28.0 } else { 27.0 }) * scale))
-                    .min_w_0()
-                    .overflow_hidden()
-                    .pl(px((if footer { 12.0 } else { 7.0 }) * scale))
-                    .pr(px(15.0 * scale))
-                    .gap(px(11.0 * scale))
-                    .cursor_default()
-                    .hover(|row| row.text_color(titlebar_active_text_color()))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_shrink_0()
-                            .items_center()
-                            .child(titlebar_svg_icon(
+            .when(!overflowed, |row| {
+                row.child(if compact {
+                    div()
+                        .id(format!("native-sidebar-{label}"))
+                        .role(gpui::Role::Button)
+                        .aria_label(tooltip_label.clone())
+                        .when(cfg!(target_os = "windows"), |button| button.occlude())
+                        .h(px(28.0 * scale))
+                        .w(px(34.0 * scale))
+                        .rounded(px(5.0 * scale))
+                        .flex()
+                        .flex_shrink_0()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .hover(|row| row.bg(appearance.hover))
+                        .child(titlebar_svg_icon(
+                            icon_path,
+                            15.0 * scale,
+                            titlebar_active_text_color().opacity(0.52),
+                        ))
+                        .on_click(cx.listener(move |app, _, _, cx| {
+                            cx.stop_propagation();
+                            app.dispatch_native_sidebar_ui(
+                                json!({"type": "sidebarAction", "action": action_id}),
+                                cx,
+                            );
+                        }))
+                        .managed_discrete_tooltip_with_placement(
+                            ManagedTooltipPlacement::Right,
+                            tooltip_delay,
+                            move |window, cx| titlebar_tooltip(tooltip_label.clone(), window, cx),
+                        )
+                        .into_any_element()
+                } else {
+                    h_flex()
+                        .id(format!("native-sidebar-{label}"))
+                        .role(gpui::Role::Button)
+                        .aria_label(tooltip_label.clone())
+                        .when(cfg!(target_os = "windows"), |button| button.occlude())
+                        .flex_1()
+                        .h(px((if footer { 28.0 } else { 27.0 }) * scale))
+                        .min_w_0()
+                        .overflow_hidden()
+                        .pl(px((if footer { 12.0 } else { 7.0 }) * scale))
+                        .pr(px(15.0 * scale))
+                        .gap(px(11.0 * scale))
+                        .cursor_default()
+                        .hover(|row| row.text_color(titlebar_active_text_color()))
+                        .child(div().flex().flex_shrink_0().items_center().child(
+                            titlebar_svg_icon(
                                 icon_path,
                                 15.0 * scale,
                                 titlebar_active_text_color().opacity(0.52),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .child(label),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .text_color(titlebar_active_text_color().opacity(0.38))
-                            .text_size(px(11.0 * scale))
-                            .child(shortcut.clone().unwrap_or_default()),
-                    )
-                    .on_click(cx.listener(move |app, _, _, cx| {
-                        cx.stop_propagation();
-                        app.dispatch_native_sidebar_ui(
-                            json!({"type": "sidebarAction", "action": action_id}),
-                            cx,
-                        );
-                    }))
-                    .into_any_element()
+                            ),
+                        ))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .child(label),
+                        )
+                        .child(div().flex_1())
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .text_color(titlebar_active_text_color().opacity(0.38))
+                                .text_size(px(11.0 * scale))
+                                .child(shortcut.clone().unwrap_or_default()),
+                        )
+                        .on_click(cx.listener(move |app, _, _, cx| {
+                            cx.stop_propagation();
+                            app.dispatch_native_sidebar_ui(
+                                json!({"type": "sidebarAction", "action": action_id}),
+                                cx,
+                            );
+                        }))
+                        .into_any_element()
+                })
             })
             // CDXC:Notifications 2026-09-20 DECISION:
             // User: the notification bell sits in the sidebar's top row, before the sidebar menu button.
-            .when(
-                !footer && self.titlebar_notification_bell_visible() && compact_fits(3.0),
-                |row| row.child(self.render_sidebar_notification_bell(appearance, cx)),
-            )
-            .when(!footer && compact_fits(2.0), |row| {
+            .when(bell_visible && !overflowed, |row| {
+                row.child(self.render_sidebar_notification_bell(appearance, cx))
+            })
+            .when(!footer, |row| {
                 let more_open = self
                     .native_sidebar
                     .menu

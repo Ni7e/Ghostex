@@ -24,6 +24,18 @@ impl GhostexGpuiApp {
             if let Some(id) = action.command["collectionId"].as_str() {
                 self.begin_native_collection_rename(id, window, cx);
             }
+        } else if action.command["type"] == "openNotifications" {
+            // The sidebar menu carries Notifications only while the bell is out of the row, so the
+            // dropdown hangs from the menu button instead of the bell's last painted spot.
+            if let Some(bounds) = self.native_sidebar.more_button_bounds.get() {
+                self.titlebar_notification_bell_bounds.set(Some(bounds));
+            }
+            self.toggle_gpui_titlebar_notifications_popup(window, cx);
+        } else if action.command["type"] == "selectSpace" {
+            // The More menu's overflowing Spaces switch with the same slide-and-fade as the row.
+            if let Some(id) = action.command["spaceId"].as_str() {
+                self.select_native_space(id, cx);
+            }
         } else if action.command["type"] == "renameGroup" {
             if let Some(id) = action.command["groupId"].as_str() {
                 self.begin_native_sidebar_rename("group", id, window, cx);

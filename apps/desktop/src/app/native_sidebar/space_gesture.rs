@@ -4,6 +4,11 @@ use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase, Window};
 use std::sync::Arc;
 use web_time::Instant;
 
+/// CDXC:Spaces 2026-09-23 DECISION:
+/// User: add a fade in/out to the Space switch animation so it looks nicer. The list fades out as it slides away and fades back in as the new Space slides in, each on its own ease-out/ease-in-out curve, long enough to read as a fade rather than a flash.
+const EXIT_SECONDS: f32 = 0.12;
+const ENTER_SECONDS: f32 = 0.24;
+
 #[derive(Default)]
 pub(crate) struct SpaceGesture {
     delta: f32,
@@ -47,13 +52,17 @@ impl SpaceGesture {
         let elapsed = transition.started.elapsed().as_secs_f32();
         match transition.phase {
             TransitionPhase::Exit => {
-                let t = bezier((elapsed / 0.085).min(1.0), 0.4, 0.0, 1.0, 1.0);
-                (-12.0 * transition.direction * t, 1.0 - t)
+                let progress = (elapsed / EXIT_SECONDS).min(1.0);
+                let t = bezier(progress, 0.4, 0.0, 1.0, 1.0);
+                let fade = bezier(progress, 0.0, 0.0, 0.58, 1.0);
+                (-12.0 * transition.direction * t, 1.0 - fade)
             }
             TransitionPhase::Waiting => (0.0, 0.0),
             TransitionPhase::Enter => {
-                let t = bezier((elapsed / 0.165).min(1.0), 0.22, 1.0, 0.36, 1.0);
-                (16.0 * transition.direction * (1.0 - t), t)
+                let progress = (elapsed / ENTER_SECONDS).min(1.0);
+                let t = bezier(progress, 0.22, 1.0, 0.36, 1.0);
+                let fade = bezier(progress, 0.42, 0.0, 0.58, 1.0);
+                (16.0 * transition.direction * (1.0 - t), fade)
             }
             TransitionPhase::Boundary => {
                 let t = bezier((elapsed / 0.15).min(1.0), 0.22, 1.0, 0.36, 1.0);
@@ -122,6 +131,7 @@ impl GhostexGpuiApp {
         }
         gesture.locked = true;
         let direction = gesture.delta.signum();
+        let snapshot = snapshot.clone();
         let selected = snapshot
             .spaces
             .iter()
@@ -135,6 +145,54 @@ impl GhostexGpuiApp {
                 .and_then(|index| snapshot.spaces.get(index))
         }
         .map(|space| space.id.clone());
+        self.start_native_space_transition(snapshot, direction, destination, cx);
+    }
+
+    /// CDXC:Spaces 2026-09-23 DECISION:
+    /// User: clicking a Space in the Spaces row plays the same slide-and-fade the trackpad swipe plays. It slides the way a swipe to that Space would: forward for a Space to the right of the selected one, back for one to the left.
+    pub(crate) fn select_native_space(&mut self, space_id: &str, cx: &mut gpui::Context<Self>) {
+        let Some(snapshot) = self
+            .native_sidebar
+            .snapshot
+            .clone()
+            .filter(|snapshot| snapshot.spaces_enabled)
+        else {
+            self.dispatch_native_sidebar_ui(
+                serde_json::json!({"type": "selectSpace", "spaceId": space_id}),
+                cx,
+            );
+            return;
+        };
+        let selected = snapshot.spaces.iter().position(|space| space.selected);
+        let target = snapshot
+            .spaces
+            .iter()
+            .position(|space| space.id == space_id);
+        match (selected, target) {
+            (Some(selected), Some(target)) if selected != target => {
+                let direction = if target > selected { 1.0 } else { -1.0 };
+                self.start_native_space_transition(
+                    snapshot,
+                    direction,
+                    Some(space_id.to_owned()),
+                    cx,
+                );
+            }
+            _ => self.dispatch_native_sidebar_ui(
+                serde_json::json!({"type": "selectSpace", "spaceId": space_id}),
+                cx,
+            ),
+        }
+    }
+
+    /// Selects `destination` behind the slide-and-fade, or plays the edge bounce when there is no Space that way.
+    fn start_native_space_transition(
+        &mut self,
+        snapshot: Arc<NativeSidebarSnapshot>,
+        direction: f32,
+        destination: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
         if self.gpui_pet_overlay_reduce_motion_enabled {
             if let Some(space_id) = destination {
                 self.dispatch_native_sidebar_ui(
@@ -149,9 +207,9 @@ impl GhostexGpuiApp {
         } else {
             TransitionPhase::Boundary
         };
-        let frozen = destination.is_some().then(|| snapshot.clone());
-        gesture.transition = Some(SpaceTransition {
-            started: now,
+        let frozen = destination.is_some().then_some(snapshot);
+        self.native_sidebar.space_gesture.transition = Some(SpaceTransition {
+            started: Instant::now(),
             direction,
             destination: destination.clone(),
             phase,
@@ -189,7 +247,7 @@ impl GhostexGpuiApp {
                 })
             });
         match transition.phase {
-            TransitionPhase::Exit if elapsed >= 0.085 => {
+            TransitionPhase::Exit if elapsed >= EXIT_SECONDS => {
                 transition.frozen = None;
                 if destination_selected {
                     transition.phase = TransitionPhase::Enter;
@@ -219,7 +277,7 @@ impl GhostexGpuiApp {
                     transition.started = Instant::now();
                 }
             }
-            TransitionPhase::Enter if elapsed >= 0.165 => complete = true,
+            TransitionPhase::Enter if elapsed >= ENTER_SECONDS => complete = true,
             TransitionPhase::Boundary if elapsed >= 0.15 => complete = true,
             _ => {}
         }
