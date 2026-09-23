@@ -90,8 +90,14 @@ focuses its name field.
   the session that was there, and a session already on screen in another pane
   is focused there instead. To split, drag a session row from the sidebar onto
   the left, right, top or bottom edge of a pane (terminal or Session Chat), or
-  use Advanced > Split Right in the session's menu. Each pane can show the raw
-  terminal or Session Chat. Cmd+T creates a session, Cmd+D splits.
+  use Advanced > Split Right in the session's menu. While the screen is split,
+  the focused pane has a small bar along its top: click it for Close Pane (the
+  sessions keep running) and Merge All Panes, or drag it to move that session
+  onto another pane's edge (a new split) or its middle (it takes that pane's
+  place), and the pane it left closes. Each pane can show the raw terminal or
+  Session Chat. Cmd+T creates a session, Cmd+D splits.
+  Cmd+Option+Arrow moves focus between the session panes and the Commands pane;
+  it skips the view panel.
   Cmd+Shift+T opens the New Thread picker: type to filter the configured
   agents (last used first), Browser, or Terminal, press Enter to start it in
   the active project, and press Tab on Claude or Codex to pick an account.
@@ -525,6 +531,9 @@ you can switch to Terminal for its setup, model menus, and permission prompts.
 Scrolling up collapses the composer; returning to the bottom expands it.
 Settings > Chat > Keep chat box expanded while scrolling leaves the desktop
 chat box at full size instead (`sessionChatKeepComposerExpanded`, on by default).
+In a short pane, such as one half of a stacked split, the chat box stays
+collapsed even at the bottom of the conversation until you click it, and
+collapses again when you click elsewhere.
 An empty collapsed composer shows only the first placeholder line, and scrolling
 keeps the same toolbar buttons visible.
 Hex colors in messages, inline code, and tables have a small rounded color swatch
@@ -1223,7 +1232,7 @@ docs directory), `hideProjectHeaderDiffStats`,
 
 ## Appearance and app
 
-Theme, background contrast and tint, active pane outline, and
+Theme, background contrast and tint, window glass, active pane outline, and
 the app icon live under Settings > General > Theme, the first section.
 App theme offers Dark, Light, and System. System is the app default and follows
 the operating system appearance. Below it, Dark theme and Light theme each pick a
@@ -1242,6 +1251,11 @@ saved dark contrast or tint that differs from the default starts on Custom. The
 accent color (status highlights, accent text, advanced-setting markers) has no
 setting of its own: it follows the dark theme's tint hue, and a neutral tint
 keeps the sky-blue accent.
+Window glass lets the blurred desktop show through the sidebar, the work area,
+terminals, and chat on macOS. Automatic (the default) uses glass in dark mode and
+stays opaque in light mode; Frosted glass and Opaque force one look in both.
+Docs, Kanban, the browser, and the code editor stay opaque. Turning on Reduce
+transparency in the macOS accessibility settings always makes the window opaque.
 Keep Awake (Power)
 prevents sleep while agents work.
 Advanced holds Enable Experimental Features. The separate Debugging page sits
@@ -1261,7 +1275,7 @@ Only the small chevron on its right expands or collapses its entries.
 Related settings: `sidebarTheme`, `darkThemePreset`, `lightThemePreset`,
 `customSidebarTitlebarBackgroundDarknessPercent`, `customSidebarTitlebarBackgroundTintColor`,
 `customSidebarTitlebarLightBackgroundLightnessPercent`, `customSidebarTitlebarLightBackgroundTintColor`,
-`showActivePaneOutline`, `appIconSourceId`, the `keepAwake*` rows,
+`windowGlass`, `showActivePaneOutline`, `appIconSourceId`, the `keepAwake*` rows,
 `showBetaFeatures`, `debuggingMode`.
 
 ## Answering the common questions

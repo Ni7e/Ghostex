@@ -4165,6 +4165,34 @@
       "agentWritable": true
     },
     {
+      "key": "windowGlass",
+      "title": "Window glass",
+      "subtitle": "Let the blurred desktop show through the window. Automatic uses glass in dark mode only.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "enum",
+      "default": "auto",
+      "options": [
+        {
+          "label": "Automatic (glass in dark mode)",
+          "value": "auto"
+        },
+        {
+          "label": "Frosted glass",
+          "value": "frosted"
+        },
+        {
+          "label": "Opaque",
+          "value": "opaque"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
       "key": "showActivePaneOutline",
       "title": "Show Active Pane Outline",
       "subtitle": "Show an outline around the currently focused pane.",
@@ -9937,25 +9965,25 @@
     {
       "id": "focusUp",
       "title": "Focus Up",
-      "description": "Move focus up.",
+      "description": "Move focus up between the session panes and the Commands pane.",
       "defaultKey": "cmd+alt+up"
     },
     {
       "id": "focusRight",
       "title": "Focus Right",
-      "description": "Move focus right.",
+      "description": "Move focus right between the session panes and the Commands pane.",
       "defaultKey": "cmd+alt+right"
     },
     {
       "id": "focusDown",
       "title": "Focus Down",
-      "description": "Move focus down.",
+      "description": "Move focus down between the session panes and the Commands pane.",
       "defaultKey": "cmd+alt+down"
     },
     {
       "id": "focusLeft",
       "title": "Focus Left",
-      "description": "Move focus left.",
+      "description": "Move focus left between the session panes and the Commands pane.",
       "defaultKey": "cmd+alt+left"
     },
     {
