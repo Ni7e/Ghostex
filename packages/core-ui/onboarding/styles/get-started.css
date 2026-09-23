@@ -512,14 +512,21 @@
   min-width: 0;
 }
 .gx-onboarding .plook .opt.appearance {
-  height: 44px;
+  height: 40px;
+}
+/* The look card carries seven controls, so its rows sit tighter than the project card's. */
+.gx-onboarding .pcol .plook .label {
+  margin-bottom: 10px;
+}
+.gx-onboarding .plook .opts {
+  margin-bottom: 16px;
 }
 .gx-onboarding .plook .theme-card-grid {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
   gap: 8px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 .gx-onboarding .plook .theme-card {
   display: flex;
@@ -549,23 +556,90 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.gx-onboarding .plook .ptoggle {
+/* The contrast and transparency sliders: one compact row each, label | slider | value. */
+.gx-onboarding .plook .pstep {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding-top: 4px;
+  gap: 14px;
+  height: 34px;
+  margin-bottom: 6px;
 }
-.gx-onboarding .plook .ptoggle-copy {
+.gx-onboarding .plook .pstep-label {
+  flex: none;
+  width: 110px;
+  font-size: 15px;
+  color: #eef1f7;
+}
+.gx-onboarding .plook .pstep-value {
+  flex: none;
+  width: 64px;
+  text-align: right;
+  font-size: 13px;
+  color: #aeb6c4;
+}
+.gx-onboarding .plook .pstep-range {
   flex: 1;
   min-width: 0;
+  height: 18px;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.gx-onboarding .plook .pstep-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.gx-onboarding .plook .pstep-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: #eef1f7;
+  box-shadow: 0 0 0 4px rgba(90, 125, 235, 0.25);
+}
+.gx-onboarding .plook .pstep-range:focus-visible {
+  outline: none;
+}
+.gx-onboarding .plook .pstep-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgba(90, 125, 235, 0.55);
+}
+/* "Theme" with a Dark | Light switch on the same line; only that appearance's cards show. */
+.gx-onboarding .plook .plook-theme-head {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
-.gx-onboarding .plook .ptoggle-copy .nm {
-  font-size: 16px;
+.gx-onboarding .pcol .plook .plook-theme-head .label {
+  margin-bottom: 0;
 }
-.gx-onboarding .plook .ptoggle-copy .ss {
-  font-size: 13.5px;
+.gx-onboarding .plook .plook-scheme {
+  display: flex;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+}
+.gx-onboarding .plook .plook-scheme button {
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
   color: #7c8598;
+}
+.gx-onboarding .plook .plook-scheme button.sel {
+  background: rgba(90, 125, 235, 0.22);
+  color: #eef1f7;
+}
+.gx-onboarding .plook .pstep .tg {
+  flex: none;
+}
+.gx-onboarding .plook .pstep.off .pstep-range {
+  opacity: 0.35;
+  cursor: default;
+}
+.gx-onboarding .plook .pstep.off .pstep-value {
+  color: #6f7788;
 }

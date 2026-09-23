@@ -49,7 +49,9 @@ const DEFAULT_TERMINAL_FONT_FAMILY: &str = "JetBrains Mono";
 const DEFAULT_TERMINAL_FONT_WEIGHT: f64 = 300.0;
 const NORMAL_TERMINAL_FONT_WEIGHT: f64 = 400.0;
 const DEFAULT_TERMINAL_GHOSTTY_THEME: &str = "GitHub Dark";
-const DEFAULT_TERMINAL_BACKGROUND_COLOR: &str = "#000000";
+/// Empty: the terminal background follows the theme (`workspaceBackgroundColor` in
+/// packages/shared/ghostex-settings/defaults.ts).
+const DEFAULT_TERMINAL_BACKGROUND_COLOR: &str = "";
 const DEFAULT_TERMINAL_BACKGROUND_IMAGE: &str = "";
 const DEFAULT_TERMINAL_BACKGROUND_IMAGE_OPACITY: f64 = 1.0;
 const DEFAULT_TERMINAL_BACKGROUND_IMAGE_FIT: &str = "cover";
@@ -2221,8 +2223,13 @@ fn normalize_ghostty_theme(value: &str) -> String {
     }
 }
 
+/// `None` follows the theme: an empty value, or the retired default #010101 that every settings
+/// file carried (the same migration as `normalizeTerminalBackgroundSetting` in TS).
 fn normalize_terminal_background_rgb(value: &str) -> Option<[u8; 3]> {
     let value = value.trim();
+    if value.eq_ignore_ascii_case("#010101") {
+        return None;
+    }
     let hex = value.strip_prefix('#').unwrap_or(value);
     if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;

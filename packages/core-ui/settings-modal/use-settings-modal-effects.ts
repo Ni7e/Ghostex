@@ -7,6 +7,7 @@
  * component's hook sequence is unchanged.
  */
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { APP_ICON_CONTROLS_VISIBLE } from './search-catalog';
 import { normalizeghostexSettings, type ghostexSettings } from '../../shared/ghostex-settings';
 import { type SettingsModalTab } from '../settings-modal-tabs';
 import { type WebviewApi } from '../webview-api';
@@ -181,7 +182,7 @@ export function useSettingsModalEffects({
    * Native answers through the appIconState prop (relayed via the modal host).
    */
   useEffect(() => {
-    if (!isOpen || activeTab !== 'theme' || !vscode || appIconPickerUnavailable) {
+    if (!APP_ICON_CONTROLS_VISIBLE || !isOpen || activeTab !== 'theme' || !vscode || appIconPickerUnavailable) {
       hasRequestedAppIconsRef.current = false;
       return;
     }

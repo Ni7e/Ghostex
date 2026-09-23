@@ -112,8 +112,8 @@ impl GpuiTerminalEngineConfig {
     /// CDXC:Theming 2026-09-13 DECISION:
     /// User: terminals can follow the system with a separate light theme. Only light mode replaces the finalized color palette; returning to dark restores the existing Ghostty config palette.
     ///
-    /// CDXC:Theming 2026-09-22 DECISION:
-    /// User: the terminal background follows the theme like the chat does, in both appearances. This supersedes the 2026-09-13 "dark mode stays exactly as it is" for the background only: the palette still comes from the Ghostty config or the light theme, while the background is the theme's content colour (`theme_background`). An explicit Terminal Background setting still wins in dark mode.
+    /// CDXC:Theming 2026-09-23 DECISION:
+    /// User: the terminal background follows the theme like the chat does, in both appearances, then "wtf does terminal color have to do with workarea theme??? pls make this more intuitive pls". This supersedes the 2026-09-13 "dark mode stays exactly as it is" for the background only: the palette still comes from the Ghostty config or the light theme, while the background is the theme's content colour (`theme_background`). The Terminal background setting follows the theme by default (an empty value); a chosen colour replaces it behind terminal cells in dark mode only and never colours the work area (SEE-ALSO `refresh_gpui_visual_settings` in app/helpers/project/colors.rs).
     pub(crate) fn apply_color_scheme(
         &mut self,
         settings: &SharedGpuiTerminalEngineSettings,

@@ -481,6 +481,46 @@ export const LIGHT_THEME_PRESET_CONTROLS: Readonly<Record<Exclude<LightThemePres
   orange: { lightnessPercent: 95, tintColor: '#8a5330' },
 };
 
+/**
+ * CDXC:Theming 2026-09-23 DECISION:
+ * User: "please add a color contrast 5 options slider in the setup", then "make the contrast show as a slider in the
+ * advanced and make sidebar and main contrast different please". Contrast is two values in points, one for the sidebar
+ * (`themeSidebarContrast`) and one for the work area (`themeWorkAreaContrast`), from -12 to 4 with 0 the theme's own
+ * contrast; higher makes dark backgrounds darker and light backgrounds whiter. The sidebar value shifts a preset
+ * theme's chrome (Custom keeps its own slider); the work area colour is the chrome at the work area value instead.
+ * Supersedes the same day's single five-step `themeContrast` (-2 to 2), which migrates as -8, -4, 0, 2 or 4 points for
+ * both.
+ * SEE-ALSO: `theme_contrast_points` in apps/desktop/src/app/helpers/titlebar.rs.
+ */
+export const THEME_CONTRAST_MIN_POINTS = -12;
+export const THEME_CONTRAST_MAX_POINTS = 4;
+const LEGACY_THEME_CONTRAST_POINTS: Readonly<Record<number, number>> = { [-2]: -8, [-1]: -4, 0: 0, 1: 2, 2: 4 };
+
+export function clampThemeContrastPoints(value: number): number {
+  return Math.max(THEME_CONTRAST_MIN_POINTS, Math.min(THEME_CONTRAST_MAX_POINTS, Math.round(value)));
+}
+
+/** A saved contrast value, or the retired five-step `themeContrast` carried over when it is missing. */
+export function readThemeContrastPoints(source: Record<string, unknown>, key: string): number {
+  const value = source[key];
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return clampThemeContrastPoints(value);
+  }
+  const legacy = source.themeContrast;
+  const step =
+    typeof legacy === 'number' && Number.isFinite(legacy) ? Math.max(-2, Math.min(2, Math.round(legacy))) : 0;
+  return LEGACY_THEME_CONTRAST_POINTS[step] ?? 0;
+}
+
+/** A preset's own contrast shifted by contrast points. */
+export function presetDarknessWithContrast(darknessPercent: number, points: number | undefined): number {
+  return clampSidebarTitlebarBackgroundDarknessPercent(darknessPercent + clampThemeContrastPoints(points ?? 0));
+}
+
+export function presetLightnessWithContrast(lightnessPercent: number, points: number | undefined): number {
+  return clampSidebarTitlebarLightBackgroundLightnessPercent(lightnessPercent + clampThemeContrastPoints(points ?? 0));
+}
+
 export function normalizeDarkThemePreset(value: unknown): DarkThemePreset | undefined {
   return value === 'custom' || (typeof value === 'string' && value in DARK_THEME_PRESET_CONTROLS)
     ? (value as DarkThemePreset)
@@ -497,9 +537,14 @@ export function resolveDarkChromeControls(settings: {
   darkThemePreset: DarkThemePreset;
   customSidebarTitlebarBackgroundDarknessPercent: number;
   customSidebarTitlebarBackgroundTintColor: string;
+  themeSidebarContrast?: number;
 }): DarkChromeControls {
   if (settings.darkThemePreset !== 'custom') {
-    return DARK_THEME_PRESET_CONTROLS[settings.darkThemePreset];
+    const preset = DARK_THEME_PRESET_CONTROLS[settings.darkThemePreset];
+    return {
+      ...preset,
+      darknessPercent: presetDarknessWithContrast(preset.darknessPercent, settings.themeSidebarContrast),
+    };
   }
   return {
     darknessPercent: clampSidebarTitlebarBackgroundDarknessPercent(
@@ -516,9 +561,14 @@ export function resolveLightChromeControls(settings: {
   lightThemePreset: LightThemePreset;
   customSidebarTitlebarLightBackgroundLightnessPercent: number;
   customSidebarTitlebarLightBackgroundTintColor: string;
+  themeSidebarContrast?: number;
 }): LightChromeControls {
   if (settings.lightThemePreset !== 'custom') {
-    return LIGHT_THEME_PRESET_CONTROLS[settings.lightThemePreset];
+    const preset = LIGHT_THEME_PRESET_CONTROLS[settings.lightThemePreset];
+    return {
+      ...preset,
+      lightnessPercent: presetLightnessWithContrast(preset.lightnessPercent, settings.themeSidebarContrast),
+    };
   }
   return {
     lightnessPercent: clampSidebarTitlebarLightBackgroundLightnessPercent(
@@ -604,4 +654,32 @@ export function getSidebarTitlebarMenuBackgroundForChrome(chromeColor: string): 
 
 export function getSessionChatBackgroundForChrome(chromeColor: string): string {
   return blendSidebarTitlebarTowardWhite(chromeColor, isLightSidebarTitlebarBackground(chromeColor) ? 0.25 : 0.01);
+}
+
+type WorkAreaColorSettings = Parameters<typeof resolveDarkChromeControls>[0] &
+  Parameters<typeof resolveLightChromeControls>[0] & { themeWorkAreaContrast?: number };
+
+/**
+ * The work area's colour for one appearance: the sidebar's chrome with the work area contrast in place of the sidebar
+ * contrast, stepped toward white like every chat and terminal background.
+ * SEE-ALSO: `work_area_background_for_variant` in apps/desktop/src/app/helpers/titlebar.rs.
+ */
+export function getWorkAreaBackgroundForSettings(settings: WorkAreaColorSettings, light: boolean): string {
+  const delta = (settings.themeWorkAreaContrast ?? 0) - (settings.themeSidebarContrast ?? 0);
+  if (light) {
+    const controls = resolveLightChromeControls(settings);
+    return getSessionChatBackgroundForChrome(
+      getSidebarTitlebarLightBackgroundForLightness(
+        clampSidebarTitlebarLightBackgroundLightnessPercent(controls.lightnessPercent + delta),
+        controls.tintColor
+      )
+    );
+  }
+  const controls = resolveDarkChromeControls(settings);
+  return getSessionChatBackgroundForChrome(
+    getSidebarTitlebarBackgroundForDarkness(
+      clampSidebarTitlebarBackgroundDarknessPercent(controls.darknessPercent + delta),
+      controls.tintColor
+    )
+  );
 }

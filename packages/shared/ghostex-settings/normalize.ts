@@ -51,6 +51,7 @@ import {
   normalizeDarkThemePreset,
   normalizeLightThemePreset,
   normalizeSidebarTitlebarHexColor,
+  readThemeContrastPoints,
   resolveDarkChromeControls,
   resolveLightChromeControls,
 } from './titlebar-color';
@@ -182,7 +183,10 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     customSidebarTitlebarBackgroundTintColor !== DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor
       ? 'custom'
       : DEFAULT_ghostex_SETTINGS.darkThemePreset);
+  const themeSidebarContrast = readThemeContrastPoints(source, 'themeSidebarContrast');
+  const themeWorkAreaContrast = readThemeContrastPoints(source, 'themeWorkAreaContrast');
   const darkChromeControls = resolveDarkChromeControls({
+    themeSidebarContrast,
     darkThemePreset,
     customSidebarTitlebarBackgroundDarknessPercent,
     customSidebarTitlebarBackgroundTintColor,
@@ -209,6 +213,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
   const lightThemePreset =
     normalizeLightThemePreset(source.lightThemePreset) ?? DEFAULT_ghostex_SETTINGS.lightThemePreset;
   const lightChromeControls = resolveLightChromeControls({
+    themeSidebarContrast,
     lightThemePreset,
     customSidebarTitlebarLightBackgroundLightnessPercent,
     customSidebarTitlebarLightBackgroundTintColor,
@@ -742,6 +747,8 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     customSidebarTitlebarBackgroundColor,
     darkThemePreset,
     lightThemePreset,
+    themeSidebarContrast,
+    themeWorkAreaContrast,
     customSidebarTitlebarLightBackgroundTintColor,
     customSidebarTitlebarLightBackgroundLightnessPercent,
     customSidebarTitlebarLightBackgroundColor,
@@ -987,14 +994,16 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         DEFAULT_ghostex_SETTINGS.workspaceActivePaneBorderColor
       ).trim() || DEFAULT_ghostex_SETTINGS.workspaceActivePaneBorderColor,
     /**
-     * CDXC:Workarea 2026-04-28-06:08
-     * Users can choose the background visible behind terminal panes. Persist a
-     * normalized CSS color string so the React workspace and native AppKit
-     * workspace render the same color instead of hardcoding dark gray.
+     * CDXC:Theming 2026-09-23 DECISION:
+     * User: "wtf does terminal color have to do with workarea theme??? pls make this more intuitive pls". Terminal
+     * background only colours the terminal panes, never the work area, and it follows the theme by default: an empty
+     * value means follow the theme, a colour replaces the theme's colour behind terminal cells. The old default
+     * #010101, which every settings file carried, migrates to follow the theme. Supersedes the 2026-04-28 note that
+     * this colour was the workspace background.
      */
-    workspaceBackgroundColor:
-      readString(source, 'workspaceBackgroundColor', DEFAULT_ghostex_SETTINGS.workspaceBackgroundColor).trim() ||
-      DEFAULT_ghostex_SETTINGS.workspaceBackgroundColor,
+    workspaceBackgroundColor: normalizeTerminalBackgroundSetting(
+      readString(source, 'workspaceBackgroundColor', DEFAULT_ghostex_SETTINGS.workspaceBackgroundColor)
+    ),
     clickToWakeSleepingSessions: readBoolean(
       source,
       'clickToWakeSleepingSessions',
@@ -1417,4 +1426,10 @@ function normalizeWindowGlassWorkAreaTint(source: Record<string, unknown>, appea
     DEFAULT_ghostex_SETTINGS[sidebarKey]
   );
   return clampWindowGlassWorkAreaTintPercent(migrateWindowGlassWorkAreaTintPercent(sidebar, extra), fallback);
+}
+
+/** `workspaceBackgroundColor`: '' follows the theme; the retired default #010101 reads as following the theme too. */
+function normalizeTerminalBackgroundSetting(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.toLowerCase() === '#010101' ? '' : trimmed;
 }

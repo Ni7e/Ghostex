@@ -175,6 +175,8 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
   appearance: [
     'sidebarTheme',
     'darkThemePreset',
+    'themeSidebarContrast',
+    'themeWorkAreaContrast',
     'customSidebarTitlebarBackgroundDarknessPercent',
     'customSidebarTitlebarBackgroundTintColor',
     'lightThemePreset',
@@ -349,6 +351,8 @@ export const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
   theming: [
     'sidebarTheme',
     'darkThemePreset',
+    'themeSidebarContrast',
+    'themeWorkAreaContrast',
     'customSidebarTitlebarBackgroundDarknessPercent',
     'customSidebarTitlebarBackgroundTintColor',
     'lightThemePreset',

@@ -716,6 +716,9 @@ export type ghostexSettings = {
    */
   darkThemePreset: DarkThemePreset;
   lightThemePreset: LightThemePreset;
+  /** CDXC:Theming 2026-09-23 SEE-ALSO: `readThemeContrastPoints` in titlebar-color.ts and `theme_contrast_points` in apps/desktop/src/app/helpers/titlebar.rs. */
+  themeSidebarContrast: number;
+  themeWorkAreaContrast: number;
   customSidebarTitlebarLightBackgroundTintColor: string;
   customSidebarTitlebarLightBackgroundLightnessPercent: number;
   customSidebarTitlebarLightBackgroundColor: string;

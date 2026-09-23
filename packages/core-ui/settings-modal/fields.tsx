@@ -1133,6 +1133,7 @@ export function DisabledCommandPreviewField({
 }
 
 export function ColorField({
+  dependent,
   advanced,
   description,
   isModified,
@@ -1141,6 +1142,7 @@ export function ColorField({
   onResetToDefault,
   value,
 }: {
+  dependent?: boolean;
   advanced?: boolean;
   description?: string;
   label: string;
@@ -1152,6 +1154,7 @@ export function ColorField({
   return (
     <SettingRow
       advanced={advanced}
+      dependent={dependent}
       description={description}
       htmlFor={id}
       isModified={isModified}

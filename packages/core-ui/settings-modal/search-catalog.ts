@@ -62,19 +62,29 @@ export type SettingsSearchSectionDefinition = {
  * maintaining a second hand-written list that drifts from Settings.
  * SEE-ALSO: skills/ghostex-help/references/settings-catalog.json, server/src/ghostex_cli/settings.rs.
  */
+/**
+ * CDXC:Theming 2026-09-23 DECISION:
+ * User: "fully hide the custom app icon feature". The App Icon picker, its search row, the Help catalog row and the
+ * `ghostex settings` entry are all off while this is false; the picker code and `appIconSourceId` stay, so an icon
+ * that was already chosen keeps working.
+ */
+export const APP_ICON_CONTROLS_VISIBLE = false;
+
 export function getSettingsSearchSectionDefinitions() {
   const settingsSearchSections = {
     // CDXC:Icons 2026-06-25-21:50: Make the App Icon section findable by Settings search.
     appIcon: {
       title: 'App Icon',
-      settings: [
-        {
-          key: 'appIconSourceId',
-          subtitle:
-            'Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.',
-          title: 'App Icon',
-        },
-      ],
+      settings: APP_ICON_CONTROLS_VISIBLE
+        ? [
+            {
+              key: 'appIconSourceId',
+              subtitle:
+                'Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.',
+              title: 'App Icon',
+            },
+          ]
+        : [],
     },
     /*
      * CDXC:Extensions 2026-08-30:
@@ -527,6 +537,18 @@ export function getSettingsSearchSectionDefinitions() {
           title: 'Light theme',
         },
         {
+          key: 'themeSidebarContrast',
+          subtitle:
+            "The sidebar's contrast. Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own.",
+          title: 'Sidebar contrast',
+        },
+        {
+          key: 'themeWorkAreaContrast',
+          subtitle:
+            "The work area's contrast (chat, terminals and views). Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own.",
+          title: 'Work area contrast',
+        },
+        {
           key: 'customSidebarTitlebarLightBackgroundLightnessPercent',
           subtitle: 'Contrast of the light sidebar and window chrome background while Light theme is Custom.',
           title: 'Light theme background contrast',
@@ -772,8 +794,8 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'workspaceBackgroundColor',
-          subtitle: 'Color shown behind terminal panes.',
-          title: 'Terminal Background',
+          subtitle: 'Only changes the terminal panes. Leave on Follow theme to match your theme.',
+          title: 'Terminal background',
         },
         {
           key: 'terminalBackgroundImage',

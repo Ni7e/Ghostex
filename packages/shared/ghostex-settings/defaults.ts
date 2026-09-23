@@ -479,6 +479,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   ),
   darkThemePreset: DEFAULT_DARK_THEME_PRESET,
   lightThemePreset: DEFAULT_LIGHT_THEME_PRESET,
+  themeSidebarContrast: 0,
+  themeWorkAreaContrast: 0,
   customSidebarTitlebarLightBackgroundTintColor: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR,
   customSidebarTitlebarLightBackgroundLightnessPercent:
     DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
@@ -567,7 +569,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * A near-black workspace background avoids platform compositor handling of
    * literal transparent black while keeping pane chrome visually black.
    */
-  workspaceBackgroundColor: '#010101',
+  workspaceBackgroundColor: '',
   clickToWakeSleepingSessions: true,
   customViews: [],
   customViewTemplates: [],

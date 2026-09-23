@@ -87,7 +87,7 @@ How to use this file:
 #### Terminal
 
 - **Ghostty settings actions** `ghosttySettingsActions` (Settings UI row without a settings key; use `ghostex settings open`) [advanced]: Recommended Ghostty settings, Ghostty config file, Ghostty docs, and Ghostty defaults.
-- **Terminal Background** `workspaceBackgroundColor` (text, default #010101) [advanced]: Color shown behind terminal panes.
+- **Terminal background** `workspaceBackgroundColor` (text, default (empty)) [advanced]: Only changes the terminal panes. Leave on Follow theme to match your theme.
 - **Background Image** `terminalBackgroundImage` (text, default (empty)) [advanced]: Absolute path to an image drawn behind terminal panes.
 - **Background Image Opacity** `terminalBackgroundImageOpacity` (number default 1) [advanced]: Blend the background image toward the terminal background color.
 - **Background Image Fit** `terminalBackgroundImageFit` (one of cover | contain | stretch | natural; default cover) [advanced]: How the background image is scaled inside each pane. Option labels: cover = Cover, contain = Contain, stretch = Stretch, natural = Natural size.
@@ -176,6 +176,7 @@ How to use this file:
 - **gpuiTitlebarOpenTargetByProject** `gpuiTitlebarOpenTargetByProject` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **settingsModalNavigation** `settingsModalNavigation` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **projectWebsiteViews** `projectWebsiteViews` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
+- **appIconSourceId** `appIconSourceId` (text, default (empty)) [advanced, not agent-writable]: App-managed state saved with the settings; not a user preference.
 - **customSidebarTitlebarLightBackgroundColor** `customSidebarTitlebarLightBackgroundColor` (text, default #f4f4f5) [not agent-writable]: App-managed state saved with the settings; not a user preference.
 - **hotkeys** `hotkeys` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **customViewTemplates** `customViewTemplates` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
@@ -201,6 +202,8 @@ How to use this file:
 - **Dark theme background contrast** `customSidebarTitlebarBackgroundDarknessPercent` (number 85 to 100 default 96): Contrast of the dark sidebar and window chrome background while Dark theme is Custom.
 - **Dark theme background tint** `customSidebarTitlebarBackgroundTintColor` (text, default #808080): Subtle tint of the dark sidebar and window chrome background while Dark theme is Custom.
 - **Light theme** `lightThemePreset` (one of gray | white | blue | green | pink | orange | custom; default gray): Preset light chrome for the sidebar and window, or Custom to tune its contrast and tint. Option labels: gray = Light Gray, white = White, blue = Blue, green = Green, pink = Pink, orange = Orange, custom = Custom.
+- **Sidebar contrast** `themeSidebarContrast` (number default 0): The sidebar's contrast. Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own.
+- **Work area contrast** `themeWorkAreaContrast` (number default 0): The work area's contrast (chat, terminals and views). Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own.
 - **Light theme background contrast** `customSidebarTitlebarLightBackgroundLightnessPercent` (number default 96): Contrast of the light sidebar and window chrome background while Light theme is Custom.
 - **Light theme background tint** `customSidebarTitlebarLightBackgroundTintColor` (text, default #808080): Subtle tint of the light sidebar and window chrome background while Light theme is Custom.
 - **Chat theme** `sessionChatTheme` (one of app | system | light | dark; default app): Follow the app theme by default, or override chat with Light, Dark, or System. Option labels: app = Follow app, system = System, light = Light, dark = Dark.
@@ -221,9 +224,6 @@ How to use this file:
 - **Pane gap** `workspacePaneGap` (number default 0): Gap in pixels between split panes in the Agents view.
 - **Sidebar foreground color (derived)** `customSidebarTitlebarForegroundColor` (text, default #d8d8d8) [not agent-writable]: Derived from Background Contrast and Background Tint; change those instead.
 - **Sidebar background color (derived)** `customSidebarTitlebarBackgroundColor` (text, default #0b0b0b) [not agent-writable]: Derived from Background Contrast and Background Tint; change those instead.
-#### App Icon
-
-- **App Icon** `appIconSourceId` (text, default (empty)) [advanced]: Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.
 ## Debugging (tab `debugging`)
 
 ### Debug controls

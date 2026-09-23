@@ -5,6 +5,8 @@ import { Button } from '@/packages/components/ui/button';
 import { SegmentedControl, SegmentedControlItem } from '@/packages/components/ui/segmented-control';
 import {
   MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+  THEME_CONTRAST_MAX_POINTS,
+  THEME_CONTRAST_MIN_POINTS,
   MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
   MAX_WINDOW_GLASS_WORK_AREA_TINT_PERCENT,
   MAX_WINDOW_GLASS_SIDEBAR_OPACITY_PERCENT,
@@ -39,19 +41,30 @@ import {
 import { getRememberedThemeAdvancedOpen, rememberThemeAdvancedOpen } from '../navigation-memory';
 import {
   APPEARANCE_CHOICES,
+  THEME_CONTRAST_CHOICES,
+  TRANSPARENCY_STRENGTH_MAX,
+  TRANSPARENCY_STRENGTH_MIN,
+  TRANSPARENCY_STRENGTH_STEP,
   ThemeCardGrid,
   darkThemeCards,
   isTransparencyEnabled,
   lightThemeCards,
   windowGlassForTransparency,
   windowGlassAvailable,
+  themeContrastChoiceIndex,
+  themeContrastPatch,
+  transparencyStrengthFromSettings,
+  transparencyStrengthPatch,
 } from '../theme-simple-controls';
+import { APP_ICON_CONTROLS_VISIBLE } from '../search-catalog';
 import { type SettingModificationProps, type SettingsSectionSearchResult } from '../types';
 
 const GHOSTTY_THEME_UNMANAGED_VALUE = '__ghostex_ghostty_theme_unmanaged__';
 
 /** Every row that lives under Advanced, so a search hit on one of them opens it. */
 const THEME_ADVANCED_SETTING_KEYS = [
+  'themeSidebarContrast',
+  'themeWorkAreaContrast',
   'customSidebarTitlebarBackgroundDarknessPercent',
   'customSidebarTitlebarBackgroundTintColor',
   'customSidebarTitlebarLightBackgroundLightnessPercent',
@@ -76,7 +89,7 @@ type UpdateDraft = <Key extends keyof ghostexSettings>(key: Key, value: ghostexS
 
 /**
  * CDXC:Theming 2026-09-23 DECISION:
- * User: "another agent should really organize the settings and make them way better … i want simple and then someone could click on advanced to customize extra", then picked the theme-card layout (option A of the Themes settings mockups) and asked to "make theme into it's own page in settings below General". Theme is its own Settings page: Appearance, a card per dark and light theme drawn as a small window in that theme's colours, and one Enable Transparency switch (the user renamed it from Frosted glass; on is glass in dark mode, off is opaque; Always glass stays under Advanced). Everything else sits under Advanced, closed by default, grouped as Colours, Chat and terminal, Glass, App icon, and links to the related rows on General. A search hit inside Advanced opens it.
+ * User: "another agent should really organize the settings and make them way better … i want simple and then someone could click on advanced to customize extra", then picked the theme-card layout (option A of the Themes settings mockups) and asked to "make theme into it's own page in settings below General". Theme is its own Settings page: Appearance, a card per dark and light theme drawn as a small window in that theme's colours, and one Enable Transparency switch (the user renamed it from Frosted glass; on is glass in dark mode, off is opaque; Always glass stays under Advanced). Everything else sits under Advanced, closed by default, grouped as Colours, Chat and terminal, Glass (App icon is hidden; see APP_ICON_CONTROLS_VISIBLE), and links to the related rows on General. A search hit inside Advanced opens it.
  */
 export function ThemeSettingsTab({
   appIconError,
@@ -96,6 +109,7 @@ export function ThemeSettingsTab({
   themingSectionRef,
   updateDraft,
   updateDraftDebounced,
+  updateDraftMany,
 }: {
   appIconError?: string;
   appIconSectionRef: RefObject<HTMLDivElement | null>;
@@ -116,10 +130,13 @@ export function ThemeSettingsTab({
   themingSectionRef: RefObject<HTMLDivElement | null>;
   updateDraft: UpdateDraft;
   updateDraftDebounced: UpdateDraft;
+  /** Saves several settings in one change, for the friendly controls that drive the deeper ones. */
+  updateDraftMany: (patch: Partial<ghostexSettings>) => void;
 }) {
   const appearanceId = useId();
   const darkThemeId = useId();
   const lightThemeId = useId();
+  const contrastId = useId();
   const [advancedOpen, setAdvancedOpenState] = useState(getRememberedThemeAdvancedOpen);
   const setAdvancedOpen = (open: boolean) => {
     rememberThemeAdvancedOpen(open);
@@ -128,17 +145,28 @@ export function ThemeSettingsTab({
   const theming = searchResults.theming;
   const isSearching = theming.isSearching;
   const visible = (key: string) => rowVisible(theming, key);
-  const appIconVisible = showAppIcon && rowVisible(searchResults.appIcon, 'appIconSourceId');
+  const appIconVisible =
+    APP_ICON_CONTROLS_VISIBLE && showAppIcon && rowVisible(searchResults.appIcon, 'appIconSourceId');
   const advancedHasSearchHit =
     isSearching && (THEME_ADVANCED_SETTING_KEYS.some((key) => visible(key)) || appIconVisible);
   const advancedShown = advancedOpen || advancedHasSearchHit;
-  const simpleVisible = ['sidebarTheme', 'darkThemePreset', 'lightThemePreset', 'windowGlass'].some(visible);
+  const simpleVisible = [
+    'sidebarTheme',
+    'darkThemePreset',
+    'lightThemePreset',
+    'themeSidebarContrast',
+    'themeWorkAreaContrast',
+    'windowGlass',
+  ].some(visible);
   // Advanced is not open while searching unless a hit is inside it, so it counts only through its own hits.
   const anythingVisible = simpleVisible || advancedHasSearchHit || !isSearching;
   const glassOn = isTransparencyEnabled(draft.windowGlass);
 
   const darkCards = darkThemeCards(draft);
   const lightCards = lightThemeCards(draft);
+  const strength = transparencyStrengthFromSettings(draft);
+  const contrastIndex = themeContrastChoiceIndex(draft);
+  const applyPatch = updateDraftMany;
 
   const selectDarkPreset = (preset: DarkThemePreset) => {
     updateDraft('darkThemePreset', preset);
@@ -224,6 +252,35 @@ export function ThemeSettingsTab({
                 />
               </SettingRow>
             ) : null}
+            {visible('themeSidebarContrast') || visible('themeWorkAreaContrast') ? (
+              <SettingRow
+                description={
+                  contrastIndex < 0
+                    ? 'The sidebar and work area are set apart under Advanced; pick a step to set both.'
+                    : 'Higher makes dark backgrounds darker and light backgrounds whiter, for both dark and light mode.'
+                }
+                htmlFor={contrastId}
+                label='Background contrast'
+                {...getSettingModificationProps('themeSidebarContrast')}
+                advanced={false}
+              >
+                <SegmentedControl
+                  aria-label='Background contrast'
+                  onValueChange={(value) => applyPatch(themeContrastPatch(draft, Number(value)))}
+                  value={contrastIndex < 0 ? '' : String(THEME_CONTRAST_CHOICES[contrastIndex]!.value)}
+                >
+                  {THEME_CONTRAST_CHOICES.map((choice, index) => (
+                    <SegmentedControlItem
+                      id={index === 0 ? contrastId : undefined}
+                      key={choice.value}
+                      value={String(choice.value)}
+                    >
+                      {choice.label}
+                    </SegmentedControlItem>
+                  ))}
+                </SegmentedControl>
+              </SettingRow>
+            ) : null}
             {windowGlassAvailable() && visible('windowGlass') ? (
               <ToggleField
                 checked={glassOn}
@@ -234,6 +291,24 @@ export function ThemeSettingsTab({
                 onChange={(checked) =>
                   updateDraft('windowGlass', windowGlassForTransparency(draft.windowGlass, checked))
                 }
+              />
+            ) : null}
+            {windowGlassAvailable() && glassOn && visible('windowGlass') ? (
+              <SliderNumberField
+                description={
+                  strength.exact === undefined
+                    ? 'Tuned by hand under Advanced; moving this resets all four tint sliders.'
+                    : 'Higher shows more of your desktop. Sets the sidebar and work area tints under Advanced.'
+                }
+                label='Transparency strength'
+                {...getSettingModificationProps('windowGlassSidebarOpacityDark')}
+                advanced={false}
+                max={TRANSPARENCY_STRENGTH_MAX}
+                min={TRANSPARENCY_STRENGTH_MIN}
+                onChange={(value) => applyPatch(transparencyStrengthPatch(value))}
+                onCommit={(value) => applyPatch(transparencyStrengthPatch(value))}
+                step={TRANSPARENCY_STRENGTH_STEP}
+                value={strength.nearest}
               />
             ) : null}
           </SettingsSection>
@@ -249,7 +324,7 @@ export function ThemeSettingsTab({
           >
             <span className='theme-advanced-disclosure-title'>Advanced</span>
             <span className='theme-advanced-disclosure-hint'>
-              Colours, glass strength, chat and terminal themes, app icon
+              Colours, contrast, glass strength, chat and terminal themes
             </span>
             <IconChevronRight
               aria-hidden='true'
@@ -286,6 +361,32 @@ export function ThemeSettingsTab({
               color panel instead of the in-app picker requested here.
             */}
             <SettingsSection title='Colours'>
+              {visible('themeSidebarContrast') ? (
+                <SliderNumberField
+                  description="The sidebar's contrast. Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own."
+                  label='Sidebar contrast'
+                  {...getSettingModificationProps('themeSidebarContrast')}
+                  max={THEME_CONTRAST_MAX_POINTS}
+                  min={THEME_CONTRAST_MIN_POINTS}
+                  onCommit={(value) => updateDraft('themeSidebarContrast', value)}
+                  onChange={(value) => updateDraftDebounced('themeSidebarContrast', value)}
+                  step={1}
+                  value={draft.themeSidebarContrast}
+                />
+              ) : null}
+              {visible('themeWorkAreaContrast') ? (
+                <SliderNumberField
+                  description="The work area's contrast (chat, terminals and views). Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own."
+                  label='Work area contrast'
+                  {...getSettingModificationProps('themeWorkAreaContrast')}
+                  max={THEME_CONTRAST_MAX_POINTS}
+                  min={THEME_CONTRAST_MIN_POINTS}
+                  onCommit={(value) => updateDraft('themeWorkAreaContrast', value)}
+                  onChange={(value) => updateDraftDebounced('themeWorkAreaContrast', value)}
+                  step={1}
+                  value={draft.themeWorkAreaContrast}
+                />
+              ) : null}
               {draft.darkThemePreset === 'custom' && visible('customSidebarTitlebarBackgroundDarknessPercent') ? (
                 <SliderNumberField
                   description='85 is softer gray; 100 is black. Text and icons adjust automatically.'
@@ -570,7 +671,7 @@ export function ThemeSettingsTab({
                 />
                 <RelatedSettingLink
                   label='Terminal background colour and image'
-                  onOpen={() => onOpenRelatedSetting('Terminal Background')}
+                  onOpen={() => onOpenRelatedSetting('Terminal background')}
                 />
               </SettingsSection>
             ) : null}

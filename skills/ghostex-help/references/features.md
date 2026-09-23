@@ -1250,20 +1250,24 @@ docs directory), `hideProjectHeaderDiffStats`,
   and Computer Use; which views to show (Browser and Docs are on by default
   on a first run) and the browser skill; phone pairing and notifications;
   and the first project folder with the default agent and session view,
-  next to the look: Appearance, the dark and light theme and Enable
-  Transparency (the same choices as Settings > Theme). "I already know Ghostex" on the first panel skips the rest. Reopen it any
+  next to the look: Appearance, the dark and light theme, Background contrast,
+  Enable Transparency and Transparency strength (the same choices as Settings >
+  Theme). Turning transparency on there also switches Appearance to Dark. "I already know Ghostex" on the first panel skips the rest. Reopen it any
   time from Tips > Setup or Quick Access > Commands > Setup.
 
 ## Appearance and app
 
-Theme, background contrast and tint, window glass, active pane outline, and
-the app icon live on their own Settings page, Theme, right below General
+Theme, background contrast and tint, window glass, and active pane outline
+live on their own Settings page, Theme, right below General
 (`ghostex settings open --tab theme`). The page starts simple: Appearance
 (System, Light, or Dark; System is the default and follows the operating
 system appearance), a row of cards for the dark theme and one for the light theme, each
-card a small picture of the window in that theme's colors, and an Enable Transparency
-switch. Everything else is under Advanced, a button below those that opens the
-Colours, Chat and terminal, Glass, and App Icon groups plus links to related
+card a small picture of the window in that theme's colors, Background contrast (five
+steps from Lowest to Highest, Normal in the middle; higher makes dark backgrounds
+darker and light backgrounds whiter, for both appearances; it sets the Sidebar
+contrast and Work area contrast sliders under Advanced together, which can also be
+set apart, and it moves the Custom contrast sliders too), an Enable Transparency switch, and Transparency strength (a 0 to 100 slider; higher shows more of the desktop, and it sets the four glass tint sliders under Advanced so the work area stays a little more see-through than the sidebar). Everything else is under Advanced, a button below those that opens the
+Colours, Chat and terminal, and Glass groups plus links to related
 settings on General; a search for one of those rows opens it. Dark theme offers
 Dark Gray (the default), Black, Blue, Green, Red, Purple, or Custom; Light theme
 offers Light Gray (the default, #f4f4f5), White, Blue, Green, Pink, Orange, or
@@ -1309,7 +1313,7 @@ Related settings: `sidebarTheme`, `darkThemePreset`, `lightThemePreset`,
 `customSidebarTitlebarBackgroundDarknessPercent`, `customSidebarTitlebarBackgroundTintColor`,
 `customSidebarTitlebarLightBackgroundLightnessPercent`, `customSidebarTitlebarLightBackgroundTintColor`,
 `windowGlass`, `windowGlassSidebarOpacityDark`, `windowGlassWorkAreaTintDark`,
-`windowGlassSidebarOpacityLight`, `windowGlassWorkAreaTintLight`, `showActivePaneOutline`, `appIconSourceId`, the `keepAwake*` rows,
+`windowGlassSidebarOpacityLight`, `windowGlassWorkAreaTintLight`, `themeSidebarContrast`, `themeWorkAreaContrast`, `showActivePaneOutline`, the `keepAwake*` rows,
 `showBetaFeatures`, `debuggingMode`.
 
 ## Answering the common questions

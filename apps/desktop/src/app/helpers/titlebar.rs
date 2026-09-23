@@ -1511,6 +1511,19 @@ pub(crate) fn titlebar_button_border_color() -> Hsla {
     .into()
 }
 
+/// CDXC:Titlebar 2026-09-23 DECISION:
+/// User: the four split buttons (Start, Open, Commit, and the view panel's expand pair) take a
+/// lighter #787779 outline and divider in dark mode, because the near-black outline vanishes in
+/// transparent mode. This is the interim look while a new split-button style is chosen.
+pub(crate) fn titlebar_split_button_border_color() -> Hsla {
+    rgb(if titlebar_uses_light_theme() {
+        0xd4d4d4
+    } else {
+        0x787779
+    })
+    .into()
+}
+
 pub(crate) fn titlebar_button_hover_color() -> Hsla {
     titlebar_overlay_base().opacity(0.08).into()
 }
@@ -1919,6 +1932,44 @@ fn custom_dark_chrome_controls(object: &serde_json::Map<String, serde_json::Valu
     (darkness, tint)
 }
 
+/// CDXC:Theming 2026-09-23 SEE-ALSO:
+/// Mirror of `readThemeContrastPoints` / `SIDEBAR_CONTRAST_KEY` / `WORK_AREA_CONTRAST_KEY` in
+/// packages/shared/ghostex-settings/titlebar-color.ts: `themeSidebarContrast` and
+/// `themeWorkAreaContrast` are contrast points (-12 to 4) added to a preset theme's contrast. When
+/// either is missing, the retired five-step `themeContrast` (-2 to 2) carries over as -8, -4, 0, 2 or
+/// 4 points for both.
+fn theme_contrast_points(object: &serde_json::Map<String, serde_json::Value>, key: &str) -> f64 {
+    if let Some(points) = object
+        .get(key)
+        .and_then(serde_json::Value::as_f64)
+        .filter(|value| value.is_finite())
+    {
+        return points.round().clamp(-12.0, 4.0);
+    }
+    let step = object
+        .get("themeContrast")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|value| value.is_finite())
+        .map_or(0, |value| (value.round() as i64).clamp(-2, 2));
+    match step {
+        -2 => -8.0,
+        -1 => -4.0,
+        1 => 2.0,
+        2 => 4.0,
+        _ => 0.0,
+    }
+}
+
+fn theme_contrast_offset(object: &serde_json::Map<String, serde_json::Value>) -> f64 {
+    theme_contrast_points(object, "themeSidebarContrast")
+}
+
+/// How far the work area's contrast sits from the sidebar's, applied on top of whatever the
+/// sidebar resolved to (a preset shifted by the sidebar contrast, or a Custom theme's own slider).
+fn work_area_contrast_delta(object: &serde_json::Map<String, serde_json::Value>) -> f64 {
+    theme_contrast_points(object, "themeWorkAreaContrast") - theme_contrast_offset(object)
+}
+
 /// Mirror of `resolveDarkChromeControls` plus the preset migration in
 /// packages/shared/ghostex-settings/normalize.ts: a missing or unknown preset with non-default
 /// custom values means the user tuned them before the dropdown existed, so they stay in force.
@@ -1937,7 +1988,12 @@ pub(crate) fn dark_chrome_controls(
             .iter()
             .find(|(key, _, _)| *key == name)
     }) {
-        return (*darkness, *tint);
+        return (
+            clamp_sidebar_titlebar_background_darkness_percent(
+                *darkness + theme_contrast_offset(object),
+            ),
+            *tint,
+        );
     }
     if custom
         != (
@@ -1948,7 +2004,12 @@ pub(crate) fn dark_chrome_controls(
         return custom;
     }
     let (_, darkness, tint) = DARK_THEME_PRESET_CONTROLS[0];
-    (darkness, tint)
+    (
+        clamp_sidebar_titlebar_background_darkness_percent(
+            darkness + theme_contrast_offset(object),
+        ),
+        tint,
+    )
 }
 
 /// Mirror of `resolveLightChromeControls` in packages/shared/ghostex-settings/titlebar-color.ts.
@@ -1978,7 +2039,12 @@ pub(crate) fn light_chrome_controls(
         })
         .copied()
         .unwrap_or(LIGHT_THEME_PRESET_CONTROLS[0]);
-    (lightness, tint)
+    (
+        clamp_sidebar_titlebar_light_background_lightness_percent(
+            lightness + theme_contrast_offset(object),
+        ),
+        tint,
+    )
 }
 
 /// The chrome background one appearance resolves to from the saved settings, whichever
@@ -1994,6 +2060,38 @@ pub(crate) fn resolved_custom_sidebar_titlebar_background_for_variant(
         let (darkness, tint) = dark_chrome_controls(object);
         sidebar_titlebar_background_for_darkness(darkness, tint)
     }
+}
+
+/// The chrome the work area's colour is derived from: the sidebar's chrome with the work area
+/// contrast in place of the sidebar contrast.
+pub(crate) fn resolved_work_area_chrome_for_variant(
+    object: &serde_json::Map<String, serde_json::Value>,
+    light: bool,
+) -> u32 {
+    let delta = work_area_contrast_delta(object);
+    if light {
+        let (lightness, tint) = light_chrome_controls(object);
+        sidebar_titlebar_light_background_for_lightness(
+            clamp_sidebar_titlebar_light_background_lightness_percent(lightness + delta),
+            tint,
+        )
+    } else {
+        let (darkness, tint) = dark_chrome_controls(object);
+        sidebar_titlebar_background_for_darkness(
+            clamp_sidebar_titlebar_background_darkness_percent(darkness + delta),
+            tint,
+        )
+    }
+}
+
+/// CDXC:Theming 2026-09-23 DECISION:
+/// User: "make the contrast show as a slider in the advanced and make sidebar and main contrast different please". The work area's own colour (chat, terminals, the workspace and its glass tint, web pages' content colour) comes from the theme at the work area contrast, while the sidebar keeps the sidebar contrast.
+/// SEE-ALSO: `getWorkAreaBackgroundForSettings` in packages/shared/ghostex-settings/titlebar-color.ts.
+pub(crate) fn work_area_background_for_variant(
+    object: &serde_json::Map<String, serde_json::Value>,
+    light: bool,
+) -> u32 {
+    session_chat_background_for_chrome(resolved_work_area_chrome_for_variant(object, light))
 }
 
 /// CDXC:Theming 2026-09-22 DECISION:

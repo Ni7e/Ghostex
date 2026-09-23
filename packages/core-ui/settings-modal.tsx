@@ -190,6 +190,9 @@ import { useAppIconSettings } from './settings-modal/use-app-icon-settings';
 import { createSettingsActions, type GhosttySettingsAction } from './settings-modal/settings-actions';
 import { getActiveSettingsModalScrollViewport } from './settings-modal/scroll-targets';
 
+/** The colour Terminal background starts from when Follow theme is turned off. */
+const TERMINAL_BACKGROUND_STARTING_COLOR = '#111111';
+
 export type { SettingsModalTab } from './settings-modal-tabs';
 /**
  * CDXC:RemotePairing 2026-09-03:
@@ -1901,13 +1904,29 @@ export function SettingsModal({
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.terminal, 'workspaceBackgroundColor') ? (
-                              <ColorField
-                                description='Color shown behind terminal panes.'
-                                label='Terminal Background'
-                                {...getSettingModificationProps('workspaceBackgroundColor')}
-                                onChange={(value) => updateDraft('workspaceBackgroundColor', value)}
-                                value={draft.workspaceBackgroundColor}
-                              />
+                              <>
+                                <ToggleField
+                                  checked={draft.workspaceBackgroundColor === ''}
+                                  description='Only changes the terminal panes. Leave on Follow theme to match your theme.'
+                                  label='Terminal background: Follow theme'
+                                  {...getSettingModificationProps('workspaceBackgroundColor')}
+                                  onChange={(checked) =>
+                                    updateDraft(
+                                      'workspaceBackgroundColor',
+                                      checked ? '' : TERMINAL_BACKGROUND_STARTING_COLOR
+                                    )
+                                  }
+                                />
+                                {draft.workspaceBackgroundColor !== '' ? (
+                                  <ColorField
+                                    dependent
+                                    description='Painted behind terminal text in dark mode. Light mode and window glass keep the theme.'
+                                    label='Terminal background color'
+                                    onChange={(value) => updateDraft('workspaceBackgroundColor', value)}
+                                    value={draft.workspaceBackgroundColor}
+                                  />
+                                ) : null}
+                              </>
                             ) : null}
                             {mainSettingVisible(settingsSearch.terminal, 'terminalBackgroundImage') ? (
                               <TextField
@@ -2730,6 +2749,7 @@ export function SettingsModal({
                       themingSectionRef={themingSectionRef}
                       updateDraft={updateDraft}
                       updateDraftDebounced={updateDraftDebounced}
+                      updateDraftMany={(patch) => applySettingsPatch(patch)}
                     />
                   </TabsContent>
                 ) : null}

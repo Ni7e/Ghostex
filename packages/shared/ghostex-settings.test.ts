@@ -1172,13 +1172,16 @@ describe('normalizeghostexSettings', () => {
     });
   });
 
-  test('keeps the workspace background color setting', () => {
-    expect(DEFAULT_ghostex_SETTINGS.workspaceBackgroundColor).toBe('#010101');
+  test('keeps the terminal background setting, empty following the theme', () => {
+    expect(DEFAULT_ghostex_SETTINGS.workspaceBackgroundColor).toBe('');
     expect(normalizeghostexSettings({ workspaceBackgroundColor: '#202020' })).toMatchObject({
       workspaceBackgroundColor: '#202020',
     });
     expect(normalizeghostexSettings({ workspaceBackgroundColor: '   ' })).toMatchObject({
-      workspaceBackgroundColor: DEFAULT_ghostex_SETTINGS.workspaceBackgroundColor,
+      workspaceBackgroundColor: '',
+    });
+    expect(normalizeghostexSettings({ workspaceBackgroundColor: '#010101' })).toMatchObject({
+      workspaceBackgroundColor: '',
     });
   });
 

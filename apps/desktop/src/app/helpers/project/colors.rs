@@ -95,27 +95,21 @@ pub(crate) fn refresh_gpui_visual_settings(
         gpui_settings_hex_rgb(object.get("workspaceActivePaneBorderColor")).unwrap_or(0x3b82f6),
         Ordering::Relaxed,
     );
-    let configured_workspace = object
-        .get("workspaceBackgroundColor")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .and_then(|_| gpui_settings_hex_rgb(object.get("workspaceBackgroundColor")))
-        .map(|rgb| if rgb == 0 { 0x010101 } else { rgb });
     let terminal_settings = settings.gpui_terminal_engine_settings();
     let terminal_is_light = terminal_settings.uses_light_theme(gpui_system_uses_light_appearance());
     /*
-    CDXC:Theming 2026-09-22 DECISION:
-    User: the terminal background and the active tab follow the theme like the chat does. The
-    workspace and every terminal pane paint the theme's content colour for the terminal's own
-    appearance (the chrome in light mode, one step off it in dark), superseding the Ghostty config
-    background and the light palette's background. An explicit Terminal Background setting still
-    wins in dark mode.
+    CDXC:Theming 2026-09-23 DECISION:
+    User: the terminal background and the active tab follow the theme like the chat does, then
+    "wtf does terminal color have to do with workarea theme??? pls make this more intuitive pls".
+    The work area always paints the theme's content colour for the terminal's own appearance (the
+    chrome in light mode, one step off it in dark), so the theme's tint and Background contrast
+    always reach it, superseding the Ghostty config background and the light palette's background.
+    The Terminal background setting no longer touches the work area: it follows the theme by
+    default, and a chosen colour only replaces the colour behind terminal cells in dark mode
+    (`GpuiTerminalConfig::apply_color_scheme`). Supersedes the 2026-09-22 rule that an explicit
+    Terminal Background won for the whole dark work area.
     */
-    let workspace = if terminal_is_light {
-        gpui_terminal_theme_background_rgb(object, true)
-    } else {
-        configured_workspace.unwrap_or_else(|| gpui_terminal_theme_background_rgb(object, false))
-    };
+    let workspace = gpui_terminal_theme_background_rgb(object, terminal_is_light);
     GPUI_WORKSPACE_BACKGROUND_RGB.store(u64::from(workspace), Ordering::Relaxed);
     GPUI_TERMINAL_PADDING_BACKGROUND_RGB.store(
         if terminal_is_light {
@@ -177,9 +171,7 @@ pub(crate) fn gpui_terminal_theme_background_rgb(
     object: &serde_json::Map<String, serde_json::Value>,
     light: bool,
 ) -> u32 {
-    session_chat_background_for_chrome(resolved_custom_sidebar_titlebar_background_for_variant(
-        object, light,
-    ))
+    work_area_background_for_variant(object, light)
 }
 
 /// The background a terminal engine paints for the current settings and system appearance.

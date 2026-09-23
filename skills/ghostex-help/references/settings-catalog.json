@@ -1151,8 +1151,8 @@
     },
     {
       "key": "workspaceBackgroundColor",
-      "title": "Terminal Background",
-      "subtitle": "Color shown behind terminal panes.",
+      "title": "Terminal background",
+      "subtitle": "Only changes the terminal panes. Leave on Follow theme to match your theme.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "terminal",
@@ -1160,7 +1160,7 @@
       "section": "terminal",
       "sectionTitle": "Terminal",
       "type": "string",
-      "default": "#010101",
+      "default": "",
       "advanced": true,
       "agentWritable": true
     },
@@ -2754,6 +2754,19 @@
       "agentWritable": false
     },
     {
+      "key": "appIconSourceId",
+      "title": "appIconSourceId",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "string",
+      "default": "",
+      "advanced": true,
+      "agentWritable": false
+    },
+    {
       "key": "customSidebarTitlebarLightBackgroundColor",
       "title": "customSidebarTitlebarLightBackgroundColor",
       "subtitle": "App-managed state saved with the settings; not a user preference.",
@@ -3124,6 +3137,34 @@
           "value": "custom"
         }
       ],
+      "agentWritable": true
+    },
+    {
+      "key": "themeSidebarContrast",
+      "title": "Sidebar contrast",
+      "subtitle": "The sidebar's contrast. Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "number",
+      "default": 0,
+      "agentWritable": true
+    },
+    {
+      "key": "themeWorkAreaContrast",
+      "title": "Work area contrast",
+      "subtitle": "The work area's contrast (chat, terminals and views). Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "number",
+      "default": 0,
       "agentWritable": true
     },
     {
@@ -7377,21 +7418,6 @@
       "type": "string",
       "default": "#0b0b0b",
       "agentWritable": false
-    },
-    {
-      "key": "appIconSourceId",
-      "title": "App Icon",
-      "subtitle": "Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.",
-      "tab": "theme",
-      "tabTitle": "Theme",
-      "group": "appearance",
-      "groupTitle": "Theme",
-      "section": "appIcon",
-      "sectionTitle": "App Icon",
-      "type": "string",
-      "default": "",
-      "advanced": true,
-      "agentWritable": true
     },
     {
       "key": "debuggingMode",
