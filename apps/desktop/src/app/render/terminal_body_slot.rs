@@ -434,12 +434,7 @@ impl GhostexGpuiApp {
             )
             .when_some(sleeping_card_title, |this, (title, click_to_wake)| {
                 this.child(crate::app::render::sleeping_card::sleeping_card_layer(
-                    crate::app::render::sleeping_card::sleeping_card(
-                        None,
-                        None,
-                        title,
-                        click_to_wake,
-                    ),
+                    crate::app::render::sleeping_card::sleeping_card(None, title, click_to_wake),
                 ))
             })
             .when_some(gpui_engine_view, |this, view| {
