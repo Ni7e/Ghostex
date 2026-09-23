@@ -426,7 +426,7 @@ impl Colors {
     fn new(appearance: &ChatAppearance) -> Self {
         let light = appearance.light;
         let foreground: Hsla = rgb(if light { 0x292929 } else { 0xfcfcfc }).into();
-        let background: Hsla = rgb(if light { 0xffffff } else { 0x191919 }).into();
+        let background = appearance.menu_surface();
         Self {
             foreground,
             muted: appearance.muted,

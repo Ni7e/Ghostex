@@ -2066,6 +2066,7 @@ impl GhostexGpuiApp {
             shared_engine_settings.scroll_to_bottom_when_typing;
         config.view.background_image =
             terminal_gpui_engine::terminal_background_image_from_settings(&shared_engine_settings);
+        config.view.background_alpha = terminal_default_background_alpha();
 
         let confirm_close_behavior =
             terminal_gpui_engine::gpui_engine_confirm_close_behavior(&config);

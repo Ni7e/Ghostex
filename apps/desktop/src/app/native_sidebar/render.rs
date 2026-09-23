@@ -46,6 +46,7 @@ impl GhostexGpuiApp {
         let header_hover = self.native_sidebar.header_hover.clone();
         let (space_offset, space_opacity) = self.native_sidebar.space_gesture.presentation();
         let appearance = SidebarAppearance::from_hud(&snapshot.hud, window);
+        let sticky_clip_top = self.native_sticky_project_clip_top(&content, &appearance);
         v_flex()
             .on_children_prepainted(move |bounds, window, cx| {
                 if bounds.len() >= 4 {
@@ -109,7 +110,10 @@ impl GhostexGpuiApp {
             }))
             .size_full()
             .min_h_0()
-            .bg(crate::app::helpers::sidebar_chrome_gradient_fill(180.0))
+            .bg(crate::app::helpers::sidebar_chrome_fill(
+                appearance.glass,
+                180.0,
+            ))
             .text_color(appearance.foreground)
             .text_size(px(15.55 * appearance.scale))
             .font_family(".SystemUIFont")
@@ -133,7 +137,8 @@ impl GhostexGpuiApp {
                     .w_full()
                     .flex_1()
                     .min_h_0()
-                    .child(
+                    .child(crate::app::element::clip_above(
+                        sticky_clip_top,
                         v_flex()
                             .on_children_prepainted(move |_, window, cx| {
                                 view.update(cx, |app, cx| {
@@ -247,7 +252,7 @@ impl GhostexGpuiApp {
                                             ),
                                     ),
                             ),
-                    )
+                    ))
                     .child(self.render_native_sidebar_list_fade(&appearance)),
             )
             /*

@@ -1,12 +1,12 @@
 use super::super::{appearance::ChatAppearance, state::NativeChatView};
 use super::layout::SPEC;
 use super::window::SuggestionPanel;
+use crate::app::helpers::ThrottledAnimationExt as _;
 use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnimationExt as _, AnyElement, Context, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, div, point,
-    px, rgb,
+    AnyElement, Context, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    StatefulInteractiveElement as _, Styled as _, Window, div, point, px, rgb,
 };
 use serde_json::json;
 
@@ -30,7 +30,7 @@ impl Render for SuggestionPanel {
         }
         let files = data["kind"] == "file";
         // React's `bg-popover` and `bg-accent` in the chat's two themes.
-        let popover = rgb(if p.light { 0xffffff } else { 0x171717 });
+        let popover = p.menu_surface();
         let highlight = rgb(if p.light { 0xf4f4f5 } else { 0x333333 });
         let outline = row_outline(&state);
         let inline = px(spec.padding_inline_px * s);
@@ -286,9 +286,9 @@ fn suggestion_spinner(size: gpui::Pixels, color: gpui::Hsla) -> gpui::AnyElement
         return glyph.into_any_element();
     }
     glyph
-        .with_animation(
+        .with_throttled_animation(
             "suggestion-loading-spinner",
-            gpui::Animation::new(std::time::Duration::from_millis(900)).repeat(),
+            std::time::Duration::from_millis(900),
             |svg, delta| {
                 svg.with_transformation(gpui::Transformation::rotate(gpui::radians(
                     delta * std::f32::consts::TAU,

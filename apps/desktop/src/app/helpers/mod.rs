@@ -22,6 +22,7 @@ pub(crate) mod source_server;
 pub(crate) mod telemetry;
 pub(crate) mod terminal_links;
 pub(crate) mod titlebar;
+pub(crate) mod window_glass;
 
 pub(crate) use agents_hub::*;
 pub(crate) use board_gxserver::*;
@@ -41,3 +42,4 @@ pub(crate) use source_server::*;
 pub(crate) use telemetry::*;
 pub(crate) use terminal_links::*;
 pub(crate) use titlebar::*;
+pub(crate) use window_glass::*;

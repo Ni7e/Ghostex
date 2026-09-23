@@ -6,6 +6,9 @@ use crate::app::helpers::*;
 #[derive(Clone)]
 pub(crate) struct SidebarAppearance {
     pub(crate) light: bool,
+    /// Whether this sidebar sits on window glass: only in the main window, never in the floating
+    /// reveal panel, which is an opaque window of its own.
+    pub(crate) glass: bool,
     pub(crate) session_selected: Hsla,
     pub(crate) session_outline: Hsla,
     pub(crate) tooltip_delay: std::time::Duration,
@@ -32,9 +35,11 @@ impl SidebarAppearance {
             .as_object()
             .is_some_and(sidebar_uses_light_theme);
         let base = titlebar_background().blend(rgb(0).opacity(0.04).into());
+        let glass = window_glass_active_in(window);
         let foreground = titlebar_active_text_color();
         Self {
             light,
+            glass,
             session_selected: if light {
                 rgb(0xe7e7e7).into()
             } else {
@@ -48,8 +53,16 @@ impl SidebarAppearance {
             selected_outline: chrome_ink().opacity(if light { 0.12 } else { 0.08 }).into(),
             selected_highlight: rgb(0xffffff).opacity(if light { 0.6 } else { 0.04 }).into(),
             hover: rgb(0x808080).opacity(0.12).into(),
-            session_hover: base.blend(foreground.opacity(if light { 0.12 } else { 0.22 })),
-            visible: if light {
+            // Under window glass these are washes of the same ink rather than opaque blends of the
+            // chrome colour, which would sit on the frosted sidebar as solid slabs.
+            session_hover: if glass {
+                foreground.opacity(if light { 0.12 } else { 0.16 })
+            } else {
+                base.blend(foreground.opacity(if light { 0.12 } else { 0.22 }))
+            },
+            visible: if glass {
+                foreground.opacity(if light { 0.06 } else { 0.12 })
+            } else if light {
                 base.blend(foreground.opacity(0.06))
             } else {
                 base.blend(foreground.opacity(0.30))

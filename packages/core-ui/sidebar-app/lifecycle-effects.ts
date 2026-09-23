@@ -4,6 +4,7 @@ import type { ghostexSettings } from '../../shared/ghostex-settings';
 import {
   getSidebarTitlebarForegroundForBackground,
   getAccentColorForSettings,
+  getLightAccentColorForSettings,
   getSessionChatBackgroundForChrome,
   getSidebarTitlebarMenuBackgroundForChrome,
   getSidebarTitlebarGradientColors,
@@ -322,6 +323,7 @@ export function useSidebarDocumentChromeEffects({
      * the theme variables instead of gating it behind the custom chrome toggle.
      */
     document.body.style.setProperty('--ghostex-accent', getAccentColorForSettings(effectiveSettings));
+    document.body.style.setProperty('--ghostex-light-accent', getLightAccentColorForSettings(effectiveSettings));
 
     /**
      * CDXC:Theming 2026-09-22 DECISION:
@@ -351,6 +353,18 @@ export function useSidebarDocumentChromeEffects({
       '--ghostex-session-chat-light-background',
       getSessionChatBackgroundForChrome(effectiveSettings.customSidebarTitlebarLightBackgroundColor)
     );
+    /**
+     * CDXC:Theming 2026-09-23 SEE-ALSO:
+     * The chat's menus take the sidebar's tinted menu colour for the chat's own theme variant; the desktop does the same in `ChatAppearance::menu_surface` (apps/desktop/src/app/native_chat/appearance.rs), which holds the user's decision.
+     */
+    document.body.style.setProperty(
+      '--ghostex-session-chat-dark-menu',
+      getSidebarTitlebarMenuBackgroundForChrome(effectiveSettings.customSidebarTitlebarBackgroundColor)
+    );
+    document.body.style.setProperty(
+      '--ghostex-session-chat-light-menu',
+      getSidebarTitlebarMenuBackgroundForChrome(effectiveSettings.customSidebarTitlebarLightBackgroundColor)
+    );
 
     document.body.dataset.customSidebarTitlebarColors = String(!isLightTheme);
     document.body.style.setProperty('--custom-sidebar-titlebar-foreground-color', customSidebarTitlebarForegroundColor);
@@ -374,6 +388,7 @@ export function useSidebarDocumentChromeEffects({
       document.body.style.removeProperty('--workspace-sidebar-theme-color');
       document.body.style.removeProperty('--workspace-sidebar-theme-foreground');
       document.body.style.removeProperty('--ghostex-accent');
+      document.body.style.removeProperty('--ghostex-light-accent');
       document.body.style.removeProperty('--custom-sidebar-titlebar-foreground-color');
       document.body.style.removeProperty('--custom-sidebar-titlebar-background-color');
       document.body.style.removeProperty('--custom-sidebar-titlebar-gradient-top-color');
@@ -389,6 +404,8 @@ export function useSidebarDocumentChromeEffects({
     effectiveSettings.customSidebarTitlebarBackgroundTintColor,
     effectiveSettings.customSidebarTitlebarLightBackgroundColor,
     effectiveSettings.darkThemePreset,
+    effectiveSettings.lightThemePreset,
+    effectiveSettings.customSidebarTitlebarLightBackgroundTintColor,
     theme,
   ]);
 

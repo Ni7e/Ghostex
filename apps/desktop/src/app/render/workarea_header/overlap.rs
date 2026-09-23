@@ -37,8 +37,11 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn agents_column_flows_under_workarea_header(&self, cx: &gpui::App) -> bool {
-        self.agents_column_solo_gpui_chat()
-            .is_some_and(|chat| !chat.read(cx).renders_region_above_transcript())
+        // Under window glass the header is see-through, so nothing passes beneath it (shell.rs).
+        !window_glass_active()
+            && self
+                .agents_column_solo_gpui_chat()
+                .is_some_and(|chat| !chat.read(cx).renders_region_above_transcript())
     }
 
     /// CDXC:Titlebar 2026-09-21 DECISION:
@@ -52,16 +55,53 @@ impl GhostexGpuiApp {
         })
     }
 
-    /// CDXC:Titlebar 2026-09-21 DECISION:
+    /// CDXC:Titlebar 2026-09-23 DECISION:
     /// User: a GPUI chat shows no background behind the header and no line under it in any of its
-    /// states. So the whole band takes the chat's own surface and the pane drops its top border
-    /// whenever the column is one GPUI chat, including the states that keep chrome above the
-    /// transcript (the error banner, the "load earlier turns" row, the search bar, the fork
-    /// button), which used to fall back to the workspace background and a hairline and read as a
-    /// separate bar. Whether the transcript also scrolls *under* the row is still
-    /// `agents_column_flows_under_workarea_header`; this only decides what the band looks like.
+    /// states, and split session panes keep that look too ("please don't add border and background
+    /// behind the split agent session panes header"). So the whole band takes the chat's own
+    /// surface and the panes drop their top border whenever every pane along the column's top edge
+    /// is a GPUI chat, one or several, including the states that keep chrome above the transcript
+    /// (the error banner, the "load earlier turns" row, the search bar, the fork button). This
+    /// supersedes the 2026-09-21 version, which applied only while the column was a single chat.
+    /// Whether a transcript also scrolls *under* the row is still
+    /// `agents_column_flows_under_workarea_header`, which stays single-pane: a split pane's grip
+    /// sits at its top and must stay clickable below the header. This only decides what the band
+    /// looks like.
     pub(crate) fn agents_column_meets_gpui_chat(&self) -> bool {
-        self.agents_column_solo_gpui_chat().is_some()
+        let panes = self.agents_column_top_row_panes();
+        !panes.is_empty()
+            && panes.iter().all(|pane_id| {
+                self.agents_workspace
+                    .active_session_in_pane(*pane_id)
+                    .is_some_and(|session_id| {
+                        self.agents_chat_mode_sessions.contains(&session_id)
+                            && self.native_chat_views.contains_key(&session_id)
+                    })
+            })
+    }
+
+    /// The panes whose top edge is the column's top edge: every pane of a side-by-side split, and
+    /// only the upper half of a stacked one.
+    fn agents_column_top_row_panes(&self) -> Vec<WorkspacePaneId> {
+        fn collect(node: &WorkspaceNode, panes: &mut Vec<WorkspacePaneId>) {
+            match node {
+                WorkspaceNode::Leaf(leaf) => panes.push(leaf.pane_id),
+                WorkspaceNode::Split(split) => {
+                    collect(&split.first, panes);
+                    if split.axis == WorkspaceSplitAxis::Horizontal {
+                        collect(&split.second, panes);
+                    }
+                }
+            }
+        }
+        if let Some(pane_id) = self.agents_workspace.focus_mode_pane
+            && self.agents_workspace.find_leaf(pane_id).is_some()
+        {
+            return vec![pane_id];
+        }
+        let mut panes = Vec::new();
+        collect(&self.agents_workspace.root, &mut panes);
+        panes
     }
 
     /*
@@ -85,10 +125,10 @@ impl GhostexGpuiApp {
     /// row or starts below it, and the workspace background everywhere else. The fade ramp reads
     /// the same answer, so it always ramps one surface out instead of crossfading two.
     pub(crate) fn workarea_header_surface_color(&self) -> gpui::Hsla {
-        if self.agents_column_meets_gpui_chat() {
+        if !window_glass_active() && self.agents_column_meets_gpui_chat() {
             gpui_session_chat_background_color()
         } else {
-            workspace_background_color()
+            workspace_nested_background()
         }
     }
 

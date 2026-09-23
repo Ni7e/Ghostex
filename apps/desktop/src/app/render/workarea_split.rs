@@ -72,7 +72,7 @@ impl GhostexGpuiApp {
             .min_h_0()
             .items_start()
             .overflow_hidden()
-            .bg(project_editor_shell_background_color())
+            .bg(glass_clear(project_editor_shell_background_color()))
             .child(self.render_agents_workspace(
                 AgentsWorkspaceLayout::Column { split_ratio },
                 window,
@@ -181,7 +181,7 @@ impl GhostexGpuiApp {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .bg(project_editor_shell_background_color())
+            .bg(glass_clear(project_editor_shell_background_color()))
             .when(draws_top_line, |this| {
                 this.child(
                     div()

@@ -338,6 +338,15 @@ impl ChatOptionMenu {
         let parent = self.parent;
         let accounts_customize = rows.first().is_some_and(|row| row["customize"] == true);
         self.opening = true;
+        // Under window glass the menu's window blurs what is behind it, rounded to the card.
+        let glass = crate::app::helpers::window_glass_active();
+        let corner_radius = px(
+            if rows.first().is_some_and(|row| row["modelMenu"].is_object()) {
+                super::model_menu::CARD_RADIUS
+            } else {
+                metrics.radius
+            } * scale,
+        );
         cx.defer(move |cx| {
             let result = cx.open_window(
                 WindowOptions {
@@ -350,12 +359,17 @@ impl ChatOptionMenu {
                     is_minimizable: false,
                     app_id: crate::gpui_platform_window_app_id(),
                     icon: crate::gpui_platform_window_icon(),
-                    window_background: gpui::WindowBackgroundAppearance::Transparent,
+                    window_background: if glass {
+                        gpui::WindowBackgroundAppearance::Blurred
+                    } else {
+                        gpui::WindowBackgroundAppearance::Transparent
+                    },
                     ..Default::default()
                 },
                 {
                     let menu = menu.clone();
                     move |window, cx| {
+                        window.set_background_corner_radius(corner_radius);
                         crate::app::window::popup_frame::strip_gpui_popup_window_frame(window);
                         crate::app::window::attach_gpui_app_modal_window_to_main_window(
                             window, parent,

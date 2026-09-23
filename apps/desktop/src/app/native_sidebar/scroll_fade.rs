@@ -35,17 +35,24 @@ impl GhostexGpuiApp {
         &self,
         appearance: &SidebarAppearance,
     ) -> impl IntoElement {
-        let color = sidebar_chrome_gradient_bottom_color();
-        div()
+        let ramp = div()
             .absolute()
             .left_0()
             .right_0()
             .bottom_0()
-            .h(px(SIDEBAR_LIST_BOTTOM_FADE_HEIGHT * appearance.scale))
-            .bg(gpui::linear_gradient(
-                180.0,
-                gpui::linear_color_stop(color.opacity(0.0), 0.0),
-                gpui::linear_color_stop(color, 1.0),
-            ))
+            .h(px(SIDEBAR_LIST_BOTTOM_FADE_HEIGHT * appearance.scale));
+        // CDXC:Sidebar 2026-09-23 DECISION:
+        // User: under window glass the list ends cleanly instead of fading. A ramp can only fade
+        // into a solid colour, and on glass it laid a second tint over the sidebar that read as a
+        // muddy band above the Commands row. The opaque sidebar keeps the fade described above.
+        if appearance.glass {
+            return ramp;
+        }
+        let color = sidebar_chrome_gradient_bottom_color();
+        ramp.bg(gpui::linear_gradient(
+            180.0,
+            gpui::linear_color_stop(color.opacity(0.0), 0.0),
+            gpui::linear_color_stop(color, 1.0),
+        ))
     }
 }

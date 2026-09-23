@@ -236,7 +236,11 @@ impl GhostexGpuiApp {
                 this.min_h(px(COMMAND_PANE_TAB_BAR_HEIGHT))
             })
             .overflow_hidden()
-            .bg(command_pane_chrome_color())
+            .bg(if floating {
+                command_pane_chrome_color()
+            } else {
+                glass_clear(command_pane_chrome_color())
+            })
             .when(floating, |this| {
                 this.absolute()
                     .left(px(COMMAND_PANE_FLOATING_MARGIN))

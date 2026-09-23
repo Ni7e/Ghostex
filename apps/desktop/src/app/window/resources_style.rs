@@ -22,7 +22,7 @@ pub(super) fn resource_panel_frame() -> gpui::Div {
         .rounded(px(RESOURCE_PANEL_RADIUS))
         .border_1()
         .border_color(titlebar_popup_menu_border_color())
-        .bg(titlebar_background())
+        .bg(popup_window_surface(titlebar_background()))
         .text_color(chrome_ink())
 }
 

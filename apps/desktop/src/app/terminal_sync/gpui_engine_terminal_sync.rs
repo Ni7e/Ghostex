@@ -632,6 +632,7 @@ impl GhostexGpuiApp {
         engine_config.view.scroll_to_bottom_when_typing = settings.scroll_to_bottom_when_typing;
         engine_config.view.background_image =
             terminal_gpui_engine::terminal_background_image_from_settings(settings);
+        engine_config.view.background_alpha = terminal_default_background_alpha();
         let viewer_recipe = GpuiTerminalViewerRecipe {
             runtime_session_id,
             working_directory: working_directory.clone(),

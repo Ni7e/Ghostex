@@ -36,6 +36,7 @@ export type ChatFileOpenView = 'docs' | 'code';
 export type DefaultEditorCommand =
   'code' | 'code-insiders' | 'zed' | 'zeditor' | 'cursor' | 'windsurf' | 'codium' | 'subl' | 'other';
 export type CommandsPanelSide = 'bottom' | 'right';
+export type WindowGlassMode = 'auto' | 'frosted' | 'opaque';
 export type SidebarSpaceSwitchBehavior = 'restore' | 'keep';
 export type SidebarVisibilityMemory = 'shared' | 'perView';
 export const MIN_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS = 0;
@@ -750,6 +751,11 @@ export type ghostexSettings = {
   showActivePaneOutline: boolean;
   workspaceActivePaneBorderColor: string;
   workspaceBackgroundColor: string;
+  /**
+   * CDXC:Theming 2026-09-23 SEE-ALSO:
+   * The desktop resolves and paints this in apps/desktop/src/app/helpers/window_glass.rs, which holds the user's decision on what Automatic means.
+   */
+  windowGlass: WindowGlassMode;
   /**
    * CDXC:SessionSleep 2026-06-13-01:44:
    * Sleeping native pane tabs should select their original split pane without

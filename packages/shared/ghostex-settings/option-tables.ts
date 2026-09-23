@@ -19,6 +19,7 @@ import {
   type SidebarSpaceSwitchBehavior,
   type SidebarVisibilityMemory,
   type WebLinkOpenTarget,
+  type WindowGlassMode,
 } from './types';
 
 export const WEB_LINK_OPEN_TARGET_OPTIONS: ReadonlyArray<{
@@ -134,6 +135,15 @@ export const COMMANDS_PANEL_SIDE_OPTIONS: ReadonlyArray<{
 }> = [
   { label: 'Bottom', value: 'bottom' },
   { label: 'Right', value: 'right' },
+];
+
+export const WINDOW_GLASS_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: WindowGlassMode;
+}> = [
+  { label: 'Automatic (glass in dark mode)', value: 'auto' },
+  { label: 'Frosted glass', value: 'frosted' },
+  { label: 'Opaque', value: 'opaque' },
 ];
 
 /**

@@ -10,6 +10,7 @@ import {
   AUTO_SLEEP_IDLE_MINUTE_OPTIONS,
   CHAT_FILE_OPEN_VIEW_OPTIONS,
   COMMANDS_PANEL_SIDE_OPTIONS,
+  WINDOW_GLASS_OPTIONS,
   COMMANDS_PANEL_AUTO_MINIMIZE_DELAY_OPTIONS,
   GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS,
   GHOSTTY_COPY_ON_SELECT_OPTIONS,
@@ -550,6 +551,12 @@ export function getSettingsSearchSectionDefinitions() {
           options: GHOSTTY_THEME_SETTING_OPTIONS,
           subtitle: 'Uses your configured Ghostty dark theme, or GitHub Dark when no theme is configured.',
           title: 'Terminal dark palette',
+        },
+        {
+          key: 'windowGlass',
+          options: WINDOW_GLASS_OPTIONS,
+          subtitle: 'Let the blurred desktop show through the window. Automatic uses glass in dark mode only.',
+          title: 'Window glass',
         },
         {
           key: 'showActivePaneOutline',

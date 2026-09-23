@@ -92,7 +92,7 @@ impl GhostexGpuiApp {
 
         let group = group
             .border_color(border_color)
-            .bg(command_pane_chrome_color())
+            .bg(glass_clear(command_pane_chrome_color()))
             .child(self.render_command_pane_titlebar(leaf, estimated_chrome_width, cx))
             .when_some(
                 self.render_command_terminal_search_bar(leaf, cx),
@@ -173,7 +173,7 @@ impl GhostexGpuiApp {
             .overflow_hidden()
             .border_b_1()
             .border_color(command_pane_titlebar_separator_color())
-            .bg(command_pane_chrome_color())
+            .bg(glass_clear(command_pane_chrome_color()))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, _window, cx| {
@@ -330,7 +330,7 @@ impl GhostexGpuiApp {
             .flex_shrink_0()
             .h(px(height))
             .w_full()
-            .bg(command_pane_strip_color())
+            .bg(glass_clear(command_pane_strip_color()))
             .into_any_element()
     }
 
@@ -384,7 +384,7 @@ impl GhostexGpuiApp {
             .overflow_hidden()
             .border_t_1()
             .border_color(command_pane_panel_separator_color())
-            .bg(command_pane_strip_color())
+            .bg(glass_clear(command_pane_strip_color()))
             .child(
                 h_flex()
                     .id("ghostex-gpui-command-pane-collapsed-strip")
@@ -396,7 +396,7 @@ impl GhostexGpuiApp {
                     .overflow_hidden()
                     .border_l_1()
                     .border_color(command_pane_side_edge_color())
-                    .bg(command_pane_strip_color())
+                    .bg(glass_clear(command_pane_strip_color()))
                     .pl(px(COMMAND_PANE_COLLAPSED_STRIP_LEFT_MARGIN
                         - COMMAND_PANE_COLLAPSED_STRIP_LEFT_EDGE_WIDTH))
                     .mr(px(COMMAND_PANE_COLLAPSED_STRIP_RIGHT_MARGIN))

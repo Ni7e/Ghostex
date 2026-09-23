@@ -431,11 +431,7 @@ impl Render for ChatOptionMenuPanel {
             .rounded(px(m.radius * scale))
             .border_1()
             .border_color(border)
-            .bg(gpui::rgb(if appearance.light {
-                0xffffff
-            } else {
-                0x191919
-            }))
+            .bg(appearance.menu_surface())
             .p(px(m.padding * scale))
             .font_family(appearance.font)
             .text_color(foreground)

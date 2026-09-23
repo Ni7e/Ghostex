@@ -8,11 +8,12 @@ export const PROJECT_BOARD_STYLES = `
     --foreground: light-dark(#27272a, oklch(0.985 0 0));
     --card: light-dark(#ffffff, #161616);
     --card-foreground: light-dark(#27272a, oklch(0.985 0 0));
-    --popover: light-dark(#ffffff, #161616);
+    --popover: var(--app-menu-background, light-dark(#ffffff, #161616));
     --popover-foreground: light-dark(#27272a, oklch(0.985 0 0));
     --primary: light-dark(#27272a, oklch(0.922 0 0));
     --primary-foreground: light-dark(#fafafa, oklch(0.205 0 0));
-    --secondary: light-dark(#e9e9eb, #242424);
+    /* A wash of the text colour over the tinted page, so filled buttons carry the theme's tint. */
+    --secondary: color-mix(in srgb, var(--foreground) 8%, var(--background));
     --secondary-foreground: light-dark(#27272a, oklch(0.985 0 0));
     --muted: light-dark(#e9e9eb, #242424);
     --muted-foreground: light-dark(#626269, oklch(0.708 0 0));

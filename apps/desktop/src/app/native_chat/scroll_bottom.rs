@@ -118,7 +118,9 @@ impl NativeChatView {
     pub(super) fn scroll_bottom_button(&self, cx: &Context<Self>) -> AnyElement {
         let remaining =
             self.list.max_offset_for_scrollbar().y + self.list.scroll_px_offset_for_scrollbar().y;
-        let p = ChatAppearance::current(&self.snapshot);
+        let p = ChatAppearance::current(&self.snapshot).on_window_glass(
+            crate::app::helpers::window_glass_active_for(self.main_window),
+        );
         if self.list.is_following_tail() || remaining <= px(SPEC.edge_threshold * p.scale) {
             return div().into_any_element();
         }

@@ -9,3 +9,4 @@ mod style;
 
 pub(super) use flyout::flyout_height;
 pub(super) use state::{ModelMenuState, menu_height};
+pub(super) use style::CARD_RADIUS;

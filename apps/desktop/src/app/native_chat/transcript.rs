@@ -72,7 +72,9 @@ impl NativeChatView {
     ) -> AnyElement {
         self.in_subagent = !main;
         let item = &items[index];
-        let mut p = ChatAppearance::current(&self.snapshot);
+        let mut p = ChatAppearance::current(&self.snapshot).on_window_glass(
+            crate::app::helpers::window_glass_active_for(self.main_window),
+        );
         // CDXC:SessionChat 2026-09-09 DECISION:
         // User: subagent transcripts default to the same normal display as main chat, with verbose
         // and summarized modes off. React reaches that by mounting its own list inside the dialog;

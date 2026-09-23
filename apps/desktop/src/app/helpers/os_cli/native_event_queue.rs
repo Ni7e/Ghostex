@@ -78,6 +78,11 @@ pub(crate) fn queue_gpui_accessibility_display_options_changed(should_reduce_mot
         .spawn(async move {
             let _ = app.update_in(&mut async_app, |this, _window, cx| {
                 this.set_gpui_pet_overlay_reduce_motion_enabled(should_reduce_motion, cx);
+                // The same notification carries Reduce Transparency, which turns window glass off.
+                let settings = shared_settings::shared_sidebar_settings_snapshot();
+                if refresh_window_glass(settings.object()) {
+                    cx.notify();
+                }
             });
         })
         .detach();
@@ -195,6 +200,7 @@ unsafe extern "C" {
     pub(crate) fn GhostexGpuiRequestNotificationAuthorization() -> i32;
     pub(crate) fn GhostexGpuiDeliverSettingsTestNotification() -> i32;
     pub(crate) fn GhostexGpuiAccessibilityDisplayShouldReduceMotion() -> i32;
+    pub(crate) fn GhostexGpuiAccessibilityDisplayShouldReduceTransparency() -> i32;
     pub(crate) fn GhostexGpuiInstallAccessibilityDisplayOptionsMonitor();
     pub(crate) fn GhostexGpuiRemoveAccessibilityDisplayOptionsMonitor();
     pub(crate) fn GhostexGpuiInstallWorkspacePowerEventsMonitor();

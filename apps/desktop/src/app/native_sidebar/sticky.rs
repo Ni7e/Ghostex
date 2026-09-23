@@ -1,4 +1,7 @@
-use super::{appearance::SidebarAppearance, model::NativeSidebarSnapshot};
+use super::{
+    appearance::SidebarAppearance,
+    model::{NativeSidebarGroup, NativeSidebarSnapshot},
+};
 use crate::GhostexGpuiApp;
 use gpui::{AnyElement, Bounds, IntoElement, ParentElement, Pixels, Styled, deferred, div, px};
 
@@ -17,12 +20,13 @@ impl GhostexGpuiApp {
         }
     }
 
-    pub(crate) fn render_native_sticky_project(
+    /// The project header pinned at the top of the list, with its own row's bounds and the y its
+    /// pinned copy sits at, measured from last frame's recorded rows.
+    fn native_sticky_project_placement<'a>(
         &self,
-        snapshot: &NativeSidebarSnapshot,
+        snapshot: &'a NativeSidebarSnapshot,
         appearance: &SidebarAppearance,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
+    ) -> Option<(&'a NativeSidebarGroup, Bounds<Pixels>, Pixels)> {
         let viewport = self.native_sidebar.scroll.bounds();
         let height = px(30.0 * appearance.scale);
         let visible: std::collections::HashSet<&str> = snapshot
@@ -59,6 +63,31 @@ impl GhostexGpuiApp {
             .top()
             .min(bounds.bottom() - height)
             .max(viewport.top() - height);
+        Some((group, bounds, y))
+    }
+
+    /// Where the list must stop painting under window glass: the pinned header is see-through
+    /// there, so rows scrolling beneath it would show through its text.
+    pub(crate) fn native_sticky_project_clip_top(
+        &self,
+        snapshot: &NativeSidebarSnapshot,
+        appearance: &SidebarAppearance,
+    ) -> Option<Pixels> {
+        if !appearance.glass {
+            return None;
+        }
+        self.native_sticky_project_placement(snapshot, appearance)
+            .map(|(_, _, y)| y + px(30.0 * appearance.scale))
+    }
+
+    pub(crate) fn render_native_sticky_project(
+        &self,
+        snapshot: &NativeSidebarSnapshot,
+        appearance: &SidebarAppearance,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        let height = px(30.0 * appearance.scale);
+        let (group, bounds, y) = self.native_sticky_project_placement(snapshot, appearance)?;
         let root = self.native_sidebar.bounds;
         // CDXC:Projects 2026-09-19 WHY:
         // The recorded bounds are the header row's, which already sit inside its 3px side margins, and the chevron hangs 18px left of the row. The pinned box adds both back (margins outside, chevron gutter as left padding) so the clipped copy keeps the resting width and its chevron.
@@ -74,7 +103,13 @@ impl GhostexGpuiApp {
                     .pl(gutter)
                     .h(height)
                     .overflow_hidden()
-                    .bg(crate::app::helpers::titlebar_background())
+                    // Under window glass the list stops at this header's bottom edge
+                    // (`native_sticky_project_clip_top`), so it needs no fill to hide rows.
+                    .bg(if appearance.glass {
+                        gpui::transparent_black()
+                    } else {
+                        crate::app::helpers::titlebar_background()
+                    })
                     .child(self.render_native_project_header(group, &snapshot.hud, appearance, cx)),
             )
             .with_priority(5)

@@ -904,6 +904,7 @@ fn parse_ghostty_terminal_engine_config(
             // The GhosttyKit surface path is not selected at runtime; the
             // composited engine owns background images.
             background_image: None,
+            background_alpha: 1.0,
             cursor_blink: parse_config_bool(
                 optional_value("cursor-style-blink").unwrap_or("false"),
             )?,

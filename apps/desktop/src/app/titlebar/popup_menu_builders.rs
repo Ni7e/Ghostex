@@ -47,7 +47,7 @@ pub(crate) fn titlebar_popup_menu_with_scroll_behavior(
             item_padding_x: px(10.0),
             item_height: px(TITLEBAR_POPUP_MENU_MIN_ITEM_HEIGHT),
             separator_margin: px(6.0),
-            background: titlebar_popup_menu_background(),
+            background: popup_window_surface(titlebar_popup_menu_background()),
             foreground: titlebar_popup_menu_foreground(),
             border: titlebar_popup_menu_border_color(),
             hover: titlebar_popup_menu_hover_color(),

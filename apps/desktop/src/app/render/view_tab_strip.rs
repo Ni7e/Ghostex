@@ -99,7 +99,7 @@ impl GhostexGpuiApp {
             // sit exactly where they sit in the header while the panel is closed.
             .pr(px(WORKAREA_HEADER_EDGE_PADDING))
             .overflow_hidden()
-            .bg(project_editor_shell_background_color())
+            .bg(glass_clear(project_editor_shell_background_color()))
             .text_color(titlebar_text_color())
             .font_family("Inter Variable")
             .on_drag_move::<DraggedViewTab>(cx.listener(

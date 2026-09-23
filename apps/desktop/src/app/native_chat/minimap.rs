@@ -257,7 +257,9 @@ impl NativeChatView {
         if !self.minimap_visible() {
             return transcript;
         }
-        let p = ChatAppearance::current(&self.snapshot);
+        let p = ChatAppearance::current(&self.snapshot).on_window_glass(
+            crate::app::helpers::window_glass_active_for(self.main_window),
+        );
         let pane = self.bounds.get().size.width;
         let content = p
             .transcript_width
