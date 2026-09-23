@@ -1,0 +1,154 @@
+/*
+ * The Theme settings page: the theme preview cards and the Advanced disclosure.
+ * Each card draws a small window in its theme's own colours (set inline as
+ * --theme-preview-*), so it looks the same in the light and dark Settings.
+ * The drawn window is shared with the onboarding's Get started panel, which
+ * styles its own card chrome in onboarding/styles/get-started.css.
+ */
+.ghostex-settings-shadcn .theme-card-grid {
+  display: grid;
+  gap: 0.625rem;
+  grid-template-columns: repeat(auto-fill, minmax(5.25rem, 1fr));
+}
+
+.ghostex-settings-shadcn .theme-card {
+  align-items: stretch;
+  background: transparent;
+  border: 1px solid var(--settings-hairline);
+  border-radius: 0.625rem;
+  color: var(--muted-foreground);
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.375rem 0.375rem 0.5rem;
+  text-align: center;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.ghostex-settings-shadcn .theme-card:hover {
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+
+.ghostex-settings-shadcn .theme-card.is-selected {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 1px var(--ring);
+  color: var(--foreground);
+}
+
+.ghostex-settings-shadcn .theme-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 20%, transparent);
+  border-color: var(--ring);
+}
+
+.ghostex-settings-shadcn .theme-card-name {
+  font-size: var(--settings-text-detail);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:is(.ghostex-settings-shadcn, .gx-onboarding) .theme-preview-window {
+  aspect-ratio: 16 / 10;
+  background: var(--theme-preview-chrome);
+  border: 1px solid color-mix(in srgb, var(--theme-preview-foreground) 14%, transparent);
+  border-radius: 0.375rem;
+  display: flex;
+  overflow: hidden;
+  width: 100%;
+}
+
+:is(.ghostex-settings-shadcn, .gx-onboarding) .theme-preview-sidebar {
+  display: flex;
+  flex: 0 0 32%;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 4px;
+}
+
+:is(.ghostex-settings-shadcn, .gx-onboarding) .theme-preview-row {
+  background: color-mix(in srgb, var(--theme-preview-foreground) 16%, transparent);
+  border-radius: 2px;
+  height: 4px;
+}
+
+:is(.ghostex-settings-shadcn, .gx-onboarding) .theme-preview-row.is-selected {
+  background: color-mix(in srgb, var(--theme-preview-foreground) 38%, transparent);
+}
+
+:is(.ghostex-settings-shadcn, .gx-onboarding) .theme-preview-work {
+  background: var(--theme-preview-work);
+  border-left: 1px solid color-mix(in srgb, var(--theme-preview-foreground) 10%, transparent);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 5px 5px;
+}
+
+:is(.ghostex-settings-shadcn, .gx-onboarding) .theme-preview-bubble {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--theme-preview-foreground) 14%, transparent);
+  border-radius: 3px;
+  height: 7px;
+  width: 55%;
+}
+
+:is(.ghostex-settings-shadcn, .gx-onboarding) .theme-preview-text {
+  background: color-mix(in srgb, var(--theme-preview-foreground) 22%, transparent);
+  border-radius: 2px;
+  height: 3px;
+  width: 85%;
+}
+
+:is(.ghostex-settings-shadcn, .gx-onboarding) .theme-preview-text.is-short {
+  width: 60%;
+}
+
+:is(.ghostex-settings-shadcn, .gx-onboarding) .theme-preview-composer {
+  background: color-mix(in srgb, var(--theme-preview-foreground) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-preview-foreground) 14%, transparent);
+  border-radius: 4px;
+  height: 9px;
+  margin-top: auto;
+}
+
+.ghostex-settings-shadcn .theme-advanced-disclosure {
+  align-items: center;
+  display: flex;
+  gap: 0.625rem;
+  height: auto;
+  justify-content: flex-start;
+  padding: 0.5rem 0.25rem;
+  width: 100%;
+}
+
+.ghostex-settings-shadcn .theme-advanced-disclosure-title {
+  color: var(--foreground);
+  font-size: var(--settings-text-heading);
+  font-weight: 400;
+}
+
+.ghostex-settings-shadcn .theme-advanced-disclosure-hint {
+  color: var(--muted-foreground);
+  font-size: var(--settings-text-detail);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghostex-settings-shadcn .theme-advanced-disclosure-chevron {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: transform 150ms ease;
+}
+
+.ghostex-settings-shadcn .theme-advanced-disclosure-chevron.is-open {
+  transform: rotate(90deg);
+}

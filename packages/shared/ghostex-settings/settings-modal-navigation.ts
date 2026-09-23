@@ -2,6 +2,7 @@ import { clampNumber, isRecord, readLooseString } from './primitives';
 
 export const SETTINGS_MODAL_NAVIGATION_TABS = [
   'settings',
+  'theme',
   'integrations',
   'extensions',
   'osIntegration',

@@ -37,6 +37,42 @@ export type DefaultEditorCommand =
   'code' | 'code-insiders' | 'zed' | 'zeditor' | 'cursor' | 'windsurf' | 'codium' | 'subl' | 'other';
 export type CommandsPanelSide = 'bottom' | 'right';
 export type WindowGlassMode = 'auto' | 'frosted' | 'opaque';
+export type WindowGlassSource = 'wallpaper' | 'desktopAndWindows' | 'customImage';
+export type WindowGlassImagePlacement = 'static' | 'desktop';
+export type PanelAnimationSpeed = 'off' | 'slow' | 'normal' | 'fast';
+export const MIN_WINDOW_GLASS_SIDEBAR_OPACITY_PERCENT = 40;
+export const MAX_WINDOW_GLASS_SIDEBAR_OPACITY_PERCENT = 100;
+export const MIN_WINDOW_GLASS_WORK_AREA_TINT_PERCENT = 0;
+export const MAX_WINDOW_GLASS_WORK_AREA_TINT_PERCENT = 100;
+export const DEFAULT_WINDOW_GLASS_SIDEBAR_OPACITY_DARK_PERCENT = 80;
+export const DEFAULT_WINDOW_GLASS_SIDEBAR_OPACITY_LIGHT_PERCENT = 88;
+export const DEFAULT_WINDOW_GLASS_WORK_AREA_TINT_DARK_PERCENT = 88;
+export const DEFAULT_WINDOW_GLASS_WORK_AREA_TINT_LIGHT_PERCENT = 93;
+
+export function clampWindowGlassSidebarOpacityPercent(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.round(
+    Math.min(MAX_WINDOW_GLASS_SIDEBAR_OPACITY_PERCENT, Math.max(MIN_WINDOW_GLASS_SIDEBAR_OPACITY_PERCENT, value))
+  );
+}
+
+export function clampWindowGlassWorkAreaTintPercent(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.round(
+    Math.min(MAX_WINDOW_GLASS_WORK_AREA_TINT_PERCENT, Math.max(MIN_WINDOW_GLASS_WORK_AREA_TINT_PERCENT, value))
+  );
+}
+
+/**
+ * The work area's own tint for a user who set the retired extra-layer slider
+ * (`windowGlassMainOpacity*`), which lay over the sidebar tint: the coverage the two layers
+ * added up to, so the work area looks the same after the tints were made independent.
+ */
+export function migrateWindowGlassWorkAreaTintPercent(sidebarPercent: number, extraPercent: number): number {
+  const sidebar = Math.min(100, Math.max(0, sidebarPercent)) / 100;
+  const extra = Math.min(100, Math.max(0, extraPercent)) / 100;
+  return Math.round((1 - (1 - sidebar) * (1 - extra)) * 100);
+}
 export type SidebarSpaceSwitchBehavior = 'restore' | 'keep';
 export type SidebarVisibilityMemory = 'shared' | 'perView';
 export const MIN_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS = 0;
@@ -534,6 +570,12 @@ export type ghostexSettings = {
   preferredAgentInterfaceOverrides: Readonly<Record<string, PreferredAgentInterface>>;
   /** Duration for sidebar section, group, and project disclosure animations, and for the floating sidebar's slide. */
   sidebarCollapseAnimationDurationMs: number;
+  /**
+   * CDXC:Workarea 2026-09-23 SEE-ALSO: how fast the sidebar, the side panel, the Agents Panel and
+   * the command pane slide open and shut; the user's decision and the durations live in
+   * `apps/desktop/src/app/panel_motion.rs`. macOS Reduce Motion always snaps.
+   */
+  panelAnimationSpeed: PanelAnimationSpeed;
   /** Delay before sidebar hover tooltips appear. */
   sidebarTooltipDelayMs: number;
   /**
@@ -627,7 +669,7 @@ export type ghostexSettings = {
    */
   sessionChatFileEditPreviews: boolean;
   /** CDXC:SessionChat 2026-09-23 DECISION:
-   * User: add a setting that stops the GPUI chat box from animating up and down, enabled by default until its animation issues are fixed. While on, scrolling the transcript never collapses the desktop chat box.
+   * User: add a setting that stops the GPUI chat box from animating up and down. While on, scrolling the transcript never collapses the desktop chat box. It shipped on by default while the collapse bounced near the end of the transcript; once that bounce was fixed the user asked for auto collapse to be enabled by default, so the setting now defaults to off.
    */
   sessionChatKeepComposerExpanded: boolean;
   /**
@@ -756,6 +798,30 @@ export type ghostexSettings = {
    * The desktop resolves and paints this in apps/desktop/src/app/helpers/window_glass.rs, which holds the user's decision on what Automatic means.
    */
   windowGlass: WindowGlassMode;
+  /**
+   * CDXC:Theming 2026-09-23 SEE-ALSO:
+   * What the glass blurs: only the desktop wallpaper, or everything behind the window. window_glass.rs holds the user's decision and the GPUI macOS window paints it.
+   */
+  windowGlassSource: WindowGlassSource;
+  /**
+   * CDXC:Theming 2026-09-23 SEE-ALSO:
+   * Absolute paths of the pictures Custom image glass shows in dark and light mode (empty: none chosen, the live blur shows); window_glass.rs holds the user's decision and the GPUI macOS window paints them.
+   */
+  windowGlassImageDark: string;
+  windowGlassImageLight: string;
+  /**
+   * CDXC:Theming 2026-09-23 SEE-ALSO:
+   * Whether the Wallpaper only or Custom image picture covers the window and moves with it (static) or stays still against the screen (desktop); window_glass.rs holds the user's decision and the GPUI macOS window places it.
+   */
+  windowGlassImagePlacement: WindowGlassImagePlacement;
+  /**
+   * CDXC:Theming 2026-09-23 SEE-ALSO:
+   * Percent of the desktop each area's own glass tint hides, per appearance: the sidebar and the work area are independent layers, so either can be the darker one. window_glass.rs holds the user's decision and paints them; normalize.ts migrates the retired `windowGlassMainOpacity*` extra layer.
+   */
+  windowGlassSidebarOpacityDark: number;
+  windowGlassWorkAreaTintDark: number;
+  windowGlassSidebarOpacityLight: number;
+  windowGlassWorkAreaTintLight: number;
   /**
    * CDXC:SessionSleep 2026-06-13-01:44:
    * Sleeping native pane tabs should select their original split pane without

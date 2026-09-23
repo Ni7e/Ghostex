@@ -28,6 +28,7 @@ const SETTINGS_UPDATE_SOURCE: &str = "cli:settings";
 /// packages/shared/ghostex-settings/settings-modal-navigation.ts.
 const SETTINGS_MODAL_TABS: &[&str] = &[
     "settings",
+    "theme",
     "integrations",
     "extensions",
     "osIntegration",

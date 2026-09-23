@@ -34,6 +34,10 @@ import {
   DEFAULT_SIDEBAR_TOOLTIP_DELAY_MS,
   DEFAULT_TERMINAL_PANE_HORIZONTAL_PADDING_PX,
   DEFAULT_TERMINAL_PANE_PADDING_PX,
+  DEFAULT_WINDOW_GLASS_SIDEBAR_OPACITY_DARK_PERCENT,
+  DEFAULT_WINDOW_GLASS_SIDEBAR_OPACITY_LIGHT_PERCENT,
+  DEFAULT_WINDOW_GLASS_WORK_AREA_TINT_DARK_PERCENT,
+  DEFAULT_WINDOW_GLASS_WORK_AREA_TINT_LIGHT_PERCENT,
   type PromptEditorBackend,
   type WebLinkOpenTarget,
   type ghostexSettings,
@@ -395,6 +399,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   preferredAgentInterfaceOverrides: {},
   sidebarCollapseAnimationDurationMs: DEFAULT_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS,
+  panelAnimationSpeed: 'normal',
   sidebarTooltipDelayMs: DEFAULT_SIDEBAR_TOOLTIP_DELAY_MS,
   /**
    * CDXC:Sidebar 2026-06-05-04:40:
@@ -421,7 +426,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   sessionChatVerboseMode: false,
   sessionChatSimpleMode: false,
   sessionChatFileEditPreviews: false,
-  sessionChatKeepComposerExpanded: true,
+  sessionChatKeepComposerExpanded: false,
   /**
    * CDXC:Theming 2026-06-15-11:24:
    * Custom sidebar/titlebar colors are scoped to the sidebar and titlebar.
@@ -549,6 +554,14 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   showActivePaneOutline: false,
   workspaceActivePaneBorderColor: '#3b82f6',
   windowGlass: 'auto',
+  windowGlassSource: 'desktopAndWindows',
+  windowGlassImagePlacement: 'static',
+  windowGlassImageDark: '',
+  windowGlassImageLight: '',
+  windowGlassSidebarOpacityDark: DEFAULT_WINDOW_GLASS_SIDEBAR_OPACITY_DARK_PERCENT,
+  windowGlassWorkAreaTintDark: DEFAULT_WINDOW_GLASS_WORK_AREA_TINT_DARK_PERCENT,
+  windowGlassSidebarOpacityLight: DEFAULT_WINDOW_GLASS_SIDEBAR_OPACITY_LIGHT_PERCENT,
+  windowGlassWorkAreaTintLight: DEFAULT_WINDOW_GLASS_WORK_AREA_TINT_LIGHT_PERCENT,
   /**
    * CDXC:Workarea 2026-06-07-16:53:
    * A near-black workspace background avoids platform compositor handling of
