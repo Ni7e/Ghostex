@@ -382,6 +382,7 @@ impl GhostexGpuiApp {
                 self.release_gpui_new_thread_picker_window(cx);
                 if self.sidebar.is_some() {
                     self.stage_agent_launch_placeholder(&message, cx);
+                    self.focus_staged_chat_after_picker(cx);
                 }
                 self.dispatch_gpui_sidebar_host_message(message, cx);
             }
