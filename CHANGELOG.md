@@ -9,11 +9,15 @@
 ### ✨ Window glass
 - **See your desktop through Ghostex.** The sidebar, sessions, terminals and chat can show a blurred view of what is behind the window. Glass is on in dark mode by default; turn it on or off with Enable Transparency in Settings > Theme.
 - **Choose what the glass shows.** Desktop and windows shows everything behind Ghostex, Wallpaper only shows just your desktop picture, and Custom image blurs a picture you pick, with a separate picture for dark mode and light mode.
+- **One slider sets how much shows through.** Transparency strength on the Theme page tunes the whole window at once, and Advanced still lets you set the sidebar and work area tints apart.
+- **Menus, popups, toasts, tooltips and suggestions are frosted to match,** as are the scroll-to-bottom button, the floating sidebar and the chat skeleton shown while a session loads.
 - **Tune how much shows through.** Sidebar tint and Work area tint set each area on its own, in dark mode and in light mode, so either can be the darker one. Always glass keeps it on in light mode too.
 
 ### 🎨 A Theme page in Settings
 - **Theme has its own page, right below General.** It starts with Appearance, a card for each dark and light theme showing the window in its colours, and Enable Transparency; Advanced holds colours, chat and terminal themes, glass and the app icon.
-- **Pick your look while getting started.** The last Get started panel offers the same Appearance, theme and transparency choices, and they apply right away.
+- **Background contrast in five steps.** Pick Lowest to Highest on the Theme page, or set Sidebar contrast and Work area contrast apart under Advanced.
+- **Terminals follow your theme.** The terminal background matches the theme by default, and a colour you choose only paints behind the terminal text.
+- **Pick your look while getting started.** The last Get started panel offers the same Appearance, theme, contrast and transparency choices, and they apply right away.
 
 ### 🗂 Panes, views and the board
 - **Panels slide open and closed.** The sidebar, side panel, Agents Panel and command pane slide in and out; set Panel animations to Off, Slow, Normal or Fast, and Reduce Motion always opens them instantly.
@@ -29,6 +33,7 @@
 - **Hide sidebar and Toggle Agents Panel sit at the top left of the sidebar on every computer,** and dragging the sidebar's top row moves the window.
 - **A narrow sidebar keeps its buttons.** When the top row runs out of room, Search and Notifications move into the sidebar menu.
 - **Switching Spaces fades the list** as it slides, from the Spaces row and from the menu alike.
+- **Double-click the top of the sidebar or the view tab strip to zoom the window,** like the header beside them.
 - **Hover the window's left edge to float a collapsed sidebar.** The hover zone is now invisible, so nothing is drawn over your work.
 
 ### 💬 Chat
@@ -44,6 +49,8 @@
 - **Windows terminals keep their output, interrupts and sessions more reliably,** and file dialogs and popups open correctly.
 
 ### 🩹 Fixes
+- **Answering Claude's questions from chat works again.** Multi-select answers with a typed note deliver the note and every pick, questions with previewed options no longer look answered while Claude still waits, and answered preview questions show the option you picked.
+- **Popups and dialogs open on the display the window is on,** instead of behind it on another monitor.
 - **Claude sends go through even when its chat box was partly erased on screen.**
 - **Waking a Claude session never resumes a conversation from another project.**
 - **A new agent started right after a restart appears straight away** instead of being replaced by a woken session.
