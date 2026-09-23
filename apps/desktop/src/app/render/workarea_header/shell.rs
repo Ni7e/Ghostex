@@ -123,6 +123,66 @@ impl GhostexGpuiApp {
             });
 
         let header = window_drag_region(header);
+        // Diagnostics only (`log_window_drag`): every left press inside the header's rectangle as
+        // the window saw it, before any element handles it. A press logged here with no
+        // `gpui.windowDrag.press` after it means something above the header took it; no line at all
+        // means it never reached this window.
+        let split_panes = self.agents_workspace.rendered_leaf_order().len();
+        let header = header.relative().child(
+            gpui::canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    // The first held-button move the window gets inside the header per press, and
+                    // the release, both before any element handles them.
+                    window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, _, _| {
+                        if phase == gpui::DispatchPhase::Capture
+                            && event.pressed_button == Some(MouseButton::Left)
+                            && bounds.contains(&event.position)
+                            && !HEADER_DRAG_SEEN.swap(true, std::sync::atomic::Ordering::Relaxed)
+                        {
+                            crate::app::render::window_drag_region::log_window_drag(
+                                "headerDragSeen",
+                                event.position,
+                                serde_json::json!({}),
+                            );
+                        }
+                    });
+                    window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, _, _| {
+                        if phase == gpui::DispatchPhase::Capture
+                            && event.button == MouseButton::Left
+                            && bounds.contains(&event.position)
+                        {
+                            crate::app::render::window_drag_region::log_window_drag(
+                                "headerReleaseSeen",
+                                event.position,
+                                serde_json::json!({ "clickCount": event.click_count }),
+                            );
+                        }
+                    });
+                    window.on_mouse_event(move |event: &MouseDownEvent, phase, _, _| {
+                        if phase == gpui::DispatchPhase::Capture {
+                            HEADER_DRAG_SEEN.store(false, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        if phase == gpui::DispatchPhase::Capture
+                            && event.button == MouseButton::Left
+                            && bounds.contains(&event.position)
+                        {
+                            crate::app::render::window_drag_region::log_window_drag(
+                                "headerPressSeen",
+                                event.position,
+                                serde_json::json!({
+                                    "panes": split_panes,
+                                    "clickCount": event.click_count,
+                                    "firstMouse": event.first_mouse,
+                                }),
+                            );
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .inset_0(),
+        );
 
         header
             .on_click(|event, window, _cx| {
@@ -167,3 +227,6 @@ impl GhostexGpuiApp {
             )
     }
 }
+
+/// Diagnostics only: whether this press's first held-button move over the header was logged.
+static HEADER_DRAG_SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

@@ -53,22 +53,64 @@ pub(crate) fn window_drag_region<E: InteractiveElement>(element: E) -> E {
     element
         .window_control_area(WindowControlArea::Drag)
         .on_mouse_down(MouseButton::Left, |event, window, _| {
-            set_window_drag_press(window_drag_is_app_owned(window).then_some(event.position));
+            let app_owned = window_drag_is_app_owned(window);
+            log_window_drag(
+                "press",
+                event.position,
+                serde_json::json!({ "appOwned": app_owned }),
+            );
+            set_window_drag_press(app_owned.then_some(event.position));
+            WINDOW_DRAG_MOVE_LOGGED.store(false, std::sync::atomic::Ordering::Relaxed);
         })
         .on_mouse_up(MouseButton::Left, |_, _, _| set_window_drag_press(None))
         .on_mouse_move(|event, window, _| {
             let Some(press) = WINDOW_DRAG_PRESS.lock().ok().and_then(|slot| *slot) else {
                 return;
             };
+            if !WINDOW_DRAG_MOVE_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                log_window_drag(
+                    "firstMove",
+                    event.position,
+                    serde_json::json!({ "leftHeld": event.pressed_button == Some(MouseButton::Left) }),
+                );
+            }
             // A release that some control swallowed leaves the press behind; without the button
             // still held there is no drag to hand over.
             if event.pressed_button != Some(MouseButton::Left) {
+                log_window_drag(
+                    "pressDroppedNoButton",
+                    event.position,
+                    serde_json::json!({}),
+                );
                 set_window_drag_press(None);
                 return;
             }
             if (event.position - press).magnitude() > f64::from(WINDOW_DRAG_THRESHOLD) {
+                log_window_drag("startWindowMove", event.position, serde_json::json!({}));
                 set_window_drag_press(None);
                 window.start_window_move();
             }
         })
+}
+
+/// Diagnostics only: whether this press's first move has been logged.
+static WINDOW_DRAG_MOVE_LOGGED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// A line in the Terminal focus diagnostic log (scenario `native.terminal.focus`) for the window
+/// move a drag region hands to the platform; written only while that scenario is on.
+pub(crate) fn log_window_drag(
+    event: &str,
+    position: gpui::Point<gpui::Pixels>,
+    mut details: serde_json::Value,
+) {
+    if let Some(object) = details.as_object_mut() {
+        object.insert("x".into(), serde_json::json!(position.x.as_f32().round()));
+        object.insert("y".into(), serde_json::json!(position.y.as_f32().round()));
+    }
+    crate::support_logs::append(
+        crate::support_logs::GpuiSupportLog::TerminalFocus,
+        &format!("gpui.windowDrag.{event}"),
+        details,
+    );
 }
