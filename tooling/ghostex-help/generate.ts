@@ -198,6 +198,8 @@ type SupplementalRow = {
 };
 
 const GENERAL_TAB = { tab: 'settings', tabTitle: 'General' } as const;
+/** The Theme page renders the `appearance` group's sections (Theme, App Icon) on its own tab. */
+const THEME_TAB = { tab: 'theme', tabTitle: 'Theme' } as const;
 const EXTENSIONS_TAB = { tab: 'extensions', tabTitle: 'Extensions' } as const;
 const AGENTS_TAB = { tab: 'agents', tabTitle: 'Agents' } as const;
 const PROJECTS_TAB = { tab: 'projects', tabTitle: 'Projects' } as const;
@@ -321,8 +323,7 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
   storybookViewTabHidden: {
     ...viewRows,
     title: 'Hide Storybook view',
-    subtitle:
-      'Hide the built-in component workshop. When enabled, it appears only in projects with Storybook.',
+    subtitle: 'Hide the built-in component workshop. When enabled, it appears only in projects with Storybook.',
   },
   terminalViewTabHidden: {
     ...viewRows,
@@ -332,8 +333,7 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
   },
   tipsAndTricksTitlebarButtonHidden: {
     ...viewRows,
-    subtitle:
-      'Stop offering the Tips & Tricks page, so it is missing from the header ⋯ menu and the view picker.',
+    subtitle: 'Stop offering the Tips & Tricks page, so it is missing from the header ⋯ menu and the view picker.',
     title: 'Hide Tips button',
   },
   notificationsTitlebarButtonHidden: {
@@ -343,14 +343,12 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
   },
   helpTitlebarButtonHidden: {
     ...viewRows,
-    subtitle:
-      'Stop offering the Ask Ghostex page, so it is missing from the header ⋯ menu and the view picker.',
+    subtitle: 'Stop offering the Ask Ghostex page, so it is missing from the header ⋯ menu and the view picker.',
     title: 'Hide Help button',
   },
   resourcesTitlebarButtonHidden: {
     ...viewRows,
-    subtitle:
-      'Stop offering the Resources page, so it is missing from the header ⋯ menu and the view picker.',
+    subtitle: 'Stop offering the Resources page, so it is missing from the header ⋯ menu and the view picker.',
     title: 'Hide Resources button',
   },
   devServersTitlebarButtonHidden: {
@@ -463,8 +461,7 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
     group: 'terminal',
     section: 'terminal',
     sectionTitle: 'Terminal',
-    subtitle:
-      'Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.',
+    subtitle: 'Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.',
     title: 'WSL distribution',
   },
   portlessEnabled: {
@@ -486,7 +483,7 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
     title: 'Portless protocol',
   },
   workspacePaneGap: {
-    ...GENERAL_TAB,
+    ...THEME_TAB,
     group: 'appearance',
     section: 'theming',
     sectionTitle: 'Theme',
@@ -494,7 +491,7 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
     title: 'Pane gap',
   },
   customSidebarTitlebarForegroundColor: {
-    ...GENERAL_TAB,
+    ...THEME_TAB,
     group: 'appearance',
     section: 'theming',
     sectionTitle: 'Theme',
@@ -503,7 +500,7 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
     userOnly: true,
   },
   customSidebarTitlebarBackgroundColor: {
-    ...GENERAL_TAB,
+    ...THEME_TAB,
     group: 'appearance',
     section: 'theming',
     sectionTitle: 'Theme',
@@ -619,6 +616,23 @@ function buildCatalog(): Catalog {
           })
         );
       }
+    }
+  }
+
+  // The `appearance` group left General's rail for its own Theme page, after General.
+  const themeGroup = MAIN_SETTINGS_GROUP_SECTIONS.appearance;
+  for (const sectionId of themeGroup.sections as readonly SettingsSearchSectionId[]) {
+    const section = definitions[sectionId];
+    for (const definition of section.settings) {
+      push(
+        catalogEntry(definition, {
+          ...THEME_TAB,
+          group: 'appearance',
+          groupTitle: themeGroup.title,
+          section: sectionId,
+          sectionTitle: section.title,
+        })
+      );
     }
   }
 
@@ -739,9 +753,7 @@ function buildCatalog(): Catalog {
     title: definition.title,
     description: definition.description,
     defaultKey: definition.defaultKey,
-    ...(definition.windowsLinuxDefaultKey
-      ? { windowsLinuxDefaultKey: definition.windowsLinuxDefaultKey }
-      : {}),
+    ...(definition.windowsLinuxDefaultKey ? { windowsLinuxDefaultKey: definition.windowsLinuxDefaultKey } : {}),
   }));
 
   return {
@@ -770,9 +782,7 @@ function describeType(entry: CatalogEntry): string {
         entry.min !== undefined && entry.max !== undefined
           ? ` ${entry.min} to ${entry.max}${entry.step ? ` step ${entry.step}` : ''}`
           : '';
-      const allowed = entry.options
-        ? ` one of ${entry.options.map((option) => option.value).join(' | ')};`
-        : '';
+      const allowed = entry.options ? ` one of ${entry.options.map((option) => option.value).join(' | ')};` : '';
       return `number${range}${allowed} default ${formatDefault(entry.default)}`;
     }
     case 'string':
