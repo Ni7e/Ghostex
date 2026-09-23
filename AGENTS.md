@@ -192,6 +192,17 @@ Files you touched earlier in your session, or read a while ago, may have been ch
 - Run desktop-crate cargo commands **from inside `apps/desktop/`**, never with `--manifest-path` from the repo root: the crate pins its toolchain in `apps/desktop/rust-toolchain.toml` (1.95.0), and `--manifest-path` from the root resolves the root toolchain and fails on dependency code that needs the pin.
 - Local Rust builds of `apps/desktop/` and `server/` require `sccache` on PATH (`rustc-wrapper = "sccache"` in each crate's `.cargo/config.toml`, which cargo reads only when run from inside the crate directory). If cargo fails with `could not execute process 'sccache'`, run `brew install sccache`; never delete the config or build with `--manifest-path` from the root. Setup details: README.md, "Building from source".
 
+### `bun run start` is a fast dev build, not a release build (macOS)
+
+The local start is tuned so a small edit rebuilds and relaunches in about 10 seconds. Keep it that way, and don't mistake its shortcuts for bugs. Details, measurements and the rejected alternatives: `ai/local-start-performance.md`.
+
+- **The `ghostex-gpui` and `gxserver` crates compile at opt-level 0** (their dependencies stay fully optimized). Never judge performance (scroll stutter, frame times, CPU use, startup time) from a default start: rebuild with `bun run start --optimized` first, and say which build you measured. `bun run build` and releases are always fully optimized.
+- **code-server is not inside local-start bundles.** Each build is cloned once into `build/dev-components.noindex/code-server/<arch>-<hash>/`; the bundle keeps only `Web/code-server/lib/node` and a `Web/local-start-code-server-root` pointer. Editing `.dependencies/code-server` still works: the next start rebuilds it into a new folder. Don't "restore" the missing payload to the bundle.
+- **Staging copies binaries only when their source changed**, so existing signatures are reused. Never go back to `rm -rf` + `cp` or a plain `rsync` for signed payloads in `build-macos-app.sh`; use `stage_file_if_changed` / `stage_tree_if_changed`.
+- **The start keeps the running gxserver when its build identity is unchanged** and stops it only when the bundled gxserver changed. `server/rust-toolchain.toml` pins the same Rust version as `apps/desktop/rust-toolchain.toml`; bump both together.
+- **Never install a build into `/Applications` by hand** (`ditto` to `Ghostex-new.app`, `mv Ghostex.app Ghostex.old-<time>.app`, and the like). Every hand install left a 1.7GB copy behind. `bun run start` is the only install path. If it reports that macOS App Management blocks it, tell the user to turn App Management on for Ghostex or their terminal and stop there. The start deletes leftover `Ghostex.old-*`, `Ghostex.broken-*` and `Ghostex-new` copies, and prunes rustc incremental caches to the newest one per binary.
+- **Adding work to the start path:** put it behind a content-hash stamp (`build-cache.sh`) so an unchanged start skips it, and measure an unchanged start (target: under 10s) and a one-line Rust edit before and after.
+
 ### Before committing and pushing: formatting and file-size upkeep
 
 Before you commit and push, run `ghostex sessions` (see `ghostex --help`) and look only at the group whose project path matches the folder you are working in; your own session is one `running` entry there, and sessions in other projects or worktrees do not block anything. Full procedure and the exact commands: `ai/formatting-and-file-size.md`.

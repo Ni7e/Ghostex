@@ -280,6 +280,20 @@ pub(crate) fn source_code_server_repo_root_candidates() -> Vec<PathBuf> {
             let resources_dir = bundle_root.join("Contents/Resources");
             append(resources_dir.join("Web/code-server"));
             append(resources_dir.join("code-server"));
+            /*
+            CDXC:CodeEditor 2026-09-23 DECISION:
+            User chose to keep code-server out of `bun run start` bundles: re-sealing, verifying, syncing and malware-scanning its 5.5k files cost every start even when it had not changed.
+            The local start copies each code-server build once into its own content-named folder outside the bundle and records that folder in this file; only lib/node stays in the bundle. Release and `bun run build` bundles never carry the file.
+            SEE-ALSO: stage_local_start_code_server in apps/desktop/scripts/build-macos-app.sh.
+            */
+            if let Ok(local_start_root) =
+                fs::read_to_string(resources_dir.join("Web/local-start-code-server-root"))
+            {
+                let local_start_root = local_start_root.trim();
+                if !local_start_root.is_empty() {
+                    append(PathBuf::from(local_start_root));
+                }
+            }
         }
         // Non-macOS staged layouts are flat: bundled payloads sit beside the
         // executable (same contract as the staged gxserver package).

@@ -422,6 +422,8 @@ export default defineConfig({
   build: {
     emptyOutDir: true,
     outDir: sidebarOutDir,
+    // The gzip size report compresses every chunk (Monaco, Mermaid) only to print sizes nobody reads here.
+    reportCompressedSize: false,
     rolldownOptions: {
       /*
        * CDXC:CefRuntime 2026-06-14-12:50:
