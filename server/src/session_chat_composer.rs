@@ -898,7 +898,7 @@ pub async fn wait_for_session_chat_composer(
         };
         match capture {
             Some(screen) => {
-                let notice = require_ready
+                let notice = (require_ready || agent.as_deref() == Some("claude"))
                     .then(|| {
                         crate::session_chat_notice::classify_session_chat_terminal_notice(
                             agent_id, &screen,

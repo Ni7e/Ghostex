@@ -170,6 +170,10 @@ mod input_replace;
 pub use input_replace::clear_session_chat_composer;
 pub(crate) use input_replace::handle_replace_session_chat_draft_http;
 
+#[path = "session_chat_composer_repaint.rs"]
+mod composer_repaint;
+pub(crate) use composer_repaint::claude_composer_needs_redraw;
+
 // Ask-answer keystrokes (upstream chat spec §8.4/§8.5).
 const ASK_ENTER: &str = "\r";
 const ASK_NEXT_TAB: &str = "\u{1b}[C"; // Right arrow → next question / Submit tab
@@ -1905,8 +1909,11 @@ async fn run_session_chat_send_worker(
                             matches!(*agent, "claude" | "openclaude" | "codex" | "grok")
                         })
                         .map(str::to_string);
-                    let wait = crate::session_chat_composer::wait_for_session_chat_composer(
+                    let wait = composer_repaint::wait_for_send_composer(
+                        &project_id,
+                        &session_id,
                         &zmx_name,
+                        &source,
                         agent.as_deref(),
                         crate::session_chat_composer::SessionChatComposerWaitPolicy {
                             settle_ms,
@@ -1921,6 +1928,13 @@ async fn run_session_chat_send_worker(
                         &|| job_generation != generation.load(Ordering::SeqCst),
                     )
                     .await;
+                    let wait = match wait {
+                        Ok(wait) => wait,
+                        Err(error) => {
+                            outcome = Err(error);
+                            break;
+                        }
+                    };
                     match wait {
                         crate::session_chat_composer::SessionChatComposerWait::Ready
                         | crate::session_chat_composer::SessionChatComposerWait::Unknown => {}

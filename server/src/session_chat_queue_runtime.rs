@@ -848,10 +848,20 @@ pub(crate) async fn send_session_chat_message_with_draft(
     clients read it from /api/readSessionTerminalTail instead.
     */
     let dismiss_claude_settings = detection.composer.should_dismiss_with_escape();
+    let redraw_claude_composer = detection.prompt.is_none()
+        && !detection
+            .notice
+            .as_ref()
+            .is_some_and(|notice| notice.blocks_input() || notice.is_answerable())
+        && crate::session_chat_send::claude_composer_needs_redraw(
+            terminal_agent.as_deref(),
+            &detection.composer,
+        );
     if detection
         .composer
         .blocks_message_for(terminal_agent.as_deref())
         && !dismiss_claude_settings
+        && !redraw_claude_composer
     {
         return Err(DomainStateError {
             code: "composerNotReady",
