@@ -39,6 +39,32 @@ fn window_drag_is_app_owned(_window: &gpui::Window) -> bool {
     false
 }
 
+/// Whether the second press of a double click landed on a drag region itself rather than on a
+/// control inside it, so the release that completes it zooms the window.
+static WINDOW_DRAG_DOUBLE_PRESS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/*
+CDXC:Titlebar 2026-08-23:
+GPUI paints the whole top band itself, so AppKit's own titlebar view never sees a double click there
+and the standard macOS zoom gesture silently did nothing. Forward it to the platform window, which
+honours the user's NSGlobalDomain AppleActionOnDoubleClick preference (Maximize/Fill/Minimize/
+Do Nothing). Linux compositors leave the same gesture to the client, so zoom directly there;
+Windows already resolves it from the WindowControlArea::Drag hit test in the platform layer.
+*/
+#[cfg(target_os = "macos")]
+fn window_drag_double_click_action(window: &gpui::Window) {
+    window.titlebar_double_click();
+}
+
+#[cfg(target_os = "linux")]
+fn window_drag_double_click_action(window: &gpui::Window) {
+    window.zoom_window();
+}
+
+#[cfg(any(target_os = "windows", target_family = "wasm"))]
+fn window_drag_double_click_action(_window: &gpui::Window) {}
+
 /// CDXC:Titlebar 2026-09-21 WHY:
 /// The view tab strip sits in the window's top band, and on macOS AppKit moved the window from any
 /// drag that started in that band, so dragging a tab to reorder it dragged the window instead.
@@ -49,6 +75,12 @@ fn window_drag_is_app_owned(_window: &gpui::Window) -> bool {
 /// pointer has travelled a few pixels so clicks and the double-click zoom keep working. Controls inside a region
 /// stop their own presses from reaching it, which is what keeps a tab drag a tab drag. Windows
 /// resolves the same regions from the `Drag` hit test in the platform layer.
+/// CDXC:Titlebar 2026-09-23 DECISION:
+/// User: double-clicking the view tab strip, or an empty spot at the top of the sidebar, maximizes
+/// the window the way double-clicking the header beside them does. So the double-click zoom
+/// belongs to every drag region, not to the header alone. It needs both halves of the second click
+/// on the region: the tabs stop only their presses and the sidebar's buttons only their clicks, and
+/// double-clicking either must stay theirs.
 pub(crate) fn window_drag_region<E: InteractiveElement>(element: E) -> E {
     element
         .window_control_area(WindowControlArea::Drag)
@@ -60,9 +92,20 @@ pub(crate) fn window_drag_region<E: InteractiveElement>(element: E) -> E {
                 serde_json::json!({ "appOwned": app_owned }),
             );
             set_window_drag_press(app_owned.then_some(event.position));
+            WINDOW_DRAG_DOUBLE_PRESS.store(
+                event.click_count == 2,
+                std::sync::atomic::Ordering::Relaxed,
+            );
             WINDOW_DRAG_MOVE_LOGGED.store(false, std::sync::atomic::Ordering::Relaxed);
         })
-        .on_mouse_up(MouseButton::Left, |_, _, _| set_window_drag_press(None))
+        .on_mouse_up(MouseButton::Left, |event, window, _| {
+            set_window_drag_press(None);
+            if WINDOW_DRAG_DOUBLE_PRESS.swap(false, std::sync::atomic::Ordering::Relaxed)
+                && event.click_count == 2
+            {
+                window_drag_double_click_action(window);
+            }
+        })
         .on_mouse_move(|event, window, _| {
             let Some(press) = WINDOW_DRAG_PRESS.lock().ok().and_then(|slot| *slot) else {
                 return;
@@ -83,11 +126,13 @@ pub(crate) fn window_drag_region<E: InteractiveElement>(element: E) -> E {
                     serde_json::json!({}),
                 );
                 set_window_drag_press(None);
+                WINDOW_DRAG_DOUBLE_PRESS.store(false, std::sync::atomic::Ordering::Relaxed);
                 return;
             }
             if (event.position - press).magnitude() > f64::from(WINDOW_DRAG_THRESHOLD) {
                 log_window_drag("startWindowMove", event.position, serde_json::json!({}));
                 set_window_drag_press(None);
+                WINDOW_DRAG_DOUBLE_PRESS.store(false, std::sync::atomic::Ordering::Relaxed);
                 window.start_window_move();
             }
         })

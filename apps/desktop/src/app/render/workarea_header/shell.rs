@@ -6,7 +6,6 @@ use gpui::IntoElement;
 use gpui::MouseButton;
 use gpui::MouseDownEvent;
 use gpui::ParentElement as _;
-use gpui::StatefulInteractiveElement as _;
 use gpui::Styled as _;
 use gpui::Window;
 use gpui::div;
@@ -20,27 +19,6 @@ use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::render::window_drag_region::window_drag_region;
 use crate::*;
-
-/*
-CDXC:Titlebar 2026-08-23:
-GPUI paints the whole header itself, so AppKit's own titlebar view never sees a double click there
-and the standard macOS zoom gesture silently did nothing. Forward it to the platform window, which
-honours the user's NSGlobalDomain AppleActionOnDoubleClick preference (Maximize/Fill/Minimize/
-Do Nothing). Linux compositors leave the same gesture to the client, so zoom directly there;
-Windows already resolves it from the WindowControlArea::Drag hit test in the platform layer.
-*/
-#[cfg(target_os = "macos")]
-fn gpui_header_double_click_window_action(window: &Window) {
-    window.titlebar_double_click();
-}
-
-#[cfg(target_os = "linux")]
-fn gpui_header_double_click_window_action(window: &Window) {
-    window.zoom_window();
-}
-
-#[cfg(target_os = "windows")]
-fn gpui_header_double_click_window_action(_window: &Window) {}
 
 impl GhostexGpuiApp {
     /// True while the header's own half of the band is too narrow for its labels, which is what the
@@ -185,12 +163,6 @@ impl GhostexGpuiApp {
         );
 
         header
-            .on_click(|event, window, _cx| {
-                if event.click_count() != 2 {
-                    return;
-                }
-                gpui_header_double_click_window_action(window);
-            })
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
