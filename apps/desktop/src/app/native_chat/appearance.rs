@@ -14,6 +14,8 @@ pub(crate) struct ChatAppearance {
     pub(crate) input_border: Hsla,
     pub(crate) ring: Hsla,
     pub(crate) card_background: Hsla,
+    /// The theme accent for this chat's appearance (`theme_accent_for_variant`), used by the account-switch card.
+    pub(crate) accent: Hsla,
     /// The status-card shell tones (cards.rs): a panel and a footer band stepped off the background.
     pub(crate) card_panel: Hsla,
     pub(crate) card_footer: Hsla,
@@ -24,6 +26,8 @@ pub(crate) struct ChatAppearance {
     pub(crate) input: Hsla,
     pub(crate) composer_border: Hsla,
     pub(crate) composer_background: Hsla,
+    /// The tinted menu tone the sidebar's menus use, for this chat's own theme variant.
+    menu: Hsla,
     pub(crate) scale: f32,
     pub(crate) font: String,
     pub(crate) light: bool,
@@ -34,6 +38,49 @@ pub(crate) struct ChatAppearance {
 }
 
 impl ChatAppearance {
+    /// CDXC:Theming 2026-09-23 DECISION:
+    /// User: under window glass the chat's bubbles, cards, chips and composer are frosted rather than solid: light washes over the glass, and the composer takes the same wash as the user's message bubble. This supersedes the same day's heavier composer tint. Only the pane inside the main window takes this; the chat's popup windows are opaque and keep their fills.
+    ///
+    /// CDXC:Theming 2026-09-23 WHY:
+    /// Window glass exists only in the desktop window, so the React chat has no counterpart to keep in parity with.
+    pub(crate) fn on_window_glass(mut self, glass: bool) -> Self {
+        if !glass {
+            return self;
+        }
+        let wash = |white: bool, alpha: f32| -> Hsla {
+            gpui::Hsla::from(rgb(if white { 0xffffff } else { 0x000000 })).opacity(alpha)
+        };
+        if self.light {
+            self.input = wash(false, 0.04);
+            self.border = wash(false, 0.08);
+            self.card_background = wash(true, 0.5);
+            self.card_panel = wash(true, 0.5);
+            self.card_footer = wash(true, 0.3);
+            self.composer_background = self.input;
+            self.composer_border = wash(false, 0.08);
+        } else {
+            self.input = wash(true, 0.06);
+            self.border = wash(true, 0.08);
+            self.card_background = gpui::transparent_black();
+            self.card_panel = wash(true, 0.06);
+            self.card_footer = wash(true, 0.03);
+            self.composer_background = self.input;
+            self.composer_border = wash(true, 0.08);
+        }
+        self
+    }
+
+    /// CDXC:Theming 2026-09-23 DECISION:
+    /// User: the chat's menus and popovers (the model picker, the transcript's Copy menu, the composer's ⋯ menu and the like) take the same tinted colour as the sidebar's menus instead of a fixed grey, and are frosted glass while window glass is on. Their windows blur what is behind them, so the fill only thins.
+    pub(crate) fn menu_surface(&self) -> Hsla {
+        if crate::app::helpers::window_glass_active() {
+            self.menu
+                .opacity(crate::app::helpers::WINDOW_GLASS_MENU_ALPHA)
+        } else {
+            self.menu
+        }
+    }
+
     /// The `--destructive` tone the React transcript paints failed tool results and failed writes in.
     pub(crate) fn error(&self) -> Hsla {
         rgb(if self.light { 0xc53030 } else { 0xef9999 }).into()
@@ -99,7 +146,19 @@ impl ChatAppearance {
         };
         let raised = |amount: f32| -> Hsla { toward(255.0, amount) };
         Self {
+            accent: rgb(crate::app::helpers::theme_accent_for_variant(
+                settings, light,
+            ))
+            .into(),
             background,
+            menu: rgb(
+                crate::app::helpers::sidebar_titlebar_menu_background_for_chrome(
+                    crate::app::helpers::resolved_custom_sidebar_titlebar_background_for_variant(
+                        settings, light,
+                    ),
+                ),
+            )
+            .into(),
             foreground: color(0xfcfcfc, 0x27272a),
             primary: color(0xb4b8c0, 0x27272a),
             control_primary: color(0xe5e5e5, 0x18181b),

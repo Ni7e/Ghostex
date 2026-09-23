@@ -530,6 +530,20 @@ pub(crate) fn resolve_allowed_session_identity(
     } else {
         None
     };
+    if let Some(conflict) = passive_unwritten_claude_conflict(
+        current_identity,
+        current_session,
+        observed_identity,
+        observed_agent_id.as_deref(),
+        current_agent_id.as_deref(),
+        resolved_agent_id.as_deref(),
+        source,
+    ) {
+        return Ok((
+            keep_current_session_identity(resolved_identity, current_identity),
+            Some(conflict),
+        ));
+    }
     let is_passive_codex_observation = source == SessionIdentityUpdateSource::Passive
         && incoming_agent_session_id.is_some()
         && (observed_agent_id.as_deref() == Some("codex")
@@ -578,6 +592,68 @@ pub(crate) fn resolve_allowed_session_identity(
         ));
     }
     Ok((resolved_identity.clone(), None))
+}
+
+/// CDXC:SessionIdentity 2026-09-20 WHY:
+/// Claude reports a brand-new conversation id through its hooks before it writes a single transcript line, and it writes none at all until the first turn. A Claude that started and died within a second therefore replaced a working conversation with an id no CLI can resume; the next wake failed its exact resume and the title lookup opened another project's chat (observed 2026-09-19, session S60-P7369-G6gmp). An observation that names a transcript which is not on disk is not evidence yet, so keep the conversation that is: the same id arrives again on the next hook event once the file exists.
+/// `align_observed_identity_with_launch_profile` has already renamed a Claude observation to its `custom-…` profile by the time this runs, so the family is read from the session's launch icon for those ids; checking for the literal `claude` let every custom Claude profile skip the guard.
+fn passive_unwritten_claude_conflict(
+    current_identity: &ResolvedIdentity,
+    current_session: &Value,
+    observed_identity: &ResolvedIdentity,
+    observed_agent_id: Option<&str>,
+    current_agent_id: Option<&str>,
+    resolved_agent_id: Option<&str>,
+    source: SessionIdentityUpdateSource,
+) -> Option<SessionIdentityConflict> {
+    if source != SessionIdentityUpdateSource::Passive {
+        return None;
+    }
+    let is_claude = |agent_id: Option<&str>| {
+        agent_id == Some("claude")
+            || (agent_id.is_some_and(|agent_id| agent_id.starts_with("custom-"))
+                && session_launch_agent_provider_id(current_session).as_deref() == Some("claude"))
+    };
+    let observes_claude = is_claude(observed_agent_id)
+        || (observed_agent_id.is_none()
+            && is_claude(current_agent_id)
+            && is_claude(resolved_agent_id));
+    if !observes_claude {
+        return None;
+    }
+    let incoming = trimmed_identity_value(observed_identity.agent_session_id.as_deref())?;
+    let current = trimmed_identity_value(current_identity.agent_session_id.as_deref())?;
+    if incoming == current {
+        return None;
+    }
+    if !agent_transcript_exists(current_identity.agent_session_path.as_deref()) {
+        return None;
+    }
+    let incoming_path = trimmed_identity_value(observed_identity.agent_session_path.as_deref())?;
+    if crate::resume_lookup::expand_home(&incoming_path).is_file() {
+        return None;
+    }
+    Some(SessionIdentityConflict {
+        agent_id: "claude".to_string(),
+        current_agent_session_id: Some(current),
+        incoming_agent_session_id: incoming,
+        owner_project_id: None,
+        owner_session_id: None,
+        reason: "passive-agent-session-id-unwritten",
+        source,
+    })
+}
+
+fn trimmed_identity_value(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn agent_transcript_exists(path: Option<&str>) -> bool {
+    trimmed_identity_value(path)
+        .is_some_and(|path| crate::resume_lookup::expand_home(&path).is_file())
 }
 
 pub(crate) fn keep_current_session_identity(

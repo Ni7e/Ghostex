@@ -367,6 +367,7 @@ fn main() {
         };
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
+            window_background: window_glass_background_appearance(),
             display_id,
             window_min_size: Some(size(
                 px(GPUI_WINDOW_FRAME_MIN_WIDTH),
@@ -547,7 +548,10 @@ fn main() {
                     .detach();
                 });
                 cx.new(|cx| {
-                    let root = Root::new(view, window, cx).bg(workspace_background_color());
+                    // Transparent rather than unset, which would paint the theme's opaque
+                    // background: the app view's root paints the window's fill and follows window
+                    // glass, which this style (set once, here) could not.
+                    let root = Root::new(view, window, cx).bg(gpui::transparent_black());
                     /*
                     Ghostex owns an exact, non-overlapping Linux resize frame
                     inside its main view. Disable gpui-component's generic

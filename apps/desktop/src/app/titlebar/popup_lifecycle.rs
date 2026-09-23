@@ -146,7 +146,12 @@ impl GhostexGpuiApp {
             is_resizable: false,
             is_minimizable: false,
             titlebar: None,
-            window_background: WindowBackgroundAppearance::Transparent,
+            // Under window glass the dropdown blurs what is behind it, rounded to its 8px panel.
+            window_background: if window_glass_active() {
+                WindowBackgroundAppearance::Blurred
+            } else {
+                WindowBackgroundAppearance::Transparent
+            },
             ..Default::default()
         };
         log_gpui_titlebar_popup_repro(
@@ -162,6 +167,7 @@ impl GhostexGpuiApp {
         let popup_window = match cx.open_window(options, {
             let content = content.clone();
             move |popup_window, cx| {
+                popup_window.set_background_corner_radius(px(8.0));
                 prepare_gpui_titlebar_popup_window_chrome(popup_window);
                 GpuiTitlebarPopupWindow::new(main_app, kind, content, popup_window, cx)
             }

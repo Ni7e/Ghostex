@@ -1537,13 +1537,16 @@ pub(crate) fn titlebar_popup_menu_foreground() -> Hsla {
     .into()
 }
 
+/// CDXC:Theming 2026-09-23 DECISION:
+/// User: the hovered row of a menu read as a flat grey slab on the tinted menus ("hovered menu item color is ugly"). It is a wash of the menu's own ink instead, so it carries the theme's tint and works on frosted menus too.
 pub(crate) fn titlebar_popup_menu_hover_color() -> Hsla {
-    rgb(if titlebar_uses_light_theme() {
-        0xefefef
-    } else {
-        0x202020
-    })
-    .into()
+    titlebar_overlay_base()
+        .opacity(if titlebar_uses_light_theme() {
+            0.06
+        } else {
+            0.08
+        })
+        .into()
 }
 
 pub(crate) fn titlebar_popup_menu_border_color() -> Hsla {
@@ -2044,6 +2047,65 @@ pub(crate) fn session_chat_background_for_chrome(chrome: u32) -> u32 {
             0.01
         },
     )
+}
+
+/// Rust port of `getAccentColorForBackgroundTint` / `getLightAccentColorForBackgroundTint` in
+/// packages/shared/ghostex-settings/titlebar-color.ts: the tint's hue at a fixed lightness (0.75 for the
+/// dark appearance, 0.38 for the light one) with saturation held in 0.55-0.9, and a fixed colour for a
+/// neutral tint (#86d3f8 dark, #262626 light). Keep both in lockstep.
+pub(crate) fn accent_color_for_tint(tint: u32, light: bool) -> u32 {
+    let [red, green, blue] = sidebar_titlebar_rgb_channels(tint).map(|channel| channel / 255.0);
+    let max = red.max(green).max(blue);
+    let min = red.min(green).min(blue);
+    if (max - min) * 255.0 < 1.0 {
+        return if light { 0x262626 } else { 0x86d3f8 };
+    }
+    let chroma = max - min;
+    let tint_lightness = (max + min) / 2.0;
+    let tint_saturation = chroma / (1.0 - (2.0 * tint_lightness - 1.0).abs());
+    let hue_sextant = if max == red {
+        (((green - blue) / chroma) % 6.0 + 6.0) % 6.0
+    } else if max == green {
+        (blue - red) / chroma + 2.0
+    } else {
+        (red - green) / chroma + 4.0
+    };
+    let lightness: f32 = if light { 0.38 } else { 0.75 };
+    let saturation = tint_saturation.clamp(0.55, 0.9);
+    let accent_chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let secondary = accent_chroma * (1.0 - ((hue_sextant % 2.0) - 1.0).abs());
+    let offset = lightness - accent_chroma / 2.0;
+    let [r, g, b] = if hue_sextant < 1.0 {
+        [accent_chroma, secondary, 0.0]
+    } else if hue_sextant < 2.0 {
+        [secondary, accent_chroma, 0.0]
+    } else if hue_sextant < 3.0 {
+        [0.0, accent_chroma, secondary]
+    } else if hue_sextant < 4.0 {
+        [0.0, secondary, accent_chroma]
+    } else if hue_sextant < 5.0 {
+        [secondary, 0.0, accent_chroma]
+    } else {
+        [accent_chroma, 0.0, secondary]
+    };
+    sidebar_titlebar_pack_rgb([
+        (r + offset) * 255.0,
+        (g + offset) * 255.0,
+        (b + offset) * 255.0,
+    ])
+}
+
+/// The accent for one appearance, from the tint that appearance's chrome actually paints.
+pub(crate) fn theme_accent_for_variant(
+    object: &serde_json::Map<String, serde_json::Value>,
+    light: bool,
+) -> u32 {
+    let tint = if light {
+        light_chrome_controls(object).1
+    } else {
+        dark_chrome_controls(object).1
+    };
+    accent_color_for_tint(tint, light)
 }
 
 pub(crate) fn command_pane_titlebar_separator_color() -> Hsla {

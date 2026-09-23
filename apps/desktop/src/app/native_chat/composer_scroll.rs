@@ -1,4 +1,5 @@
 use super::state::NativeChatView;
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement, Styled, div, px,
 };
@@ -7,19 +8,31 @@ use serde_json::json;
 impl NativeChatView {
     /// CDXC:SessionChat 2026-09-23 SEE-ALSO: `sessionChatKeepComposerExpanded` in `packages/shared/ghostex-settings/types.ts` holds the user's decision; a missing key reads as its default, on.
     pub(super) fn composer_collapse_eligible(&self) -> bool {
-        let keep_expanded = crate::shared_settings::shared_sidebar_settings_snapshot()
-            .object()
-            .get("sessionChatKeepComposerExpanded")
-            .and_then(serde_json::Value::as_bool)
-            != Some(false);
-        !keep_expanded
-            && self.maximized_window.is_none()
+        !keep_composer_expanded() && self.composer_collapse_allowed()
+    }
+
+    /// Everything but the scroll gesture's own setting that stops the box collapsing.
+    fn composer_collapse_allowed(&self) -> bool {
+        self.maximized_window.is_none()
             && !(self.snapshot["questionCard"]["visible"] == true
                 && self.snapshot["prompt"]["kind"] == "question")
             && self.snapshot["composerCollapseEligible"] == true
     }
 
+    /// The pane is too short for the full box (`sessionChatComposerHeightConstrained` in
+    /// packages/shared/session-chat-presentation/composer-scroll.ts holds the decision).
+    fn composer_height_constrained(&self) -> bool {
+        let scale = super::appearance::ChatAppearance::current(&self.snapshot).scale;
+        let height = f32::from(self.bounds.get().size.height) / scale.max(0.01);
+        height > 0.0 && height < super::composer_animation::METRICS.constrained_pane_height_px
+    }
+
+    /// CDXC:SessionChat 2026-09-23 WHY:
+    /// A short pane's box first stayed open for as long as the text field held focus, but the field keeps focus (and its caret) when the user clicks the transcript, and selecting a session hands it focus without any click, so the box of the focused short pane was almost always open. It now opens only on something the user does to the box itself: a press inside it, or typing into it. A press anywhere else in the chat, the field losing focus, or another pane taking focus closes it again.
     pub(super) fn composer_collapsed(&self) -> bool {
+        if self.composer_height_constrained() {
+            return self.composer_collapse_allowed() && !self.short_pane_composer_open;
+        }
         self.composer_collapse_eligible() && self.snapshot["composerCollapsed"] == true
     }
 
@@ -29,7 +42,9 @@ impl NativeChatView {
         &mut self,
         cx: &Context<Self>,
     ) -> super::composer_animation::ComposerFrame {
-        let reduce_motion = cx.reduce_motion();
+        // With the box kept expanded while scrolling, the only collapse left is a short pane's,
+        // and it changes shape at once rather than animating.
+        let reduce_motion = cx.reduce_motion() || keep_composer_expanded();
         self.composer_animation
             .set_collapsed(self.composer_collapsed(), reduce_motion);
         self.composer_animation.advance(reduce_motion)
@@ -41,7 +56,8 @@ impl NativeChatView {
         cx: &Context<Self>,
     ) -> AnyElement {
         let chat = cx.weak_entity();
-        let p = super::appearance::ChatAppearance::current(&self.snapshot);
+        let p = super::appearance::ChatAppearance::current(&self.snapshot)
+            .on_window_glass(crate::app::helpers::window_glass_active_for(self.main_window));
         let scale = p.scale;
         div()
             .relative()
@@ -59,22 +75,29 @@ impl NativeChatView {
                 }),
             )
             .child(self.minimap_row(transcript.into_any_element(), cx))
-            .child(
-                // React masks the viewport's last rows into the composer band
-                // (`--scroll-fade-mask` on `[data-slot='message-scroller-viewport']` in chat.css).
-                // GPUI cannot mask a scrolling list, so the same shape is painted: a plain div with
-                // no id and no interactivity, which registers no hitbox and takes no input.
-                div()
-                    .absolute()
-                    .bottom_0()
-                    .left_0()
-                    .right_0()
-                    .h(px(24.0 * p.scale))
-                    .bg(gpui::linear_gradient(
-                        180.0,
-                        gpui::linear_color_stop(p.background.opacity(0.0), 0.0),
-                        gpui::linear_color_stop(p.background, 1.0),
-                    )),
+            // Under window glass there is no solid colour to fade into; the ramp would paint a
+            // dark band above the composer instead.
+            .when(
+                !crate::app::helpers::window_glass_active_for(self.main_window),
+                |this: gpui::Div| {
+                    this.child(
+                        // React masks the viewport's last rows into the composer band
+                        // (`--scroll-fade-mask` on `[data-slot='message-scroller-viewport']` in chat.css).
+                        // GPUI cannot mask a scrolling list, so the same shape is painted: a plain div with
+                        // no id and no interactivity, which registers no hitbox and takes no input.
+                        div()
+                            .absolute()
+                            .bottom_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(24.0 * p.scale))
+                            .bg(gpui::linear_gradient(
+                                180.0,
+                                gpui::linear_color_stop(p.background.opacity(0.0), 0.0),
+                                gpui::linear_color_stop(p.background, 1.0),
+                            )),
+                    )
+                },
             )
             .child(self.transcript_scrollbar(&p))
             .child(self.scroll_bottom_button(cx))
@@ -131,4 +154,29 @@ impl NativeChatView {
             )
             .into_any_element()
     }
+}
+
+impl NativeChatView {
+    /// Every press inside the chat, seen before anything else handles it: inside the box opens a
+    /// short pane's box, anywhere else closes it.
+    pub(super) fn note_short_pane_composer_press(
+        &mut self,
+        position: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let open = self.composer_bounds.get().contains(&position);
+        if self.short_pane_composer_open != open {
+            self.short_pane_composer_open = open;
+            cx.notify();
+        }
+    }
+}
+
+/// `sessionChatKeepComposerExpanded`; a missing key reads as its default, on.
+fn keep_composer_expanded() -> bool {
+    crate::shared_settings::shared_sidebar_settings_snapshot()
+        .object()
+        .get("sessionChatKeepComposerExpanded")
+        .and_then(serde_json::Value::as_bool)
+        != Some(false)
 }

@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
+import { getSidebarTitlebarMenuBackgroundForChrome } from '@/packages/shared/ghostex-settings';
+
 export type WorkareaTheme = 'light' | 'dark';
 const THEME_EVENT = 'ghostex-workarea-theme-changed';
 
@@ -22,6 +24,17 @@ export function applyWorkareaTheme(theme: WorkareaTheme, colors?: WorkareaThemeC
   const content = normalizeHex(colors?.content);
   if (chrome) document.documentElement.style.setProperty('--app-chrome-background', chrome);
   else document.documentElement.style.removeProperty('--app-chrome-background');
+  /**
+   * CDXC:Theming 2026-09-23 SEE-ALSO:
+   * Menus and popovers take the sidebar's tinted menu colour, the same one the desktop's own menus
+   * use (`titlebar_popup_menu_background`, and `ChatAppearance::menu_surface` for the chat).
+   */
+  if (chrome)
+    document.documentElement.style.setProperty(
+      '--app-menu-background',
+      getSidebarTitlebarMenuBackgroundForChrome(chrome)
+    );
+  else document.documentElement.style.removeProperty('--app-menu-background');
   if (content) document.documentElement.style.setProperty('--app-background', content);
   else document.documentElement.style.removeProperty('--app-background');
 }

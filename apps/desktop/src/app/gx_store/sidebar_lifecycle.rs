@@ -547,6 +547,7 @@ impl GhostexGpuiApp {
                 startup_restore: false,
                 keep_view: false,
                 wake_sleeping: false,
+                keep_sleeping: false,
             },
             cx,
         );

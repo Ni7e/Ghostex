@@ -496,6 +496,10 @@ EOF
 	local -a cargo_profile_args=()
 	if [[ "${GHOSTEX_LOCAL_START:-0}" == "1" ]]; then
 		cargo_profile_args+=(--config 'profile.release.package.gxserver.incremental=true')
+		# CDXC:Build 2026-09-23 DECISION: local starts build the gxserver crate at opt-level 0 unless `bun run start --optimized`; dependencies keep release optimization. SEE-ALSO: build-macos-rust.sh.
+		if [[ "${GHOSTEX_START_OPTIMIZED:-0}" != "1" ]]; then
+			cargo_profile_args+=(--config 'profile.release.package.gxserver.opt-level=0')
+		fi
 	fi
 	(
 		cd "$GXSERVER_RS_ROOT"
@@ -826,7 +830,7 @@ stage_remote_gxserver_linux_package_if_configured() {
 	# CDXC:RemoteMachines 2026-06-23-09:46: macOS app bundles may stage Linux remote gxserver packages only from explicit prebuilt directories. Validate required gxserver/zmx/Node/Portless/CLI resources and require Linux ELF payloads before copying to Web/gxserver-linux-* so the installer never uploads the host Darwin package to Ubuntu.
 	#
 	# CDXC:RemoteMachines 2026-06-23-10:07: The Ubuntu package builder writes build/remote-gxserver-linux/<arch>/package by default. Auto-stage that deterministic output when it exists so release/local app packaging can include the already-built Linux package without requiring another env var or rebuilding it in the macOS app pass.
-	rm -rf "$target_dir"
+	# CDXC:Build 2026-09-23 WHY: the two packages are 458MB; wiping the target first re-copied all of it on every start, while rsync alone copies only what changed.
 	mkdir -p "$target_dir"
 	rsync -a --delete "$source_dir"/ "$target_dir"/
 }
@@ -1222,9 +1226,10 @@ x86_64)
 	;;
 esac
 build_zmx_if_needed
-rm -rf "$WEB_DIR/bin"
+# CDXC:Build 2026-09-23 WHY: a fresh copy gave zmx a new modification time on every start, so the packager re-copied it into the bundle and re-signed it; rsync keeps the source's time and skips an unchanged binary.
 mkdir -p "$WEB_DIR/bin"
-cp "$ZMX_ROOT/zig-out/bin/zmx" "$WEB_DIR/bin/zmx"
+find "$WEB_DIR/bin" -mindepth 1 -maxdepth 1 ! -name zmx -exec rm -rf {} +
+rsync -a "$ZMX_ROOT/zig-out/bin/zmx" "$WEB_DIR/bin/zmx"
 chmod 755 "$WEB_DIR/bin/zmx"
 # CDXC:Build 2026-06-22-23:23: Optional contributor submodules should be packaged when present and strict, but absent optional checkouts should only disable their feature in local starts. Keep zmx above as the hard terminal/persistence dependency; gate Source independently so one missing feature cannot remove the rest of the app shell.
 if [[ -n "$CODE_SERVER_ROOT" ]]; then

@@ -137,7 +137,7 @@ impl GhostexGpuiApp {
                         .flex_shrink_0()
                         .h_full()
                         .w(px(trailing_reserve))
-                        .bg(workspace_background_color())
+                        .bg(workspace_nested_background())
                         .justify_end()
                         .children(window_controls.take()),
                 )

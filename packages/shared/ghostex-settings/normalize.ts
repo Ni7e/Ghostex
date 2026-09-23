@@ -59,6 +59,7 @@ import {
   type AutoSleepIdleMinutes,
   type ChatFileOpenView,
   type CommandsPanelSide,
+  type WindowGlassMode,
   type DefaultEditorCommand,
   type GhosttyConfirmCloseSurface,
   type GhosttyCopyOnSelect,
@@ -943,6 +944,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
      */
     hotkeys: normalizeghostexHotkeySettings(source.hotkeys),
     showActivePaneOutline: readBoolean(source, 'showActivePaneOutline', DEFAULT_ghostex_SETTINGS.showActivePaneOutline),
+    windowGlass: normalizeWindowGlassMode(readString(source, 'windowGlass', DEFAULT_ghostex_SETTINGS.windowGlass)),
     workspaceActivePaneBorderColor:
       readString(
         source,
@@ -1193,6 +1195,10 @@ export function getDefaultEditorCommandForSettings(settings: ghostexSettings): s
 
 function normalizeCommandsPanelSide(value: string | undefined): CommandsPanelSide {
   return value === 'right' ? 'right' : DEFAULT_ghostex_SETTINGS.commandsPanelSide;
+}
+
+function normalizeWindowGlassMode(value: string | undefined): WindowGlassMode {
+  return value === 'frosted' || value === 'opaque' ? value : DEFAULT_ghostex_SETTINGS.windowGlass;
 }
 
 function normalizeSidebarSpaceSwitchBehavior(value: string | undefined): SidebarSpaceSwitchBehavior {

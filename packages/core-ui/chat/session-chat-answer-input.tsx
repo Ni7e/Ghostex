@@ -7,13 +7,14 @@ import './session-chat-answer-input.css';
 import {
   clipboardImageFiles,
   linkedImageReferenceHrefs,
-  nextImageReferenceIndex,
   saveSessionChatImageFile,
   type PastedImagePreview,
   type SaveSessionChatImage,
 } from './session-chat-image-attachments';
 import { SessionChatAttachmentPreviews } from './session-chat-attachment-previews';
 import { sessionChatImageTargetForHref, useSessionChatImageViewer } from './session-chat-image-viewer';
+import { insertAnswerAttachments, removeChatReference } from '@/packages/shared/session-chat-presentation/references';
+import { sessionChatComposerReferences } from '@/packages/shared/session-chat-presentation/reference-pills';
 
 /**
  * CDXC:Clipboard 2026-09-15 DECISION:
@@ -95,8 +96,15 @@ export function SessionChatAnswerInput({
         disabled={disabled}
         activeImagePath={referenceInteractions.hoveredImagePath}
         onRemove={(image) => {
-          const escaped = image.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          onUpdate((text) => text.replace(new RegExp(`\\s?\\[Image #\\d+·?\\]\\(${escaped}\\) ?`), ''));
+          onUpdate((text) => {
+            const reference = sessionChatComposerReferences(text, true).find(
+              (reference) => reference.path === image.path
+            );
+            if (!reference) return text;
+            const result = removeChatReference(text, reference.start, reference.end);
+            caretRef.current = result.caret;
+            return result.text;
+          });
         }}
       />
       <div
@@ -136,15 +144,11 @@ export function SessionChatAnswerInput({
                 try {
                   const { path, dataUrl } = await saveSessionChatImageFile(file, save);
                   onUpdate((text) => {
-                    const position = text === original ? start : text.length;
-                    const finish = text === original ? end : text.length;
-                    const reference = `[Image #${nextImageReferenceIndex(text)}](${path})`;
-                    const inserted = `${position > 0 && !/\s/.test(text[position - 1] ?? '') ? ' ' : ''}${reference} `;
-                    const next = text.slice(0, position) + inserted + text.slice(finish);
-                    original = next;
-                    start = end = position + inserted.length;
+                    const result = insertAnswerAttachments(text, [path], original, start, end);
+                    original = result.text;
+                    start = end = result.caret;
                     caretRef.current = start;
-                    return next;
+                    return result.text;
                   });
                   setPreviews((current) => ({ ...current, [path]: dataUrl }));
                 } catch (reason) {

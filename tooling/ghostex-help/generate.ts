@@ -9,6 +9,7 @@
  * is stale.
  * SEE-ALSO: packages/core-ui/settings-modal/search-catalog.ts, server/src/ghostex_cli/settings.rs, server/src/ghostex_cli/guide.rs.
  */
+import './catalog-platform';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -122,7 +123,10 @@ const AGENT_DENIED_KEY_PATTERN = /token|password|secret|apikey|credential/iu;
 const AGENT_DENIED_TABS = new Set(['accounts', 'remote']);
 
 const NUMBER_RANGES: Record<string, { max: number; min: number; step?: number }> = {
-  agentManagerZoomPercent: { max: MAX_AGENT_MANAGER_ZOOM_PERCENT, min: MIN_AGENT_MANAGER_ZOOM_PERCENT },
+  agentManagerZoomPercent: {
+    max: MAX_AGENT_MANAGER_ZOOM_PERCENT,
+    min: MIN_AGENT_MANAGER_ZOOM_PERCENT,
+  },
   commandsPanelDefaultHeightPx: {
     max: MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
     min: MIN_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
@@ -154,14 +158,23 @@ const NUMBER_RANGES: Record<string, { max: number; min: number; step?: number }>
     max: MAX_PROJECT_SWITCH_KEEP_ALIVE_MINUTES,
     min: MIN_PROJECT_SWITCH_KEEP_ALIVE_MINUTES,
   },
-  sidebarDefaultWidthPx: { max: MAX_SIDEBAR_DEFAULT_WIDTH_PX, min: MIN_SIDEBAR_DEFAULT_WIDTH_PX },
+  sidebarDefaultWidthPx: {
+    max: MAX_SIDEBAR_DEFAULT_WIDTH_PX,
+    min: MIN_SIDEBAR_DEFAULT_WIDTH_PX,
+  },
   sidebarTooltipDelayMs: {
     max: MAX_SIDEBAR_TOOLTIP_DELAY_MS,
     min: MIN_SIDEBAR_TOOLTIP_DELAY_MS,
     step: SIDEBAR_TOOLTIP_DELAY_STEP_MS,
   },
-  terminalPaneHorizontalPaddingPx: { max: MAX_TERMINAL_PANE_PADDING_PX, min: MIN_TERMINAL_PANE_PADDING_PX },
-  terminalPaneVerticalPaddingPx: { max: MAX_TERMINAL_PANE_PADDING_PX, min: MIN_TERMINAL_PANE_PADDING_PX },
+  terminalPaneHorizontalPaddingPx: {
+    max: MAX_TERMINAL_PANE_PADDING_PX,
+    min: MIN_TERMINAL_PANE_PADDING_PX,
+  },
+  terminalPaneVerticalPaddingPx: {
+    max: MAX_TERMINAL_PANE_PADDING_PX,
+    min: MIN_TERMINAL_PANE_PADDING_PX,
+  },
   terminalViewWidthPercent: {
     max: MAX_TERMINAL_VIEW_WIDTH_PERCENT,
     min: MIN_TERMINAL_VIEW_WIDTH_PERCENT,
@@ -190,8 +203,16 @@ const AGENTS_TAB = { tab: 'agents', tabTitle: 'Agents' } as const;
 const PROJECTS_TAB = { tab: 'projects', tabTitle: 'Projects' } as const;
 const OPEN_TARGETS_TAB = { tab: 'openTargets', tabTitle: 'Open In' } as const;
 const HOTKEYS_TAB = { tab: 'hotkeys', tabTitle: 'Hotkeys' } as const;
-const viewRows = { ...EXTENSIONS_TAB, section: 'viewOrder', sectionTitle: 'Views' };
-const agentsConfig = { ...AGENTS_TAB, section: 'config', sectionTitle: 'Config' };
+const viewRows = {
+  ...EXTENSIONS_TAB,
+  section: 'viewOrder',
+  sectionTitle: 'Views',
+};
+const agentsConfig = {
+  ...AGENTS_TAB,
+  section: 'config',
+  sectionTitle: 'Config',
+};
 
 /**
  * Settings keys the modal renders without a search row (or with a row keyed
@@ -300,7 +321,8 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
   storybookViewTabHidden: {
     ...viewRows,
     title: 'Hide Storybook view',
-    subtitle: 'Hide the built-in component workshop. When enabled, it appears only in projects with Storybook.',
+    subtitle:
+      'Hide the built-in component workshop. When enabled, it appears only in projects with Storybook.',
   },
   terminalViewTabHidden: {
     ...viewRows,
@@ -310,7 +332,8 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
   },
   tipsAndTricksTitlebarButtonHidden: {
     ...viewRows,
-    subtitle: 'Stop offering the Tips & Tricks page, so it is missing from the header ⋯ menu and the view picker.',
+    subtitle:
+      'Stop offering the Tips & Tricks page, so it is missing from the header ⋯ menu and the view picker.',
     title: 'Hide Tips button',
   },
   notificationsTitlebarButtonHidden: {
@@ -320,12 +343,14 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
   },
   helpTitlebarButtonHidden: {
     ...viewRows,
-    subtitle: 'Stop offering the Ask Ghostex page, so it is missing from the header ⋯ menu and the view picker.',
+    subtitle:
+      'Stop offering the Ask Ghostex page, so it is missing from the header ⋯ menu and the view picker.',
     title: 'Hide Help button',
   },
   resourcesTitlebarButtonHidden: {
     ...viewRows,
-    subtitle: 'Stop offering the Resources page, so it is missing from the header ⋯ menu and the view picker.',
+    subtitle:
+      'Stop offering the Resources page, so it is missing from the header ⋯ menu and the view picker.',
     title: 'Hide Resources button',
   },
   devServersTitlebarButtonHidden: {
@@ -438,7 +463,8 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
     group: 'terminal',
     section: 'terminal',
     sectionTitle: 'Terminal',
-    subtitle: 'Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.',
+    subtitle:
+      'Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.',
     title: 'WSL distribution',
   },
   portlessEnabled: {
@@ -533,7 +559,10 @@ function catalogEntry(
   definition: SettingSearchDefinition,
   location: Pick<CatalogEntry, 'tab' | 'tabTitle' | 'group' | 'groupTitle' | 'section' | 'sectionTitle'>
 ): CatalogEntry {
-  const options = definition.options?.map((option) => ({ label: option.label, value: option.value }));
+  const options = definition.options?.map((option) => ({
+    label: option.label,
+    value: option.value,
+  }));
   const type = valueTypeFor(definition.key, Boolean(options && options.length > 0));
   const primitive = type === 'boolean' || type === 'number' || type === 'string' || type === 'enum';
   const agentWritable =
@@ -547,7 +576,13 @@ function catalogEntry(
     type,
     ...(type === 'ui' ? {} : { default: defaults[definition.key] }),
     ...(options && options.length > 0 ? { options } : {}),
-    ...(range ? { min: range.min, max: range.max, ...(range.step ? { step: range.step } : {}) } : {}),
+    ...(range
+      ? {
+          min: range.min,
+          max: range.max,
+          ...(range.step ? { step: range.step } : {}),
+        }
+      : {}),
     ...(definition.advanced || ADVANCED_MAIN_SETTING_KEYS.has(definition.key) ? { advanced: true } : {}),
     agentWritable,
   };
@@ -606,7 +641,12 @@ function buildCatalog(): Catalog {
         catalogEntry(definition, {
           tab: 'settings',
           tabTitle: 'General',
-          ...(groupId ? { group: groupId, groupTitle: MAIN_SETTINGS_GROUP_SECTIONS[groupId].title } : {}),
+          ...(groupId
+            ? {
+                group: groupId,
+                groupTitle: MAIN_SETTINGS_GROUP_SECTIONS[groupId].title,
+              }
+            : {}),
           section: sectionId,
           sectionTitle: section.title,
         })
@@ -638,7 +678,12 @@ function buildCatalog(): Catalog {
       {
         tab: row.tab,
         tabTitle: row.tabTitle,
-        ...(row.group ? { group: row.group, groupTitle: MAIN_SETTINGS_GROUP_SECTIONS[row.group].title } : {}),
+        ...(row.group
+          ? {
+              group: row.group,
+              groupTitle: MAIN_SETTINGS_GROUP_SECTIONS[row.group].title,
+            }
+          : {}),
         section: row.section,
         sectionTitle: row.sectionTitle,
       }
@@ -652,7 +697,11 @@ function buildCatalog(): Catalog {
     }
     push({
       ...catalogEntry(
-        { key, subtitle: 'App-managed state saved with the settings; not a user preference.', title: key },
+        {
+          key,
+          subtitle: 'App-managed state saved with the settings; not a user preference.',
+          title: key,
+        },
         INTERNAL_STATE_ROW
       ),
       agentWritable: false,
@@ -690,10 +739,17 @@ function buildCatalog(): Catalog {
     title: definition.title,
     description: definition.description,
     defaultKey: definition.defaultKey,
-    ...(definition.windowsLinuxDefaultKey ? { windowsLinuxDefaultKey: definition.windowsLinuxDefaultKey } : {}),
+    ...(definition.windowsLinuxDefaultKey
+      ? { windowsLinuxDefaultKey: definition.windowsLinuxDefaultKey }
+      : {}),
   }));
 
-  return { version: 1, generatedBy: GENERATOR_PATH, settings: entries, hotkeys };
+  return {
+    version: 1,
+    generatedBy: GENERATOR_PATH,
+    settings: entries,
+    hotkeys,
+  };
 }
 
 function formatDefault(value: unknown): string {
@@ -714,7 +770,9 @@ function describeType(entry: CatalogEntry): string {
         entry.min !== undefined && entry.max !== undefined
           ? ` ${entry.min} to ${entry.max}${entry.step ? ` step ${entry.step}` : ''}`
           : '';
-      const allowed = entry.options ? ` one of ${entry.options.map((option) => option.value).join(' | ')};` : '';
+      const allowed = entry.options
+        ? ` one of ${entry.options.map((option) => option.value).join(' | ')};`
+        : '';
       return `number${range}${allowed} default ${formatDefault(entry.default)}`;
     }
     case 'string':

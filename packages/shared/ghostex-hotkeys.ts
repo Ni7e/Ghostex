@@ -789,7 +789,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
      * Directional pane focus uses Cmd+Alt+Arrow so app navigation no longer steals common editing shortcuts.
      */
     defaultKey: `cmd+alt+${direction}`,
-    description: `Move focus ${direction}.`,
+    description: `Move focus ${direction} between the session panes and the Commands pane.`,
     id: `focus${capitalize(direction)}` as ghostexHotkeyActionId,
     retiredDefaultKeys: [`cmd+${direction}`],
     title: `Focus ${capitalize(direction)}`,

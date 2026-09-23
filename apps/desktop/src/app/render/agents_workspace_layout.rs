@@ -118,7 +118,7 @@ impl GhostexGpuiApp {
             .pt(px(top_inset))
             .min_h_0()
             .overflow_hidden()
-            .bg(workspace_background_color());
+            .bg(workspace_nested_background());
         let root = match layout {
             AgentsWorkspaceLayout::FullWidth | AgentsWorkspaceLayout::Floating => {
                 root.flex_1().min_w_0()
@@ -345,12 +345,15 @@ impl GhostexGpuiApp {
         let pane_id = leaf.pane_id;
         let border_state = self.workspace_leaf_border_state(leaf, window, cx);
         let view = cx.entity().clone();
-        // Only the lone GPUI chat of the docked column is handed a header-facing top edge.
-        let header_reach = (rail_edges.top && self.agents_column_meets_gpui_chat()).then(|| {
-            self.workarea_header_column_top_inset(
-                self.agents_column_flows_under_workarea_header(cx),
-            )
-        });
+        // Only the lone GPUI chat of the docked column is handed a header-facing top edge: in a
+        // split, the top edge of a lower pane is a rail, and the panes of the top row close their
+        // outline along their own top instead of running it up around the header.
+        let header_reach =
+            (rail_edges.top && self.agents_column_solo_gpui_chat().is_some()).then(|| {
+                self.workarea_header_column_top_inset(
+                    self.agents_column_flows_under_workarea_header(cx),
+                )
+            });
 
         v_flex()
             .on_children_prepainted(move |child_bounds, _window, cx| {
@@ -378,7 +381,7 @@ impl GhostexGpuiApp {
                     header_reach,
                 )
             })
-            .bg(workspace_terminal_placeholder_color())
+            .bg(glass_clear(workspace_terminal_placeholder_color()))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -393,6 +396,7 @@ impl GhostexGpuiApp {
             // selecting one shows it in the focused pane, and dragging a row onto a pane splits it
             // (session_pane_placement.rs). This supersedes the 2026-09-04 rule that hid the bar
             // only while the workspace was not split, and its setting is gone with it.
+            .children(self.render_workspace_pane_grip(leaf, cx))
             .when_some(
                 self.render_agents_terminal_search_bar(leaf, cx),
                 |this, surface| this.child(surface),

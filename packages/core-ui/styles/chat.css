@@ -233,7 +233,7 @@ body[data-session-chat-theme='light'] .ghostex-session-chat-popup:not([data-chat
   /* Cards sit a little lighter than the tinted page rather than on fixed white, so the theme reaches them. */
   --card: color-mix(in srgb, #ffffff 60%, var(--background));
   --card-foreground: var(--foreground);
-  --popover: oklch(100% 0 0);
+  --popover: var(--ghostex-session-chat-light-menu, oklch(100% 0 0));
   --popover-foreground: var(--foreground);
   --primary: oklch(21% 0.006 285.885);
   --primary-foreground: oklch(98.5% 0 0);
@@ -300,7 +300,7 @@ body[data-session-chat-theme='dark'] .ghostex-session-chat-popup:not([data-chat-
   --foreground: #fcfcfc;
   --card: var(--background);
   --card-foreground: var(--foreground);
-  --popover: oklch(20.5% 0 0);
+  --popover: var(--ghostex-session-chat-dark-menu, oklch(20.5% 0 0));
   --popover-foreground: var(--foreground);
   --primary: oklch(92.2% 0 0);
   --primary-foreground: oklch(20.5% 0 0);

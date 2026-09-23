@@ -333,6 +333,10 @@ pub struct TerminalViewSettings {
     pub light_theme: bool,
     pub cursor_shape: TerminalCursorShape,
     pub background_image: Option<TerminalBackgroundImage>,
+    /// How much of the default background the pane paints itself; window glass sets it to 0 so the
+    /// frosted surface behind the pane shows through. Cells with an explicit background still
+    /// paint it in full.
+    pub background_alpha: f32,
     pub cursor_blink: bool,
     pub cursor_opacity: f32,
     pub cursor_text: Option<TerminalConfiguredColor>,
@@ -357,6 +361,7 @@ impl Default for TerminalViewSettings {
             light_theme: false,
             cursor_shape: TerminalCursorShape::Block,
             background_image: None,
+            background_alpha: 1.0,
             cursor_blink: false,
             cursor_opacity: 1.0,
             cursor_text: None,
@@ -3357,7 +3362,14 @@ impl Element for TerminalElement {
             )
         };
 
-        window.paint_quad(fill(bounds, layout.background));
+        let background_alpha = self.terminal.read(cx).settings.background_alpha;
+        window.paint_quad(fill(
+            bounds,
+            Hsla {
+                a: layout.background.a * background_alpha,
+                ..layout.background
+            },
+        ));
         self.paint_background_image(bounds, layout.background, window, cx);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for (row, layout_row) in layout.rows.iter().enumerate() {

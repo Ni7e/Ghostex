@@ -40,7 +40,7 @@ impl GhostexGpuiApp {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .bg(command_pane_chrome_color())
+            .bg(glass_clear(command_pane_chrome_color()))
             .child(body)
             .into_any_element()
     }

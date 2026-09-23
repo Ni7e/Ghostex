@@ -548,6 +548,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   hotkeys: DEFAULT_ghostex_HOTKEYS,
   showActivePaneOutline: false,
   workspaceActivePaneBorderColor: '#3b82f6',
+  windowGlass: 'auto',
   /**
    * CDXC:Workarea 2026-06-07-16:53:
    * A near-black workspace background avoids platform compositor handling of

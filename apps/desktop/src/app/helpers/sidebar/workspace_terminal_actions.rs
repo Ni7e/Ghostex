@@ -122,6 +122,7 @@ pub(crate) fn gpui_sidebar_workspace_terminal_focus_from_value(
             "startupRestore",
             "keepView",
             "wakeSleeping",
+            "keepSleeping",
         ],
     )?;
 
@@ -185,6 +186,12 @@ pub(crate) fn gpui_sidebar_workspace_terminal_focus_from_value(
             .as_bool()
             .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedJson)?,
     };
+    let keep_sleeping = match object.get("keepSleeping") {
+        None => false,
+        Some(value) => value
+            .as_bool()
+            .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedJson)?,
+    };
     Ok(GpuiSidebarWorkspaceTerminalFocusMessage {
         force_remount,
         placement,
@@ -195,6 +202,7 @@ pub(crate) fn gpui_sidebar_workspace_terminal_focus_from_value(
         startup_restore,
         keep_view,
         wake_sleeping,
+        keep_sleeping,
     })
 }
 

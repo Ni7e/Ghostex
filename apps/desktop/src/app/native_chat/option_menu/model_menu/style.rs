@@ -3,7 +3,7 @@ use gpui::{Hsla, rgb};
 
 pub(super) const CARD_WIDTH: f32 = 304.0;
 pub(super) const FLYOUT_WIDTH: f32 = 232.0;
-pub(super) const CARD_RADIUS: f32 = 12.0;
+pub(crate) const CARD_RADIUS: f32 = 12.0;
 pub(super) const ITEM_RADIUS: f32 = 8.0;
 pub(super) const BAR_HEIGHT: f32 = 40.0;
 /// The model list keeps one height whatever the tab holds, so switching tabs never moves the card.
@@ -49,7 +49,7 @@ impl Palette {
         Self {
             text,
             muted: text.opacity(0.64),
-            surface: rgb(if light { 0xffffff } else { 0x191919 }).into(),
+            surface: appearance.menu_surface(),
             border: ink.opacity(0.12),
             accent: appearance.control_primary,
             star: rgb(if light { 0xd97706 } else { 0xfbbf24 }).into(),

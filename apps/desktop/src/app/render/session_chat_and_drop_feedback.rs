@@ -158,7 +158,7 @@ impl GhostexGpuiApp {
                 .min_h_0()
                 .items_center()
                 .justify_center()
-                .bg(gpui_session_chat_background_color())
+                .bg(glass_clear(gpui_session_chat_background_color()))
                 .child(
                     v_flex()
                         .max_w(px(WORKSPACE_STATE_PLACEHOLDER_MAX_WIDTH))
@@ -235,7 +235,7 @@ impl GhostexGpuiApp {
             .min_h_0()
             .w_full()
             .overflow_hidden()
-            .bg(gpui_session_chat_background_color())
+            .bg(glass_clear(gpui_session_chat_background_color()))
             /*
             CDXC:FocusRouting 2026-09-17 WHY:
             The native chat composer stops mouse-down propagation, so a bubble-phase listener here never sees a click on the composer itself.

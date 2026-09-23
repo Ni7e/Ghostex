@@ -12,6 +12,7 @@ import type { SessionChatContextDetailItem } from './session-chat-context-detail
 import { useSessionChatStatusLineLayout } from './use-session-chat-status-line-layout';
 import { sessionChatStatusLineReserved } from '@/packages/shared/session-chat-presentation/status-line-layout';
 import { playCopySound } from '../copy-sound';
+import skeleton from '@/packages/shared/session-chat-presentation/status-line-skeleton.json';
 
 function copyStatusLineItem(copy: { text: string; label: string }): void {
   playCopySound();
@@ -31,14 +32,17 @@ function copyStatusLineItem(copy: { text: string; label: string }): void {
  */
 export function SessionChatStatusLine({
   hasConfiguredItems = false,
+  loading = false,
   items,
 }: {
   hasConfiguredItems?: boolean;
+  loading?: boolean;
   items: readonly SessionChatContextDetailItem[];
 }) {
   const { ref, rowStarts } = useSessionChatStatusLineLayout(items);
-  const visible = items.length > 0;
-  const shouldReserveSpace = sessionChatStatusLineReserved({ hasConfiguredItems, itemCount: items.length });
+  const showSkeleton = items.length === 0 && (loading || hasConfiguredItems);
+  const visible = items.length > 0 || showSkeleton;
+  const shouldReserveSpace = loading || sessionChatStatusLineReserved({ hasConfiguredItems, itemCount: items.length });
   return (
     <div
       ref={ref}
@@ -47,7 +51,15 @@ export function SessionChatStatusLine({
       aria-label='Session status'
       className={`ghostex-chat-status-line${visible ? ' is-visible' : ''}${shouldReserveSpace ? ' is-reserved' : ''}`}
       role='status'
+      aria-busy={showSkeleton}
     >
+      {showSkeleton ? (
+        <span aria-hidden='true' style={{ display: 'flex', alignItems: 'center', gap: skeleton.gap }}>
+          {skeleton.widths.map((width) => (
+            <span key={width} className='ghostex-chat-pill-skeleton' style={{ width, height: skeleton.height }} />
+          ))}
+        </span>
+      ) : null}
       {items.map((item, index) => (
         <Fragment key={item.id}>
           {index > 0 && rowStarts.includes(index) ? (

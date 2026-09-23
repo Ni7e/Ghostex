@@ -60,6 +60,7 @@ pub(crate) mod view_tabs;
 pub(crate) mod windows_first_run_setup;
 pub(crate) mod workspace;
 pub(crate) mod workspace_shell_state;
+pub(crate) mod workspace_pane_close;
 pub(crate) mod workspace_tree;
 
 pub(crate) use agents_terminal_body_presentation::*;

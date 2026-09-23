@@ -231,11 +231,30 @@ const MAX_ACCENT_SATURATION = 0.9;
 export function getAccentColorForBackgroundTint(
   tintColor = DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR
 ): string {
+  return accentColorForTint(tintColor, ACCENT_LIGHTNESS, NEUTRAL_TINT_ACCENT_COLOR);
+}
+
+/**
+ * CDXC:Theming 2026-09-23 WHY:
+ * The light chat needs an accent that reads on a pale surface: the tint's hue at a dark lightness, and the
+ * light chrome's foreground #262626 for a neutral tint (the value theme.css already forces in light mode).
+ * SEE-ALSO: `accent_color_for_tint` in apps/desktop/src/app/helpers/titlebar.rs.
+ */
+export const NEUTRAL_TINT_LIGHT_ACCENT_COLOR = '#262626';
+const LIGHT_ACCENT_LIGHTNESS = 0.38;
+
+export function getLightAccentColorForBackgroundTint(
+  tintColor = DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR
+): string {
+  return accentColorForTint(tintColor, LIGHT_ACCENT_LIGHTNESS, NEUTRAL_TINT_LIGHT_ACCENT_COLOR);
+}
+
+function accentColorForTint(tintColor: string, lightness: number, neutral: string): string {
   const tint = parseSidebarTitlebarHexColor(
     normalizeSidebarTitlebarHexColor(tintColor, DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR)
   );
   if (isNeutralSidebarTitlebarColor(tint)) {
-    return NEUTRAL_TINT_ACCENT_COLOR;
+    return neutral;
   }
 
   const red = tint.red / 255;
@@ -256,9 +275,9 @@ export function getAccentColorForBackgroundTint(
   }
 
   const saturation = Math.min(MAX_ACCENT_SATURATION, Math.max(MIN_ACCENT_SATURATION, tintSaturation));
-  const accentChroma = (1 - Math.abs(2 * ACCENT_LIGHTNESS - 1)) * saturation;
+  const accentChroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
   const secondary = accentChroma * (1 - Math.abs((hueSextant % 2) - 1));
-  const offset = ACCENT_LIGHTNESS - accentChroma / 2;
+  const offset = lightness - accentChroma / 2;
   const [accentRed, accentGreen, accentBlue] =
     hueSextant < 1
       ? [accentChroma, secondary, 0]
@@ -524,6 +543,23 @@ export function getAccentColorForSettings(
 ): string {
   return getAccentColorForBackgroundTint(
     settings ? resolveDarkChromeControls(settings).tintColor : DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR
+  );
+}
+
+/** The light chat's accent, from the tint the light chrome actually paints. */
+export function getLightAccentColorForSettings(
+  settings:
+    | {
+        lightThemePreset: LightThemePreset;
+        customSidebarTitlebarLightBackgroundLightnessPercent: number;
+        customSidebarTitlebarLightBackgroundTintColor: string;
+      }
+    | undefined
+): string {
+  return getLightAccentColorForBackgroundTint(
+    settings
+      ? resolveLightChromeControls(settings).tintColor
+      : DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_TINT_COLOR
   );
 }
 

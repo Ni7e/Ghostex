@@ -26,6 +26,7 @@ pub(super) struct ComposerReference {
     pub(super) path: String,
     /// The visible text, already padded for the icon and truncated to the shared label width.
     pub(super) pill: String,
+    pub(super) revealed: bool,
 }
 
 /// Byte offset of every UTF-16 code-unit boundary in `draft`, so JS string indices land on chars.
@@ -63,6 +64,7 @@ pub(super) fn parse(draft: &str, parsed: &Value) -> Vec<ComposerReference> {
                 label: reference["label"].as_str()?.to_owned(),
                 path: reference["path"].as_str()?.to_owned(),
                 pill: reference["pill"].as_str()?.to_owned(),
+                revealed: reference["revealed"] == true,
             })
         })
         .collect()
@@ -75,6 +77,7 @@ pub(super) fn replacements(
 ) -> Vec<InlineReplacement> {
     references
         .iter()
+        .filter(|reference| !reference.revealed)
         .filter_map(|reference| {
             let color = markdown_links::composer_color(&reference.kind, appearance)?;
             Some(

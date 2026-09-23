@@ -33,14 +33,41 @@ export function nextFileReferenceIndex(text: string): number {
   return highest + 1;
 }
 
-export function insertChatReference(current: string, reference: string, start = current.length, end = start): { text: string; caret: number } {
+export function insertChatReference(
+  current: string,
+  reference: string,
+  start = current.length,
+  end = start
+): { text: string; caret: number } {
   const needsLeadingSpace = start > 0 && !/\s/.test(current[start - 1] ?? '');
   const inserted = `${needsLeadingSpace ? ' ' : ''}${reference} `;
   return { text: `${current.slice(0, start)}${inserted}${current.slice(end)}`, caret: start + inserted.length };
 }
 
 export function nativePathReference(path: string, text: string): string {
-  return IMAGE_PATH_PATTERN.test(path) ? `[Image #${nextImageReferenceIndex(text)}](${path})` : `[File #${nextFileReferenceIndex(text)}](${path})`;
+  return IMAGE_PATH_PATTERN.test(path)
+    ? `[Image #${nextImageReferenceIndex(text)}](${path})`
+    : `[File #${nextFileReferenceIndex(text)}](${path})`;
+}
+
+/** CDXC:Clipboard 2026-09-23 DECISION: User: images pasted into a question answer should appear as [Image #1] and render exactly like the GPUI chat composer. */
+export function insertAnswerAttachments(
+  current: string,
+  paths: readonly string[],
+  original: string,
+  start: number,
+  end: number
+): { text: string; caret: number } {
+  let text = current;
+  // An upload can finish after more typing; the old selection then no longer belongs to this draft.
+  let caret = current === original ? start : current.length;
+  let finish = current === original ? end : current.length;
+  for (const path of paths) {
+    const result = insertChatReference(text, nativePathReference(path, text), caret, finish);
+    text = result.text;
+    caret = finish = result.caret;
+  }
+  return { text, caret };
 }
 
 /**

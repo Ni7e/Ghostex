@@ -83,6 +83,8 @@ pub(crate) struct GpuiSidebarWorkspaceTerminalFocusMessage {
     /// The sidebar runtime sets this when the session it is focusing is asleep, instead of awaiting its own `/api/wakeSession` before posting the focus. The attach plan then uses the Wake intent, which starts the provider, marks the row running and returns the attach metadata in one round trip, so the click no longer waits on a serial wake before anything moves.
     /// SEE-ALSO: `focusSession` in apps/desktop/sidebar/gxserver-runtime/sessions-and-focus.ts, `local_workspace_attach_intent_for_key` in apps/desktop/src/app/workspace_terminals.rs.
     pub(crate) wake_sleeping: bool,
+    /// Set by focuses the user did not aim at the session itself (opening its project), so a mapped sleeping tab is selected like a tab-strip click instead of woken. See `select_sleeping_local_workspace_tab`.
+    pub(crate) keep_sleeping: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

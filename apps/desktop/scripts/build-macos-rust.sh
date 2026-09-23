@@ -31,6 +31,14 @@ cargo_args=(build --release --bin ghostex-gpui --bin ghostex-gpui-cef-helper)
 # Do not move this into Cargo.toml or the release build inherits it.
 if [[ "${GHOSTEX_LOCAL_START:-0}" == "1" ]]; then
 	cargo_args+=(--config 'profile.release.package.ghostex-gpui.incremental=true')
+	# CDXC:Build 2026-09-23 DECISION:
+	# User chose opt-level 0 for the app crate on local starts, with `bun run start --optimized` for performance work.
+	# Measured on an M5 Pro: a one-line edit rebuilt in ~5s at opt-level 0, ~17s at 1 and ~20s at 3, and a cold compile used 71 vs 315 CPU-seconds.
+	# Only this crate changes: GPUI, CEF, tree-sitter and every other dependency keep release optimization, and debug assertions and overflow checks stay off as in release.
+	# SEE-ALSO: prepare-macos-runtime.sh applies the same rule to gxserver.
+	if [[ "${GHOSTEX_START_OPTIMIZED:-0}" != "1" ]]; then
+		cargo_args+=(--config 'profile.release.package.ghostex-gpui.opt-level=0')
+	fi
 fi
 
 cd "$GPUI_DIR"

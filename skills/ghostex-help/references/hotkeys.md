@@ -72,10 +72,10 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Next Session | `ctrl+tab` | `cmd+tab` | Select the next session shown in the sidebar. | `focusNextSession` |
 | Previous Tab in Pane | `cmd+alt+[` |  | Select the previous tab in the focused split pane. | `focusPreviousPaneTab` |
 | Next Tab in Pane | `cmd+alt+]` |  | Select the next tab in the focused split pane. | `focusNextPaneTab` |
-| Focus Up | `cmd+alt+up` |  | Move focus up. | `focusUp` |
-| Focus Right | `cmd+alt+right` |  | Move focus right. | `focusRight` |
-| Focus Down | `cmd+alt+down` |  | Move focus down. | `focusDown` |
-| Focus Left | `cmd+alt+left` |  | Move focus left. | `focusLeft` |
+| Focus Up | `cmd+alt+up` |  | Move focus up between the session panes and the Commands pane. | `focusUp` |
+| Focus Right | `cmd+alt+right` |  | Move focus right between the session panes and the Commands pane. | `focusRight` |
+| Focus Down | `cmd+alt+down` |  | Move focus down between the session panes and the Commands pane. | `focusDown` |
+| Focus Left | `cmd+alt+left` |  | Move focus left between the session panes and the Commands pane. | `focusLeft` |
 | Jump to Project 1 | `cmd+ctrl+1` | `cmd+alt+1` | Jump to project 1 as shown in the sidebar. | `jumpToProject1` |
 | Jump to Project 2 | `cmd+ctrl+2` | `cmd+alt+2` | Jump to project 2 as shown in the sidebar. | `jumpToProject2` |
 | Jump to Project 3 | `cmd+ctrl+3` | `cmd+alt+3` | Jump to project 3 as shown in the sidebar. | `jumpToProject3` |

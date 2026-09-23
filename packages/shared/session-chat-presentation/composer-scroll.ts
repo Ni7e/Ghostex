@@ -72,3 +72,12 @@ export function canCollapseSessionChatComposer(input: {
     input.queuedPrompts === 0
   );
 }
+
+/**
+ * CDXC:SessionChat 2026-09-23 DECISION:
+ * User: when an agent session's height is constrained (vertical splits especially), show its chat box collapsed until the user clicks it to expand, even at the bottom of the conversation. A pane shorter than `constrainedPaneHeightPx` (composer-animation.json, in chat pixels, so zoom counts) keeps the box collapsed while the box does not have focus; clicking it focuses and expands it, and leaving it collapses it again. The scroll gesture and the Keep chat box expanded setting play no part there, and every other reason the box cannot collapse (a question card, the note, suggestions, an error, attachments, a queue, a maximized box) still wins.
+ * SEE-ALSO: apps/desktop/src/app/native_chat/composer_scroll.rs (`composer_collapsed`), packages/core-ui/chat/use-session-chat-composer-collapse.ts.
+ */
+export function sessionChatComposerHeightConstrained(paneHeightPx: number, constrainedPaneHeightPx: number): boolean {
+  return paneHeightPx > 0 && paneHeightPx < constrainedPaneHeightPx;
+}

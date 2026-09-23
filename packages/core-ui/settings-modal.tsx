@@ -79,6 +79,7 @@ import {
   SIDEBAR_VISIBILITY_MEMORY_OPTIONS,
   WEB_LINK_OPEN_TARGET_OPTIONS,
   COMMANDS_PANEL_SIDE_OPTIONS,
+  WINDOW_GLASS_OPTIONS,
   COMMANDS_PANEL_AUTO_MINIMIZE_DELAY_OPTIONS,
   MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
   MAX_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS,
@@ -102,6 +103,7 @@ import {
   type KeepAwakeDurationMinutes,
   type SettingsModalNavigationState,
   type CommandsPanelSide,
+  type WindowGlassMode,
   type SidebarSpaceSwitchBehavior,
   type SidebarVisibilityMemory,
   type TerminalBackgroundImageFit,
@@ -1350,6 +1352,16 @@ export function SettingsModal({
                                 options={getGhosttyThemeSettingOptions(draft.terminalGhosttyTheme)}
                                 showScrollButtons={false}
                                 value={draft.terminalGhosttyTheme || GHOSTTY_THEME_UNMANAGED_VALUE}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.theming, 'windowGlass') ? (
+                              <SelectField
+                                description='Let the blurred desktop show through the window. Automatic uses glass in dark mode only.'
+                                label='Window glass'
+                                {...getSettingModificationProps('windowGlass')}
+                                onChange={(value) => updateDraft('windowGlass', value as WindowGlassMode)}
+                                options={WINDOW_GLASS_OPTIONS}
+                                value={draft.windowGlass}
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.theming, 'showActivePaneOutline') ? (

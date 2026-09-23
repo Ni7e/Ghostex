@@ -166,8 +166,8 @@ function accountSwitchCardAccount(
 /**
  * CDXC:AgentProviders 2026-09-12 DECISION:
  * User: center the account-switch card in chat until the switch completes; only add this card and leave the Switch Account menu unchanged.
- * Show both accounts with three percentage cards side by side, including Fable, colored by proximity to the limit and red at 100%. Omit "used" and "limit reached" captions.
- * Keep numbered steps with one animated line beneath the active step, replacing the rejected spinner around the number. The automatic third step is "Continue Session"; manual switches wait for the user's next message.
+ * Show both accounts with their three usage windows, including Fable. Omit "used" and "limit reached" captions. The steps keep one animated line on the active step, never a spinner. The automatic third step is "Continue Session"; manual switches wait for the user's next message.
+ * 2026-09-23: the proximity colours (red at 100%) and the large tiles were replaced by the compact-tiles design the user picked, with usage in neutral ink; see account-switch-card.css.
  * No heading spinner, repeated status above the composer, View terminal button, draft reassurance, or bottom bar.
  * Show plain provider logos in this card, without the account's two-character indicator inside them.
  * Identify each account by its real email on one line, respecting Hide emails, rather than account names or the preview's former invented aliases.

@@ -183,6 +183,7 @@ impl Render for GhostexGpuiApp {
         self.sync_terminal_model_picker_keyboard_scope();
         self.main_window_bounds = window.bounds();
         self.main_window_handle = Some(gpui::Window::window_handle(window));
+        self.sync_main_window_glass(window, cx);
         self.main_window_display_id = window.display(cx).map(|display| display.id());
         #[cfg(target_os = "windows")]
         if self.windows_first_run_setup_state != GpuiWindowsFirstRunSetupState::Ready {
@@ -232,7 +233,7 @@ impl Render for GhostexGpuiApp {
             }))
             .relative()
             .size_full()
-            .bg(workspace_background_color())
+            .bg(window_shell_background())
             .when(
                 self.titlebar_popup_menu.as_ref().is_some_and(|state| {
                     matches!(state.kind, GpuiTitlebarPopupKind::AccountUsage(_))
@@ -914,6 +915,9 @@ impl Render for GhostexGpuiApp {
                     this.merge_all_agents_tabs_for_pane(WorkspacePaneId(action.pane_id), cx);
                 }),
             )
+            .on_action(cx.listener(|this, action: &CloseAgentsPane, _window, cx| {
+                this.close_agents_pane(WorkspacePaneId(action.pane_id), cx);
+            }))
             .on_action(
                 cx.listener(|this, action: &ToggleFocusModeForPane, _window, cx| {
                     this.toggle_agents_focus_mode_for_pane(WorkspacePaneId(action.pane_id), cx);
@@ -1213,7 +1217,7 @@ impl Render for GhostexGpuiApp {
                     .min_h_0()
                     .items_start()
                     .overflow_hidden()
-                    .bg(sidebar_divider_background_color())
+                    .bg(window_body_row_background())
                     .when(sidebar_chrome_visible, |this| {
                         this.child(
                             /*
@@ -1270,7 +1274,7 @@ impl Render for GhostexGpuiApp {
                             .min_w_0()
                             .min_h_0()
                             .overflow_hidden()
-                            .bg(workspace_background_color())
+                            .bg(workspace_column_background())
                             .child(self.render_workspace_with_command_pane(window, cx))
                             .child(self.render_workarea_header(window, cx)),
                     ),

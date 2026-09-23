@@ -1,6 +1,13 @@
 #!/usr/bin/env bun
-import { checkClientStorage } from './client-storage/check.mjs';
-checkClientStorage();
+/* CDXC:Build 2026-09-23 WHY:
+ * macOS and Linux starts re-run this script under the start lock, so every check at module load ran twice, and the storage check alone parses ~1,100 files (~0.7s).
+ * Run it only in the process that builds: the locked child, or the single Windows process.
+ */
+const localStartOwnsLock = process.platform === 'win32' || process.env.GHOSTEX_GPUI_START_LOCK_HELD === '1';
+if (localStartOwnsLock) {
+  const { checkClientStorage } = await import('./client-storage/check.mjs');
+  checkClientStorage();
+}
 
 import { spawn, spawnSync } from 'node:child_process';
 import {
@@ -9,6 +16,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
   renameSync,
@@ -98,6 +106,8 @@ const buildScript = path.join(
       : 'build-linux-app.sh'
 );
 const localStartLockFile = path.join(repoRoot, 'build', 'ghostex-gpui-local-start.lock');
+// Where build-macos-app.sh keeps local-start code-server builds outside the bundle (CDXC:CodeEditor 2026-09-23).
+const localStartCodeServerStoreRoot = path.join(repoRoot, 'build', 'dev-components.noindex', 'code-server');
 const dependenciesRoot = path.join(repoRoot, '.dependencies');
 const startOptions = validateStartArguments(process.argv.slice(2));
 const startVerbose = startOptions.verbose;
@@ -144,9 +154,9 @@ const windowsWslCodeServerArchive = targetsWindows
   : undefined;
 const configuration = isDarwin ? resolveLocalStartConfiguration(process.env.CONFIGURATION) : undefined;
 const arch = isDarwin ? resolveLocalMacosArch(process.env.GHOSTEX_MACOS_ARCH) : undefined;
-const localStartCodeSignIdentity = isDarwin
-  ? resolveLocalStartCodeSignIdentity(startEnvironment, installedAppPath)
-  : undefined;
+// Probed only in the locked child: the parent just re-executes, and the probe runs security and codesign.
+const localStartCodeSignIdentity =
+  isDarwin && localStartOwnsLock ? resolveLocalStartCodeSignIdentity(startEnvironment, installedAppPath) : undefined;
 const localStartCodeSignTimestampFlag = isDarwin ? resolveLocalStartCodeSignTimestampFlag(startEnvironment) : undefined;
 const buildEnvironment = {
   ...startEnvironment,
@@ -166,6 +176,7 @@ const buildEnvironment = {
         GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG: localStartCodeSignTimestampFlag,
         GHOSTEX_LOCAL_START: '1',
         GHOSTEX_MACOS_ARCH: arch,
+        ...(startOptions.optimized ? { GHOSTEX_START_OPTIMIZED: '1' } : {}),
         ...(startVerbose ? { GHOSTEX_GPUI_START_VERBOSE: '1', GHOSTEX_START_VERBOSE: '1' } : {}),
       }
     : {}),
@@ -284,6 +295,8 @@ if (targetsWindows) {
   logStartStep(`Opening ${appName}...`);
   launchWindowsGpuiApp();
 } else if (isDarwin) {
+  ensureInstalledMacosAppIsWritable();
+  removeStaleMacosAppCopies();
   await closeRunningGpuiBundle(installedAppPath, {
     action: `before installing rebuilt app to ${installedAppPath}`,
     includeBundleId: true,
@@ -297,8 +310,72 @@ if (targetsWindows) {
   });
   installAndLaunchLinuxApp(appPath);
 }
+pruneStaleIncrementalCaches();
 finishStartStep();
 console.log(formatLastRunTimestamp(new Date()));
+
+/* CDXC:Build 2026-09-23 DECISION:
+ * User asked for rustc's incremental caches to be pruned automatically, keeping one cache per binary.
+ * Every build configuration (check, build, test, opt-level, target) gets its own cache directory and nothing ever removes the old ones: apps/desktop/target/debug/incremental had grown to 22GB across ~25 caches per binary.
+ * Each start keeps the newest cache per crate in every incremental folder of the desktop and gxserver targets, and leaves anything touched in the last 30 minutes alone so a build running in another session is never disturbed.
+ * The removal runs detached so the start does not wait for it.
+ */
+function pruneStaleIncrementalCaches() {
+  if (isWindows) {
+    return;
+  }
+  const recentCutoffMs = Date.now() - 30 * 60 * 1000;
+  const incrementalDirs = [];
+  for (const targetRoot of [path.join(gpuiDir, 'target'), path.join(repoRoot, 'server', 'target')]) {
+    for (const first of safeReaddir(targetRoot)) {
+      const firstPath = path.join(targetRoot, first);
+      incrementalDirs.push(path.join(firstPath, 'incremental'));
+      for (const second of safeReaddir(firstPath)) {
+        incrementalDirs.push(path.join(firstPath, second, 'incremental'));
+      }
+    }
+  }
+  const stale = [];
+  for (const incrementalDir of incrementalDirs) {
+    const newestByCrate = new Map();
+    for (const entry of safeReaddir(incrementalDir)) {
+      const entryPath = path.join(incrementalDir, entry);
+      let modifiedMs;
+      try {
+        const stats = statSync(entryPath);
+        if (!stats.isDirectory()) continue;
+        modifiedMs = stats.mtimeMs;
+      } catch {
+        continue;
+      }
+      const crate = entry.replace(/-[^-]+$/, '');
+      const caches = newestByCrate.get(crate) ?? [];
+      caches.push({ entryPath, modifiedMs });
+      newestByCrate.set(crate, caches);
+    }
+    for (const caches of newestByCrate.values()) {
+      caches.sort((left, right) => right.modifiedMs - left.modifiedMs);
+      for (const { entryPath, modifiedMs } of caches.slice(1)) {
+        if (modifiedMs < recentCutoffMs) stale.push(entryPath);
+      }
+    }
+  }
+  if (stale.length === 0) {
+    return;
+  }
+  spawn('/bin/rm', ['-rf', ...stale], { detached: true, stdio: 'ignore' }).unref();
+  logStartDetail(
+    `Removing ${stale.length} old incremental build cache${stale.length === 1 ? '' : 's'} in the background.`
+  );
+}
+
+function safeReaddir(directory) {
+  try {
+    return readdirSync(directory);
+  } catch {
+    return [];
+  }
+}
 
 function startBuildInBackground(label, scriptName) {
   /* CDXC:Build 2026-09-05 WHY:
@@ -438,6 +515,7 @@ function validateStartArguments(args) {
   let verbose =
     truthyStartFlag(process.env.GHOSTEX_GPUI_START_VERBOSE) || truthyStartFlag(process.env.GHOSTEX_START_VERBOSE);
   let profile = false;
+  let optimized = truthyStartFlag(process.env.GHOSTEX_START_OPTIMIZED);
   for (const arg of args) {
     if (arg === '--') {
       continue;
@@ -449,15 +527,20 @@ function validateStartArguments(args) {
       profile = true;
       continue;
     }
+    // macOS only: build the app and gxserver crates with full release optimization (see build-macos-rust.sh).
+    if (arg === '--optimized') {
+      optimized = true;
+      continue;
+    }
     if (arg === '--verbose' || arg === '-v') {
       verbose = true;
       continue;
     }
     throw new Error(
-      `Unknown GPUI start argument: ${arg}. Use "bun run start" with optional --verbose, --profile, and --isolated[=<variant>] flags.`
+      `Unknown GPUI start argument: ${arg}. Use "bun run start" with optional --verbose, --profile, --optimized, and --isolated[=<variant>] flags.`
     );
   }
-  return { verbose, profile };
+  return { verbose, profile, optimized };
 }
 
 function truthyStartFlag(value) {
@@ -832,23 +915,25 @@ function findRunningGpuiPidsByBundleId() {
   if (!isDarwin) {
     return [];
   }
-  const result = spawnSync(
-    'osascript',
-    [
-      '-e',
-      `tell application "System Events" to get the unix id of every process whose bundle identifier is "${bundleId}"`,
-    ],
-    {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      env: startEnvironment,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }
-  );
-  if (result.status !== 0 || !result.stdout.trim()) {
+  /* CDXC:Build 2026-09-23 WHY:
+   * This runs every 100ms while the app quits and launches. Asking System Events through osascript took ~0.27s per call; lsappinfo reads the same Launch Services table in ~0.01s.
+   */
+  const spawnOptions = {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: startEnvironment,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  };
+  const found = spawnSync('lsappinfo', ['find', `bundleid=${bundleId}`], spawnOptions);
+  const asns = found.status === 0 ? (found.stdout.match(/ASN:0x[0-9a-f]+-0x[0-9a-f]+/gi) ?? []) : [];
+  if (asns.length === 0) {
     return [];
   }
-  return parsePidList(result.stdout).filter((pid) => /^\d+$/.test(pid));
+  const info = spawnSync('lsappinfo', ['info', '-only', 'pid', ...asns], spawnOptions);
+  if (info.status !== 0) {
+    return [];
+  }
+  return [...info.stdout.matchAll(/"?pid"?\s*=\s*(\d+)/g)].map((match) => match[1]);
 }
 
 function findRunningGpuiPidsByBundlePath(bundlePath) {
@@ -908,7 +993,15 @@ function findRunningGpuiPidsByBundlePath(bundlePath) {
   return result.stdout
     .split(/\r?\n/)
     .map((line) => line.match(/^\s*(\d+)\s+(.+)$/))
-    .filter((match) => match && commandLineBelongsToGpuiBundle(match[2], bundlePath))
+    .filter(
+      (match) =>
+        match &&
+        (commandLineBelongsToGpuiBundle(match[2], bundlePath) ||
+          // The installed app's code-server runs from the local-start store, not from inside the bundle.
+          (isDarwin &&
+            bundlePath === installedAppPath &&
+            match[2].includes(`${localStartCodeServerStoreRoot}${path.sep}`)))
+    )
     .map((match) => match[1]);
 }
 
@@ -1009,6 +1102,59 @@ function commandLineBelongsToGpuiBundle(commandLine, bundlePath) {
 
 function commandLineRunsExecutable(commandLine, executablePath) {
   return commandLine === executablePath || commandLine.startsWith(`${executablePath} `);
+}
+
+/* CDXC:Build 2026-09-23 WHY:
+ * On 2026-09-21 macOS App Management refused the sync into the installed app halfway ("Operation not permitted"), leaving a broken app, and an agent then installed every later build by hand as Ghostex-new.app plus `mv Ghostex.app Ghostex.old-<time>.app`, leaving a 1.7GB copy per install.
+ * Probe before the running app is closed, so a blocked install stops with the fix instead of breaking the app.
+ * Installing in place, not by swapping in a new bundle, is deliberate: a kept gxserver and live zmx sessions run from files inside the installed bundle.
+ */
+function ensureInstalledMacosAppIsWritable() {
+  if (!existsSync(installedAppPath)) {
+    return;
+  }
+  const probePath = path.join(installedAppPath, 'Contents', `.ghostex-install-probe-${process.pid}`);
+  try {
+    writeFileSync(probePath, '');
+    rmSync(probePath, { force: true });
+  } catch (error) {
+    throw new Error(
+      [
+        `macOS will not let this start modify ${installedAppPath} (${error.code ?? error.message}).`,
+        'This is the App Management privacy setting. Open System Settings > Privacy & Security > App Management and turn it on for the app this command runs in (Ghostex, or your terminal), then run the start again.',
+        'Do not install the build by hand under another name: every such install leaves a full copy of the app behind.',
+      ].join('\n')
+    );
+  }
+}
+
+/* Removes full app copies that hand installs left beside the installed app, identified by their bundle id and never while running. */
+function removeStaleMacosAppCopies() {
+  const leftoverName = new RegExp(
+    `^${appName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\.(?:old|broken|bak|backup)-[^/]*|-new|-old)\\.app$`
+  );
+  let entries = [];
+  try {
+    entries = readdirSync(installDir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!leftoverName.test(entry)) {
+      continue;
+    }
+    const copyPath = path.join(installDir, entry);
+    const infoPlist = path.join(copyPath, 'Contents', 'Info.plist');
+    const bundleIdResult = spawnSync('/usr/libexec/PlistBuddy', ['-c', 'Print CFBundleIdentifier', infoPlist], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    if (bundleIdResult.stdout?.trim() !== bundleId || findRunningGpuiPidsByBundlePath(copyPath).length > 0) {
+      continue;
+    }
+    rmSync(copyPath, { recursive: true, force: true });
+    logStartDetail(`Removed leftover app copy ${copyPath}.`);
+  }
 }
 
 async function installAndOpenMacosApp(stagedAppPath) {
@@ -1194,6 +1340,14 @@ async function stopGxserverEndpointBeforeLaunch({ baseUrl, pid }, token, expecte
   }
 
   const actualBuildIdentity = typeof health.buildIdentity === 'string' ? health.buildIdentity.trim() : '';
+  /* CDXC:ServerDaemon 2026-09-23 WHY:
+   * Every start used to stop the control plane even when the rebuilt app bundles the same gxserver, costing up to 5s plus a daemon cold start on launch.
+   * The build identity hashes the whole staged gxserver package, so a match means the running daemon already is the code this start would launch.
+   */
+  if (expectedBuildIdentity && actualBuildIdentity === expectedBuildIdentity) {
+    logStartDetail('gxserver control plane already runs the bundled build; keeping it.');
+    return;
+  }
   const buildIdentitySuffix =
     actualBuildIdentity && expectedBuildIdentity && actualBuildIdentity !== expectedBuildIdentity
       ? ` (build identity ${actualBuildIdentity} -> ${expectedBuildIdentity})`
@@ -1220,10 +1374,7 @@ function gxserverControlPlaneStopReason({ actualBuildIdentity, expectedBuildIden
   if (!actualBuildIdentity) {
     return 'running daemon did not report a build identity';
   }
-  if (actualBuildIdentity !== expectedBuildIdentity) {
-    return 'bundled daemon changed';
-  }
-  return 'local GPUI start resets the daemon even when the bundled identity is current';
+  return 'bundled daemon changed';
 }
 
 function readBundledGxserverBuildIdentity(stagedAppPath) {
@@ -1434,13 +1585,6 @@ function installWindowsGpuiApp(stagedAppPath) {
     throw new Error(`The installed Ghostex executable is missing at ${windowsInstalledAppPath}\\Ghostex.exe.`);
   }
   logStartDetail(`Installed app and Start Menu shortcut are ready for all Windows users.`);
-}
-
-function parsePidList(value) {
-  return value
-    .split(/[,\s]+/)
-    .map((pid) => pid.trim())
-    .filter(Boolean);
 }
 
 function uniquePids(pids) {

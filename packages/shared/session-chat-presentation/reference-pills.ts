@@ -7,6 +7,7 @@ export interface SessionChatComposerReference {
   label: string;
   path: string;
   start: number;
+  revealed?: boolean;
 }
 
 export const SESSION_CHAT_REFERENCE_REVEAL_MARKER = '·';
@@ -146,7 +147,7 @@ function linkedDestination(text: string, destinationStart: number): { end: numbe
 }
 
 /** Finds file, skill, image, and HTTP(S) links for every composer backend. */
-export function sessionChatComposerReferences(text: string): SessionChatComposerReference[] {
+export function sessionChatComposerReferences(text: string, includeRevealed = false): SessionChatComposerReference[] {
   const references: SessionChatComposerReference[] = [];
   for (const match of text.matchAll(REFERENCE_LABEL_PATTERN)) {
     const sourceLabel = match[1];
@@ -154,8 +155,10 @@ export function sessionChatComposerReferences(text: string): SessionChatComposer
     if (sourceLabel === undefined || start === undefined) {
       continue;
     }
-    const label = unescapeMarkdown(sourceLabel);
-    if (label.endsWith(SESSION_CHAT_REFERENCE_REVEAL_MARKER) || text[start - 1] === '!') continue;
+    const source = unescapeMarkdown(sourceLabel);
+    const revealed = source.endsWith(SESSION_CHAT_REFERENCE_REVEAL_MARKER);
+    if ((revealed && !includeRevealed) || text[start - 1] === '!') continue;
+    const label = revealed ? source.slice(0, -SESSION_CHAT_REFERENCE_REVEAL_MARKER.length) : source;
     const destinationStart = start + match[0].length;
     const destination = linkedDestination(text, destinationStart);
     if (!destination || destination.path === '') {
@@ -180,6 +183,7 @@ export function sessionChatComposerReferences(text: string): SessionChatComposer
       label,
       path: destination.path,
       start,
+      ...(revealed ? { revealed: true } : {}),
     });
   }
   return references;

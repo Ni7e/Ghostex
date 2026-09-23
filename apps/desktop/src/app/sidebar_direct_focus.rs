@@ -209,6 +209,13 @@ impl GhostexGpuiApp {
         let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id) else {
             return false;
         };
+        // A kept view selects in the background; otherwise the session comes to the focused pane
+        // like any other selection (session_pane_placement.rs).
+        let pane_id = if keep_view {
+            pane_id
+        } else {
+            self.pull_workspace_session_into_focused_pane(pane_id, shell_session_id)
+        };
         self.agents_workspace.select_tab(pane_id, shell_session_id);
         // The sidebar highlight reads the store, so the staged tab is a selection like any other.
         self.gx_store_select_local_session(&key, false, false, cx);

@@ -1002,10 +1002,16 @@ impl GhostexGpuiApp {
         survives is its first clause, which this branch still implements — landing on another project
         selects the session in the background and leaves that project's remembered view alone.
         */
-        if message.keep_view
+        let keeps_view = message.keep_view
             && self.view_panel_open()
-            && !self.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key)
+            && !self.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key);
+        if message.keep_sleeping
+            && !message.force_remount
+            && self.select_sleeping_local_workspace_tab(&key, keeps_view, cx)
         {
+            return;
+        }
+        if keeps_view {
             self.select_local_workspace_terminal_keeping_view(&key, message.wake_sleeping, cx);
             return;
         }
@@ -1166,6 +1172,15 @@ impl GhostexGpuiApp {
                 "sessionId": key.session_id,
             }),
         );
+        // A mapped tab with nothing live behind it is re-attached where it is, so it is brought to
+        // the focused pane first, as the focus-existing path above does (session_pane_placement.rs).
+        if message.placement == GpuiWorkspaceTerminalFocusPlacement::Tab
+            && !force_requested_pane_placement
+            && let Some(shell_session_id) = self.local_workspace_session_mappings.get(&key).copied()
+            && let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id)
+        {
+            self.pull_workspace_session_into_focused_pane(pane_id, shell_session_id);
+        }
         self.spawn_local_workspace_attach_plan(
             key,
             attach_intent,

@@ -84,6 +84,9 @@ impl GhostexGpuiApp {
         The 2026-09-21 follow-up extends the colour and the missing edge to every state of a GPUI
         chat, including the ones whose own chrome keeps the transcript below the row rather than
         under it (`agents_column_meets_gpui_chat`).
+        2026-09-23: User: with window glass on, the header is see-through and the chat starts
+        below it instead of scrolling under it, since an opaque row would read as a solid strip on
+        the glass. Without glass everything above still holds.
 
         CDXC:Titlebar 2026-09-20 WHY:
         `occlude()` is what makes the float honest rather than a second input layer: without it the

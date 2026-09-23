@@ -10,11 +10,17 @@ impl NativeChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let answer = self
+            .async_answer_input
+            .as_ref()
+            .filter(|(_, input)| input.read(cx).focus_handle(cx).is_focused(window))
+            .cloned();
         if !self.composer_ready
-            || !self
-                .input
-                .as_ref()
-                .is_some_and(|input| input.read(cx).focus_handle(cx).is_focused(window))
+            || (answer.is_none()
+                && !self
+                    .input
+                    .as_ref()
+                    .is_some_and(|input| input.read(cx).focus_handle(cx).is_focused(window)))
         {
             cx.propagate();
             return;
@@ -31,29 +37,58 @@ impl NativeChatView {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        if images.is_empty() {
-            let paths = clipboard
-                .entries
-                .iter()
-                .filter_map(|entry| match entry {
-                    ClipboardEntry::ExternalPaths(paths) => Some(&paths.0),
-                    _ => None,
-                })
-                .flatten()
-                .map(|path| path.to_string_lossy().into_owned())
-                .collect::<Vec<_>>();
-            if paths.is_empty() {
-                cx.propagate();
-            } else {
-                cx.stop_propagation();
-                self.invoke(json!({"type":"attachPaths","paths":paths}), cx);
-            }
+        let external_paths = clipboard
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                ClipboardEntry::ExternalPaths(paths) => Some(&paths.0),
+                _ => None,
+            })
+            .flatten()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        if images.is_empty() && external_paths.is_empty() {
+            cx.propagate();
             return;
         }
         cx.stop_propagation();
-        self.invoke(json!({"type":"attachmentsStarted"}), cx);
+        if answer.is_some()
+            && (self.snapshot["asyncQuestions"]["submitting"] == true
+                || self.snapshot["asyncQuestions"]["loading"] == true)
+        {
+            return;
+        }
+        let selection = answer.as_ref().map(|(_, input)| {
+            let state = input.read(cx);
+            let text = state.value().to_string();
+            let selected = state.selected_range();
+            let start = text[..selected.start].encode_utf16().count();
+            let end = text[..selected.end].encode_utf16().count();
+            (text, start, end)
+        });
+        if answer.is_some() {
+            self.async_answer_echo.pending += 1;
+            self.async_answer_echo.error = None;
+            self.invoke(
+                json!({"type":"asyncQuestionImagesPending","pending":true}),
+                cx,
+            );
+            cx.notify();
+        } else {
+            if images.is_empty() {
+                self.invoke(json!({"type":"attachPaths","paths":external_paths}), cx);
+                return;
+            }
+            self.invoke(json!({"type":"attachmentsStarted"}), cx);
+        }
         let config = self.config.clone();
         let task = cx.background_executor().spawn(async move {
+            if images.is_empty() {
+                return match super::attachments::import_paths(&config.remote, &json!({"paths":external_paths,"projectId":config.project_id,"sessionId":config.session_id})) {
+                    Ok(paths) => (paths.as_array().cloned().unwrap_or_default(), None),
+                    Err(error) => (Vec::new(), Some(error)),
+                };
+            }
             let mut paths = Vec::new();
             for (index, image) in images.into_iter().enumerate() {
                 let result = super::rpc::request(config.remote.clone(), "/api/saveSessionChatImage", &json!({
@@ -69,9 +104,21 @@ impl NativeChatView {
             }
             (paths, None)
         });
-        cx.spawn(async move |chat, cx| {
+        cx.spawn_in(window, async move |chat, cx| {
             let (paths, error) = task.await;
-            let _ = chat.update(cx, |chat, cx| {
+            let _ = chat.update_in(cx, |chat, window, cx| {
+                if let Some((key, input)) = answer {
+                    chat.finish_answer_attachments(
+                        key,
+                        input,
+                        selection.unwrap(),
+                        paths,
+                        error,
+                        window,
+                        cx,
+                    );
+                    return;
+                }
                 chat.invoke(
                     json!({"type":"attachmentsFinished","paths":paths,"error":error}),
                     cx,
