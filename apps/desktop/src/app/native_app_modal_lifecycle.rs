@@ -33,6 +33,7 @@ impl GhostexGpuiApp {
                 .get("sidebarTheme")
                 .and_then(serde_json::Value::as_str),
         )
+        .tinted(titlebar_background().into())
     }
 
     /// Opens `kind` as a native window whose content is built by `build`.

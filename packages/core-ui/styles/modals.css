@@ -2629,6 +2629,23 @@ html:has(body.app-modal-host-native-window-body) {
   position: relative;
 }
 
+/*
+ * CDXC:AppModal 2026-09-23 DECISION:
+ * User: "let's only show the x button when we hover them". Every toast's close button stays hidden
+ * (still in place, so nothing shifts) until the toast is hovered or the button has keyboard focus.
+ * SEE-ALSO: the desktop toast window in apps/desktop/src/app/window/toast.rs and the board's copy in
+ * apps/desktop/views/project-board/styles.ts.
+ */
+[data-sonner-toast] [data-close-button] {
+  opacity: 0;
+}
+
+[data-sonner-toast]:hover [data-close-button],
+[data-sonner-toast]:focus-within [data-close-button],
+[data-sonner-toast] [data-close-button]:focus-visible {
+  opacity: 1;
+}
+
 .ghostex-app-toast[data-sonner-toast][data-styled='true'] [data-icon] {
   align-items: flex-start;
   align-self: flex-start;
@@ -3190,12 +3207,19 @@ html:has(body.app-modal-host-native-window-body) {
  * native-host `!important` background rules above) so the child-window shell
  * resolves to the window color on every theme.
  */
+/* CDXC:Theming 2026-09-23 DECISION:
+ * User: app modals (the commit review first) match the rest of the app instead of a fixed neutral
+ * grey. The window takes the theme's chrome colour that the modal host publishes as
+ * --gx-theme-chrome (modal-host.tsx), and panels and raised controls are the same steps toward
+ * white the neutral design used (#161616 / #1d1d1d / #232323 over #0e0e0e), so a tinted theme
+ * carries into every modal. Without the variable the neutral values stay.
+ */
 .gx-app-modal {
-  --app-modal-background: #0e0e0e;
-  --gx-modal-surface: #0e0e0e;
-  --gx-modal-panel: #161616;
-  --gx-modal-raised: #1d1d1d;
-  --gx-modal-raised-hover: #232323;
+  --app-modal-background: var(--gx-theme-chrome, #0e0e0e);
+  --gx-modal-surface: var(--gx-theme-chrome, #0e0e0e);
+  --gx-modal-panel: color-mix(in srgb, #ffffff 3%, var(--gx-modal-surface));
+  --gx-modal-raised: color-mix(in srgb, #ffffff 6%, var(--gx-modal-surface));
+  --gx-modal-raised-hover: color-mix(in srgb, #ffffff 8.5%, var(--gx-modal-surface));
   --gx-modal-hairline: rgba(255, 255, 255, 0.08);
   --gx-modal-radius-pill: 999px;
   --gx-modal-radius-menu: 6px;

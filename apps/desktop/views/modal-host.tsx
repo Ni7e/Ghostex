@@ -450,6 +450,7 @@ type AppModalHostMessage =
   | { type: 'pickWorktreeImages' }
   | { paths: string[]; type: 'worktreeImageFilesPicked' }
   | { path: string; type: 'terminalBackgroundImageFilePicked' }
+  | { appearance: 'dark' | 'light'; path: string; type: 'windowGlassImageFilePicked' }
   | { path: string; type: 'firstLaunchProjectFolderPicked' }
   | {
       error?: string;
@@ -1936,6 +1937,13 @@ function AppModalHost() {
      * is the correct value.
      */
     document.body.style.setProperty('--ghostex-accent', getAccentColorForSettings(settings));
+    /** CDXC:Theming 2026-09-23 SEE-ALSO: the `.gx-app-modal` tokens in packages/core-ui/styles/modals.css derive every modal's surfaces from this. */
+    const themeChrome =
+      pageTheme === 'plain-light' || pageTheme.startsWith('light-')
+        ? settings?.customSidebarTitlebarLightBackgroundColor
+        : settings?.customSidebarTitlebarBackgroundColor;
+    if (themeChrome) document.body.style.setProperty('--gx-theme-chrome', themeChrome);
+    else document.body.style.removeProperty('--gx-theme-chrome');
     const normalizedThemeColor = normalizeWorkspaceThemeColor(customThemeColor);
     if (normalizedThemeColor) {
       document.body.dataset.sidebarCustomTheme = 'true';
@@ -1956,6 +1964,7 @@ function AppModalHost() {
       document.body.style.removeProperty('--workspace-sidebar-theme-color');
       document.body.style.removeProperty('--workspace-sidebar-theme-foreground');
       document.body.style.removeProperty('--ghostex-accent');
+      document.body.style.removeProperty('--gx-theme-chrome');
     };
   }, [
     customThemeColor,

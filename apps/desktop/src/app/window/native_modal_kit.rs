@@ -132,6 +132,24 @@ pub(crate) fn dark_theme_text_colors(sidebar_theme: Option<&str>) -> (u32, u32, 
 }
 
 impl ModalPalette {
+    /// CDXC:Theming 2026-09-23 SEE-ALSO:
+    /// The app tints these surfaces from the theme's chrome colour (`tinted`), like the
+    /// `.gx-app-modal` tokens in packages/core-ui/styles/modals.css, which hold the user's decision.
+    pub(crate) fn tinted(mut self, chrome: Rgba) -> Self {
+        let ink = if self.light { 0x000000 } else { 0xffffff };
+        let step = |amount: f32| css_mix(rgb(ink), amount, chrome);
+        self.surface = chrome;
+        self.panel = step(0.03);
+        if self.light {
+            self.raised = step(0.05);
+            self.raised_hover = step(0.09);
+        } else {
+            self.raised = step(0.06);
+            self.raised_hover = step(0.085);
+        }
+        self
+    }
+
     pub(crate) fn resolve(light: bool, sidebar_theme: Option<&str>) -> Self {
         if light {
             Self {

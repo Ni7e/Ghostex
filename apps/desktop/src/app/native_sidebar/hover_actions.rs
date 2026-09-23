@@ -63,10 +63,19 @@ impl GhostexGpuiApp {
                     .justify_center()
                     .rounded(px(4.0 * scale))
                     .cursor_pointer()
-                    .when(appearance.light, |item| item.bg(gpui::rgb(0xf4f4f5)))
+                    // On light-mode glass the buttons are white washes like the selected row.
+                    .when(appearance.light, |item| {
+                        item.bg(if appearance.glass {
+                            gpui::Hsla::from(gpui::rgb(0xffffff)).opacity(0.55)
+                        } else {
+                            gpui::Hsla::from(gpui::rgb(0xf4f4f5))
+                        })
+                    })
                     .hover(|item| {
-                        item.bg(if appearance.light {
-                            gpui::rgb(0xe4e4e7).into()
+                        item.bg(if appearance.light && appearance.glass {
+                            gpui::Hsla::from(gpui::rgb(0xffffff)).opacity(0.85)
+                        } else if appearance.light {
+                            gpui::Hsla::from(gpui::rgb(0xe4e4e7))
                         } else {
                             appearance.hover
                         })

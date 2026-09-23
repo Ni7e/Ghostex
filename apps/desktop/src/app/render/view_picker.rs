@@ -175,7 +175,7 @@ impl GhostexGpuiApp {
             .min_h_0()
             .items_center()
             .p(px(24.0))
-            .bg(project_editor_shell_background_color())
+            .bg(glass_clear(project_editor_shell_background_color()))
             .font_family("Inter Variable")
             .text_color(titlebar_text_color())
             .on_mouse_down(
@@ -232,6 +232,7 @@ impl GhostexGpuiApp {
         };
         let shortcut = view_picker_shortcut(mode);
         let dashed = mode.is_addon_view();
+        let (fill, border, hover) = view_picker_card_colors();
         div()
             .id(format!(
                 "ghostex-gpui-view-picker-card-{}",
@@ -248,23 +249,22 @@ impl GhostexGpuiApp {
             .rounded(px(12.0))
             .border_1()
             .when(dashed, |this| this.border_dashed())
-            .border_color(workspace_pane_border_color())
-            .bg(titlebar_popup_menu_background())
+            .border_color(border)
+            .bg(fill)
             .cursor_default()
             .when(!available, |this| this.opacity(0.5))
             .when_some(extension_description.clone(), |this, description| {
                 this.tooltip(move |window, cx| titlebar_tooltip(description.clone(), window, cx))
             })
             .when(available, |this| {
-                this.hover(|this| this.bg(titlebar_active_segment_color()))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.open_view_tab(mode, window, cx);
-                        }),
-                    )
+                this.hover(move |this| this.bg(hover)).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.open_view_tab(mode, window, cx);
+                    }),
+                )
             })
             .child(
                 h_flex()
@@ -341,7 +341,7 @@ impl GhostexGpuiApp {
                     this.open_gpui_settings_extensions_page(Some(window), cx);
                 }),
             )
-            .child("Manage views and where they appear…")
+            .child("Manage your extensions")
     }
 
     /// CDXC:Hotkeys 2026-09-20 DECISION:
@@ -381,6 +381,27 @@ impl GhostexGpuiApp {
         };
         self.open_view_tab(mode, window, cx)
     }
+}
+
+/// A picker card's fill, border and hover fill.
+///
+/// CDXC:Theming 2026-09-23 DECISION:
+/// User: "make this also glassy matching the main area glass bg look and same for the cards". Under window glass the picker paints no page fill of its own, so the work area's frosted glass shows through, and its cards are the same flat ink wash as the frosted view cards (sleeping and setup cards) with a faint ink border and a stronger wash on hover. The opaque window keeps its solid menu-toned cards.
+fn view_picker_card_colors() -> (gpui::Hsla, gpui::Hsla, gpui::Hsla) {
+    if !window_glass_active() {
+        return (
+            titlebar_popup_menu_background(),
+            workspace_pane_border_color().into(),
+            titlebar_active_segment_color().into(),
+        );
+    }
+    let ink = gpui::Hsla::from(chrome_ink());
+    let light = chrome_uses_light_appearance();
+    (
+        ink.opacity(if light { 0.04 } else { 0.06 }),
+        ink.opacity(0.08),
+        ink.opacity(if light { 0.07 } else { 0.10 }),
+    )
 }
 
 /// The letter a built-in view answers to in the picker. Extension, custom and Ghostex views have

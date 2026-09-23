@@ -88,12 +88,13 @@ impl GhostexGpuiApp {
                 .justify_center()
                 .cursor_grab()
                 // A chat pane's strip is the chat's own surface, so it reads as part of the pane
-                // and, under the header, as part of the band above it.
+                // and, under the header, as part of the band above it. Under glass the chat is
+                // clear too, so the strip stays clear rather than drawing an opaque band.
                 .when(
                     session_id.is_some_and(|session_id| {
                         self.agents_chat_mode_sessions.contains(&session_id)
                     }),
-                    |grip| grip.bg(gpui_session_chat_background_color()),
+                    |grip| grip.bg(glass_clear(gpui_session_chat_background_color())),
                 )
                 .child(
                     div()

@@ -1564,6 +1564,10 @@ pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
     }
     let theme = Theme::global_mut(cx);
     theme.popover = titlebar_popup_menu_background();
+    // CDXC:Theming 2026-09-23 DECISION: User: tooltips "dont fit the glass look". gpui-component's
+    // tooltip paints `tokens.popover`, which kept the stock near-black, so it now takes the same
+    // tinted menu colour as the app's menus.
+    theme.tokens.popover = titlebar_popup_menu_background().into();
     theme.popover_foreground = titlebar_popup_menu_foreground();
     theme.border = titlebar_popup_menu_border_color();
     theme.radius = px(2.0);

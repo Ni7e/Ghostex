@@ -81,6 +81,57 @@ impl GpuiAppToastLevel {
     }
 }
 
+/// The colours one toast paints with.
+struct GpuiAppToastColors {
+    background: Hsla,
+    border: Hsla,
+    title: Hsla,
+    description: Hsla,
+}
+
+impl GpuiAppToastColors {
+    /*
+    CDXC:AppModal 2026-09-23 DECISION:
+    User: "let's also please make the toasts that we have in the app also use the same effect that the scroll to bottom has and let's only show the x button when we hover them". Under window glass the toast window blurs what is behind each toast (limited to the toasts themselves, not the gaps between them), and each toast takes the chat composer's frosted wash and border instead of a solid tinted card; success, warning and error keep a faint wash and outline of their own colour. The × stays hidden until the toast is hovered. The opaque window keeps the solid cards.
+    */
+    fn resolve(level: GpuiAppToastLevel, glass: bool, light: bool) -> Self {
+        if !glass {
+            return Self {
+                background: level.container_background().into(),
+                border: level.container_border().into(),
+                title: level.title_color().into(),
+                description: rgba(0xffffffb8).into(),
+            };
+        }
+        let ink: Hsla = if light { gpui::black() } else { gpui::white() };
+        let tint = |alpha: f32| -> Hsla { Hsla::from(level.indicator_color()).opacity(alpha) };
+        let (background, border) = match level {
+            GpuiAppToastLevel::Info => (
+                ink.opacity(if light { 0.04 } else { 0.06 }),
+                ink.opacity(0.08),
+            ),
+            _ => (tint(0.10), level.container_border().into()),
+        };
+        let title: Hsla = if light {
+            match level {
+                GpuiAppToastLevel::Info => rgb(0x18181b),
+                GpuiAppToastLevel::Success => rgb(0x14532d),
+                GpuiAppToastLevel::Warning => rgb(0x713f12),
+                GpuiAppToastLevel::Error => rgb(0x7f1d1d),
+            }
+            .into()
+        } else {
+            level.title_color().into()
+        };
+        Self {
+            background,
+            border,
+            title,
+            description: ink.opacity(if light { 0.62 } else { 0.72 }),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct GpuiAppToast {
     pub(crate) id: String,
@@ -262,6 +313,8 @@ pub(crate) struct GpuiAppToastWindow {
     pub(crate) app: gpui::WeakEntity<GhostexGpuiApp>,
     pub(crate) toasts: Vec<GpuiAppToast>,
     pub(crate) hovered_toast_id: Option<String>,
+    /// The toast cards the window's blurred background was last limited to.
+    pub(crate) blur_region: Vec<(Bounds<Pixels>, Pixels)>,
 }
 
 impl GpuiAppToastWindow {
@@ -360,6 +413,14 @@ pub(crate) fn gpui_app_toast_close_button_icon_color() -> Hsla {
 impl Render for GpuiAppToastWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         let hovered_toast_id = self.hovered_toast_id.clone();
+        let glass = window_glass_active();
+        let light = chrome_uses_light_appearance();
+        // Each card reports its painted frame here so the blurred background covers the cards
+        // themselves and not the gaps or the close buttons' outset.
+        let card_frames: std::rc::Rc<std::cell::RefCell<Vec<(Bounds<Pixels>, Pixels)>>> =
+            Default::default();
+        let region_frames = card_frames.clone();
+        let toast_window = cx.entity().downgrade();
 
         div()
             .flex()
@@ -373,6 +434,8 @@ impl Render for GpuiAppToastWindow {
                 let hover_toast_id = toast.id.clone();
                 let show_close_button = hovered_toast_id.as_deref() == Some(toast.id.as_str());
                 let description = toast.description.clone();
+                let colors = GpuiAppToastColors::resolve(toast.level, glass, light);
+                let card_frames = card_frames.clone();
                 let truncate_description_from_start =
                     toast.id == GPUI_SESSION_CHAT_FILE_OPENING_TOAST_ID;
                 let indicator = if toast.loading && toast.id != GPUI_GXSERVER_DAEMON_TOAST_ID {
@@ -413,10 +476,33 @@ impl Render for GpuiAppToastWindow {
                             .mr(px(GPUI_APP_TOAST_CLOSE_OUTSET))
                             .px(px(GPUI_APP_TOAST_HORIZONTAL_PADDING))
                             .py(px(GPUI_APP_TOAST_VERTICAL_PADDING))
+                            .relative()
                             .rounded(px(10.0))
                             .border_1()
-                            .border_color(toast.level.container_border())
-                            .bg(toast.level.container_background())
+                            .border_color(colors.border)
+                            .bg(colors.background)
+                            .when(glass, |card| {
+                                card.child(
+                                    canvas(
+                                        move |bounds, _, _| {
+                                            // Pinned to the padding box, so grow by the 1px
+                                            // border to cover the whole card.
+                                            card_frames
+                                                .borrow_mut()
+                                                .push((bounds.dilate(px(1.0)), px(10.0)));
+                                        },
+                                        |_, _, _, _| {},
+                                    )
+                                    // Without insets an absolute child sits at the card's
+                                    // content origin, inside its padding, which put the blur
+                                    // off the card by the padding.
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .right_0()
+                                    .bottom_0(),
+                                )
+                            })
                             .child(
                                 div()
                                     .flex()
@@ -437,7 +523,7 @@ impl Render for GpuiAppToastWindow {
                                                         GPUI_APP_TOAST_TITLE_LINE_HEIGHT,
                                                     ))
                                                     .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(toast.level.title_color())
+                                                    .text_color(colors.title)
                                                     .child(toast.title.clone()),
                                             )
                                             .when_some(description, |text_column, description| {
@@ -448,7 +534,7 @@ impl Render for GpuiAppToastWindow {
                                                         .line_height(px(
                                                             GPUI_APP_TOAST_DESCRIPTION_LINE_HEIGHT,
                                                         ))
-                                                        .text_color(rgba(0xffffffb8))
+                                                        .text_color(colors.description)
                                                         .when(
                                                             truncate_description_from_start,
                                                             |description| {
@@ -477,12 +563,15 @@ impl Render for GpuiAppToastWindow {
                                                             .items_center()
                                                             .rounded(px(4.0))
                                                             .border_1()
-                                                            .border_color(rgba(0xffffff40))
+                                                            .border_color(
+                                                                colors.title.opacity(0.25),
+                                                            )
                                                             .text_size(px(12.0))
-                                                            .text_color(rgba(0xffffffff))
+                                                            .text_color(colors.title)
                                                             .cursor_pointer()
-                                                            .hover(|button| {
-                                                                button.bg(rgba(0xffffff18))
+                                                            .hover(move |button| {
+                                                                button
+                                                                    .bg(colors.title.opacity(0.094))
                                                             })
                                                             .on_click(move |_, _, cx| {
                                                                 cx.stop_propagation();
@@ -504,5 +593,30 @@ impl Render for GpuiAppToastWindow {
                         toast_element.child(self.render_close_button(toast_id, cx))
                     })
             }))
+            .when(glass, |stack| {
+                // Painted after every card, so it sees all of this frame's card frames.
+                stack.child(
+                    canvas(
+                        move |_, window, cx| {
+                            let frames = region_frames.borrow().clone();
+                            let changed = toast_window
+                                .update(cx, |toast_window, _| {
+                                    if toast_window.blur_region == frames {
+                                        return false;
+                                    }
+                                    toast_window.blur_region = frames.clone();
+                                    true
+                                })
+                                .unwrap_or(false);
+                            if changed {
+                                window.set_background_blur_region(frames);
+                            }
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
     }
 }

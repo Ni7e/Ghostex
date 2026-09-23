@@ -1164,4 +1164,10 @@ export const PROJECT_BOARD_STYLES = `
     .project-ticket-conversation-controls { grid-template-columns: 1fr; }
     .project-ticket-meta-grid { grid-template-columns: 1fr; }
   }
+
+  /* The toast close button shows only on hover, restated from packages/core-ui/styles/modals.css because this page loads only the generated sheet. */
+  [data-sonner-toast] [data-close-button] { opacity: 0; }
+  [data-sonner-toast]:hover [data-close-button],
+  [data-sonner-toast]:focus-within [data-close-button],
+  [data-sonner-toast] [data-close-button]:focus-visible { opacity: 1; }
 `;

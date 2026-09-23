@@ -115,14 +115,14 @@ impl PickerColors {
         if p.light {
             let foreground = rgb(0x262626);
             Self {
-                surface: p.background,
-                frame_border: rgb(0xd4d4d4),
+                surface: p.surface,
+                frame_border: p.hairline,
                 item: rgb(0x404040),
                 foreground,
                 muted: p.muted,
                 label: css_mix(foreground, 0.86, p.muted),
                 glyph: css_mix(foreground, 0.62, p.muted),
-                selected_background: rgb(0xefefef),
+                selected_background: modal_rgba(0x000000, 0.05),
                 selected_ring: modal_rgba(0x000000, 0.06),
                 selected_label: foreground,
                 input_background: p.panel,
@@ -133,17 +133,17 @@ impl PickerColors {
         } else {
             let foreground = rgb(0xb4b8bf);
             Self {
-                surface: p.background,
-                frame_border: rgb(0x3f3f3f),
+                surface: p.surface,
+                frame_border: modal_rgba(0xffffff, 0.12),
                 item: foreground,
                 foreground,
                 muted: p.muted,
                 label: css_mix(foreground, 0.86, p.muted),
                 glyph: css_mix(foreground, 0.62, p.muted),
-                selected_background: rgb(0x141414),
+                selected_background: modal_rgba(0xffffff, 0.06),
                 selected_ring: modal_rgba(0xffffff, 0.05),
                 selected_label: rgb(0xd8d8d8),
-                input_background: css_mix(p.background, 0.76, rgb(0x000000)),
+                input_background: modal_rgba(0xffffff, 0.04),
                 input_border: modal_rgba(0xffffff, 0.15),
                 divider: modal_rgba(0xffffff, 0.10 * 0.7),
                 light: false,
@@ -291,6 +291,8 @@ fn matches_query(text: &str, normalized_query: &str) -> bool {
 pub(crate) struct GpuiNewThreadPickerWindow {
     host: NewThreadPickerHost,
     colors: PickerColors,
+    /// Set by the app when the picker's window is blurred under window glass.
+    pub(crate) glass: bool,
     input: Entity<InputState>,
     agents: Vec<NewThreadPickerAgent>,
     agents_loaded: bool,
@@ -338,6 +340,7 @@ impl GpuiNewThreadPickerWindow {
         });
         input.update(cx, |input, cx| input.focus(window, cx));
         Self {
+            glass: false,
             host,
             colors: PickerColors::resolve(&config.palette),
             input,
@@ -1283,7 +1286,12 @@ impl Render for GpuiNewThreadPickerWindow {
             .rounded(px(10.0))
             .border_1()
             .border_color(hsla(c.frame_border))
-            .bg(hsla(c.surface))
+            // Under window glass the picker's window blurs what is behind it, so its fill thins.
+            .bg(hsla(if self.glass {
+                rgba_of(c.surface, 0.78)
+            } else {
+                c.surface
+            }))
             .font_family(PICKER_FONT)
             .text_size(px(ROW_TEXT_SIZE))
             .line_height(px(ROW_LINE_HEIGHT))

@@ -1884,6 +1884,12 @@ impl GhostexGpuiApp {
             "pickTerminalBackgroundImageFile" => {
                 self.handle_gpui_pick_terminal_background_image_message(cx);
             }
+            "pickWindowGlassImageFile" => {
+                self.handle_gpui_pick_window_glass_image_message(
+                    &serde_json::Value::Object(command.clone()),
+                    cx,
+                );
+            }
             "pickFirstLaunchProjectFolder" => {
                 self.handle_gpui_pick_first_launch_project_folder_message(cx);
             }

@@ -1016,6 +1016,14 @@ export const MANAGE_STYLES = `
     padding: 0 var(--manage-header-edge-padding) 0 13px;
   }
 
+  /*
+   * CDXC:Theming 2026-09-23 DECISION:
+   * User: "the titlebar of docs ... doesn't match the style of the rest when i have the glass effect more transparent". Under window glass the page is one solid card below the see-through tab strip, so its header row takes the page's own tone, kept apart by its hairline, instead of the chrome tone that only lines up with an opaque tab strip.
+   */
+  :root[data-window-glass="true"] .manage-preview-header {
+    background: var(--manage-bg);
+  }
+
   .manage-preview-content[data-kind="drawing"] .manage-preview-header {
     padding-right: 13px;
   }
