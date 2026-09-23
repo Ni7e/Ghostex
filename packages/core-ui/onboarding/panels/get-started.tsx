@@ -6,16 +6,26 @@ import {
   installedAgents,
   type PanelProps,
 } from '../onboarding-state';
-import { Cta, Eyebrow, FootActions, Heading, Icon, Spinner, Sub } from '../primitives';
+import {
+  APPEARANCE_CHOICES,
+  ThemeCardGrid,
+  darkThemeCards,
+  isTransparencyEnabled,
+  lightThemeCards,
+  windowGlassAvailable,
+  windowGlassForTransparency,
+} from '../../settings-modal/theme-simple-controls';
+import { Cta, Eyebrow, FootActions, Heading, Icon, Spinner, Sub, Toggle } from '../primitives';
 import { box } from '../stage';
 
 const SESSION_VIEWS: readonly (readonly [PreferredAgentInterface, string, string])[] = [
   ['chat', 'Chat', 'Cleaner agent conversation'],
   ['terminal', 'Terminal', 'Raw CLI interface'],
 ];
-const CARD_LEFT = 486;
-const CARD_TOP = 310;
-const CARD_WIDTH = 700;
+/** The project card and the look card sit side by side, centred on the full-width stage. */
+const CARDS_LEFT = 156;
+const CARDS_TOP = 310;
+const CARDS_WIDTH = 1360;
 /**
  * CDXC:Onboarding 2026-09-15 WHY:
  * The prototype laid the "Start with" tiles out at a fixed pitch of card width over tile count, which squeezed
@@ -55,6 +65,10 @@ export function GetStartedPanel({ props, flow, setFlow }: PanelProps) {
     if (!settings) return;
     props.onChange({ ...settings, preferredAgentInterface: view });
   };
+  const updateSettings = (patch: Partial<NonNullable<typeof settings>>) => {
+    if (!settings) return;
+    props.onChange({ ...settings, ...patch });
+  };
   const openGhostex = () => {
     if (folder) {
       if (opening) return;
@@ -82,63 +96,66 @@ export function GetStartedPanel({ props, flow, setFlow }: PanelProps) {
         Get started
       </Eyebrow>
       <Heading x={336} y={182} w={1000} size={48} center l1='Open your first project in Ghostex.' />
-      <Sub x={486} y={252} w={700} size={16.5} center>
-        One folder, one agent, one default view. Everything else can change later.
+      <Sub x={336} y={252} w={1000} size={16.5} center>
+        One folder, one agent, one default view and a look you like. Everything else can change later.
       </Sub>
-      <div className='pcol' style={box(CARD_LEFT, CARD_TOP, CARD_WIDTH)}>
-        <div className='glass pcard'>
-          <div className='label'>Project folder</div>
-          <div className='pfield'>
-            <Icon n='folder' size={22} className='dimc2' />
-            <span className={'path' + (folder ? '' : ' dim')}>{folder || 'Choose a folder to start in'}</span>
-            <button type='button' className='choose' onClick={props.onPickProjectFolder}>
-              Choose folder
-            </button>
-          </div>
-          <div className='label'>Start with</div>
-          {tiles.length <= MAX_TILE_ROW ? (
-            <div className='opts' style={{ gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))` }}>
-              {tiles.map((tile) => (
-                <button
-                  key={tile.id}
-                  type='button'
-                  className={'opt' + (startWith === tile.id ? ' sel' : '')}
-                  onClick={() => setFlow({ startWith: tile.id })}
-                >
-                  <span className='nm'>{tile.name}</span>
-                  <span className='ss'>{tile.detail}</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className='chips'>
-              {tiles.map((tile) => (
-                <button
-                  key={tile.id}
-                  type='button'
-                  className={'opt chip' + (startWith === tile.id ? ' sel' : '')}
-                  title={tile.detail}
-                  onClick={() => setFlow({ startWith: tile.id })}
-                >
-                  {tile.name}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className='label'>Default session view</div>
-          <div className='opts' style={{ gridTemplateColumns: `repeat(${SESSION_VIEWS.length}, minmax(0, 1fr))` }}>
-            {SESSION_VIEWS.map(([id, name, detail]) => (
-              <button
-                key={id}
-                type='button'
-                className={'opt' + (sessionView === id ? ' sel' : '')}
-                onClick={() => setSessionView(id)}
-              >
-                <span className='nm'>{name}</span>
-                <span className='ss'>{detail}</span>
+      <div className='pcol' style={box(CARDS_LEFT, CARDS_TOP, CARDS_WIDTH)}>
+        <div className='pcards'>
+          <div className='glass pcard'>
+            <div className='label'>Project folder</div>
+            <div className='pfield'>
+              <Icon n='folder' size={22} className='dimc2' />
+              <span className={'path' + (folder ? '' : ' dim')}>{folder || 'Choose a folder to start in'}</span>
+              <button type='button' className='choose' onClick={props.onPickProjectFolder}>
+                Choose folder
               </button>
-            ))}
+            </div>
+            <div className='label'>Start with</div>
+            {tiles.length <= MAX_TILE_ROW ? (
+              <div className='opts' style={{ gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))` }}>
+                {tiles.map((tile) => (
+                  <button
+                    key={tile.id}
+                    type='button'
+                    className={'opt' + (startWith === tile.id ? ' sel' : '')}
+                    onClick={() => setFlow({ startWith: tile.id })}
+                  >
+                    <span className='nm'>{tile.name}</span>
+                    <span className='ss'>{tile.detail}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className='chips'>
+                {tiles.map((tile) => (
+                  <button
+                    key={tile.id}
+                    type='button'
+                    className={'opt chip' + (startWith === tile.id ? ' sel' : '')}
+                    title={tile.detail}
+                    onClick={() => setFlow({ startWith: tile.id })}
+                  >
+                    {tile.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className='label'>Default session view</div>
+            <div className='opts' style={{ gridTemplateColumns: `repeat(${SESSION_VIEWS.length}, minmax(0, 1fr))` }}>
+              {SESSION_VIEWS.map(([id, name, detail]) => (
+                <button
+                  key={id}
+                  type='button'
+                  className={'opt' + (sessionView === id ? ' sel' : '')}
+                  onClick={() => setSessionView(id)}
+                >
+                  <span className='nm'>{name}</span>
+                  <span className='ss'>{detail}</span>
+                </button>
+              ))}
+            </div>
           </div>
+          {settings ? <LookCard settings={settings} onUpdate={updateSettings} /> : null}
         </div>
         <p className='sub center pnote-flow'>
           {openError ? (
@@ -169,5 +186,68 @@ export function GetStartedPanel({ props, flow, setFlow }: PanelProps) {
         </Cta>
       </FootActions>
     </>
+  );
+}
+
+/**
+ * CDXC:Onboarding 2026-09-23 DECISION:
+ * User: "please add the transparency setting and theme (just the non advanced stuff) to the onboarding setup's last
+ * page". The Get started panel carries the Theme page's simple choices in a card beside the project card: Appearance,
+ * the dark and light theme cards and Enable Transparency, from the same shared controls as Settings -> Theme
+ * (settings-modal/theme-simple-controls.tsx), applied live. Custom is left out here because tuning it needs the
+ * Advanced colour rows; it stays on the Theme page.
+ */
+function LookCard({
+  settings,
+  onUpdate,
+}: {
+  settings: NonNullable<PanelProps['props']['settings']>;
+  onUpdate: (patch: Partial<NonNullable<PanelProps['props']['settings']>>) => void;
+}) {
+  const transparencyOn = isTransparencyEnabled(settings.windowGlass);
+  return (
+    <div className='glass pcard plook'>
+      <div className='label'>Appearance</div>
+      <div className='opts' style={{ gridTemplateColumns: `repeat(${APPEARANCE_CHOICES.length}, minmax(0, 1fr))` }}>
+        {APPEARANCE_CHOICES.map((choice) => (
+          <button
+            key={choice.value}
+            type='button'
+            className={'opt appearance' + (settings.sidebarTheme === choice.value ? ' sel' : '')}
+            onClick={() => onUpdate({ sidebarTheme: choice.value })}
+          >
+            <span className='nm'>{choice.label}</span>
+          </button>
+        ))}
+      </div>
+      <div className='label'>Dark theme</div>
+      <ThemeCardGrid
+        cards={darkThemeCards(settings, { includeCustom: false })}
+        label='Dark theme'
+        onSelect={(darkThemePreset) => onUpdate({ darkThemePreset })}
+        value={settings.darkThemePreset}
+      />
+      <div className='label'>Light theme</div>
+      <ThemeCardGrid
+        cards={lightThemeCards(settings, { includeCustom: false })}
+        label='Light theme'
+        onSelect={(lightThemePreset) => onUpdate({ lightThemePreset })}
+        value={settings.lightThemePreset}
+      />
+      {windowGlassAvailable() ? (
+        <div className='ptoggle'>
+          <span className='ptoggle-copy'>
+            <span className='nm'>Enable Transparency</span>
+            <span className='ss'>Let your desktop show softly through the window in dark mode.</span>
+          </span>
+          <Toggle
+            size='md'
+            on={transparencyOn}
+            onClick={() => onUpdate({ windowGlass: windowGlassForTransparency(settings.windowGlass, !transparencyOn) })}
+            label='Enable Transparency'
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
