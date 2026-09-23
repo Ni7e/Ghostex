@@ -170,8 +170,17 @@ const OMP_CANCELLED_TEXT = 'User cancelled the selection';
 const OMP_NO_SELECTION_TEXT = 'User did not select any options';
 const OMP_MULTI_HEADER = 'User answers:';
 const OMP_TIMEOUT_SUFFIX = ' (auto-selected after timeout)';
-/** Substring-matched so the exact closing-sentence wording cannot break it. */
-const RESULT_SUFFIX_MARKERS = ['". Read the answers carefully', '". You can now continue'];
+/**
+ * Substring-matched so the exact closing-sentence wording cannot break it. No
+ * leading quote: a preview answer ends in its mockup, not in a closing `"`.
+ */
+const RESULT_SUFFIX_MARKERS = ['. Read the answers carefully', '. You can now continue'];
+/**
+ * CDXC:SessionChat 2026-09-23 WHY: Claude Code 2.1.280 follows a preview option's answer with its
+ * mockup and any note: `"Q"="Grid" selected preview:\n<mockup> notes: <text>`.
+ */
+const PREVIEW_ANSWER_MARKER = '" selected preview:';
+const PREVIEW_NOTE_MARKER = ' notes: ';
 const DISMISSED_PREFIX = '[User dismissed';
 
 /** `"…"` body between the known prefix and closing sentence, or null. */
@@ -184,8 +193,7 @@ function stripAnswerEnvelope(output: string): string | null {
   for (const marker of RESULT_SUFFIX_MARKERS) {
     const at = body.lastIndexOf(marker);
     if (at >= 0) {
-      // Keep the closing quote of the last answer.
-      body = body.slice(0, at + 1);
+      body = body.slice(0, at);
       break;
     }
   }
@@ -510,10 +518,24 @@ function parseAnswers(
     }
     const question = questions[entry.index];
     if (question) {
-      answers[entry.index] = matchAnswerToOptions(question, raw);
+      answers[entry.index] = matchClaudeAnswer(question, raw);
     }
   });
   return answers;
+}
+
+/** A Claude answer, with a preview option's mockup dropped and its note kept as the user's words. */
+function matchClaudeAnswer(question: SessionChatQuestion, raw: string): SessionChatQuestionExchangeAnswer {
+  const previewAt = raw.indexOf(PREVIEW_ANSWER_MARKER);
+  if (previewAt < 0) {
+    return matchAnswerToOptions(question, raw);
+  }
+  const preview = raw.slice(previewAt + PREVIEW_ANSWER_MARKER.length);
+  const noteAt = preview.lastIndexOf(PREVIEW_NOTE_MARKER);
+  const note = noteAt >= 0 ? preview.slice(noteAt + PREVIEW_NOTE_MARKER.length).trim() : '';
+  const matched = matchAnswerToOptions(question, raw.slice(0, previewAt));
+  const other = [matched.otherText, note].filter((part): part is string => !!part);
+  return { ...matched, otherText: other.length > 0 ? other.join('\n') : null };
 }
 
 /**
@@ -543,4 +565,3 @@ export function answeredSessionChatQuestionExchange(pair: SessionChatToolPair): 
     fallbackText: answers === null ? output : null,
   };
 }
-

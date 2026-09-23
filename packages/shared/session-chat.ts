@@ -291,6 +291,8 @@ export interface SessionChatQuestion {
   toolName?: string;
   /** omp's recommended option index: its ask dialog opens with the cursor on this row. */
   recommended?: number;
+  /** True when Claude draws this question beside option previews, where typed text is only a note on a picked option. */
+  previewLayout?: boolean;
   options: SessionChatQuestionOption[];
 }
 

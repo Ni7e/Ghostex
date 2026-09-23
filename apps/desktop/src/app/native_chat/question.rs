@@ -77,7 +77,9 @@ impl NativeChatView {
             .flatten()
             .enumerate()
         {
-            let selected = text(&draft, "other").trim().is_empty()
+            // A multi-select note is sent beside the picks, so they stay visible while it is typed.
+            let selected = (question["multiSelect"] == true
+                || text(&draft, "other").trim().is_empty())
                 && draft["indices"].as_array().is_some_and(|indices| {
                     indices
                         .iter()

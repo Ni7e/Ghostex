@@ -14,9 +14,12 @@ use crate::transcript::tool_fold::ToolPair;
 const HERMES_CLARIFY_MAX_CHOICES: usize = 4;
 
 const RESULT_PREFIXES: [&str; 2] = ["The user answered: ", "Your questions have been answered: "];
-/// Substring-matched so the exact closing-sentence wording cannot break it.
-const RESULT_SUFFIX_MARKERS: [&str; 2] =
-    ["\". Read the answers carefully", "\". You can now continue"];
+/// Substring-matched so the exact closing-sentence wording cannot break it. No leading quote: a
+/// preview answer ends in its mockup, not in a closing `"`.
+const RESULT_SUFFIX_MARKERS: [&str; 2] = [". Read the answers carefully", ". You can now continue"];
+/// CDXC:SessionChat 2026-09-23 WHY: Claude Code 2.1.280 follows a preview option's answer with its mockup and any note: `"Q"="Grid" selected preview:\n<mockup> notes: <text>`.
+const PREVIEW_ANSWER_MARKER: &str = "\" selected preview:";
+const PREVIEW_NOTE_MARKER: &str = " notes: ";
 const DISMISSED_PREFIX: &str = "[User dismissed";
 
 /// Pi's `cursor_ask_question` result envelope.
@@ -485,8 +488,7 @@ fn strip_answer_envelope(output: &str) -> Option<&str> {
     let mut body = &output[prefix.len()..];
     for marker in RESULT_SUFFIX_MARKERS {
         if let Some(at) = body.rfind(marker) {
-            // Keep the closing quote of the last answer.
-            body = &body[..at + 1];
+            body = &body[..at];
             break;
         }
     }
@@ -543,7 +545,7 @@ fn parse_answers(entries: &[ParsedQuestion], output: &str) -> Option<Vec<Option<
         let mut raw = js_trim_end(raw);
         raw = raw.strip_suffix(',').unwrap_or(raw);
         raw = raw.strip_suffix('"').unwrap_or(raw);
-        answers[*index] = Some(match_answer_to_options(&entries[*index], raw));
+        answers[*index] = Some(match_claude_answer(&entries[*index], raw));
     }
     Some(answers)
 }
@@ -574,4 +576,25 @@ pub fn answered_question_exchange(pair: &ToolPair<'_>) -> Option<Value> {
         },
         "fallbackText": if answers.is_none() { Value::String(output) } else { Value::Null },
     }))
+}
+
+/// A Claude answer, with a preview option's mockup dropped and its note kept as the user's words.
+fn match_claude_answer(question: &ParsedQuestion, raw: &str) -> Answer {
+    let Some(preview_at) = raw.find(PREVIEW_ANSWER_MARKER) else {
+        return match_answer_to_options(question, raw);
+    };
+    let preview = &raw[preview_at + PREVIEW_ANSWER_MARKER.len()..];
+    let note = preview
+        .rfind(PREVIEW_NOTE_MARKER)
+        .map(|at| js_trim(&preview[at + PREVIEW_NOTE_MARKER.len()..]))
+        .unwrap_or_default();
+    let mut matched = match_answer_to_options(question, &raw[..preview_at]);
+    let other: Vec<&str> = matched
+        .other
+        .as_deref()
+        .into_iter()
+        .chain((!note.is_empty()).then_some(note))
+        .collect();
+    matched.other = (!other.is_empty()).then(|| other.join("\n"));
+    matched
 }
