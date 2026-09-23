@@ -1,4 +1,4 @@
-import { IconArrowRight, IconCheck, IconRefresh } from '@tabler/icons-react';
+import { IconCheck, IconRefresh } from '@tabler/icons-react';
 import { Button } from '@/packages/components/ui/button';
 import type { AccountSwitchProgress, AgentAccount } from '@/packages/shared/agent-accounts';
 import {
@@ -28,9 +28,11 @@ function UsageCard({ usage: { label, used, level, reset } }: { usage: AccountSwi
         {used !== undefined && <small>%</small>}
       </strong>
       <span className='gx-account-switch-usage-reset' title={reset ? `Resets in ${reset}` : 'Reset time unavailable'}>
-        {reset && <IconRefresh size={10} aria-hidden='true' />}
         {reset ?? '–'}
       </span>
+      {used !== undefined && (
+        <span className='gx-account-switch-usage-bar' style={{ width: `${used}%` }} aria-hidden='true' />
+      )}
     </div>
   );
 }
@@ -45,21 +47,22 @@ function Account({
   verified: boolean;
 }) {
   const text = useAccountText();
+  const shortRole = target ? (verified ? 'Active' : 'To') : verified ? 'Previous' : 'From';
   return (
     <div
       className={`gx-account-switch-account gx-account-switch-account-${target ? 'to' : 'from'}`}
       role='group'
-      aria-label={`${text(label)} usage`}
+      aria-label={`${role}: ${text(label)}`}
     >
-      <span className='gx-account-switch-account-role'>{role}</span>
       <div className='gx-account-switch-account-identity'>
         <span className='gx-account-switch-agent-mark' aria-hidden='true'>
           <span style={getBrandAgentLogoStyle(provider)} />
         </span>
-        <div>
-          <strong title={text(label)}>{text(label)}</strong>
-        </div>
-        {target && verified && <IconCheck size={15} className='gx-account-switch-verified' />}
+        <span className='gx-account-switch-account-role'>{shortRole}</span>
+        <strong className='gx-account-switch-account-email' title={text(label)}>
+          {text(label)}
+        </strong>
+        {target && verified && <IconCheck size={13} className='gx-account-switch-verified' aria-hidden='true' />}
       </div>
       <div className='gx-account-switch-usage-cards'>
         {usage.map((card) => (
@@ -91,17 +94,12 @@ export function AccountSwitchCard({
   if (!card) return null;
   return (
     <section className='gx-account-switch-card' data-phase={card.phase} aria-label='Account switch status'>
-      <div className='gx-account-switch-card-heading'>
-        <div role='status' aria-live='polite'>
-          <h2>{card.heading}</h2>
-          <p>{card.lede}</p>
-        </div>
+      <div className='gx-account-switch-card-heading' role='status' aria-live='polite'>
+        <h2>{card.heading}</h2>
+        <p>{card.lede}</p>
       </div>
-      <div className='gx-account-switch-account-route'>
-        <Account account={card.from} provider={progress.provider} verified={card.verified} />
-        <IconArrowRight size={17} className='gx-account-switch-route-arrow' aria-hidden='true' />
-        <Account account={card.to} provider={progress.provider} verified={card.verified} />
-      </div>
+      <Account account={card.from} provider={progress.provider} verified={card.verified} />
+      <Account account={card.to} provider={progress.provider} verified={card.verified} />
       {card.steps === null ? (
         <div className='gx-account-switch-failure-detail' role='alert'>
           <p>{text(card.failure ?? '')}</p>
@@ -124,15 +122,11 @@ export function AccountSwitchCard({
               aria-current={state === 'active' ? 'step' : undefined}
               aria-label={`Step ${index + 1}: ${label}, ${state === 'done' ? 'complete' : state === 'active' ? 'in progress' : 'pending'}`}
             >
-              <span className='gx-account-switch-step-marker' aria-hidden='true'>
-                <span className='gx-account-switch-step-number'>{index + 1}</span>
+              <span className='gx-account-switch-step-number' aria-hidden='true'>
+                {state === 'done' ? <IconCheck size={10} /> : index + 1}
               </span>
-              <span className='gx-account-switch-step-copy'>
-                <span className='gx-account-switch-step-label'>{label}</span>
-                <span className='gx-account-switch-step-track' aria-hidden='true'>
-                  {state === 'active' && <span className='gx-account-switch-step-motion' />}
-                </span>
-              </span>
+              <span className='gx-account-switch-step-label'>{label}</span>
+              {state === 'active' && <span className='gx-account-switch-step-motion' aria-hidden='true' />}
             </li>
           ))}
         </ol>
