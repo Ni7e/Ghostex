@@ -121,6 +121,12 @@ pub(crate) struct MergeAllTabsForPane {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
 #[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct CloseAgentsPane {
+    pub(crate) pane_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
 pub(crate) struct SelectAgentsWorkspaceTab {
     pub(crate) pane_id: u64,
     pub(crate) session_id: u64,

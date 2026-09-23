@@ -158,15 +158,46 @@ impl GhostexGpuiApp {
         };
         window.prevent_default();
         cx.stop_propagation();
+        let was_on_screen = self
+            .agents_workspace
+            .rendered_leaf_order()
+            .contains(&source_pane_id)
+            && self.agents_workspace.active_session_in_pane(source_pane_id) == Some(session_id);
         if self
             .agents_workspace
             .split_tab_to_pane(source_pane_id, target_pane_id, session_id, zone)
         {
+            if was_on_screen {
+                self.close_pane_left_by_dragged_session(source_pane_id, target_pane_id);
+            }
             // The same activation a tab drop completes with, so a sleeping or runtime-missing
             // session is reported to the sidebar for its wake and reattach.
             self.select_agents_tab(self.agents_workspace.focused_pane, session_id, cx);
         } else {
             cx.notify();
+        }
+    }
+
+    /// CDXC:Workarea 2026-09-23 DECISION:
+    /// User: dragging a session onto the middle of another pane moves it there, and with `a b / c d` dragging `c` onto `b` leaves `a b / d d`: the pane `c` came from goes away and `d` fills the row. `b`'s pane now shows `c`, the way any selection replaces what the focused pane shows. A pane is a viewport onto the session it shows, so when that session is dragged to another pane (the middle or an edge) the viewport it leaves closes instead of showing some other session; the sessions it held behind the scenes join its neighbour and keep running.
+    pub(crate) fn close_pane_left_by_dragged_session(
+        &mut self,
+        source_pane_id: WorkspacePaneId,
+        target_pane_id: WorkspacePaneId,
+    ) {
+        if source_pane_id == target_pane_id
+            || self.agents_workspace.find_leaf(source_pane_id).is_none()
+        {
+            return;
+        }
+        let focused = self.agents_workspace.focused_pane;
+        if self
+            .agents_workspace
+            .close_pane_keeping_sessions(source_pane_id)
+            .is_some()
+            && self.agents_workspace.find_leaf(focused).is_some()
+        {
+            self.agents_workspace.set_focused_pane(focused);
         }
     }
 }

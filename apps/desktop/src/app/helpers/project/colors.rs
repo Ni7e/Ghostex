@@ -167,6 +167,7 @@ pub(crate) fn refresh_gpui_visual_settings(
     GPUI_TITLEBAR_GRADIENT_LEFT_RGB.store(u64::from(gradient_left), Ordering::Relaxed);
     GPUI_TITLEBAR_GRADIENT_RIGHT_RGB.store(u64::from(gradient_right), Ordering::Relaxed);
     GPUI_TITLEBAR_FOREGROUND_RGB.store(u64::from(titlebar_foreground), Ordering::Relaxed);
+    refresh_window_glass(object);
 }
 
 /// The theme's content colour for terminals of one appearance: the same rule the chat uses, so a
@@ -313,6 +314,13 @@ pub(crate) fn workspace_terminal_body_color(
     presentation_state: Option<TerminalSessionPresentationState>,
 ) -> Hsla {
     match presentation_state {
+        // Under window glass the grid paints no default background either, so the pane shows the
+        // frosted column all the way to its padding.
+        Some(
+            TerminalSessionPresentationState::Running
+            | TerminalSessionPresentationState::Sleeping
+            | TerminalSessionPresentationState::Mounting,
+        ) if window_glass_active() => gpui::transparent_black(),
         Some(TerminalSessionPresentationState::Running) => workspace_terminal_placeholder_color(),
         Some(
             TerminalSessionPresentationState::Sleeping | TerminalSessionPresentationState::Mounting,
@@ -792,15 +800,7 @@ pub(crate) fn command_pane_split_handle_color() -> Hsla {
 }
 
 pub(crate) fn command_terminal_placeholder_color() -> Hsla {
-    workspace_terminal_placeholder_color()
-}
-
-pub(crate) fn command_pane_sleeping_placeholder_wake_label_color() -> Hsla {
-    /*
-    CDXC:SessionSleep 2026-06-25-14:49:
-    Native AppKit uses calibrated white 0.55 for the sleeping placeholder wake label; keep the GPUI label on the equivalent neutral gray instead of reusing brighter tab or state-placeholder text colors.
-    */
-    rgb(0x8c8c8c).into()
+    glass_clear(workspace_terminal_placeholder_color())
 }
 
 pub(crate) fn command_pane_delayed_send_badge_background_color() -> Hsla {

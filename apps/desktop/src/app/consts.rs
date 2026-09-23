@@ -1451,26 +1451,6 @@ pub(crate) const COMMAND_PANE_MIN_WIDTH_RATIO: f32 = 0.10;
 
 pub(crate) const COMMAND_PANE_MAX_WIDTH_RATIO: f32 = 0.90;
 
-/*
-CDXC:SessionSleep 2026-06-25-14:49:
-Sleeping command-pane bodies should mirror native AppKit placeholders: black body, centered medium 13px wake text, and the exact "Press Any Key to Wake" affordance only when click-to-wake placeholders are enabled.
-
-CDXC:SessionSleep 2026-06-27-00:22:
-Native `SleepingPanePlaceholderContentView` measures the wake label from the exact command body: max width is body width minus 8, max height is body height minus 16, nonpositive max dimensions hide the label, text wraps by character, width is ceil(measured width)+8 clamped to the max, height is ceil(measured height) with an 18px minimum clamped to the max, and the frame is centered in the body.
-
-CDXC:SessionSleep 2026-06-27-00:22:
-The GPUI wake label must be paint-only body chrome inside the normal command body canvas so it cannot own hit testing, keyboard routing, persistence, logs, or fallback geometry. Existing body click/key wake handlers remain the only wake behavior.
-*/
-pub(crate) const COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL: &str = "Press Any Key to Wake";
-
-pub(crate) const COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_FONT_SIZE: f32 = 13.0;
-
-pub(crate) const COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_LINE_HEIGHT: f32 = 18.0;
-
-pub(crate) const COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_HORIZONTAL_PADDING: f32 = 4.0;
-
-pub(crate) const COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_VERTICAL_PADDING: f32 = 8.0;
-
 pub(crate) const GPUI_KEEP_AWAKE_POWER_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 pub(crate) const GPUI_KEEP_AWAKE_LID_SLEEP_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);

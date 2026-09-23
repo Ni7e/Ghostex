@@ -332,14 +332,8 @@ impl GhostexGpuiApp {
 
         let dragged = event.drag(cx);
         let zone = workspace_pane_body_drop_zone(event.bounds, event.event.position);
-        if self
-            .agents_workspace
-            .workspace_tab_edge_drop_is_single_tab_own_pane_noop(
-                dragged.source_pane_id,
-                pane_id,
-                zone,
-            )
-        {
+        // A pane dragged by its grip lands on another pane only (session_pane_placement.rs).
+        if dragged.source_pane_id == pane_id {
             if self.workspace_drop_feedback.is_some_and(|feedback| {
                 feedback.pane_id == pane_id
                     && matches!(feedback.target, WorkspaceDropTarget::PaneBody(_))
@@ -404,20 +398,10 @@ impl GhostexGpuiApp {
             _ => None,
         };
         self.finish_workspace_tab_drag_state(cx);
-        let zone = if let Some(zone) = feedback_zone {
-            zone
-        } else {
-            if self
-                .agents_workspace
-                .workspace_tab_body_drop_is_single_tab_own_pane_noop(
-                    dragged.source_pane_id,
-                    target_pane_id,
-                )
-            {
-                cx.notify();
-                return;
-            }
-            WorkspaceDropZone::Center
+        // No zone is shown over the dragged pane itself, so a release there moves nothing.
+        let Some(zone) = feedback_zone else {
+            cx.notify();
+            return;
         };
 
         let changed = match zone {
@@ -438,6 +422,7 @@ impl GhostexGpuiApp {
         };
 
         if changed {
+            self.close_pane_left_by_dragged_session(dragged.source_pane_id, target_pane_id);
             /*
             A pane-body drop makes the dragged tab active in the destination,
             so complete the interaction through the same activation path as a

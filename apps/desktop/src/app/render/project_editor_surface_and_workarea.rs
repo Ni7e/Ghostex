@@ -23,6 +23,7 @@ use crate::app::consts::*;
 use crate::app::element::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
+use crate::app::render::sleeping_card::sleeping_card;
 use crate::*;
 
 impl GhostexGpuiApp {
@@ -72,7 +73,8 @@ impl GhostexGpuiApp {
             .project_workarea_runtime_cef_surfaces
             .get(&slot_key)
             .is_none_or(|owned| owned.page_ready());
-        div()
+        let glass = window_glass_active();
+        let card = div()
             .id(format!(
                 "ghostex-gpui-project-workarea-runtime-cef-surface-{}",
                 slot_key.privacy_label()
@@ -103,7 +105,16 @@ impl GhostexGpuiApp {
                         .inset_0()
                         .child(self.render_view_skeleton(mode)),
                 )
-            })
+            });
+        if !glass {
+            return card.into_any_element();
+        }
+        div()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .p(px(VIEW_PANEL_GLASS_CARD_INSET))
+            .child(card)
             .into_any_element()
     }
 
@@ -327,26 +338,36 @@ impl GhostexGpuiApp {
             .bg(if mode == TitlebarMode::Source {
                 source_view_background_color()
             } else {
-                if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
-                    rgb(0xffffff).into()
-                } else {
-                    workspace_background_color()
-                }
-            })
-            .when(mode == TitlebarMode::Browser, |this| {
-                this.child(self.render_browser_sleeping_placeholder_card(cx))
-            })
-            .when(mode != TitlebarMode::Browser, |this| {
-                this.on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.focus_project_editor_surface(mode, window, cx);
-                        cx.notify();
-                    }),
+                glass_clear(
+                    if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+                        rgb(0xffffff).into()
+                    } else {
+                        workspace_background_color()
+                    },
                 )
-                .child(project_editor_sleeping_placeholder_copy(signature))
+            })
+            .p(px(16.0))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.focus_project_editor_surface(mode, window, cx);
+                    cx.notify();
+                }),
+            )
+            .child(if mode == TitlebarMode::Browser {
+                self.render_browser_sleeping_card()
+            } else {
+                sleeping_card(
+                    Some(
+                        titlebar_svg_icon(mode.tab_icon(), 34.0, chrome_ink().opacity(0.8).into())
+                            .into_any_element(),
+                    ),
+                    None,
+                    mode.tab_label(),
+                    true,
+                )
             })
             .into_any_element()
     }
@@ -493,11 +514,13 @@ impl GhostexGpuiApp {
             .bg(if mode == TitlebarMode::Source {
                 source_view_background_color()
             } else {
-                if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
-                    rgb(0xffffff).into()
-                } else {
-                    workspace_background_color()
-                }
+                glass_clear(
+                    if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+                        rgb(0xffffff).into()
+                    } else {
+                        workspace_background_color()
+                    },
+                )
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -547,34 +570,4 @@ impl GhostexGpuiApp {
             )
             .into_any_element()
     }
-}
-
-fn project_editor_sleeping_placeholder_copy(
-    signature: ProjectEditorSleepingPlaceholderSignature,
-) -> impl IntoElement {
-    v_flex()
-        .max_w(px(430.0))
-        .min_w_0()
-        .items_center()
-        .justify_center()
-        .px(px(24.0))
-        .text_center()
-        .child(
-            div()
-                .text_center()
-                .text_size(px(12.5))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(chrome_color(0xe5e8ec, 0x111111).opacity(0.64))
-                .child(signature.title),
-        )
-        .child(
-            div()
-                .mt(px(5.0))
-                .max_w(px(430.0))
-                .text_center()
-                .text_size(px(12.0))
-                .line_height(px(17.0))
-                .text_color(chrome_color(0xe5e8ec, 0x111111).opacity(0.64))
-                .child(signature.message),
-        )
 }

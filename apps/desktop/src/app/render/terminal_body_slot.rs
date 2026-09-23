@@ -111,10 +111,13 @@ impl GhostexGpuiApp {
                     .map(|name| format!("zmx - {name}"))
             })
             .flatten();
-        let sleeping_wake_label = command_pane_sleeping_placeholder_wake_label(
-            presentation_state == Some(TerminalSessionPresentationState::Sleeping),
-            gpui_click_to_wake_sleeping_sessions_from_shared_settings(&settings_snapshot),
-        );
+        let sleeping_card_title =
+            (presentation_state == Some(TerminalSessionPresentationState::Sleeping)).then(|| {
+                (
+                    title.clone(),
+                    gpui_click_to_wake_sleeping_sessions_from_shared_settings(&settings_snapshot),
+                )
+            });
         let is_generating_first_prompt_title =
             active_session.is_some_and(|session| session.is_generating_first_prompt_title);
         let remote_connect_status = self.agents_remote_connect_status_for_session(session_id);
@@ -162,8 +165,8 @@ impl GhostexGpuiApp {
         CDXC:Terminal 2026-07-10:
         Mounted libghostty terminals keep keyboard and IME ownership on their exact AppKit host NSView. The existing body remains the normal mouse/layout owner, but it must not focus GPUI's legacy text service after the native handoff because doing so strips Tab, Option/Alt, arrows, and terminal bindings down to committed-text-only input.
 
-        CDXC:SessionSleep 2026-07-05:
-        Sleeping Agents bodies mirror native AppKit sleeping pane placeholders: black body, no diagnostic card, and the same centered paint-only "Press Any Key to Wake" affordance controlled by click-to-wake settings. The existing body click and focused key handlers remain the only wake behavior.
+        CDXC:SessionSleep 2026-09-23:
+        Sleeping Agents bodies show the shared sleeping card (`render/sleeping_card.rs`) with the session title. The card holds no input: the existing body click and focused key handlers remain the only wake behavior. Supersedes the 2026-07-05 paint-only "Press Any Key to Wake" label.
         */
         div()
             .id(format!(
@@ -429,28 +432,15 @@ impl GhostexGpuiApp {
                     | AgentsTerminalBodyPresentation::RunningPlaceholder => this,
                 },
             )
-            .when_some(sleeping_wake_label, |this, label| {
-                this.child(
-                    canvas(
-                        move |bounds, window, _| {
-                            command_pane_sleeping_placeholder_wake_label_prepaint(
-                                bounds, label, window,
-                            )
-                        },
-                        move |bounds, paint_state, window, cx| {
-                            if let Some(paint_state) = paint_state {
-                                command_pane_sleeping_placeholder_wake_label_paint(
-                                    bounds,
-                                    paint_state,
-                                    window,
-                                    cx,
-                                );
-                            }
-                        },
-                    )
-                    .absolute()
-                    .size_full(),
-                )
+            .when_some(sleeping_card_title, |this, (title, click_to_wake)| {
+                this.child(crate::app::render::sleeping_card::sleeping_card_layer(
+                    crate::app::render::sleeping_card::sleeping_card(
+                        None,
+                        None,
+                        title,
+                        click_to_wake,
+                    ),
+                ))
             })
             .when_some(gpui_engine_view, |this, view| {
                 this.child(

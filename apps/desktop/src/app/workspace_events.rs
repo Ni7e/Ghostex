@@ -1172,6 +1172,15 @@ impl GhostexGpuiApp {
                 "sessionId": key.session_id,
             }),
         );
+        // A mapped tab with nothing live behind it is re-attached where it is, so it is brought to
+        // the focused pane first, as the focus-existing path above does (session_pane_placement.rs).
+        if message.placement == GpuiWorkspaceTerminalFocusPlacement::Tab
+            && !force_requested_pane_placement
+            && let Some(shell_session_id) = self.local_workspace_session_mappings.get(&key).copied()
+            && let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id)
+        {
+            self.pull_workspace_session_into_focused_pane(pane_id, shell_session_id);
+        }
         self.spawn_local_workspace_attach_plan(
             key,
             attach_intent,
