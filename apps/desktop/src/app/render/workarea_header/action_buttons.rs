@@ -326,7 +326,7 @@ impl GhostexGpuiApp {
             .overflow_hidden()
             .rounded(px(TITLEBAR_BUTTON_RADIUS))
             .border_1()
-            .border_color(titlebar_button_border_color())
+            .border_color(titlebar_split_button_border_color())
             .bg(workarea_header_split_button_background())
             .when(spec.dimmed, |this| this.opacity(0.5))
             .child(main)
@@ -334,7 +334,7 @@ impl GhostexGpuiApp {
                 div()
                     .w(px(1.0))
                     .h(px(TITLEBAR_CONTROL_HEIGHT))
-                    .bg(titlebar_button_border_color()),
+                    .bg(titlebar_split_button_border_color()),
             )
             .child(caret)
             .when(!open, |this| {

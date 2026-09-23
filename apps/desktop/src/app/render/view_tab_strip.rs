@@ -605,7 +605,7 @@ impl GhostexGpuiApp {
             .overflow_hidden()
             .rounded(px(WORKAREA_VIEW_TAB_RADIUS))
             .border_1()
-            .border_color(titlebar_button_border_color())
+            .border_color(titlebar_split_button_border_color())
             .child(
                 cell(
                     "ghostex-gpui-view-tab-expand",
@@ -636,7 +636,7 @@ impl GhostexGpuiApp {
                     .flex_shrink_0()
                     .w(px(1.0))
                     .h_full()
-                    .bg(titlebar_button_border_color()),
+                    .bg(titlebar_split_button_border_color()),
             )
             .child(
                 cell(
