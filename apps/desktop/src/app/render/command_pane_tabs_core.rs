@@ -251,6 +251,16 @@ impl GhostexGpuiApp {
                             );
                         }),
                     )
+                    .on_mouse_up(
+                        MouseButton::Middle,
+                        cx.listener(move |this, _event: &MouseUpEvent, window, cx| {
+                            this.handle_command_pane_empty_titlebar_middle_mouse_up(
+                                Some(group_id),
+                                window,
+                                cx,
+                            );
+                        }),
+                    )
                     .children(
                         leaf.tab_group
                             .tabs
@@ -438,6 +448,14 @@ impl GhostexGpuiApp {
                                     );
                                 }),
                             )
+                            .on_mouse_up(
+                                MouseButton::Middle,
+                                cx.listener(move |this, _event: &MouseUpEvent, window, cx| {
+                                    this.handle_command_pane_empty_titlebar_middle_mouse_up(
+                                        None, window, cx,
+                                    );
+                                }),
+                            )
                             .children(flat_tabs.into_iter().enumerate().map(
                                 |(tab_index, (group_id, session_id))| {
                                     self.render_command_pane_tab(
@@ -455,9 +473,11 @@ impl GhostexGpuiApp {
                                     == CommandPaneNewCommandControlPlacement::InlineTabRun,
                                 |this| {
                                     this.when(show_tab_add_button, |this| {
-                                        this.child(
-                                            self.render_command_pane_tab_add_button(None, true, cx),
-                                        )
+                                        this.child(self.render_command_pane_tab_add_button(
+                                            self.command_pane.bottom_dock_target_group(),
+                                            true,
+                                            cx,
+                                        ))
                                     })
                                 },
                             ),
