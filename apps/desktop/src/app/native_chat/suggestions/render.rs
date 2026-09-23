@@ -30,7 +30,7 @@ impl Render for SuggestionPanel {
         }
         let files = data["kind"] == "file";
         // React's `bg-popover` and `bg-accent` in the chat's two themes.
-        let popover = p.menu_surface();
+        let popover = p.menu_opaque();
         let highlight = rgb(if p.light { 0xf4f4f5 } else { 0x333333 });
         let outline = row_outline(&state);
         let inline = px(spec.padding_inline_px * s);

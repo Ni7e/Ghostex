@@ -68,11 +68,17 @@ impl NativeChatView {
                 window_bounds:Some(WindowBounds::Windowed(bounds)),display_id,
                 app_id:crate::gpui_platform_window_app_id(),icon:crate::gpui_platform_window_icon(),
                 focus:true,show:true,is_resizable:false,is_minimizable:false,is_movable:false,titlebar:None,
-                window_background:gpui::WindowBackgroundAppearance::Transparent,
+                // Under window glass the card's own window blurs what is behind it (the card fills it).
+                window_background:if crate::app::helpers::window_glass_active() {
+                    gpui::WindowBackgroundAppearance::Blurred
+                } else {
+                    gpui::WindowBackgroundAppearance::Transparent
+                },
                 ..Default::default()
             }, {
                 let chat=chat.clone();
                 move |window,cx| {
+                    window.set_background_corner_radius(px(12.0 * appearance.scale));
                     crate::app::window::popup_frame::strip_gpui_popup_window_frame(window);
                     crate::app::window::attach_gpui_app_modal_window_to_main_window(window,parent);
                     let view=cx.new(|cx| {

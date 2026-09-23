@@ -208,6 +208,10 @@ impl NativeChatView {
             return;
         };
         if !input.read(cx).focus_handle(cx).is_focused(window) {
+            // Another chat field (find bar, note, answer) owns its own typing.
+            if this.chat_text_field_focused(window, cx) {
+                return;
+            }
             /*
             CDXC:SessionChat 2026-09-18 DECISION:
             User (2026-09-06 and 2026-09-07, React composer): arrows and text-editing chords act on

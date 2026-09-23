@@ -16,6 +16,13 @@ use gpui::{
 };
 use serde_json::{Value, json};
 
+/// The stack's frame (React's `.ghostex-chat-file-changes`): 10px rounded corners, 10px side and
+/// 8px end padding, and 12px between files. The files carry the padding and the gap themselves.
+const STACK_RADIUS: f32 = 10.0;
+const STACK_PAD_X: f32 = 10.0;
+const STACK_PAD_Y: f32 = 8.0;
+const STACK_GAP: f32 = 12.0;
+
 /// The card palette, mirroring the tokens in `session-chat-file-change-card.css`.
 struct Palette {
     surface: Hsla,
@@ -140,10 +147,7 @@ impl NativeChatView {
             .flex_col()
             .w_full()
             .min_w_0()
-            .gap(px(12.0 * s))
-            .py(px(8.0 * s))
-            .px(px(10.0 * s))
-            .rounded(px(10.0 * s))
+            .rounded(px(STACK_RADIUS * s))
             .bg(palette.surface);
         let last = files.len().saturating_sub(1);
         for (index, file) in files.iter().enumerate() {
@@ -268,14 +272,23 @@ impl NativeChatView {
         // the code, the footer and the empty space between them all toggle the diff from here, so
         // no two listeners can flip the same row twice. Only the path stops the press to open the file.
         let card_key = key.clone();
-        // CDXC:SessionChat 2026-09-22 DECISION:
-        // User: hovering a file's card lightens it to show a click collapses or expands it. The fill
-        // sits in a 6px inset the card takes from the stack's padding, so the layout does not move.
+        // CDXC:SessionChat 2026-09-23 DECISION:
+        // User: "when i hover over this kind of card, you're making the only middle part change
+        // color, I want all of it to change color". Each file owns its share of the stack's padding
+        // and of the gap to its neighbours, so its hover fill reaches the stack's edges and, for the
+        // first and last file, its rounded corners: a single file lights the whole stack. The spacing
+        // is the old 8px padding and 12px gap, so the layout does not move. Supersedes the
+        // 2026-09-22 fill in a 6px inset. SEE-ALSO: `.ghostex-chat-file-change-card` in
+        // packages/core-ui/chat/session-chat-file-change-card.css.
         let hover_fill: Hsla = if p.light {
             gpui::white().opacity(0.6)
         } else {
             p.foreground.opacity(0.05)
         };
+        let first = index == 0;
+        let pad_top = if first { STACK_PAD_Y } else { STACK_GAP / 2.0 } * s;
+        let pad_bottom = if last { STACK_PAD_Y } else { STACK_GAP / 2.0 } * s;
+        let radius = px(STACK_RADIUS * s);
         let mut card = div()
             .id(format!("card:{key}"))
             .on_click(cx.listener(move |view, _, _, cx| {
@@ -288,9 +301,11 @@ impl NativeChatView {
             .w_full()
             .min_w_0()
             .relative()
-            .mx(px(-6.0 * s))
-            .px(px(6.0 * s))
-            .rounded(px(6.0 * s))
+            .px(px(STACK_PAD_X * s))
+            .pt(px(pad_top))
+            .pb(px(pad_bottom))
+            .when(first, |this| this.rounded_t(radius))
+            .when(last, |this| this.rounded_b(radius))
             .when(can_expand, |this| {
                 this.hover(move |style| style.bg(hover_fill))
             })
@@ -301,9 +316,14 @@ impl NativeChatView {
                 this.child(
                     div()
                         .absolute()
-                        .left(px(14.0 * s))
-                        .top(px(22.0 * s))
-                        .bottom(px(if last { 0.0 } else { -12.0 * s }))
+                        .left(px(STACK_PAD_X * s + 8.0 * s))
+                        .top(px(pad_top + 22.0 * s))
+                        // Down to the next file's first line, through the half gap it owns.
+                        .bottom(px(if last {
+                            pad_bottom
+                        } else {
+                            -STACK_GAP / 2.0 * s
+                        }))
                         .w(px(1.0))
                         .bg(palette.rail),
                 )

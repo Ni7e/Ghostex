@@ -894,11 +894,26 @@ pub fn codex_rows() -> Vec<RowDefinition> {
     rows
 }
 
+/// `CURSOR_ROWS`: Cursor reports only its model, reasoning effort and context use, so its catalog
+/// is the Codex rows that read those.
+pub fn cursor_rows() -> Vec<RowDefinition> {
+    codex_rows()
+        .into_iter()
+        .filter(|row| {
+            matches!(
+                row.id,
+                "thinking" | "sessionName" | "contextUsed" | "contextTokens" | "model"
+            )
+        })
+        .collect()
+}
+
 /// The catalog for one agent.
 pub fn context_detail_rows(agent: ContextDetailsAgent) -> Vec<RowDefinition> {
     match agent {
         ContextDetailsAgent::Codex => codex_rows(),
         ContextDetailsAgent::Claude => claude_rows(),
+        ContextDetailsAgent::Cursor => cursor_rows(),
     }
 }
 

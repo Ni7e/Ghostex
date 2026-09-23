@@ -16,7 +16,30 @@ import {
 import type { SessionChatContextDetailRowDefinition } from './session-chat-context-details';
 import { formatSessionChatDuration } from './session-chat-duration';
 
-export type ContextDetailsAgent = 'claude' | 'codex';
+export type ContextDetailsAgent = 'claude' | 'codex' | 'cursor';
+
+/** CDXC:SessionChatDetectedOptions 2026-09-23 DECISION:
+ * User: Cursor chats get their own status line and More details, saved separately from Claude and Codex, built from what Cursor reports: model, reasoning effort and context use.
+ * Other agents still have neither.
+ */
+export function contextDetailsAgentFor(icon: string | null | undefined): ContextDetailsAgent | null {
+  const normalized = icon?.trim().toLowerCase();
+  if (normalized === 'claude' || normalized === 'codex') return normalized;
+  if (
+    normalized === 'cursor' ||
+    normalized === 'cursor-cli' ||
+    normalized === 'cursor cli' ||
+    normalized === 'cursor-agent'
+  )
+    return 'cursor';
+  return null;
+}
+
+export const CONTEXT_DETAILS_AGENT_NAMES: Record<ContextDetailsAgent, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  cursor: 'Cursor',
+};
 export type AdditionalContextDetailRowId =
   | 'contextUsed'
   | 'contextTokens'

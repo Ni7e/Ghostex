@@ -25,6 +25,7 @@ import { computeSessionChatFiles } from './files';
 import { balancedRowStarts } from '../session-chat-presentation/status-line-layout';
 import { nativeContextEditor, nativeContextEditorCommand } from './native-context-editor';
 import { adoptNativeChatSettings, adoptNativeContextPreferences, computeNativeChatContext } from './native-context';
+import { contextDetailsAgentFor } from '@/packages/core-ui/chat/session-chat-context-details-agents';
 import { dispatchSessionChatOption, queueSessionChatOption } from './option-dispatch';
 import { sendSessionChatOptionAware } from './option-command';
 import { NativeModelPicker } from './native-model-picker';
@@ -874,7 +875,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       case 'contextSave':
         await nativeContextEditorCommand(
           command,
-          chat.sessionOptions.catalog?.modelIcon === 'codex' ? 'codex' : 'claude',
+          contextDetailsAgentFor(chat.sessionOptions.catalog?.modelIcon) ?? 'claude',
           (agent, preferences) => composer('contextSave', { agent, preferences }),
           () => publish(controller.current())
         );

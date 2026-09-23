@@ -49,8 +49,13 @@ impl ContextEditorWindow {
             .rounded(px(6.0 * p.scale))
             .border_1()
             .border_color(p.border)
+            // CDXC:Theming 2026-09-23 DECISION: User: this modal matches the app's other modals, so the primary action is a soft raised wash of the ink rather than a solid white button.
             .when(primary, |item| {
-                item.bg(p.foreground).text_color(p.background)
+                item.bg(p.foreground.opacity(if p.light { 0.08 } else { 0.12 }))
+                    .text_color(p.foreground)
+            })
+            .when(!disabled, |item| {
+                item.hover(|style| style.bg(p.foreground.opacity(if p.light { 0.1 } else { 0.16 })))
             })
             .when(disabled, |item| item.opacity(0.5))
             .when(!disabled, |item| item.chat_cursor_pointer())
@@ -120,7 +125,7 @@ impl Render for ContextEditorWindow {
             .rounded(px(12.0 * s))
             .border_1()
             .border_color(p.border)
-            .bg(gpui::rgb(if p.light { 0xffffff } else { 0x191919 }))
+            .bg(p.menu_surface())
             .font_family(p.font.clone())
             .text_size(px(13.0 * s))
             .text_color(p.foreground)
@@ -161,11 +166,26 @@ impl Render for ContextEditorWindow {
                     .child(text(editor, "description")),
             )
             .child(
-                Input::new(&self.filter)
-                    .cleanable(true)
-                    .disabled(editor["saving"] == true)
+                div()
                     .h(px(32.0 * s))
-                    .text_size(px(13.0 * s)),
+                    .px(px(10.0 * s))
+                    .flex()
+                    .items_center()
+                    .rounded(px(8.0 * s))
+                    .border_1()
+                    .border_color(p.border)
+                    .bg(p.input)
+                    .child(
+                        Input::new(&self.filter)
+                            .cleanable(true)
+                            .disabled(editor["saving"] == true)
+                            .appearance(false)
+                            .bordered(false)
+                            .focus_bordered(false)
+                            .placeholder_color(p.muted.opacity(0.6))
+                            .w_full()
+                            .text_size(px(13.0 * s)),
+                    ),
             )
             .child(groups)
             .child(

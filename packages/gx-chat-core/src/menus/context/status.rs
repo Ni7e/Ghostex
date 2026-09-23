@@ -18,31 +18,56 @@ pub enum ContextDetailsAgent {
     #[default]
     Claude,
     Codex,
+    Cursor,
 }
 
 impl ContextDetailsAgent {
+    /// Every agent with its own catalog and saved record.
+    pub const ALL: [Self; 3] = [Self::Claude, Self::Codex, Self::Cursor];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Cursor => "cursor",
         }
     }
 
-    /// The agent an icon selects. Anything but `codex` is Claude, which is the TypeScript's
-    /// `icon === 'codex' ? 'codex' : 'claude'`.
-    pub fn from_icon(icon: Option<&str>) -> Self {
-        if icon == Some("codex") {
-            Self::Codex
-        } else {
-            Self::Claude
+    /// `contextDetailsAgentFor`: the agent an icon selects, `None` for an agent with no context
+    /// details at all.
+    ///
+    /// CDXC:SessionChatDetectedOptions 2026-09-23 DECISION:
+    /// User: Cursor chats get their own status line and More details, saved separately from
+    /// Claude and Codex, built from what Cursor reports: model, reasoning effort and context use.
+    /// Other agents still have neither.
+    pub fn for_icon(icon: Option<&str>) -> Option<Self> {
+        match icon.map(|icon| icon.trim().to_lowercase()).as_deref() {
+            Some("claude") => Some(Self::Claude),
+            Some("codex") => Some(Self::Codex),
+            Some("cursor" | "cursor-cli" | "cursor cli" | "cursor-agent") => Some(Self::Cursor),
+            _ => None,
         }
+    }
+
+    /// The catalog and record an icon uses: `contextDetailsAgentFor(icon) ?? 'claude'`.
+    pub fn from_icon(icon: Option<&str>) -> Self {
+        Self::for_icon(icon).unwrap_or(Self::Claude)
     }
 
     /// The other agent, which is where Copy to and Copy from write.
     pub fn other(&self) -> Self {
         match self {
             Self::Claude => Self::Codex,
-            Self::Codex => Self::Claude,
+            Self::Codex | Self::Cursor => Self::Claude,
+        }
+    }
+
+    /// The name the Context details dialog uses.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Claude => "Claude Code",
+            Self::Codex => "Codex",
+            Self::Cursor => "Cursor",
         }
     }
 }
@@ -280,7 +305,7 @@ pub fn resolve_context_detail_status(
 ) -> ContextDetailStatus {
     let codex = match agent {
         ContextDetailsAgent::Codex => options.and_then(|options| options.codex_status.clone()),
-        ContextDetailsAgent::Claude => None,
+        ContextDetailsAgent::Claude | ContextDetailsAgent::Cursor => None,
     };
     let usage = resolve_context_meter_usage(
         options.and_then(|options| options.context_usage.as_ref()),
@@ -308,7 +333,7 @@ pub fn resolve_context_detail_status(
                 None => ContextDetailStatus::default(),
             }
         }
-        ContextDetailsAgent::Codex => {
+        ContextDetailsAgent::Codex | ContextDetailsAgent::Cursor => {
             let request = codex.as_ref().and_then(|codex| codex.last_request);
             ContextDetailStatus {
                 version: codex.as_ref().and_then(|codex| codex.version.clone()),

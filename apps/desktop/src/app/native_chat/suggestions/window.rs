@@ -17,6 +17,10 @@ pub(in crate::app::native_chat) struct SuggestionWindowState {
 }
 
 impl SuggestionWindowState {
+    pub(in crate::app::native_chat) fn is_open(&self) -> bool {
+        self.bounds.is_some()
+    }
+
     /// The card inside its window, whose frame is `window_frame` of the card.
     pub(super) fn card_in_window(&self) -> Option<Bounds<Pixels>> {
         self.bounds

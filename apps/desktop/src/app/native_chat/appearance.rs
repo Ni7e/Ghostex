@@ -81,6 +81,13 @@ impl ChatAppearance {
         }
     }
 
+    /// The same tinted menu tone at full strength, for chat popups whose windows are transparent
+    /// rather than blurred (the suggestions popover, whose window is larger than its card), where a
+    /// thinned fill would show the transcript through it unblurred.
+    pub(crate) fn menu_opaque(&self) -> Hsla {
+        self.menu
+    }
+
     /// The `--destructive` tone the React transcript paints failed tool results and failed writes in.
     pub(crate) fn error(&self) -> Hsla {
         rgb(if self.light { 0xc53030 } else { 0xef9999 }).into()

@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 import type { GxserverSessionForkBranch } from '../../shared/gxserver-protocol';
 import { cn } from '@/packages/components/utils';
 import { Button } from '../../components/ui/button';
+import { AppTooltip } from '../app-tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -110,22 +111,27 @@ export function SessionChatForkBranchSwitcher({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            aria-label={tooltip}
-            // It floats over the transcript rather than sitting in a row of its own, so it carries
-            // the chat's own surface and a hairline to stay readable over the text beneath it.
-            className='h-6 gap-1 rounded-md border border-border bg-background px-1.5 text-[11px] font-normal text-muted-foreground'
-            size='sm'
-            title={tooltip}
-            variant='ghost'
-          />
-        }
-      >
-        <IconGitBranch aria-hidden='true' className='size-3.5' stroke={2} />
-        {rows.length}
-      </DropdownMenuTrigger>
+      {/*
+      CDXC:SessionFork 2026-09-23 DECISION:
+      User: the switcher's tooltip opens "to the left not to the right (below it)" with a max width of 220px. It sits under the button with its right edge on the button's right edge and wraps at 220px, like the desktop chat's (fork_branches.rs).
+      */}
+      <AppTooltip align='end' content={tooltip} contentClassName='max-w-[220px]' side='bottom'>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              aria-label={tooltip}
+              // It floats over the transcript rather than sitting in a row of its own, so it carries
+              // the chat's own surface and a hairline to stay readable over the text beneath it.
+              className='h-6 gap-1 rounded-md border border-border bg-background px-1.5 text-[11px] font-normal text-muted-foreground'
+              size='sm'
+              variant='ghost'
+            />
+          }
+        >
+          <IconGitBranch aria-hidden='true' className='size-3.5' stroke={2} />
+          {rows.length}
+        </DropdownMenuTrigger>
+      </AppTooltip>
       <DropdownMenuContent align='end' className='w-72 min-w-72'>
         {/*
         Base UI's GroupLabel needs a Group context and throws (error #31) without one.

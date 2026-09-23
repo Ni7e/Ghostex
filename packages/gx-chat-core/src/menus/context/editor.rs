@@ -178,10 +178,7 @@ pub fn context_editor_projection(
         "description".into(),
         json!(format!(
             "Pick the rows shown under the context meter in {} sessions. Drag to reorder within a group. Star a row to show its value under the chat box.",
-            match agent {
-                ContextDetailsAgent::Claude => "Claude Code",
-                ContextDetailsAgent::Codex => "Codex",
-            }
+            agent.display_name()
         )),
     );
     object.insert("groups".into(), Value::Array(groups));

@@ -143,8 +143,11 @@ impl NativeChatView {
                         // Geometry is available before the session is. Use the same fit rules as
                         // React immediately, including while the controller is still booting.
                         if let Ok(measured) = serde_json::from_value(measurements.clone()) {
-                            let fit = ghostex_gx_chat_core::composer::layout::fit_composer_controls(&measured);
-                            std::sync::Arc::make_mut(&mut chat.snapshot)["composerOverflow"] = json!(fit);
+                            let fit = ghostex_gx_chat_core::composer::layout::fit_composer_controls(
+                                &measured,
+                            );
+                            std::sync::Arc::make_mut(&mut chat.snapshot)["composerOverflow"] =
+                                json!(fit);
                             cx.notify();
                         }
                         if chat.composer_ready {

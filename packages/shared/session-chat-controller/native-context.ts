@@ -2,6 +2,7 @@ import { maskAccountText } from '../account-display';
 import type { AgentAccountsState } from '../agent-accounts';
 import type { UseSessionChatResult } from '@/packages/core-ui/chat/use-session-chat/state';
 import {
+  contextDetailsAgentFor,
   resolveContextDetailStatus,
   type ContextDetailsAgent,
 } from '@/packages/core-ui/chat/session-chat-context-details-agents';
@@ -22,6 +23,7 @@ import type { ChatLifecycle } from './lifecycle';
 let preferences: Record<ContextDetailsAgent, SessionChatContextDetailsPreferences> = {
   claude: normalizeSessionChatContextDetailsPreferences(null, 'claude'),
   codex: normalizeSessionChatContextDetailsPreferences(null, 'codex'),
+  cursor: normalizeSessionChatContextDetailsPreferences(null, 'cursor'),
 };
 export const currentNativeContextPreferences = () => preferences;
 let settings: { title: string | null; hideAccountEmails: boolean } = {
@@ -63,8 +65,9 @@ export function computeNativeChatContext(
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
-  const agent = icon === 'codex' ? 'codex' : 'claude';
-  const hasDetails = icon === 'codex' || icon === 'claude';
+  const detailsAgent = contextDetailsAgentFor(icon);
+  const agent = detailsAgent ?? 'claude';
+  const hasDetails = detailsAgent !== null;
   const reported = resolveSessionChatContextMeterUsage(chat.selectedOptions?.contextUsage, agent === 'codex');
   if (!reported && !hasDetails) return { contextMeter: null };
   const usage = reported ?? { usedPercentage: null, usedTokens: null, windowSize: null };

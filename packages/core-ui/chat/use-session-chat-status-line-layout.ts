@@ -1,9 +1,12 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { SessionChatContextDetailItem } from './session-chat-context-details';
 
-import { balancedRowStarts } from '@/packages/shared/session-chat-presentation/status-line-layout';
+import {
+  balancedRowStarts,
+  SESSION_CHAT_STATUS_LINE_EDIT_RESERVE_PX,
+} from '@/packages/shared/session-chat-presentation/status-line-layout';
 
-export function useSessionChatStatusLineLayout(items: readonly SessionChatContextDetailItem[]) {
+export function useSessionChatStatusLineLayout(items: readonly SessionChatContextDetailItem[], editable = false) {
   const ref = useRef<HTMLDivElement>(null);
   const [rowStarts, setRowStarts] = useState<number[]>([0]);
 
@@ -28,6 +31,7 @@ export function useSessionChatStatusLineLayout(items: readonly SessionChatContex
       } finally {
         delete line.dataset.statusMeasuring;
       }
+      if (editable && widths.length > 0) widths[widths.length - 1] += SESSION_CHAT_STATUS_LINE_EDIT_RESERVE_PX;
       const next = balancedRowStarts(widths, available, separatorWidth);
       setRowStarts((previous) => (previous.join(',') === next.join(',') ? previous : next));
     };
@@ -44,7 +48,7 @@ export function useSessionChatStatusLineLayout(items: readonly SessionChatContex
       mutations.disconnect();
       document.fonts.removeEventListener('loadingdone', measure);
     };
-  }, [items]);
+  }, [items, editable]);
 
   return { ref, rowStarts };
 }

@@ -18,7 +18,8 @@ pub(crate) fn status_line_skeleton(p: &ChatAppearance) -> AnyElement {
     static GEOMETRY: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| {
         serde_json::from_str(include_str!(
             "../../../../../packages/shared/session-chat-presentation/status-line-skeleton.json"
-        )).expect("status line skeleton geometry")
+        ))
+        .expect("status line skeleton geometry")
     });
     div()
         .flex()
@@ -40,6 +41,14 @@ pub(crate) fn status_line_skeleton(p: &ChatAppearance) -> AnyElement {
 /// `packages/shared/session-chat-presentation/status-line-layout.ts`, which React applies as the
 /// `min-height` of `.ghostex-chat-status-line.is-reserved`.
 pub(super) const STATUS_LINE_ROW_HEIGHT: f32 = 16.0;
+
+/// Width the status line's edit pen takes after the last item: the value of
+/// `SESSION_CHAT_STATUS_LINE_EDIT_RESERVE_PX` in
+/// `packages/shared/session-chat-presentation/status-line-layout.ts`.
+const STATUS_LINE_EDIT_RESERVE: f32 = 18.0;
+
+/// The hover group of the status line, which reveals its edit pen.
+const CONTEXT_STATUS_GROUP: &str = "context-status";
 
 /// The context meter's toggle key in `menu_toggle.rs`.
 const CONTEXT_METER_TRIGGER: &str = "chat-context-meter";
@@ -166,7 +175,11 @@ impl NativeChatView {
     }
 
     fn status_line_loading(&self) -> bool {
-        !self.composer_ready || matches!(self.snapshot["status"].as_str(), Some("loading" | "starting"))
+        !self.composer_ready
+            || matches!(
+                self.snapshot["status"].as_str(),
+                Some("loading" | "starting")
+            )
     }
 
     pub(super) fn adopt_status_line_reservation(&mut self) {
@@ -239,6 +252,50 @@ impl NativeChatView {
             .into_any_element()
     }
 
+    /// The pen that floats right of the status line's last item and opens Context details, the
+    /// same `contextEdit` the pen in the context meter popover sends.
+    fn context_status_edit(appearance: &ChatAppearance, cx: &Context<Self>) -> AnyElement {
+        let scale = appearance.scale;
+        div()
+            .id("context-status-edit")
+            .role(gpui::Role::Button)
+            .aria_label("Edit status line")
+            .absolute()
+            .left(gpui::relative(1.0))
+            .top_0()
+            .ml(px(2.0 * scale))
+            .size(px(STATUS_LINE_ROW_HEIGHT * scale))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.0 * scale))
+            // CDXC:SessionChat 2026-09-23 DECISION: User: the pen appears only while the status
+            // line is hovered.
+            .opacity(0.0)
+            .group_hover(CONTEXT_STATUS_GROUP, |style| style.opacity(0.55))
+            .hover(|style| style.opacity(1.0))
+            .chat_cursor_pointer()
+            .tooltip(|window, cx| {
+                gpui_component::tooltip::Tooltip::new("Edit status line").build(window, cx)
+            })
+            .child(
+                gpui::svg()
+                    .path("titlebar/pencil.svg")
+                    .size(px(11.0 * scale))
+                    .text_color(appearance.muted),
+            )
+            .on_click(cx.listener(|chat, _, window, cx| {
+                chat.handle_action(
+                    &super::actions::NativeChatAction {
+                        command: json!({"type": "contextEdit"}),
+                    },
+                    window,
+                    cx,
+                );
+            }))
+            .into_any_element()
+    }
+
     pub(super) fn render_context_status(
         &self,
         appearance: &ChatAppearance,
@@ -246,7 +303,9 @@ impl NativeChatView {
         cx: &Context<Self>,
     ) -> AnyElement {
         let scale = appearance.scale;
-        if self.snapshot["contextMeter"]["starred"].as_array().is_none_or(Vec::is_empty)
+        if self.snapshot["contextMeter"]["starred"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
             && (self.status_line_loading() || self.status_line_reserved)
         {
             return status_line_skeleton(appearance);
@@ -262,12 +321,9 @@ impl NativeChatView {
             .w_full()
             .min_w_0();
         let starts = self.snapshot["contextStatusRows"].as_array();
-        for (index, item) in self.snapshot["contextMeter"]["starred"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .enumerate()
-        {
+        let starred = self.snapshot["contextMeter"]["starred"].as_array();
+        let last = starred.map_or(0, Vec::len).saturating_sub(1);
+        for (index, item) in starred.into_iter().flatten().enumerate() {
             let row_start = index == 0
                 || starts.is_some_and(|starts| {
                     starts
@@ -317,29 +373,41 @@ impl NativeChatView {
                     ""
                 }
             );
-            line = line.child(
-                div()
-                    .id(format!("context-status-{index}"))
-                    .min_w_0()
-                    .text_ellipsis()
-                    .child(value)
-                    .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(label.clone()).build(window, cx)
-                    })
-                    .when_some(copy, |item, copy| {
-                        item.chat_cursor_pointer()
-                            .on_click(cx.listener(move |_, _, _, cx| {
-                                crate::app::helpers::gpui_copy_to_clipboard(
-                                    gpui::ClipboardItem::new_string(copy.clone()),
-                                    cx,
-                                );
-                            }))
-                    }),
-            );
+            let value = div()
+                .id(format!("context-status-{index}"))
+                .min_w_0()
+                .text_ellipsis()
+                .child(value)
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+                })
+                .when_some(copy, |item, copy| {
+                    item.chat_cursor_pointer()
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            crate::app::helpers::gpui_copy_to_clipboard(
+                                gpui::ClipboardItem::new_string(copy.clone()),
+                                cx,
+                            );
+                        }))
+                });
+            if index == last {
+                line = line.child(
+                    div()
+                        .relative()
+                        .min_w_0()
+                        .child(value)
+                        .child(Self::context_status_edit(appearance, cx)),
+                );
+            } else {
+                line = line.child(value);
+            }
+        }
+        if let Some(width) = widths.last_mut() {
+            *width += STATUS_LINE_EDIT_RESERVE * scale;
         }
         lines.push(line.into_any_element());
         let chat = cx.weak_entity();
-        div().relative().flex().flex_col().w_full().min_w_0().min_h(px(STATUS_LINE_ROW_HEIGHT*scale)).px(px(4.0*scale))
+        div().group(CONTEXT_STATUS_GROUP).relative().flex().flex_col().w_full().min_w_0().min_h(px(STATUS_LINE_ROW_HEIGHT*scale)).px(px(4.0*scale))
             .text_size(px(11.0*scale)).line_height(px(STATUS_LINE_ROW_HEIGHT*scale)).text_color(appearance.muted.opacity(0.8)).children(lines)
             .child(canvas(move |bounds,window,cx| {
                 let measurement=json!({"available":(bounds.size.width.as_f32()-8.0*scale).max(0.0),"widths":widths,"separator":18.0*scale});

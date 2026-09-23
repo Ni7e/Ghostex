@@ -107,6 +107,12 @@ const STORES: &[ChatStore] = &[
         backend: Backend::Local,
     },
     ChatStore {
+        id: "cursorContext",
+        prefix: "ghostex.chat.context-details.cursor.v1",
+        collection: false,
+        backend: Backend::Local,
+    },
+    ChatStore {
         id: "notices",
         prefix: "ghostex.sessionChat.noticeDismissed.",
         collection: true,

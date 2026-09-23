@@ -134,7 +134,7 @@ pub fn compute_context_meter(
     context: &crate::ChatContext,
 ) -> ContextMeterResult {
     let agent = ContextDetailsAgent::from_icon(input.icon);
-    let has_details = input.icon == Some("codex") || input.icon == Some("claude");
+    let has_details = ContextDetailsAgent::for_icon(input.icon).is_some();
     let reported = resolve_context_meter_usage(
         input
             .selected_options

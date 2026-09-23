@@ -24,7 +24,11 @@ import {
 import { modelMenuPick, type ModelMenuContext } from '@/packages/shared/session-chat-controller/model-menu';
 import { SessionChatModelMenu, type SessionChatModelMenuExtraRow } from './session-chat-model-menu';
 import { QUICK_MODEL_PICKER_ENABLED } from './session-chat-model-picker-platform';
-import { resolveContextDetailStatus, type ContextDetailStatus } from './session-chat-context-details-agents';
+import {
+  contextDetailsAgentFor,
+  resolveContextDetailStatus,
+  type ContextDetailStatus,
+} from './session-chat-context-details-agents';
 import type { AccountIconColor } from '@/packages/shared/agent-accounts';
 import type { SessionChatPendingModelSelection } from '@/packages/shared/session-chat';
 // Composer footer session-option pills (upstream chat spec §1.2-§1.4 port).
@@ -486,7 +490,7 @@ export function SessionChatSessionOptionPills({
   const modelPickerActions = useRef<ModelPickerActions | null>(null);
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const dispatchingRef = useRef<object | null>(null);
-  const contextDetailsAgent = controller.catalog?.modelIcon === 'codex' ? 'codex' : 'claude';
+  const contextDetailsAgent = contextDetailsAgentFor(controller.catalog?.modelIcon) ?? 'claude';
   const contextDetailsPreferences = useSessionChatContextDetailsPreferences(contextDetailsAgent);
   const contextDetailsNow = useSessionChatContextDetailsClock();
   const [switchingAgent, setSwitchingAgent] = useState(false);
@@ -861,7 +865,7 @@ export function SessionChatSessionOptionPills({
   const planMode = isCodex && state.mode?.value === 'plan';
   const terminalStatusLine = detectedOptions?.terminalStatusLine?.trim();
   const contextMeterUsage = resolveSessionChatContextMeterUsage(detectedOptions?.contextUsage, isCodex);
-  const hasContextDetails = isCodex || catalog.modelIcon === 'claude';
+  const hasContextDetails = contextDetailsAgentFor(catalog.modelIcon) !== null;
   const modeButton = visibleOptions.find(isShiftTabModeCycler);
   const menuOptions = modeButton ? visibleOptions.filter((descriptor) => descriptor !== modeButton) : visibleOptions;
   /*

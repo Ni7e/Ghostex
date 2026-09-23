@@ -30,6 +30,14 @@ static SPEC: LazyLock<ScrollBottom> = LazyLock::new(|| {
     .expect("shared scroll button appearance")
 });
 
+pub(super) fn label() -> &'static str {
+    &SPEC.label
+}
+
+pub(super) fn font_size() -> f32 {
+    SPEC.font_size
+}
+
 #[derive(Clone, Debug, PartialEq, gpui::Action)]
 #[action(namespace = ghostex_gpui, no_json)]
 pub(super) struct ScrollChatToBottom {
@@ -76,7 +84,7 @@ pub(super) fn register(cx: &mut App) {
 }
 
 impl NativeChatView {
-    fn jump_to_bottom(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn jump_to_bottom(&mut self, cx: &mut Context<Self>) {
         self.list.set_follow_mode(gpui::FollowMode::Tail);
         self.invoke(serde_json::json!({"type":"composerExpand"}), cx);
         cx.notify();
@@ -118,10 +126,13 @@ impl NativeChatView {
     pub(super) fn scroll_bottom_button(&self, cx: &Context<Self>) -> AnyElement {
         let remaining =
             self.list.max_offset_for_scrollbar().y + self.list.scroll_px_offset_for_scrollbar().y;
-        let p = ChatAppearance::current(&self.snapshot).on_window_glass(
-            crate::app::helpers::window_glass_active_for(self.main_window),
-        );
-        if self.list.is_following_tail() || remaining <= px(SPEC.edge_threshold * p.scale) {
+        let glass = crate::app::helpers::window_glass_active_for(self.main_window);
+        let p = ChatAppearance::current(&self.snapshot).on_window_glass(glass);
+        let shown = !self.list.is_following_tail() && remaining > px(SPEC.edge_threshold * p.scale);
+        if glass {
+            return self.scroll_bottom_window_placeholder(shown, &p, cx);
+        }
+        if !shown {
             return div().into_any_element();
         }
         let label = gpui_configured_hotkey_label("scrollChatToBottom")
@@ -178,6 +189,56 @@ impl NativeChatView {
                     )
                     .child(label)
                     .on_click(cx.listener(|chat, _, _, cx| chat.jump_to_bottom(cx))),
+            )
+            .into_any_element()
+    }
+}
+
+impl NativeChatView {
+    /// CDXC:SessionChat 2026-09-23 DECISION:
+    /// User: the scroll-to-bottom pill "should match the color and everything of the composer box", then, when the composer's see-through wash let the transcript read through it, "can't we make it's bg more frosted glass??". Under window glass the pill wears the composer's wash and border over a real blur of what is behind it. Supersedes the same day's opaque menu tone and the plain see-through wash.
+    ///
+    /// CDXC:SessionChat 2026-09-23 WHY:
+    /// GPUI cannot blur behind an element inside a window, only behind a whole window, so the pill is drawn in a small blurred child window of its own (frosted_overlay_window.rs). This placeholder lays out an invisible pill of the same size where the in-window one would be and hands its bounds to that window. The pill stays down while something else sits over the pane (a chat popup window, the account-switch card, the subagent viewer), or while it would stick out of the pane, because a window of its own would float above all of them.
+    fn scroll_bottom_window_placeholder(
+        &self,
+        shown: bool,
+        p: &ChatAppearance,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let overlay = super::frosted_overlay_window::FrostedOverlay::ScrollBottom;
+        let shown = shown && !self.frosted_overlay_covered(overlay);
+        let report = self.frosted_overlay_reporter(overlay, shown, cx);
+        if !shown {
+            return div().absolute().size_0().child(report).into_any_element();
+        }
+        let label = gpui_configured_hotkey_label("scrollChatToBottom")
+            .filter(|label| !label.is_empty())
+            .map_or_else(
+                || SPEC.label.clone(),
+                |key| format!("{} ({key})", SPEC.label),
+            );
+        div()
+            .absolute()
+            .bottom(px(SPEC.bottom * p.scale))
+            .w_full()
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .h(px(SPEC.height * p.scale))
+                    .px(px(SPEC.padding_x * p.scale))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .text_color(gpui::transparent_black())
+                    .text_size(px(SPEC.font_size * p.scale))
+                    .font_weight(FontWeight::MEDIUM)
+                    .whitespace_nowrap()
+                    .child(label)
+                    .child(report),
             )
             .into_any_element()
     }

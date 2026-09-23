@@ -168,14 +168,25 @@ impl NativeChatView {
         true
     }
 
-    /// Whether one of this chat's own text fields holds GPUI focus, so keys already reach the
-    /// composer path through the pane's capture listener.
-    pub(crate) fn composer_owns_gpui_focus(&self, window: &Window, cx: &gpui::App) -> bool {
+    /// Whether any text field inside this chat pane holds GPUI focus: the composer, the Cmd+F
+    /// find field, the session note, question answers or the terminal dialog field.
+    ///
+    /// CDXC:SessionChat 2026-09-22 WHY:
+    /// Background typing sends keys to the composer only when no chat field is focused. Checking
+    /// just the composer made every other field (the Cmd+F find bar first) lose its typing to the
+    /// composer; every in-pane text field must be listed here.
+    pub(crate) fn chat_text_field_focused(&self, window: &Window, cx: &gpui::App) -> bool {
         self.input
             .iter()
+            .chain(self.search_input.iter())
+            .chain(self.note_input.iter())
             .chain(self.answer_input.iter().map(|(_, input)| input))
             .chain(self.async_answer_input.iter().map(|(_, input)| input))
-            .chain(self.note_input.iter())
+            .chain(
+                self.terminal_dialog_input
+                    .iter()
+                    .map(|dialog| &dialog.input),
+            )
             .any(|input| input.read(cx).focus_handle(cx).is_focused(window))
             || self.terminal_dialog_key_focus.is_focused(window)
     }

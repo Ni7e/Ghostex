@@ -81,8 +81,13 @@ impl NativeChatView {
                         .text_color(p.muted)
                         .into_any_element(),
                 ))
-            })
-            .into_any_element();
+            });
+        let header = if expandable {
+            super::cards::status_card_press_header(header, open, false, p)
+        } else {
+            header
+        }
+        .into_any_element();
         let body = if open {
             vec![
                 div()

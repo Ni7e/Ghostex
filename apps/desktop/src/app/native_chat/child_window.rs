@@ -33,6 +33,7 @@ impl NativeChatView {
     pub(crate) fn dismiss_windows_for_hidden_pane(&mut self, cx: &mut Context<Self>) {
         self.close_image_viewer(cx);
         self.dismiss_model_picker_for_hidden_pane(cx);
+        self.hide_frosted_overlays(cx);
     }
 
     pub(super) fn pane_windows_open(&self) -> bool {

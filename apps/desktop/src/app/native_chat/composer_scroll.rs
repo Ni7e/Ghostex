@@ -6,7 +6,7 @@ use gpui::{
 use serde_json::json;
 
 impl NativeChatView {
-    /// CDXC:SessionChat 2026-09-23 SEE-ALSO: `sessionChatKeepComposerExpanded` in `packages/shared/ghostex-settings/types.ts` holds the user's decision; a missing key reads as its default, on.
+    /// CDXC:SessionChat 2026-09-23 SEE-ALSO: `sessionChatKeepComposerExpanded` in `packages/shared/ghostex-settings/types.ts` holds the user's decision; a missing key reads as its default, off.
     pub(super) fn composer_collapse_eligible(&self) -> bool {
         !keep_composer_expanded() && self.composer_collapse_allowed()
     }
@@ -56,8 +56,9 @@ impl NativeChatView {
         cx: &Context<Self>,
     ) -> AnyElement {
         let chat = cx.weak_entity();
-        let p = super::appearance::ChatAppearance::current(&self.snapshot)
-            .on_window_glass(crate::app::helpers::window_glass_active_for(self.main_window));
+        let p = super::appearance::ChatAppearance::current(&self.snapshot).on_window_glass(
+            crate::app::helpers::window_glass_active_for(self.main_window),
+        );
         let scale = p.scale;
         div()
             .relative()
@@ -129,10 +130,9 @@ impl NativeChatView {
                                         - chat.composer_animation.current_transcript_inset())
                                     .max(0.0);
                                     let end_distance = (maximum - offset).max(0.0);
-                                    // CDXC:SessionChat 2026-09-21 WHY: An upward wheel that leaves the list inside the band the collapsed box would only fill with the held inset is not a collapse gesture. Collapsing there uncovers no rows, and with the box expanding again 10px from the end it let a small up and down wobble at the edge flip the box on every reversal.
-                                    if delta > 0.0
-                                        && !chat.composer_collapsed()
-                                        && end_distance + delta
+                                    // CDXC:SessionChat 2026-09-23 WHY: A wheel in either direction that leaves an expanded box's list inside the band the collapsed box would only fill with the held inset is not a collapse gesture. Collapsing there uncovers no rows. Upward, a small wobble at the edge flipped the box on every reversal; downward, a box that had just expanded one band short of the real end collapsed again on the next 24px toward the end and re-expanded at once. Supersedes the 2026-09-21 upward-only guard.
+                                    if !chat.composer_collapsed()
+                                        && (end_distance + delta).max(0.0)
                                             < chat.composer_animation.collapse_travel(scale)
                                     {
                                         return;
@@ -172,11 +172,11 @@ impl NativeChatView {
     }
 }
 
-/// `sessionChatKeepComposerExpanded`; a missing key reads as its default, on.
+/// `sessionChatKeepComposerExpanded`; a missing key reads as its default, off.
 fn keep_composer_expanded() -> bool {
     crate::shared_settings::shared_sidebar_settings_snapshot()
         .object()
         .get("sessionChatKeepComposerExpanded")
         .and_then(serde_json::Value::as_bool)
-        != Some(false)
+        == Some(true)
 }
