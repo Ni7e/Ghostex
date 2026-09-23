@@ -1564,54 +1564,17 @@ impl GhostexGpuiApp {
             return false;
         }
 
-        if let Some(mode) = self.open_view_mode() {
-            let view_bounds_ready =
-                if mode == TitlebarMode::Browser && self.project_editor_shell.is_mode_awake(mode) {
-                    let pane_ids = self.browser_tabs.rendered_leaf_order();
-                    if pane_ids.is_empty() {
-                        self.project_editor_surface_bounds_for_mode(mode).is_some()
-                    } else {
-                        pane_ids
-                            .iter()
-                            .all(|pane_id| self.browser_leaf_layout_bounds.contains_key(pane_id))
-                    }
-                } else {
-                    self.project_editor_surface_bounds_for_mode(mode).is_some()
-                };
-            if !view_bounds_ready {
-                return false;
-            }
-        }
-
         self.command_spatial_focus_bounds_ready()
     }
 
+    /// CDXC:FocusRouting 2026-09-23 DECISION:
+    /// User: Option+Cmd+Arrows must not go to the view panel, only between the Commands pane and the agent sessions in their split panes, so the sessions can be walked by keyboard. The view panel is not a candidate; a focus that is already inside it still moves out of it to the nearest pane in that direction.
     pub(crate) fn spatial_focus_candidates(&self) -> Vec<FocusCandidate> {
         let mut candidates = Vec::new();
         for pane_id in self.agents_workspace.rendered_leaf_order() {
             if let Some(bounds) = self.workspace_leaf_layout_bounds.get(&pane_id).copied() {
                 candidates.push(FocusCandidate {
                     target: SpatialFocusTarget::AgentsPane(pane_id),
-                    bounds,
-                    order: candidates.len(),
-                });
-            }
-        }
-
-        if let Some(mode) = self.open_view_mode() {
-            if mode == TitlebarMode::Browser && self.project_editor_shell.is_mode_awake(mode) {
-                for pane_id in self.browser_tabs.rendered_leaf_order() {
-                    if let Some(bounds) = self.browser_leaf_layout_bounds.get(&pane_id).copied() {
-                        candidates.push(FocusCandidate {
-                            target: SpatialFocusTarget::BrowserPane(pane_id),
-                            bounds,
-                            order: candidates.len(),
-                        });
-                    }
-                }
-            } else if let Some(bounds) = self.project_editor_surface_bounds_for_mode(mode) {
-                candidates.push(FocusCandidate {
-                    target: SpatialFocusTarget::ProjectEditorSurface(mode),
                     bounds,
                     order: candidates.len(),
                 });
@@ -1790,38 +1753,8 @@ impl GhostexGpuiApp {
                 }
             }
             ShellFocusTarget::AgentsPane(pane_id) => Some(SpatialFocusTarget::AgentsPane(pane_id)),
-            ShellFocusTarget::ProjectEditorSurface(mode) if self.active_mode == mode => targets
-                .contains(&SpatialFocusTarget::ProjectEditorSurface(mode))
-                .then_some(SpatialFocusTarget::ProjectEditorSurface(mode)),
-            ShellFocusTarget::BrowserPane(pane_id) if self.active_mode == TitlebarMode::Browser => {
-                let browser_target = SpatialFocusTarget::BrowserPane(pane_id);
-                if targets.contains(&browser_target) {
-                    Some(browser_target)
-                } else {
-                    targets
-                        .contains(&SpatialFocusTarget::ProjectEditorSurface(
-                            TitlebarMode::Browser,
-                        ))
-                        .then_some(SpatialFocusTarget::ProjectEditorSurface(
-                            TitlebarMode::Browser,
-                        ))
-                }
-            }
-            ShellFocusTarget::BrowserSurface if self.active_mode == TitlebarMode::Browser => {
-                let browser_target =
-                    SpatialFocusTarget::BrowserPane(self.browser_tabs.focused_pane);
-                if targets.contains(&browser_target) {
-                    Some(browser_target)
-                } else {
-                    targets
-                        .contains(&SpatialFocusTarget::ProjectEditorSurface(
-                            TitlebarMode::Browser,
-                        ))
-                        .then_some(SpatialFocusTarget::ProjectEditorSurface(
-                            TitlebarMode::Browser,
-                        ))
-                }
-            }
+            // The view panel is not in the order (see `spatial_focus_candidates`): leave it for the
+            // focused agent pane.
             _ => {
                 self.focus_agents_pane(self.agents_workspace.focused_pane, cx);
                 return true;
@@ -1838,12 +1771,8 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn workspace_render_order_focus_targets(&self) -> Vec<SpatialFocusTarget> {
-        let open_view = self.open_view_mode();
         workspace_render_order_focus_targets(
             self.agents_workspace.rendered_leaf_order(),
-            open_view,
-            open_view.is_some_and(|mode| self.project_editor_shell.is_mode_awake(mode)),
-            self.browser_tabs.rendered_leaf_order(),
             self.command_pane.any_dock_visible(),
             self.command_pane.has_sessions(),
             self.visible_command_focus_group_ids(),

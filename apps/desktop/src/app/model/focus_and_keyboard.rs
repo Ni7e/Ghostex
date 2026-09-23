@@ -330,36 +330,56 @@ pub(crate) fn focus_bounds_center(bounds: Bounds<Pixels>) -> (f32, f32) {
     )
 }
 
+/// How a candidate sits relative to the focused pane in one direction: the gap between the two
+/// facing edges and the distance between their centres across that direction. `None` when the
+/// candidate is not wholly past the focused pane's edge or does not overlap it across the edge.
 pub(crate) fn spatial_focus_score(
     current_bounds: Bounds<Pixels>,
     candidate_bounds: Bounds<Pixels>,
     direction: WorkspaceFocusDirection,
-) -> Option<(f32, f32, f32)> {
+) -> Option<(f32, f32)> {
+    let edges = |bounds: Bounds<Pixels>| {
+        let left = bounds.origin.x.as_f32();
+        let top = bounds.origin.y.as_f32();
+        (
+            left,
+            top,
+            left + bounds.size.width.as_f32(),
+            top + bounds.size.height.as_f32(),
+        )
+    };
+    let (left, top, right, bottom) = edges(current_bounds);
+    let (c_left, c_top, c_right, c_bottom) = edges(candidate_bounds);
     let (current_x, current_y) = focus_bounds_center(current_bounds);
     let (candidate_x, candidate_y) = focus_bounds_center(candidate_bounds);
-    let delta_x = candidate_x - current_x;
-    let delta_y = candidate_y - current_y;
-
-    let (primary_distance, secondary_distance) = match direction {
-        WorkspaceFocusDirection::Left if delta_x < -SPATIAL_FOCUS_HALF_PLANE_TOLERANCE => {
-            (-delta_x, delta_y.abs())
-        }
-        WorkspaceFocusDirection::Right if delta_x > SPATIAL_FOCUS_HALF_PLANE_TOLERANCE => {
-            (delta_x, delta_y.abs())
-        }
-        WorkspaceFocusDirection::Up if delta_y < -SPATIAL_FOCUS_HALF_PLANE_TOLERANCE => {
-            (-delta_y, delta_x.abs())
-        }
-        WorkspaceFocusDirection::Down if delta_y > SPATIAL_FOCUS_HALF_PLANE_TOLERANCE => {
-            (delta_y, delta_x.abs())
-        }
-        _ => return None,
+    let tolerance = SPATIAL_FOCUS_HALF_PLANE_TOLERANCE;
+    let (gap, overlap, cross_distance) = match direction {
+        WorkspaceFocusDirection::Up => (
+            top - c_bottom,
+            right.min(c_right) - left.max(c_left),
+            (candidate_x - current_x).abs(),
+        ),
+        WorkspaceFocusDirection::Down => (
+            c_top - bottom,
+            right.min(c_right) - left.max(c_left),
+            (candidate_x - current_x).abs(),
+        ),
+        WorkspaceFocusDirection::Left => (
+            left - c_right,
+            bottom.min(c_bottom) - top.max(c_top),
+            (candidate_y - current_y).abs(),
+        ),
+        WorkspaceFocusDirection::Right => (
+            c_left - right,
+            bottom.min(c_bottom) - top.max(c_top),
+            (candidate_y - current_y).abs(),
+        ),
     };
-    let squared_distance = delta_x.mul_add(delta_x, delta_y * delta_y);
-
-    Some((primary_distance, secondary_distance, squared_distance))
+    (gap >= -tolerance && overlap > tolerance).then_some((gap.max(0.0), cross_distance))
 }
 
+/// CDXC:FocusRouting 2026-09-23 DECISION:
+/// User: Option+Cmd+Arrows must be directional. With panes `a b / c d` above a Commands pane `e`, holding Up from `e` used to walk `e c d a b`, sideways through the grid, because a candidate only had to have its centre above the focused pane's centre. A candidate now has to lie wholly past the focused pane's edge in that direction and overlap it across that edge; the nearest edge wins, then the one most in line with the focused pane, and when nothing qualifies focus stays where it is.
 pub(crate) fn nearest_spatial_focus_target(
     current_bounds: Bounds<Pixels>,
     current_target: SpatialFocusTarget,
@@ -371,25 +391,16 @@ pub(crate) fn nearest_spatial_focus_target(
         .filter(|candidate| candidate.target != current_target)
         .filter_map(|candidate| {
             spatial_focus_score(current_bounds, candidate.bounds, direction).map(
-                |(primary_distance, secondary_distance, squared_distance)| {
-                    (
-                        candidate.target,
-                        candidate.order,
-                        primary_distance,
-                        secondary_distance,
-                        squared_distance,
-                    )
-                },
+                |(gap, cross_distance)| (candidate.target, candidate.order, gap, cross_distance),
             )
         })
         .min_by(|left, right| {
             left.2
                 .total_cmp(&right.2)
                 .then_with(|| left.3.total_cmp(&right.3))
-                .then_with(|| left.4.total_cmp(&right.4))
                 .then_with(|| left.1.cmp(&right.1))
         })
-        .map(|(target, _, _, _, _)| target)
+        .map(|(target, _, _, _)| target)
 }
 
 pub(crate) fn render_order_focus_target(
@@ -426,9 +437,6 @@ pub(crate) fn render_order_focus_target(
 /// pane, which is why the two used to be separate functions.
 pub(crate) fn workspace_render_order_focus_targets(
     pane_ids: Vec<WorkspacePaneId>,
-    open_view: Option<TitlebarMode>,
-    browser_is_awake: bool,
-    browser_pane_ids: Vec<BrowserPaneId>,
     command_is_expanded: bool,
     command_has_sessions: bool,
     command_group_ids: Vec<CommandPaneGroupId>,
@@ -437,17 +445,6 @@ pub(crate) fn workspace_render_order_focus_targets(
         .into_iter()
         .map(SpatialFocusTarget::AgentsPane)
         .collect::<Vec<_>>();
-    if let Some(mode) = open_view {
-        if mode == TitlebarMode::Browser && browser_is_awake && !browser_pane_ids.is_empty() {
-            targets.extend(
-                browser_pane_ids
-                    .into_iter()
-                    .map(SpatialFocusTarget::BrowserPane),
-            );
-        } else {
-            targets.push(SpatialFocusTarget::ProjectEditorSurface(mode));
-        }
-    }
     /*
     CDXC:CommandPane 2026-06-25-23:35:
     Render-order keyboard fallback must target the same live expanded command groups as spatial focus. Do not append a generic command-pane target for collapsed strips, empty panels, or stored sessions that no longer belong to a rendered command group.
