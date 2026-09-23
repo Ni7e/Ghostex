@@ -60,6 +60,11 @@ unsafe extern "C" {
         total_us: u64,
     );
     fn GhostexGpuiCEFSetNativeViewVisible(native_view: *mut c_void, visible: bool);
+    fn GhostexGpuiCEFSetNativeViewMotionHidden(
+        native_view: *mut c_void,
+        hidden: bool,
+        fade_in_seconds: f64,
+    );
     fn GhostexGpuiCEFOrderNativeViewFront(native_view: *mut c_void);
     fn GhostexGpuiCEFRemoveNativeViewFromSuperview(native_view: *mut c_void);
     fn GhostexGpuiCEFPrepareNativeViewForFocus(native_view: *mut c_void);
@@ -353,6 +358,16 @@ pub(super) fn log_resize_diagnostic(
 pub(super) fn set_native_view_visible(native_view: *mut c_void, visible: bool) {
     unsafe {
         GhostexGpuiCEFSetNativeViewVisible(native_view, visible);
+    }
+}
+
+pub(super) fn set_native_view_motion_hidden(
+    native_view: *mut c_void,
+    hidden: bool,
+    fade_in_seconds: f64,
+) {
+    unsafe {
+        GhostexGpuiCEFSetNativeViewMotionHidden(native_view, hidden, fade_in_seconds);
     }
 }
 

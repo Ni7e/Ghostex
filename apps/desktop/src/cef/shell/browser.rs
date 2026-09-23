@@ -49,6 +49,7 @@ pub struct CefBrowser {
     pub(crate) _request_context: cef::RequestContext,
     pub(crate) last_bounds: RefCell<Option<(f32, f32, f32, f32, f32)>>,
     pub(crate) last_visible: Cell<Option<bool>>,
+    motion_hidden: Cell<bool>,
     pub(crate) uses_system_page_appearance: bool,
     pub(crate) extension_bridge_installed: bool,
     session_chat_bootstrap: StdRc<RefCell<Option<SidebarGxserverBootstrap>>>,
@@ -380,6 +381,7 @@ impl CefBrowser {
             _request_context: request_context,
             last_bounds: RefCell::new(None),
             last_visible: Cell::new(None),
+            motion_hidden: Cell::new(false),
             uses_system_page_appearance,
             extension_bridge_installed,
             session_chat_bootstrap,
@@ -470,6 +472,38 @@ impl CefBrowser {
         browser
             .host()
             .map(|host| platform::native_view_ptr(host.window_handle()))
+    }
+
+    /// Whether `bounds` differs from the frame the native view last took.
+    pub fn bounds_differ(&self, bounds: Bounds<Pixels>, scale_factor: f32) -> bool {
+        let raw_bounds = (
+            bounds.origin.x.as_f32(),
+            bounds.origin.y.as_f32(),
+            bounds.size.width.as_f32().max(0.0),
+            bounds.size.height.as_f32().max(0.0),
+            scale_factor,
+        );
+        self.last_bounds.borrow().as_ref() != Some(&raw_bounds)
+    }
+
+    /// Makes the page transparent for the frames a panel slides (app/panel_motion.rs), keeping its
+    /// last frame. Unlike `set_visible(false)` this neither blurs the page nor hides its view, which
+    /// would hand the window's keyboard focus elsewhere. Coming back, the page fades in over
+    /// `fade_in` (macOS), so it arrives the way the panel's other content does.
+    pub fn set_motion_hidden(&self, hidden: bool, fade_in: std::time::Duration) {
+        if self.motion_hidden.get() == hidden {
+            return;
+        }
+        self.motion_hidden.set(hidden);
+        let browser = self.browser.borrow();
+        let Some(host) = browser.host() else {
+            return;
+        };
+        platform::set_native_view_motion_hidden(
+            platform::native_view_ptr(host.window_handle()),
+            hidden,
+            fade_in.as_secs_f64(),
+        );
     }
 
     pub fn set_visible(&self, visible: bool) {

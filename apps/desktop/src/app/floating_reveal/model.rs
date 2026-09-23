@@ -33,18 +33,13 @@ pub(crate) const FLOATING_REVEAL_REQUEST_GRACE_SECS: u64 = 5;
 
 /// How long the panel takes to slide in, and to slide away again.
 ///
-/// CDXC:Sidebar 2026-09-22 DECISION:
-/// User: the floating sidebar and sessions column were "appearing instantly and without any
-/// animation even though we do have a setting for this". The slide runs for the Collapse animation
-/// speed setting (`sidebarCollapseAnimationDurationMs`, 0 is instant) and for that setting alone:
-/// it no longer defers to macOS Reduce Motion, which was on and had been skipping the slide
-/// whatever the setting said. The hard-coded 0.22s the hosts used before is gone with it.
-pub(crate) fn floating_reveal_slide_duration() -> std::time::Duration {
-    let millis = shared_settings::shared_sidebar_settings_snapshot()
-        .sidebar_collapse_animation_duration_ms()
-        .round()
-        .max(0.0) as u64;
-    std::time::Duration::from_millis(millis)
+/// CDXC:Sidebar 2026-09-23 DECISION:
+/// User: "please also make the animation when the sidebar/chat is hidden and i hover over the left side better", after asking that every panel animation respect the system "reduce animations" setting and follow the Panel animations setting ("none slow normal fast"). The floating panel now slides on the Panel animations duration and curve the docked panels use (`panelAnimationSpeed`, CSS `ease-out`), and macOS Reduce Motion snaps it. This supersedes the 2026-09-22 rule that the slide followed the Collapse animation speed setting and ignored Reduce Motion.
+pub(crate) fn floating_reveal_slide_duration(reduce_motion: bool) -> std::time::Duration {
+    if reduce_motion {
+        return std::time::Duration::ZERO;
+    }
+    crate::app::panel_motion::panel_motion_duration()
 }
 
 /// The reveal's sweep while nothing is on screen: often enough to feel immediate on the edge,

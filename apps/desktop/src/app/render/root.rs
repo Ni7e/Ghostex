@@ -209,6 +209,7 @@ impl Render for GhostexGpuiApp {
             self.sidebar_width,
             current_sidebar_max_width(window, self.active_mode),
         );
+        self.sample_panel_motion(window, cx);
         self.refresh_gpui_sidebar_browser_tabs_if_changed(cx);
         // The displayed set crosses the bridge to the sidebar runtime; while the selection is still moving it would do so once per tab step. The settle repaints, so the set is reported for the tab the user landed on.
         if !self.gx_store_selection_is_settling() {
@@ -224,6 +225,9 @@ impl Render for GhostexGpuiApp {
         self.sync_session_chat_pane_focus(window, cx);
         self.refresh_zmx_persistence_focused_terminal_if_changed(cx);
         let sidebar_chrome_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
+        // Collapsing or expanding, the sidebar and its divider slide at their full width inside a
+        // clip that tweens (panel_motion.rs).
+        let sidebar_frame = self.panel_motion.sidebar.frame();
         let titlebar_popup_dismissal_active =
             self.titlebar_popup_menu.is_some() || self.titlebar_extension_popup.is_some();
 
@@ -379,7 +383,7 @@ impl Render for GhostexGpuiApp {
                 */
                 if let ShellKeyboardOwner::ChatComposer(session_id) = this.shell_keyboard_owner()
                     && let Some(chat) = this.native_chat_views.get(&session_id).cloned()
-                    && !chat.read(cx).composer_owns_gpui_focus(window, cx)
+                    && !chat.read(cx).chat_text_field_focused(window, cx)
                 {
                     chat.update(cx, |chat, cx| chat.composer_key_down(event, window, cx));
                     return;
@@ -1216,9 +1220,32 @@ impl Render for GhostexGpuiApp {
                     .w_full()
                     .min_h_0()
                     .items_start()
+                    .relative()
                     .overflow_hidden()
                     .bg(window_body_row_background())
-                    .when(sidebar_chrome_visible, |this| {
+                    .when(sidebar_frame.animating, |this| {
+                        this.child(
+                            crate::app::panel_motion::clip_panel_horizontally(
+                                sidebar_frame,
+                                false,
+                                h_flex()
+                                    .h_full()
+                                    .items_stretch()
+                                    .child(
+                                        // The same id as at rest, so the sidebar's element state
+                                        // carries through the slide.
+                                        div()
+                                            .id("ghostex-gpui-docked-sidebar")
+                                            .w(px(self.sidebar_width))
+                                            .h_full()
+                                            .child(self.render_docked_native_sidebar(cx)),
+                                    )
+                                    .child(self.render_sidebar_resize_divider(cx))
+                                    .into_any_element(),
+                            ),
+                        )
+                    })
+                    .when(sidebar_chrome_visible && !sidebar_frame.animating, |this| {
                         this.child(
                             /*
                             CDXC:Sidebar 2026-06-26-10:04:
@@ -1247,14 +1274,8 @@ impl Render for GhostexGpuiApp {
                                 .child(self.render_docked_native_sidebar(cx)),
                         )
                     })
-                    .when(sidebar_chrome_visible, |this| {
+                    .when(sidebar_chrome_visible && !sidebar_frame.animating, |this| {
                         this.child(self.render_sidebar_resize_divider(cx))
-                    })
-                    // Collapsed, the body row starts with the reveal's own edge strip instead of
-                    // the sidebar and its divider. It is a sibling frame like they were, so the
-                    // workarea beside it keeps every pixel it owns and every click in them.
-                    .when(self.floating_reveal_edge_strip_visible(), |this| {
-                        this.child(self.render_floating_reveal_edge_strip(cx))
                     })
                     .child(
                         /*
@@ -1277,7 +1298,17 @@ impl Render for GhostexGpuiApp {
                             .bg(workspace_column_background())
                             .child(self.render_workspace_with_command_pane(window, cx))
                             .child(self.render_workarea_header(window, cx)),
-                    ),
+                    )
+                    // Collapsed, the reveal's hot zone lies over the workarea's left edge (the
+                    // decision is on `floating_reveal_edge_want`); last child so it paints above.
+                    // macOS keeps it as a native view instead, above the CEF pages too.
+                    .map(|this| {
+                        #[cfg(not(target_os = "macos"))]
+                        if self.floating_reveal_edge_strip_visible() {
+                            return this.child(self.render_floating_reveal_edge_strip(cx));
+                        }
+                        this
+                    }),
             )
             .child(self.render_gpui_status_pet_presentation(cx))
             /*

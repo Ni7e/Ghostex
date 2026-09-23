@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <objc/message.h>
 #import <objc/runtime.h>
 #import <stdbool.h>
 #import <stdint.h>
@@ -42,13 +43,47 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
 /// setting on every update; the legacy CEF panel keeps its 0.22s.
 @property(nonatomic) double slideDuration;
 @property(nonatomic, strong) NSTimer *animationTimer;
+/// The GPUI panel's own view, whose content size is held while the panel slides.
+@property(nonatomic, weak) NSView *hostView;
 - (void)layoutReveal;
 - (void)animateIn;
 - (void)animateTo:(double)target;
 - (void)hide;
 @end
 
+/// CSS `ease-out`, `cubic-bezier(0, 0, 0.58, 1)`, at `t`: the curve the docked panels slide on.
+/// The ends are exact: the bisection alone lands a hair short of 1, which left a slid-out panel at
+/// a progress just above 0 that the hosts never recognised as closed, so the next hover did nothing.
+static double GhostexGpuiRevealEaseOut(double t) {
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+  double low = 0, high = 1;
+  for (int i = 0; i < 20; i++) {
+    double u = (low + high) / 2;
+    double x = 3 * (1 - u) * u * u * 0.58 + u * u * u;
+    if (x < t) low = u; else high = u;
+  }
+  double u = (low + high) / 2;
+  return 3 * (1 - u) * u * u + u * u * u;
+}
+
 @implementation GhostexGpuiSidebarReveal
+// CDXC:Sidebar 2026-09-23 WHY:
+// The GPUI panel slides by resizing its child window, and every intermediate width used to reach
+// GPUI as a real resize: a new drawable, a full layout and a repaint of the sidebar and sessions
+// column, several times a frame, with AppKit showing the resized window before GPUI had painted
+// into it. That is what made the floating slide stutter and flash. While it slides the panel's
+// view now holds its full content size (`ghostexSetContentSizeHeld:` in the GPUI macOS crate):
+// GPUI keeps the frame it already drew, the layer shows it pinned to the window's right edge, and
+// the pointer is mapped the same way, so the slide costs no rendering and cannot flash. Moving a
+// full-width window instead would have pushed the panel past the main window's left edge.
+- (void)setContentSizeHeld:(BOOL)held {
+  NSView *view = self.hostView;
+  if (self.companion && [view respondsToSelector:@selector(ghostexSetContentSizeHeld:)]) {
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(view, @selector(ghostexSetContentSizeHeld:), held);
+  }
+}
+
 - (void)layoutReveal {
   NSRect frame = self.targetFrame;
   CGFloat fullWidth = frame.size.width;
@@ -64,6 +99,10 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
 
 - (void)animateIn {
   self.revealProgress = 0;
+  // Held before the first narrow frame, so GPUI never lays out at a sliver.
+  if (self.slideDuration > 0 && !(!self.companion && NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion)) {
+    [self setContentSizeHeld:YES];
+  }
   [self layoutReveal];
   [self.panel orderFront:nil];
   if (!self.companion) GhostexGpuiCEFRefreshSidebarPointerInside();
@@ -76,15 +115,13 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
   self.animationTimer = nil;
   self.revealTarget = target;
   self.revealStartProgress = self.revealProgress;
-  // CDXC:Sidebar 2026-09-22 DECISION:
-  // User: the floating panels were "appearing instantly and without any animation even though we
-  // do have a setting for this". The GPUI panel's slide follows that setting alone
-  // (`floating_reveal_slide_duration` in app/floating_reveal/model.rs; 0 is instant) and no longer
-  // consults Reduce Motion, which was on and had been skipping the slide whatever the setting said.
+  // The GPUI panel's duration comes from `floating_reveal_slide_duration` in
+  // app/floating_reveal/model.rs, already 0 under Off or Reduce Motion, so it is not re-checked here.
   BOOL instant = self.slideDuration <= 0 ||
                  (!self.companion && NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion);
   if (instant) {
     self.revealProgress = target;
+    [self setContentSizeHeld:NO];
     [self layoutReveal];
     if (target == 0) {
       [self.panel orderOut:nil];
@@ -93,22 +130,24 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
     return;
   }
   self.revealStartedAt = NSProcessInfo.processInfo.systemUptime;
+  [self setContentSizeHeld:YES];
   __weak GhostexGpuiSidebarReveal *weakSelf = self;
   self.animationTimer = [NSTimer timerWithTimeInterval:1.0 / 120.0 repeats:YES block:^(NSTimer *timer) {
     GhostexGpuiSidebarReveal *state = weakSelf;
     if (!state || !state.attached) {
       [timer invalidate];
+      [state setContentSizeHeld:NO];
       return;
     }
     double elapsed = NSProcessInfo.processInfo.systemUptime - state.revealStartedAt;
     double t = MIN(1, MAX(0, elapsed / state.slideDuration));
-    double remaining = 1 - t;
-    double eased = 1 - remaining * remaining * remaining;
+    double eased = GhostexGpuiRevealEaseOut(t);
     state.revealProgress = state.revealStartProgress + (state.revealTarget - state.revealStartProgress) * eased;
     [state layoutReveal];
     if (t == 1) {
       [timer invalidate];
       state.animationTimer = nil;
+      [state setContentSizeHeld:NO];
       // Keep the CEF view in the hidden panel until Rust's next visibility
       // update detaches it and hides the browser together, avoiding a flash
       // in its old docked frame between animation completion and that update.
@@ -125,6 +164,7 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
   self.requestedRevealDeadline = 0;
   [self.animationTimer invalidate];
   self.animationTimer = nil;
+  [self setContentSizeHeld:NO];
   if (!self.attached) return;
   NSWindow *parent = self.panel.parentWindow;
   BOOL wasKey = self.panel.keyWindow;
@@ -353,6 +393,7 @@ static bool GhostexGpuiNativeRevealUpdate(void *rootPtr, void *popupPtr, bool en
     state = [GhostexGpuiSidebarReveal new];
     state.companion = YES;
     state.root = root;
+    state.hostView = popup;
     state.panel = (GhostexGpuiSidebarRevealPanel *)popup.window;
     state.panel.level = parent.level;
     state.panel.styleMask = NSWindowStyleMaskNonactivatingPanel;
@@ -453,6 +494,84 @@ int GhostexGpuiNativeSidebarRevealRequest(void *rootPtr, double width, double ti
   if (requested || (keepUnderPointer && NSPointInRect(pointer, slot))) return 1;
   if (!edgeHovered || NSEvent.pressedMouseButtons != 0) return 0;
   return 1;
+}
+
+// The collapsed sidebar's hot zone: a transparent view over the left edge of the main window's
+// content, kept above the CEF pages so a page reaching the window edge cannot hide it (the decision
+// is on `floating_reveal_edge_want` in app/floating_reveal/edge_strip.rs). It takes the clicks in
+// its frame and records the pointer for the reveal's poll: movement arms the reveal and leaving
+// disarms it, as the GPUI zone does on the other platforms.
+@interface GhostexGpuiRevealEdgeView : NSView
+/// 0 nothing new, 1 the pointer moved in the zone (at `pendingYFraction` from the top), 2 it left.
+@property(nonatomic) int pending;
+@property(nonatomic) double pendingYFraction;
+@end
+
+@implementation GhostexGpuiRevealEdgeView
+- (BOOL)isFlipped { return YES; }
+- (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
+- (void)updateTrackingAreas {
+  for (NSTrackingArea *area in [self.trackingAreas copy]) [self removeTrackingArea:area];
+  [self addTrackingArea:[[NSTrackingArea alloc]
+      initWithRect:NSZeroRect
+           options:NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
+                   NSTrackingActiveInActiveApp | NSTrackingInVisibleRect
+             owner:self
+          userInfo:nil]];
+  [super updateTrackingAreas];
+}
+- (void)recordPointer:(NSEvent *)event {
+  NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+  CGFloat height = self.bounds.size.height;
+  self.pendingYFraction = height > 0 ? point.y / height : 0;
+  self.pending = 1;
+}
+- (void)mouseEntered:(NSEvent *)event { [self recordPointer:event]; }
+- (void)mouseMoved:(NSEvent *)event { [self recordPointer:event]; }
+- (void)mouseExited:(NSEvent *)event { self.pending = 2; }
+- (void)mouseDown:(NSEvent *)event {}
+- (void)mouseUp:(NSEvent *)event {}
+- (void)mouseDragged:(NSEvent *)event {}
+- (void)rightMouseDown:(NSEvent *)event {}
+- (void)rightMouseUp:(NSEvent *)event {}
+- (void)otherMouseDown:(NSEvent *)event {}
+- (void)otherMouseUp:(NSEvent *)event {}
+@end
+
+static const void *GhostexGpuiRevealEdgeKey = &GhostexGpuiRevealEdgeKey;
+
+void GhostexGpuiRevealEdgeSync(void *rootPtr, bool visible, double width) {
+  NSView *root = (__bridge NSView *)rootPtr;
+  if (!root) return;
+  GhostexGpuiRevealEdgeView *edge = objc_getAssociatedObject(root, GhostexGpuiRevealEdgeKey);
+  if (!visible) {
+    if (edge) {
+      [edge removeFromSuperview];
+      objc_setAssociatedObject(root, GhostexGpuiRevealEdgeKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return;
+  }
+  if (!edge) {
+    edge = [[GhostexGpuiRevealEdgeView alloc] initWithFrame:NSZeroRect];
+    objc_setAssociatedObject(root, GhostexGpuiRevealEdgeKey, edge, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  }
+  NSRect frame = NSMakeRect(0, 0, MIN(width, root.bounds.size.width), root.bounds.size.height);
+  if (!NSEqualRects(edge.frame, frame)) edge.frame = frame;
+  // A CEF page created or reparented since the last sweep is added above this view.
+  if (edge.superview != root || root.subviews.lastObject != edge) {
+    [root addSubview:edge positioned:NSWindowAbove relativeTo:nil];
+  }
+}
+
+int GhostexGpuiRevealEdgeTake(void *rootPtr, double *yFraction) {
+  NSView *root = (__bridge NSView *)rootPtr;
+  if (!root) return 0;
+  GhostexGpuiRevealEdgeView *edge = objc_getAssociatedObject(root, GhostexGpuiRevealEdgeKey);
+  if (!edge) return 0;
+  int pending = edge.pending;
+  if (yFraction) *yFraction = edge.pendingYFraction;
+  edge.pending = 0;
+  return pending;
 }
 
 bool GhostexGpuiReparentPaneNativeView(void *viewPtr, void *parentPtr, void *fromPtr) {

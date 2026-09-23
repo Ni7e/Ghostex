@@ -32,9 +32,37 @@ unsafe extern "C" {
         slide_seconds: f64,
     ) -> bool;
     fn GhostexGpuiNativeSidebarRevealLeaving(popup: *mut c_void) -> bool;
+    fn GhostexGpuiRevealEdgeSync(root: *mut c_void, visible: bool, width: f64);
+    fn GhostexGpuiRevealEdgeTake(root: *mut c_void, y_fraction: *mut f64) -> i32;
 }
 
 impl GhostexGpuiApp {
+    /// Keeps the native hot zone over the window's left edge while the sidebar is collapsed and
+    /// hands what the pointer did there since the last sweep to the same arm and disarm the GPUI zone
+    /// calls on the other platforms.
+    pub(super) fn sync_floating_reveal_native_edge(&mut self) {
+        let visible = self.floating_reveal_edge_strip_visible();
+        unsafe {
+            GhostexGpuiRevealEdgeSync(
+                self.parent_ns_view,
+                visible,
+                FLOATING_REVEAL_EDGE_WIDTH as f64,
+            )
+        };
+        if !visible {
+            return;
+        }
+        let mut y_fraction = 0.0;
+        match unsafe { GhostexGpuiRevealEdgeTake(self.parent_ns_view, &mut y_fraction) } {
+            1 => {
+                let want = self.floating_reveal_edge_want(y_fraction < 0.5);
+                self.arm_floating_reveal_from_strip(want);
+            }
+            2 => self.disarm_floating_reveal_edge(),
+            _ => {}
+        }
+    }
+
     pub(super) fn sync_floating_reveal_host(
         &mut self,
         requested: bool,
@@ -52,7 +80,7 @@ impl GhostexGpuiApp {
                     self.floating_reveal_left_inset() as f64,
                     requested,
                     false,
-                    floating_reveal_slide_duration().as_secs_f64(),
+                    floating_reveal_slide_duration(cx.reduce_motion()).as_secs_f64(),
                 )
             };
             if !visible {
@@ -112,7 +140,7 @@ impl GhostexGpuiApp {
                 self.floating_reveal_left_inset() as f64,
                 requested,
                 sticky,
-                floating_reveal_slide_duration().as_secs_f64(),
+                floating_reveal_slide_duration(cx.reduce_motion()).as_secs_f64(),
             )
         };
         if !visible {
