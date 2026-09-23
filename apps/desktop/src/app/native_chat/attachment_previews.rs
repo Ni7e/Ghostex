@@ -1,10 +1,10 @@
 use super::{appearance::ChatAppearance, images::ChatImageSource, state::NativeChatView};
+use crate::app::helpers::ThrottledAnimationExt as _;
 use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement,
-    ParentElement as _, StatefulInteractiveElement as _, Styled as _, StyledImage as _, div, img,
-    px,
+    AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
+    StatefulInteractiveElement as _, Styled as _, StyledImage as _, div, img, px,
 };
 use serde_json::{Value, json};
 
@@ -62,10 +62,31 @@ impl NativeChatView {
         p: &ChatAppearance,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let s = p.scale;
         let pending = self.snapshot["pendingAttachments"].as_u64().unwrap_or(0);
-        let attachments: Vec<_> = self
-            .composer_references
+        let active = self.composer_active_image(cx);
+        self.render_reference_previews(
+            self.composer_references.clone(),
+            pending,
+            active,
+            None,
+            false,
+            p,
+            cx,
+        )
+    }
+
+    pub(super) fn render_reference_previews(
+        &mut self,
+        references: Vec<super::composer_references::ComposerReference>,
+        pending: u64,
+        active: Option<String>,
+        answer_key: Option<String>,
+        disabled: bool,
+        p: &ChatAppearance,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let s = p.scale;
+        let attachments: Vec<_> = references
             .iter()
             .filter(|reference| reference.kind == "image")
             .map(|reference| {
@@ -88,14 +109,18 @@ impl NativeChatView {
         // React's `flex flex-wrap items-center gap-2 pb-2`: separate rounded chips with a real gap
         // between them, never one fused strip.
         let mut row = div()
+            .id(answer_key
+                .as_ref()
+                .map(|key| format!("answer-attachments:{key}"))
+                .unwrap_or_else(|| "composer-attachments".into()))
             .flex()
             .flex_wrap()
             .items_center()
             .gap(px(8.0 * s))
             .pb(px(8.0 * s));
-        let active = self.composer_active_image(cx);
         for (index, (range, path, label)) in attachments.into_iter().enumerate() {
             let removed = range.clone();
+            let answer_key = answer_key.clone();
             let outlined = active.as_deref() == Some(path.as_str());
             let source = self.chat_image(&images[index], cx);
             let open = images.clone();
@@ -178,8 +203,15 @@ impl NativeChatView {
                                     .size(px(9.0 * s))
                                     .text_color(p.muted),
                             )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.remove_composer_attachment(removed.clone(), cx)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if disabled {
+                                    return;
+                                }
+                                if let Some(key) = &answer_key {
+                                    this.remove_answer_attachment(key, removed.clone(), window, cx);
+                                } else {
+                                    this.remove_composer_attachment(removed.clone(), cx)
+                                }
                             })),
                     ),
             );
@@ -201,10 +233,9 @@ impl NativeChatView {
                             .path("titlebar/loader2.svg")
                             .size(px(16.0 * s))
                             .text_color(p.muted)
-                            .with_animation(
+                            .with_throttled_animation(
                                 "chat-attachment-spinner",
-                                gpui::Animation::new(std::time::Duration::from_millis(900))
-                                    .repeat(),
+                                std::time::Duration::from_millis(900),
                                 |svg, delta| {
                                     svg.with_transformation(gpui::Transformation::rotate(
                                         gpui::radians(delta * std::f32::consts::TAU),

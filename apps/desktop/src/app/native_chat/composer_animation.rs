@@ -33,6 +33,7 @@ pub(super) struct ComposerAnimationMetrics {
     pub expanded_padding_block_px: f32,
     pub expanded_max_height_px: f32,
     pub expanded_row_gap_px: f32,
+    pub constrained_pane_height_px: f32,
 }
 
 pub(super) static METRICS: LazyLock<ComposerAnimationMetrics> = LazyLock::new(|| {

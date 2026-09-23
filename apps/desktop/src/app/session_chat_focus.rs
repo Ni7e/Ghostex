@@ -24,6 +24,10 @@ impl GhostexGpuiApp {
             view.update(cx, |view, cx| {
                 if view.pane_focused != focused {
                     view.pane_focused = focused;
+                    // Another pane took focus: a short pane's open chat box closes behind it.
+                    if !focused && window.is_window_active() {
+                        view.short_pane_composer_open = false;
+                    }
                     view.sync_suggestion_window(cx);
                     cx.notify();
                 }

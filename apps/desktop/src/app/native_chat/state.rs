@@ -146,6 +146,10 @@ pub(crate) struct NativeChatView {
     /// The tables whose cells the reader capped back to one line (React's collapsed table).
     pub(super) table_collapsed: HashSet<String>,
     pub(crate) list: gpui::ListState,
+    /// The transcript's own cached view, created on the first draw (transcript_host.rs).
+    pub(super) transcript_host: Option<Entity<super::transcript_host::TranscriptHost>>,
+    /// The composer tween's bottom inset for the row list, computed once per chat render.
+    pub(super) transcript_inset: f32,
     /// The transcript minimap's dashes, hover and measured column (minimap.rs).
     pub(super) minimap: super::minimap::MinimapState,
     /// The subagent viewer's list, kept apart so opening it never disturbs the main transcript's scroll.
@@ -158,6 +162,8 @@ pub(crate) struct NativeChatView {
     /// Whether this chat's composer field itself holds the keyboard, which is what the `@`, `$` and
     /// `/` picker window keys off (`suggestions/window.rs`).
     pub(super) composer_focused: bool,
+    /// Whether the user opened the chat box of a short pane (composer_scroll.rs).
+    pub(crate) short_pane_composer_open: bool,
     pub(crate) focus_requested: bool,
     pub(crate) subscriptions: Vec<Subscription>,
     /// When this view last rendered; a parked chat keeps applying frames without redrawing the window.
@@ -249,7 +255,11 @@ impl NativeChatView {
             config,
             runtime,
             error,
-            snapshot: Arc::new(Value::Null),
+            snapshot: Arc::new(json!({
+                "composerPlaceholder": ghostex_gx_chat_core::composer::policy::DESKTOP_COMPOSER_PLACEHOLDER,
+                "composerActions": {"summary": true, "note": false, "stash": true, "attach": true, "terminal": true},
+                "optionLabels": {"showModel": true}
+            })),
             items: Arc::default(),
             subagent_items: Arc::default(),
             input: None,
@@ -323,12 +333,15 @@ impl NativeChatView {
             code_wrap_default: false,
             table_collapsed: HashSet::new(),
             list,
+            transcript_host: None,
+            transcript_inset: 0.0,
             minimap: Default::default(),
             subagent_list,
             subagent_focus: cx.focus_handle(),
             subagent_focused: false,
             pane_focused: false,
             composer_focused: false,
+            short_pane_composer_open: false,
             focus_requested: false,
             subscriptions: Vec::new(),
             last_render: None,
@@ -382,6 +395,9 @@ impl NativeChatView {
                             return;
                         }
                         this.invoke(json!({"type":"composerExpand","editor":true}), cx);
+                        if this.composer_focused {
+                            this.short_pane_composer_open = true;
+                        }
                         this.draft = draft;
                         this.draft_revision += 1;
                         this.persist_draft(cx);
@@ -394,11 +410,15 @@ impl NativeChatView {
                         this.sync_suggestion_window(cx);
                         this.invoke(json!({"type":"composerExpand","editor":true}), cx);
                         cx.emit(NativeChatEvent::ComposerFocused);
+                        cx.notify();
                     }
                     InputEvent::Blur => {
                         this.composer_focused = false;
+                        this.short_pane_composer_open = false;
                         this.sync_suggestion_window(cx);
                         this.save_draft(cx);
+                        // A short pane's box collapses again once it loses focus (composer_scroll.rs).
+                        cx.notify();
                     }
                     _ => {}
                 },
@@ -625,6 +645,14 @@ impl NativeChatView {
             // The pane's keyboard zoom is its own, and outlives the snapshots the host publishes.
             self.apply_chat_zoom(&mut snapshot);
             self.retain_launch_welcome(&mut snapshot);
+            if let Some(measured) = self
+                .composer_measurements
+                .as_ref()
+                .and_then(|value| serde_json::from_value(value.clone()).ok())
+            {
+                snapshot["composerOverflow"] =
+                    json!(ghostex_gx_chat_core::composer::layout::fit_composer_controls(&measured));
+            }
             self.snapshot = Arc::new(snapshot);
             self.adopt_status_line_reservation();
             self.sync_model_picker_window(cx);
@@ -657,6 +685,7 @@ impl NativeChatView {
                     self.input_needs_sync = self.draft != draft;
                     self.draft = draft;
                     self.composer_ready = true;
+                    self.composer_measurements = None;
                     if local_draft.is_some() {
                         self.draft_revision += 1;
                         self.persist_draft(cx);

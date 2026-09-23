@@ -119,6 +119,7 @@ impl NativeChatView {
         Enter keeps its view-level meaning from React (send, Shift+Enter newline, Option+Enter compact and send) by running the composer's own Enter handling once the composer has focus.
         */
         if keystroke.key == "enter" && !modifiers.platform && !modifiers.control {
+            self.short_pane_composer_open = true;
             self.invoke(json!({"type":"composerExpand","editor":true}), cx);
             if modifiers.shift {
                 // The composer's key handling leaves Shift+Enter to the input's own newline, which a replay never reaches.
@@ -134,6 +135,7 @@ impl NativeChatView {
         }
         if let Some(text) = typed_text(keystroke) {
             let text = text.to_owned();
+            self.short_pane_composer_open = true;
             self.invoke(json!({"type":"composerExpand","editor":true}), cx);
             input.update(cx, |input, cx| {
                 input.focus(window, cx);

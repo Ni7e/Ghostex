@@ -8,11 +8,12 @@
 //! lays them out.
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::helpers::ThrottledAnimationExt as _;
 use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement as _, StatefulInteractiveElement as _, Styled as _, div, list, px, rgba,
+    AnyElement, Context, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
+    StatefulInteractiveElement as _, Styled as _, div, list, px, rgba,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -354,9 +355,9 @@ fn subagent_spinner(size: gpui::Pixels, color: gpui::Hsla) -> AnyElement {
         return glyph.into_any_element();
     }
     glyph
-        .with_animation(
+        .with_throttled_animation(
             "subagent-loading-spinner",
-            gpui::Animation::new(std::time::Duration::from_millis(900)).repeat(),
+            std::time::Duration::from_millis(900),
             |svg, delta| {
                 svg.with_transformation(gpui::Transformation::rotate(gpui::radians(
                     delta * std::f32::consts::TAU,

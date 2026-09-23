@@ -12,5 +12,6 @@
   "expandedLineHeightPx": 24,
   "expandedPaddingBlockPx": 10,
   "expandedMaxHeightPx": 160,
-  "expandedRowGapPx": 6
+  "expandedRowGapPx": 6,
+  "constrainedPaneHeightPx": 480
 }

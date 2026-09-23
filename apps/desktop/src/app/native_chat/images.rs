@@ -9,13 +9,13 @@
 //! read renders the named chip it would otherwise have been, never a broken image well.
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::helpers::ThrottledAnimationExt as _;
 use crate::app::native_chat::cursor::ChatCursor as _;
 use base64::Engine as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnimationExt as _, AnyElement, Context, ImageFormat, InteractiveElement as _, IntoElement,
-    ParentElement as _, RenderImage, StatefulInteractiveElement as _, Styled as _,
-    StyledImage as _, div, img, px, svg,
+    AnyElement, Context, ImageFormat, InteractiveElement as _, IntoElement, ParentElement as _,
+    RenderImage, StatefulInteractiveElement as _, Styled as _, StyledImage as _, div, img, px, svg,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -186,9 +186,9 @@ fn thumbnail(source: &ChatImageTile, p: &ChatAppearance) -> Option<AnyElement> {
                         .path("titlebar/loader2.svg")
                         .size(px(VISUAL.loading_icon_size * s))
                         .text_color(p.muted)
-                        .with_animation(
+                        .with_throttled_animation(
                             "chat-image-spinner",
-                            gpui::Animation::new(std::time::Duration::from_millis(900)).repeat(),
+                            std::time::Duration::from_millis(900),
                             |svg, delta| {
                                 svg.with_transformation(gpui::Transformation::rotate(
                                     gpui::radians(delta * std::f32::consts::TAU),

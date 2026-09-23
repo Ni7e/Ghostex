@@ -4,7 +4,7 @@ use gpui::StatefulInteractiveElement as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Context, Focusable as _, InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    Styled as _, Window, div, list, px,
+    Styled as _, Window, div, px,
 };
 use serde_json::json;
 
@@ -62,7 +62,9 @@ impl Render for NativeChatView {
             self.ensure_input(window, cx);
         }
         self.sync_chat_zoom_default();
-        let p = ChatAppearance::current(&self.snapshot);
+        let p = ChatAppearance::current(&self.snapshot).on_window_glass(
+            crate::app::helpers::window_glass_active_for(self.main_window),
+        );
         let s = p.scale;
         self.sync_search_scroll();
         /*
@@ -86,20 +88,13 @@ impl Render for NativeChatView {
         };
         let state = self.snapshot.clone();
         let error = self.error.clone();
-        let transcript_inset = if maximized {
+        self.transcript_inset = if maximized {
             0.0
         } else {
             self.composer_frame(cx).transcript_inset
         };
-        let transcript = list(
-            self.list.clone(),
-            cx.processor(|this, index, window, cx| this.transcript_row(index, window, cx)),
-        )
-        .flex_1()
-        .min_h_0()
-        .w_full()
-        .pb(px(transcript_inset));
-        let transcript = self.scrollable_transcript(transcript, cx);
+        crate::app::helpers::indicator_animation::render_indicators_at_display_rate(cx.entity_id());
+        let transcript = self.render_transcript_host(window, cx);
         let rows = self.list.item_count();
         /*
         CDXC:SessionFork 2026-09-21 WHY:
@@ -112,11 +107,7 @@ impl Render for NativeChatView {
         let body = if maximized {
             None
         } else {
-            let content = if rows == 0 {
-                self.render_empty_transcript_region(&state, &p, cx)
-            } else {
-                transcript
-            };
+            let content = transcript;
             Some(
                 div()
                     .id("chat-transcript")
@@ -172,11 +163,17 @@ impl Render for NativeChatView {
             .font_family(p.font.clone())
             .text_size(px(14.0 * s))
             .line_height(px(22.75 * s))
-            .bg(p.background)
-            .text_color(p.primary)
-            .capture_any_mouse_down(|_, window, _| {
-                super::focus::reclaim_keyboard_focus(window);
+            // Under window glass the transcript sits on the frosted column like the terminals do.
+            .bg(if crate::app::helpers::window_glass_active_in(window) {
+                gpui::transparent_black()
+            } else {
+                p.background
             })
+            .text_color(p.primary)
+            .capture_any_mouse_down(cx.listener(|chat, event: &gpui::MouseDownEvent, window, cx| {
+                super::focus::reclaim_keyboard_focus(window);
+                chat.note_short_pane_composer_press(event.position, cx);
+            }))
             .capture_action(cx.listener(Self::scroll_bottom_action))
             .capture_action(cx.listener(Self::open_search_action))
             .capture_action(cx.listener(Self::chat_zoom_in_action))

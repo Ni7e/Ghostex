@@ -6,10 +6,11 @@ import {
   createSessionChatComposerScrollGesture,
   recordSessionChatComposerScrollGesture,
   resetSessionChatComposerScrollGesture,
+  sessionChatComposerHeightConstrained,
   suppressSessionChatComposerScrollGesture,
 } from '@/packages/shared/session-chat-presentation/composer-scroll';
+import { SESSION_CHAT_COMPOSER_ANIMATION } from '@/packages/shared/session-chat-presentation/composer-animation';
 import { useSessionChatComposerTransition } from './use-session-chat-composer-transition';
-
 
 /**
  * CDXC:SessionChat 2026-09-05 DECISION:
@@ -29,13 +30,19 @@ export function useSessionChatComposerCollapse({
   const composerRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
   const collapsedRef = useRef(false);
+  // A short pane keeps the box collapsed while it does not have focus
+  // (`sessionChatComposerHeightConstrained` in composer-scroll.ts holds the decision).
+  const [heightConstrained, setHeightConstrained] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const allowed = enabled && collapseEligible;
+  const effectiveCollapsed = allowed && (heightConstrained ? !focused : collapsed);
   const captureTransition = useSessionChatComposerTransition({
-    collapsed: enabled && collapseEligible && collapsed,
+    collapsed: effectiveCollapsed,
     composerRef,
   });
   const gestureRef = useRef(createSessionChatComposerScrollGesture());
   const collapseEligibleRef = useRef(false);
-  collapseEligibleRef.current = enabled && collapseEligible && !collapsed;
+  collapseEligibleRef.current = allowed && !heightConstrained && !collapsed;
 
   const changeCollapsed = useCallback(
     (next: boolean) => {
@@ -43,12 +50,54 @@ export function useSessionChatComposerCollapse({
       captureTransition();
       collapsedRef.current = next;
       setCollapsed(next);
-      onCollapsedChange?.(next);
     },
-    [onCollapsedChange, captureTransition]
+    [captureTransition]
   );
 
+  useEffect(() => {
+    onCollapsedChange?.(effectiveCollapsed);
+  }, [effectiveCollapsed, onCollapsedChange]);
+
   useEffect(() => () => onCollapsedChange?.(false), [onCollapsedChange]);
+
+  useEffect(() => {
+    const transcript = transcriptRef?.current;
+    if (!enabled || !transcript) return;
+    const measure = () => {
+      const next = sessionChatComposerHeightConstrained(
+        transcript.clientHeight,
+        SESSION_CHAT_COMPOSER_ANIMATION.constrainedPaneHeightPx
+      );
+      setHeightConstrained((current) => {
+        if (current !== next) captureTransition();
+        return next;
+      });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(transcript);
+    return () => observer.disconnect();
+  }, [enabled, transcriptRef, captureTransition]);
+
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+    const onFocusIn = () => {
+      captureTransition();
+      setFocused(true);
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      if (event.relatedTarget instanceof Node && composer.contains(event.relatedTarget)) return;
+      captureTransition();
+      setFocused(false);
+    };
+    composer.addEventListener('focusin', onFocusIn);
+    composer.addEventListener('focusout', onFocusOut);
+    return () => {
+      composer.removeEventListener('focusin', onFocusIn);
+      composer.removeEventListener('focusout', onFocusOut);
+    };
+  }, [captureTransition]);
 
   const expand = useCallback(() => {
     suppressSessionChatComposerScrollGesture(gestureRef.current, performance.now(), SCROLL_GESTURE_RESET_MS);
@@ -150,5 +199,5 @@ export function useSessionChatComposerCollapse({
     };
   }, [enabled, transcriptRef, changeCollapsed]);
 
-  return { collapsed: enabled && collapseEligible && collapsed, composerRef, expand };
+  return { collapsed: effectiveCollapsed, composerRef, expand };
 }

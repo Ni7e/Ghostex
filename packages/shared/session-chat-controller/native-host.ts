@@ -93,7 +93,12 @@ import {
   COMPOSER_MENU_EXCLUDED_HOST_ACTION_IDS,
   AGENT_HOST_ACTION_IDS,
 } from '../session-chat-presentation/actions';
-import { insertChatReference, nativePathReference, removeChatReference } from '../session-chat-presentation/references';
+import {
+  insertAnswerAttachments,
+  insertChatReference,
+  nativePathReference,
+  removeChatReference,
+} from '../session-chat-presentation/references';
 import { nativeComposerKeyIntent } from '../session-chat-presentation/native-composer-keys';
 import { sessionChatReferenceMenuRows } from '../session-chat-presentation/reference-menu';
 import {
@@ -1403,6 +1408,9 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       case 'asyncQuestionText':
         asyncQuestions.edit(command.key, () => command.text);
         break;
+      case 'asyncQuestionImagesPending':
+        asyncQuestions.imagesPending(command.pending);
+        break;
       case 'asyncQuestionOption': {
         const state = asyncQuestions.project(
           chat.messages,
@@ -1694,14 +1702,15 @@ function trackDraftAttachments(text: unknown): void {
   draftAttachmentCount = sessionChatComposerReferences(text).filter((reference) => reference.kind === 'image').length;
 }
 
-function composerReferences(text: string) {
-  return sessionChatComposerReferences(text).map((reference) => ({
+function composerReferences(text: string, includeRevealed = false) {
+  return sessionChatComposerReferences(text, includeRevealed).map((reference) => ({
     start: reference.start,
     end: reference.end,
     kind: reference.kind,
     label: reference.label,
     path: reference.path,
     pill: sessionChatReferencePillText(reference.label, reference.kind),
+    revealed: reference.revealed === true,
   }));
 }
 
@@ -1748,6 +1757,8 @@ Object.assign(globalThis, {
     start,
     action,
     composerReferences,
+    insertAnswerAttachments,
+    removeChatReference,
     composerKeyIntent: nativeComposerKeyIntent,
     referenceMenu: sessionChatReferenceMenuRows,
     transcriptMenu: sessionChatTranscriptMenuRows,

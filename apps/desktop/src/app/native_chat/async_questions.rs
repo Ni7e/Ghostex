@@ -15,9 +15,17 @@ use std::time::Duration;
 #[derive(Default)]
 pub(super) struct AsyncAnswerEcho {
     /// Texts this input reported whose snapshot has not come back yet, oldest first.
-    sent: Vec<String>,
+    pub(super) sent: Vec<String>,
     /// The draft text the last snapshot carried.
     seen: String,
+    pub(super) references: Vec<super::composer_references::ComposerReference>,
+    pub(super) reference_draft: Option<String>,
+    pub(super) pending: usize,
+    pub(super) error: Option<String>,
+    pub(super) hovered_image: Option<String>,
+    pub(super) reference_retry: Option<gpui::Task<()>>,
+    caret: Option<usize>,
+    _observer: Option<gpui::Subscription>,
 }
 
 impl NativeChatView {
@@ -34,7 +42,7 @@ impl NativeChatView {
         let collapsed = state["collapsed"] == true;
         let count = state["count"].as_u64().unwrap_or(1);
         let index = state["index"].as_u64().unwrap_or(0);
-        let busy = state["disabled"] == true;
+        let busy = state["disabled"] == true || self.async_answer_echo.pending > 0;
         let mut indicator = div().relative().size(px(16.0 * s)).flex_shrink_0();
         if state["working"] == true {
             indicator =
@@ -189,6 +197,9 @@ impl NativeChatView {
                 move |this, input, event: &InputEvent, window, cx| match event {
                     InputEvent::Change => {
                         let text = input.read(cx).value().to_string();
+                        if this.async_answer_echo.sent.last() == Some(&text) {
+                            return;
+                        }
                         this.async_answer_echo.sent.push(text.clone());
                         this.invoke(
                             json!({"type":"asyncQuestionText","key":question_key,"text":text}),
@@ -196,7 +207,9 @@ impl NativeChatView {
                         )
                     }
                     InputEvent::PressEnter { shift: false, .. } => {
-                        this.invoke(json!({"type":"asyncQuestionSend"}), cx)
+                        if this.async_answer_echo.pending == 0 {
+                            this.invoke(json!({"type":"asyncQuestionSend"}), cx)
+                        }
                     }
                     InputEvent::Focus => {
                         super::focus::reclaim_keyboard_focus(window);
@@ -206,10 +219,20 @@ impl NativeChatView {
                     _ => {}
                 },
             ));
+            let observer = cx.observe_in(&input, window, |this, input, _, cx| {
+                let caret = input.read(cx).cursor();
+                if this.async_answer_echo.caret != Some(caret) {
+                    this.async_answer_echo.caret = Some(caret);
+                    cx.notify();
+                }
+            });
             self.async_answer_input = Some((key, input));
             self.async_answer_echo = AsyncAnswerEcho {
                 sent: Vec::new(),
                 seen: answer.clone(),
+                pending: self.async_answer_echo.pending,
+                _observer: Some(observer),
+                ..Default::default()
             };
         }
         let input = self.async_answer_input.as_ref().unwrap().1.clone();
@@ -230,36 +253,82 @@ impl NativeChatView {
             }
         }
         let focused = input.read(cx).focus_handle(cx).is_focused(window);
+        self.sync_answer_references(p, cx);
+        let caret = input.read(cx).cursor();
+        let active = self.async_answer_echo.hovered_image.clone().or_else(|| {
+            self.async_answer_echo
+                .references
+                .iter()
+                .find(|reference| {
+                    reference.kind == "image"
+                        && reference.range.start <= caret
+                        && caret <= reference.range.end
+                })
+                .map(|reference| reference.path.clone())
+        });
+        if let Some(previews) = self.render_reference_previews(
+            self.async_answer_echo.references.clone(),
+            self.async_answer_echo.pending as u64,
+            active,
+            self.async_answer_input.as_ref().map(|(key, _)| key.clone()),
+            state["submitting"] == true || state["loading"] == true,
+            p,
+            cx,
+        ) {
+            body = body.child(div().flex_shrink_0().child(previews));
+        }
         body = body.child(
-            Input::new(&input)
-                .aria_label("Your answer")
-                .appearance(false)
-                .bordered(false)
-                .focus_bordered(false)
-                .disabled(state["submitting"] == true || state["loading"] == true)
-                .placeholder_color(p.muted.opacity(0.6))
+            div()
+                .id("async-answer-editor")
                 .w_full()
                 .min_w_0()
-                .min_h(px(60.0 * s))
-                .max_h(px(118.0 * s))
                 .flex_shrink_0()
-                .border_1()
-                .border_color(p.input_border)
-                .when(focused, |input| {
-                    input.border_color(p.ring).shadow(vec![
-                        gpui::BoxShadow::new(px(0.0), px(0.0), p.ring.opacity(0.2))
-                            .spread_radius(px(3.0 * s))
-                            .inset(),
-                    ])
-                })
-                .rounded(px(12.0 * s))
-                .bg(p.background)
-                .px(px(10.0 * s))
-                .py(px(8.0 * s))
-                .text_size(px(13.0 * s))
-                .line_height(px(24.0 * s))
-                .text_color(p.foreground),
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(Self::click_answer_reference),
+                )
+                .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                    this.hover_answer_reference(Some(event.position), cx)
+                }))
+                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                    if !*hovered {
+                        this.hover_answer_reference(None, cx);
+                    }
+                }))
+                .child(
+                    Input::new(&input)
+                        .aria_label("Your answer")
+                        .appearance(false)
+                        .bordered(false)
+                        .focus_bordered(false)
+                        .disabled(state["submitting"] == true || state["loading"] == true)
+                        .placeholder_color(p.muted.opacity(0.6))
+                        .w_full()
+                        .min_w_0()
+                        .min_h(px(60.0 * s))
+                        .max_h(px(118.0 * s))
+                        .flex_shrink_0()
+                        .border_1()
+                        .border_color(p.input_border)
+                        .when(focused, |input| {
+                            input.border_color(p.ring).shadow(vec![
+                                gpui::BoxShadow::new(px(0.0), px(0.0), p.ring.opacity(0.2))
+                                    .spread_radius(px(3.0 * s))
+                                    .inset(),
+                            ])
+                        })
+                        .rounded(px(12.0 * s))
+                        .bg(p.background)
+                        .px(px(10.0 * s))
+                        .py(px(8.0 * s))
+                        .text_size(px(13.0 * s))
+                        .line_height(px(24.0 * s))
+                        .text_color(p.foreground),
+                ),
         );
+        if let Some(error) = self.async_answer_echo.error.clone() {
+            body = body.child(div().flex_shrink_0().text_color(rgb(0xef4444)).child(error));
+        }
         if let Some(error) = state["error"].as_str().filter(|value| !value.is_empty()) {
             body = body.child(
                 div()
@@ -287,13 +356,13 @@ impl NativeChatView {
                     "previous",
                     "Previous question",
                     "titlebar/chevron-left.svg",
-                    state["previousDisabled"] == true,
+                    state["previousDisabled"] == true || self.async_answer_echo.pending > 0,
                 ),
                 (
                     "next",
                     "Next question",
                     "titlebar/chevron-right.svg",
-                    state["nextDisabled"] == true,
+                    state["nextDisabled"] == true || self.async_answer_echo.pending > 0,
                 ),
             ] {
                 actions = actions.child(

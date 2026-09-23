@@ -10,6 +10,7 @@ mod actions;
 mod agent_fleet;
 mod agent_tasks;
 mod approval;
+mod answer_attachments;
 mod async_questions;
 mod attachment_previews;
 mod attachments;
@@ -75,6 +76,7 @@ mod send_control;
 mod toolbar;
 mod transcript_layout;
 mod transcript_menu;
+mod transcript_host;
 mod transcript_skeleton;
 
 mod terminal_dialog;
@@ -85,7 +87,7 @@ mod option_menu;
 
 mod option_pills;
 
-mod context_meter;
+pub(crate) mod context_meter;
 
 mod context_editor;
 
