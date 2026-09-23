@@ -62,7 +62,7 @@ impl NativeChatView {
             let result = main.update(cx,|_,window,cx| {
                 let frame = context_editor_frame(pane, appearance.scale);
                 let bounds = gpui::Bounds::new(window.bounds().origin + frame.origin, frame.size);
-                (bounds,window.display(cx).map(|display|display.id()))
+                (bounds,crate::app::window::popup_frame::display_at(bounds.center(),cx).or_else(||window.display(cx).map(|display|display.id())))
             }).and_then(|(bounds,display_id)| cx.open_window(WindowOptions {
                 kind: crate::app::window::popup_frame::child_window_kind(),
                 window_bounds:Some(WindowBounds::Windowed(bounds)),display_id,

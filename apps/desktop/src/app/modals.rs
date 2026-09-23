@@ -1484,7 +1484,11 @@ impl GhostexGpuiApp {
             show: true,
             is_resizable: modal.is_resizable(),
             window_min_size: Some(modal.window_min_size(&open_message)),
-            display_id: self.main_window_display_id,
+            display_id: crate::app::window::popup_frame::display_at(
+                self.main_window_bounds.center(),
+                cx,
+            )
+            .or(self.main_window_display_id),
             titlebar: modal.has_titlebar().then(|| gpui::TitlebarOptions {
                 title: Some(window_title.clone().into()),
                 appears_transparent: false,

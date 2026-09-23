@@ -61,7 +61,11 @@ impl GhostexGpuiApp {
             show: true,
             is_resizable: false,
             is_minimizable: false,
-            display_id: self.main_window_display_id,
+            display_id: crate::app::window::popup_frame::display_at(
+                self.main_window_bounds.center(),
+                cx,
+            )
+            .or(self.main_window_display_id),
             titlebar: None,
             ..Default::default()
         };

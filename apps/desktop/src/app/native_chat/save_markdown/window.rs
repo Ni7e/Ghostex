@@ -57,7 +57,8 @@ impl NativeChatView {
                 // Chat Lab's regular macOS titlebar is outside GPUI's content coordinates.
                 #[cfg(target_os = "macos")]
                 let origin = origin + gpui::point(px(0.0), (window.bounds().size.height - window.viewport_size().height).max(px(0.0)));
-                (gpui::Bounds::new(origin, pane.size), window.display(cx).map(|display| display.id()))
+                let bounds = gpui::Bounds::new(origin, pane.size);
+                (bounds, crate::app::window::popup_frame::display_at(bounds.center(), cx).or_else(|| window.display(cx).map(|display| display.id())))
             }).and_then(|(bounds, display_id)| cx.open_window(WindowOptions {
                 kind: crate::app::window::popup_frame::child_window_kind(),
                 window_bounds: Some(WindowBounds::Windowed(bounds)), display_id,

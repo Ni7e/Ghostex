@@ -347,11 +347,13 @@ impl ChatOptionMenu {
                 metrics.radius
             } * scale,
         );
+        let display_id = crate::app::window::popup_frame::display_at(bounds.center(), cx);
         cx.defer(move |cx| {
             let result = cx.open_window(
                 WindowOptions {
                     kind: crate::app::window::popup_frame::child_window_kind(),
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    display_id,
                     titlebar: None,
                     focus: true,
                     show: true,
