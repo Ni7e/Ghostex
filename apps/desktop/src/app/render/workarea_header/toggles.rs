@@ -23,6 +23,7 @@ pub(crate) fn header_panel_toggle_button(
     icon: &'static str,
     size_reduction: f32,
     enabled: bool,
+    icon_color: Option<gpui::Hsla>,
 ) -> gpui::Stateful<gpui::Div> {
     let button = div()
         .id(id)
@@ -49,7 +50,7 @@ pub(crate) fn header_panel_toggle_button(
                 icon,
                 TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE - size_reduction,
                 if enabled {
-                    titlebar_active_text_color()
+                    icon_color.unwrap_or_else(titlebar_active_text_color)
                 } else {
                     titlebar_disabled_text_color()
                 },
@@ -64,7 +65,7 @@ pub(crate) fn header_panel_toggle_button(
             icon,
             TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE - size_reduction,
             if enabled {
-                titlebar_icon_color()
+                icon_color.unwrap_or_else(titlebar_icon_color)
             } else {
                 titlebar_disabled_text_color()
             },
@@ -102,6 +103,7 @@ impl GhostexGpuiApp {
 
     pub(crate) fn render_sidebar_collapse_button(
         &self,
+        icon_color: Option<gpui::Hsla>,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         /*
@@ -120,6 +122,7 @@ impl GhostexGpuiApp {
             TITLEBAR_ICON_LAYOUT_SIDEBAR,
             0.0,
             true,
+            icon_color,
         )
         .on_mouse_down(
             MouseButton::Left,
@@ -148,6 +151,7 @@ impl GhostexGpuiApp {
     /// it behind, so the button is disabled the way Expand is, and says so.
     pub(crate) fn render_workarea_header_agents_toggle(
         &self,
+        icon_color: Option<gpui::Hsla>,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let enabled = self.open_view_mode().is_some();
@@ -161,6 +165,7 @@ impl GhostexGpuiApp {
             TITLEBAR_ICON_MESSAGE,
             0.0,
             enabled,
+            icon_color,
         )
         .when(enabled, |this| {
             this.on_mouse_down(
@@ -191,6 +196,7 @@ impl GhostexGpuiApp {
             TITLEBAR_ICON_PANEL_BOTTOM,
             0.0,
             true,
+            None,
         )
         .when(expanded, |this| this.bg(titlebar_active_segment_color()))
         .on_mouse_down(
@@ -227,6 +233,7 @@ impl GhostexGpuiApp {
             TITLEBAR_ICON_PANEL_RIGHT,
             0.0,
             true,
+            None,
         )
         .when(open, |this| this.bg(titlebar_active_segment_color()))
         .on_mouse_down(

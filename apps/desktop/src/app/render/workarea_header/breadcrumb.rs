@@ -100,7 +100,7 @@ impl GhostexGpuiApp {
                         div()
                             .relative()
                             .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
-                            .child(self.render_sidebar_collapse_button(cx)),
+                            .child(self.render_sidebar_collapse_button(None, cx)),
                     )
                     // The Agents Panel toggle follows the sidebar toggle wherever that one is
                     // drawn; while the docked Search row owns it, that row draws this one too. The
@@ -110,7 +110,7 @@ impl GhostexGpuiApp {
                             .relative()
                             .ml(px(4.0))
                             .when(cfg!(target_os = "macos"), |this| this.top(px(0.5)))
-                            .child(self.render_workarea_header_agents_toggle(cx)),
+                            .child(self.render_workarea_header_agents_toggle(None, cx)),
                     )
                 },
             )

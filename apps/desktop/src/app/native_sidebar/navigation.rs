@@ -137,6 +137,12 @@ impl GhostexGpuiApp {
             */
             .flex_shrink_0()
             .text_color(titlebar_active_text_color().opacity(0.52))
+            /*
+            CDXC:Sidebar 2026-09-23 DECISION:
+            User: the Toggle sidebar and Agents Panel buttons at the top of the sidebar have the
+            same color as the notification bell there, so this row draws their icons in the
+            sidebar's muted color rather than the header's bright one.
+            */
             .when(reserves_window_controls, |row| {
                 // The row's leading padding is scaled with the sidebar; the margin puts the button
                 // back on the header's unscaled x. The spacer keeps it left of a compact row, whose
@@ -145,15 +151,14 @@ impl GhostexGpuiApp {
                     div()
                         .flex_shrink_0()
                         .ml(px(7.0 * scale))
-                        .child(self.render_sidebar_collapse_button(cx)),
+                        .child(self.render_sidebar_collapse_button(Some(appearance.muted), cx)),
                 )
                 // Right of Toggle sidebar, as in the collapsed header (workarea_header/breadcrumb.rs),
                 // which puts it 4pt after that button: the margin tops the scaled row gap up to it.
                 .child(
-                    div()
-                        .flex_shrink_0()
-                        .ml(px(4.0 - 4.0 * scale))
-                        .child(self.render_workarea_header_agents_toggle(cx)),
+                    div().flex_shrink_0().ml(px(4.0 - 4.0 * scale)).child(
+                        self.render_workarea_header_agents_toggle(Some(appearance.muted), cx),
+                    ),
                 )
                 .when(compact, |row| row.child(div().flex_1()))
             })
