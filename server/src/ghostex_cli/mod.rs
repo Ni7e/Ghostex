@@ -23,6 +23,7 @@ pub mod rpc;
 pub mod saved_prompts;
 pub mod selector;
 mod session_chat_model;
+mod session_chat_transcript;
 mod session_parking;
 pub mod sessions;
 pub mod settings;
@@ -140,7 +141,7 @@ fn dispatch(argv: &[String]) -> CliResult<i32> {
     if !HELP_GATE_EXCLUDED.contains(&command_name)
         && args.iter().any(|arg| arg == "-h" || arg == "--help")
     {
-        println!("{}", usage::usage());
+        println!("{}", usage::command_usage(command_name));
         return Ok(0);
     }
     run_command(command_name, &args)?;
@@ -624,6 +625,9 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             fail_on_not_ok,
             args,
         ),
+        "read-session-chat" if session_chat_transcript::wants_transcript_reader(args) => {
+            session_chat_transcript::read_session_chat_transcript(args)
+        }
         "read-session-chat" => {
             run_bridge_action("readSessionChat", Parser::SessionChatRead, plain, args)
         }

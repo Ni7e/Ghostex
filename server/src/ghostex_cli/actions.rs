@@ -1114,7 +1114,10 @@ fn with_resolved_session_params(payload: &Value, flags: &Flags) -> Value {
     Value::Object(object)
 }
 
-fn with_resolved_gxserver_session_params(payload: &Value, flags: &Flags) -> CliResult<Value> {
+pub(crate) fn with_resolved_gxserver_session_params(
+    payload: &Value,
+    flags: &Flags,
+) -> CliResult<Value> {
     let params = with_resolved_session_params(payload, flags);
     if js_truthy(params.get("projectId")) || !js_truthy(params.get("sessionId")) {
         return Ok(params);

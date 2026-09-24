@@ -40,6 +40,9 @@ pub struct SidebarMenus<'a> {
     filter_catalog: TagCatalog,
     spaces: Option<SpacesState>,
     collections: CollectionsState,
+    /// The drawn machine's daemon id (`S…`), the first part of a session's global ref; absent
+    /// until a stream frame has named it.
+    server_id: Option<String>,
     now_ms: u64,
 }
 
@@ -102,6 +105,10 @@ impl<'a> SidebarMenus<'a> {
                     .map(CollectionsState::from_local_json)
                     .unwrap_or_default(),
             },
+            server_id: store
+                .loaded(&machine)
+                .map(|loaded| loaded.server_id.clone())
+                .filter(|server_id| !server_id.is_empty()),
             now_ms,
         }
     }
@@ -118,6 +125,7 @@ impl<'a> SidebarMenus<'a> {
         self.filter_catalog.hash(&mut hasher);
         self.spaces.hash(&mut hasher);
         self.collections.hash(&mut hasher);
+        self.server_id.hash(&mut hasher);
         hasher.finish()
     }
 
@@ -156,6 +164,7 @@ impl<'a> SidebarMenus<'a> {
                 .project_context
                 .as_ref()
                 .and_then(|project| project.git_remote_origin_url.as_deref()),
+            server_id: self.server_id.clone(),
         }
     }
 

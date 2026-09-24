@@ -15,6 +15,64 @@ pub fn format_help_command(signature: &str, description: &str) -> String {
     format!("  {signature}{}{description}", " ".repeat(gap_width))
 }
 
+/// `ghostex <command> --help`: the catalog rows for that one command, or the whole catalog when
+/// none name it.
+///
+/// CDXC:Cli 2026-09-24 WHY:
+/// A test agent reading another thread ran `read-session-chat --help` and got the 100-line catalog,
+/// then had to grep it for the two rows that mattered.
+pub fn command_usage(command_name: &str) -> String {
+    let catalog = usage();
+    let rows: Vec<&str> = catalog
+        .lines()
+        .filter(|line| {
+            let signature = line.trim_start();
+            line.starts_with("  ")
+                && (signature == command_name
+                    || signature.starts_with(&format!("{command_name} "))
+                    || signature.starts_with(&format!("{command_name} |")))
+        })
+        .collect();
+    if rows.is_empty() {
+        return catalog;
+    }
+    let mut text = format!("Usage:\n{}\n", rows.join("\n"));
+    if command_name == "read-session-chat" {
+        text.push_str(READ_SESSION_CHAT_HELP);
+    }
+    text.push_str("\nEvery command: ghostex --help");
+    text
+}
+
+const READ_SESSION_CHAT_HELP: &str = "
+Examples:
+  ghostex read-session-chat <session> --grep \"mobile|react native\" --context 1 --format text
+  ghostex read-session-chat <session> --all --role user --format text
+  ghostex read-session-chat <session> --since \"2026-09-21 23:00\" --until \"2026-09-21 23:30\" --format text
+  ghostex read-session-chat <session> --grep \"rust only\" --role user --before 0 --after 1 --format text
+
+<session> is a title, session id, global ref (S…:P…:G…), zmx name, agent session id, or the
+Session ID or Routing ID from the sidebar's Copy Details. Sleeping sessions read without waking.
+
+Whole-thread reader (any of these flags switches to it):
+  --all                 Walk the thread back to its first turn. Older turns come as prompt plus
+                        final reply, their tool work collapsed into one note.
+  --grep <a|b>          Case-insensitive plain-text search over the whole thread (not a regex;
+                        ^ $ . * match themselves); | separates alternatives. Matched rows are
+                        marked \"match\" in text output.
+  --role <list>         user, assistant, tool, system, reasoning or harness (injected task
+                        notifications and reminders). With --grep it limits which rows match.
+  --context <n>         Keep n rows before and after each match.
+  --before <n>          Keep n rows before each match (overrides --context on that side).
+  --after <n>           Keep n rows after each match; --before 0 --after 1 gives a prompt and its reply.
+  --since <date>        Keep rows at or after a local date or time (2026-09-21, 2026-09-21T18:00).
+  --until <date>        Keep rows before a local date or time; with --since it reads one window.
+  --last <n>            Keep only the newest n of the rows left after the other filters (with
+                        --grep, the newest n matches).
+  --format text|json    text prints a readable conversation in local time; json is the default.
+  --history-mode detail Every row, including each tool call, instead of collapsed turns.
+";
+
 /// The automations module owns the commands; this file owns their help rows.
 fn automation_help_commands() -> Vec<String> {
     vec![
@@ -322,7 +380,8 @@ pub fn usage() -> String {
         format_help_command("read-agent-prompt-text --key <key> --json", "Read one prompt's full text by the key a search row reported"),
         format_help_command("toggle-agent-prompt-favorite --key <key> [--favorite true|false] --json", "Star or unstar a prompt; shares gx f's favorites file"),
         format_help_command("resolve-agent-prompt-launch --key <key> [--action resume|fork] [--fork-agent id] --json", "Resolve whether opening a prompt focuses a live session or runs a command"),
-        format_help_command("read-session-chat <selector> [--subagent name-or-id] [--limit n] [--before-offset n] [--history-mode turns|detail] [--preserve-newest] [--wait-ms n --fingerprint f] --json", "Read a session or subagent transcript; --wait-ms long-polls the main chat"),
+        format_help_command("read-session-chat <selector> [--subagent name-or-id] [--limit n] [--before-offset n] [--history-mode turns|detail] [--preserve-newest] [--wait-ms n --fingerprint f] --json", "Read a session or subagent transcript; --wait-ms long-polls the main chat; without --before-offset, --history-mode turns starts at the newest turn"),
+        format_help_command("read-session-chat <selector> --all|--grep <text> [--role user,assistant] [--context n] [--before n] [--after n] [--since date] [--until date] [--last n] [--history-mode detail] [--format text|json]", "Read a whole thread in one call: --all walks it to the first turn, --grep searches it (a|b for either word), --context keeps rows around each match, --since/--until/--last trim it, --format text prints a readable conversation; read-session-chat --help has examples. <selector> can be a title, session id, global ref, zmx name, agent session id, or Copy Details' Session ID or Routing ID"),
         format_help_command("switch-draft-agent <selector> --agent-id <id> --json", "Switch an unprompted draft session to another project agent"),
         format_help_command("send-session-chat-key <selector> --key <key> --json", "Queue Enter or a shifted option key behind this session's pending chat writes"),
         format_help_command("select-session-chat-model <selector> [--model <model> --effort <effort>] [--scope session|default] [--mode <mode>] [--fast-mode on|off] [--defer] --json", "Change chat model, effort or mode; --scope session applies it to this session without changing the agent's default (Claude only); --defer queues the choice until the agent is ready"),
@@ -417,7 +476,7 @@ pub fn usage() -> String {
         ),
         format_help_command(
             "agents-orchestration --help",
-            "Show Ghostex Agents Orchestration skill setup (launch and coordinate other agents)",
+            "Show Ghostex Agents skill setup (launch and coordinate other agents)",
         ),
         format_help_command(
             "manage-beads --help",
@@ -581,7 +640,7 @@ Specialized workflows:
   chat queues, prompt history, server, diagnostics) is covered by ghostex --help
   and the focused help pages. Use $ghostex-embedded-browser-use,
   $ghostex-browser-use, $ghostex-computer-use, $ghostex-manage-beads,
-  $ghostex-agents-orchestration, $ghostex-auto-rename-session, or
+  $ghostex-agents, $ghostex-auto-rename-session, or
   $ghostex-move-codex-session when their domain applies. Use $ghostex-help to
   explain how a Ghostex feature works or to change an app setting for the user
   (ghostex guide, ghostex settings).
@@ -1121,14 +1180,14 @@ Boundary:
 }
 
 pub fn agents_orchestration_usage() -> String {
-    "Ghostex Agents Orchestration - install the agent skill for launching and coordinating other agents
+    "Ghostex Agents - install the agent skill for launching and coordinating other agents
 
 Usage:
   gx agents-orchestration --help
   gx agents-orchestration install-skill [--json]
 
 Agent skill:
-  Use $ghostex-agents-orchestration when one agent needs other agents to do
+  Use $ghostex-agents when one agent needs other agents to do
   part of the work: launch them with a specific model and effort, send them
   tasks, read their replies, wait for them to finish, and verify the result.
 

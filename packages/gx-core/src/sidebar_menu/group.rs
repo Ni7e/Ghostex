@@ -28,6 +28,8 @@ pub struct MenuGroup<'a> {
     pub can_remove_project: bool,
     /// The project's git origin, when the daemon has probed one.
     pub git_remote_origin_url: Option<&'a str>,
+    /// The machine's daemon id, which Copy Details joins into the session's global ref.
+    pub server_id: Option<String>,
 }
 
 impl<'a> MenuGroup<'a> {
@@ -41,6 +43,7 @@ impl<'a> MenuGroup<'a> {
             worktree_branch: worktree.map(|worktree| worktree.branch.as_str()),
             parent_project_name: worktree.map(|worktree| worktree.parent_project_name.as_str()),
             remote_machine_name: self.remote_machine_name,
+            server_id: self.server_id.as_deref(),
         }
     }
 }

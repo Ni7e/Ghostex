@@ -386,21 +386,19 @@ pub(crate) async fn handle_read_session_chat_http(
     let history_mode = params.get("historyMode").and_then(Value::as_str);
     let verbatim_tail = history_mode == Some("detail") && before_offset.is_none();
     if let Some(mode) = history_mode.filter(|_| !verbatim_tail) {
-        if !matches!(mode, "turns" | "detail") || before_offset.is_none() {
+        if !matches!(mode, "turns" | "detail") {
             return domain_error_response(
                 endpoint_path,
                 request_id,
                 DomainStateError {
                     code: "invalidParams",
-                    message: "History reads require historyMode turns/detail and beforeOffset."
-                        .to_string(),
+                    message: "historyMode must be turns or detail.".to_string(),
                 },
             );
         }
         let history_agent =
             crate::session_chat::resolve_session_chat_transcript_agent(resolution.agent.as_deref());
         let path = resolution.transcript_path.clone();
-        let before = before_offset.unwrap();
         let detail = mode == "detail";
         let preserve = params
             .get("preserveNewest")
@@ -408,11 +406,16 @@ pub(crate) async fn handle_read_session_chat_http(
             .unwrap_or(false);
         let history_project = project_id.clone();
         let history_session = session_id.clone();
+        // CDXC:SessionChat 2026-09-24 DECISION:
+        // The user asked that reading a whole thread not need a live read first, so a history read without a cursor starts at the transcript's end (the newest turn).
         let history = tokio::task::spawn_blocking(move || match (history_agent, path) {
             (Some(agent), Some(path)) => crate::session_chat_history::read_history(
                 agent,
                 &path,
-                before,
+                match before_offset {
+                    Some(before) => before,
+                    None => std::fs::metadata(&path)?.len(),
+                },
                 limit,
                 detail,
                 preserve,
