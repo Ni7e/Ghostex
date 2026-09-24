@@ -111,9 +111,16 @@ impl GhostexGpuiApp {
                     },
                 )
                 .child({
+                    // Alone in its sliding clip it grows by 1, or it would fill only its share
+                    // of the clip (render/workarea_split.rs).
+                    let strip_grow = if self.panel_motion.view_panel.frame().animating {
+                        1.0
+                    } else {
+                        1.0 - split_ratio
+                    };
                     let strip = div()
                         .flex()
-                        .flex_grow(1.0 - split_ratio)
+                        .flex_grow(strip_grow)
                         .flex_shrink(1.0)
                         .flex_basis(relative(0.0))
                         .h(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
@@ -201,10 +208,11 @@ impl GhostexGpuiApp {
     /// header drops its labels from this width rather than from the window's, because with a view
     /// open the labels have only the sessions column to fit in.
     pub(crate) fn workarea_header_row_width(&self, window: &Window) -> f32 {
-        self.workarea_header_row_width_with_reserve(
+        (self.workarea_header_row_width_with_reserve(
             window,
             self.workarea_header_trailing_dock_reserve(window),
-        )
+        ) - self.workarea_header_closing_clearance())
+        .max(0.0)
     }
 
     /// The header row's width with every panel at its settled size.

@@ -45,11 +45,25 @@ impl GhostexGpuiApp {
             None => {
                 let workspace =
                     self.render_agents_workspace(AgentsWorkspaceLayout::FullWidth, window, cx);
-                // Closing, the panel's content is gone with the view, so its frame slides shut.
+                // Closing, a view's content is gone with the view, so its frame slides shut; the
+                // picker stays in it and fades out.
                 let frame = self.panel_motion.view_panel.frame();
                 if !frame.animating {
                     return workspace;
                 }
+                let closing_panel = if !frame.opening && self.panel_motion.view_panel_showed_picker
+                {
+                    self.render_closing_view_picker(frame, window, cx)
+                } else {
+                    crate::app::panel_motion::closing_panel_ghost(
+                        frame,
+                        false,
+                        false,
+                        project_editor_companion_divider_background_color(),
+                        WORKSPACE_SPLIT_HANDLE_THICKNESS,
+                        glass_clear(project_editor_shell_background_color()),
+                    )
+                };
                 h_flex()
                     .flex_1()
                     .min_w_0()
@@ -64,14 +78,7 @@ impl GhostexGpuiApp {
                             .h_full()
                             .child(workspace),
                     )
-                    .child(crate::app::panel_motion::closing_panel_ghost(
-                        frame,
-                        false,
-                        false,
-                        project_editor_companion_divider_background_color(),
-                        WORKSPACE_SPLIT_HANDLE_THICKNESS,
-                        glass_clear(project_editor_shell_background_color()),
-                    ))
+                    .child(closing_panel)
                     .into_any_element()
             }
         }

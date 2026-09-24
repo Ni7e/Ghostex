@@ -665,13 +665,13 @@ impl GhostexGpuiApp {
             self.open_views.push(target_mode);
         }
         self.view_strip_layout = state.view_strip_layout.clone();
-        self.view_panel_maximized =
-            self.view_panel_maximized && target_mode != TitlebarMode::Agents;
         self.active_mode = target_mode;
         // The picker belongs to the panel, not to a project, so it survives a switch only while the
         // incoming project has no view of its own to show.
         self.view_panel_picker_open =
             self.view_panel_picker_open && target_mode == TitlebarMode::Agents;
+        self.view_panel_maximized = self.view_panel_maximized
+            && (target_mode != TitlebarMode::Agents || self.view_panel_picker_open);
         self.apply_view_pane_state(cx);
         self.seed_terminal_view_for_open(cx);
         self.focus_shell_target(

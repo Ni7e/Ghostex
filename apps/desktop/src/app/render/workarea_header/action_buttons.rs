@@ -492,7 +492,7 @@ impl GhostexGpuiApp {
             .flex_shrink_0()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .items_center()
-            .gap(px(2.0))
+            .gap(px(WORKAREA_HEADER_PINNED_GAP))
             .ml(px(4.0))
             // Everything occasional lives behind the trailing ⋯ menu.
             .when(self.titlebar_more_menu_visible(), |this| {
@@ -500,7 +500,12 @@ impl GhostexGpuiApp {
             })
             // With a view open the toggles end the view tab strip instead (render_workarea_panel_toggles).
             .when(!self.workarea_header_hosts_view_tab_strip(), |this| {
-                this.child(self.render_workarea_panel_toggles(cx))
+                this.child(
+                    div()
+                        .flex_shrink_0()
+                        .ml(px(self.workarea_header_closing_clearance()))
+                        .child(self.render_workarea_panel_toggles(cx)),
+                )
             })
             .child(self.render_titlebar_extension_popup_panel(window, cx));
         let controls = h_flex()
@@ -509,7 +514,9 @@ impl GhostexGpuiApp {
             .max_w_full()
             .h_full()
             .items_center()
-            .pr(px(WORKAREA_HEADER_EDGE_PADDING))
+            .pr(px(
+                WORKAREA_HEADER_EDGE_PADDING + self.workarea_header_opening_clearance()
+            ))
             .child(
                 h_flex()
                     .id("ghostex-gpui-workarea-header-controls-scroll")

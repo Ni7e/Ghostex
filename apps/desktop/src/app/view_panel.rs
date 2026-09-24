@@ -52,10 +52,13 @@ impl GhostexGpuiApp {
         !self.view_panel_maximized() || self.floating_reveal_hosts_agents_column()
     }
 
-    /// Maximised only counts while a view is really open; closing the panel, or leaving it on the
-    /// picker, puts the sessions column back rather than leaving the window with nothing in it.
+    /// CDXC:Workarea 2026-09-24 DECISION:
+    /// User: on the "Open a view" picker, "still allow me to use" Toggle Agents Panel, Expand side
+    /// panel and Expand side panel fully. Maximised counts while the panel is open, whether it holds
+    /// a view or the picker; this supersedes the 2026-09-20 rule that the picker put the sessions
+    /// column back. Closing the panel still does, rather than leaving the window with nothing in it.
     pub(crate) fn view_panel_maximized(&self) -> bool {
-        self.view_panel_maximized && self.open_view_mode().is_some()
+        self.view_panel_maximized && self.view_panel_open()
     }
 
     /// CDXC:Workarea 2026-09-20 DECISION:
@@ -89,10 +92,12 @@ impl GhostexGpuiApp {
     /// Open the panel onto the picker. The picker takes shell focus so its single-letter shortcuts
     /// reach it rather than the terminal the user was typing in a moment ago.
     pub(crate) fn open_view_picker(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
-        if self.active_mode != TitlebarMode::Agents {
-            self.close_view_panel(window, cx);
-        }
+        // Marked open before the mode change, so a panel that was expanded stays expanded on the
+        // picker instead of being closed and reopened (`set_active_mode`).
         self.view_panel_picker_open = true;
+        if self.active_mode != TitlebarMode::Agents {
+            self.set_active_mode(TitlebarMode::Agents, window, cx);
+        }
         self.focus_view_picker(cx);
         self.persist_shell_layout_state();
         cx.notify();
@@ -238,7 +243,7 @@ impl GhostexGpuiApp {
 
     /// Expand and restore, the button in the tab strip and the `⋯` row beside it.
     pub(crate) fn toggle_view_panel_maximized(&mut self, cx: &mut gpui::Context<Self>) {
-        if self.open_view_mode().is_none() {
+        if !self.view_panel_open() {
             return;
         }
         self.view_panel_maximized = !self.view_panel_maximized;
@@ -259,7 +264,7 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn toggle_view_panel_fully_expanded(&mut self, cx: &mut gpui::Context<Self>) {
-        if self.open_view_mode().is_none() {
+        if !self.view_panel_open() {
             return;
         }
         let expand = !self.view_panel_fully_expanded();

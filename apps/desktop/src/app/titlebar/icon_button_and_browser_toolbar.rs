@@ -253,7 +253,8 @@ impl GhostexGpuiApp {
             .w_full()
             .items_center()
             .pl(px(BROWSER_TOOLBAR_LEADING_PADDING))
-            .pr(px(WORKAREA_HEADER_EDGE_PADDING))
+            // Lined up with the panel toggles in the strip above (WORKAREA_HEADER_PINNED_GAP).
+            .pr(px(WORKAREA_HEADER_EDGE_PADDING + WORKAREA_HEADER_PINNED_GAP))
             .bg(browser_toolbar_background())
             .border_b_1()
             .border_color(chrome_color(0x252525, 0xd4d4d4))

@@ -57,7 +57,7 @@ impl GhostexGpuiApp {
         let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
         let metrics_view = cx.entity().clone();
         let surface_view = cx.entity().clone();
-        if let Some(mode) = mode.filter(|_| self.view_panel_maximized()) {
+        if self.view_panel_maximized() {
             let panel = self.render_maximized_view_panel(mode, window, cx);
             // Folding away, the Agents Panel's frame slides shut on the left (panel_motion.rs).
             let frame = self.panel_motion.agents_column.frame();
@@ -97,9 +97,11 @@ impl GhostexGpuiApp {
             .child({
                 /*
                 CDXC:Workarea 2026-09-23 WHY:
-                Flex grow factors that sum to less than 1 hand out only that fraction of the free space. While the view panel slides it is a fixed-width frame, so the Agents column is the row's only grower, and at its split ratio (0.3 or so) it stopped at its minimum width and left the panel sliding out of it with empty space to the right. It grows by 1 for the slide; the same goes for the panel while the Agents column slides, and for the header band above them.
+                Flex grow factors that sum to less than 1 hand out only that fraction of the free space. While the view panel slides it is a fixed-width frame, so the Agents column is the row's only grower, and at its split ratio (0.3 or so) it stopped at its minimum width and left the panel sliding out of it with empty space to the right. It grows by 1 for the slide; the same goes for the panel while the Agents column slides, and for the header band above them. Inside its own sliding clip each one is the clip's only child and grows by 1 too: the panel at its 0.7 or so filled only that share of the clip, so the picker's cards faded in squeezed and jumped wide when the slide settled.
                 */
-                let split_ratio = if self.panel_motion.view_panel.frame().animating {
+                let split_ratio = if self.panel_motion.view_panel.frame().animating
+                    || self.panel_motion.agents_column.frame().animating
+                {
                     1.0
                 } else {
                     split_ratio
@@ -141,11 +143,12 @@ impl GhostexGpuiApp {
                 // Browser owns its borders inside its leaves; other views own a surface border.
                 // Keep those borders inside the flex allocation so switching views cannot change the
                 // Agents column's width.
-                let panel_grow = if self.panel_motion.agents_column.frame().animating {
-                    1.0
-                } else {
-                    1.0 - split_ratio
-                };
+                let panel_grow =
+                    if panel_frame.animating || self.panel_motion.agents_column.frame().animating {
+                        1.0
+                    } else {
+                        1.0 - split_ratio
+                    };
                 let panel = v_flex()
                     .pt(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
                     .flex_grow(panel_grow)
@@ -216,6 +219,62 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
+    /// Closing from the picker, the panel's frame slides shut with the picker still in it, laid out
+    /// at its open width and fading out over the first half of the slide (panel_motion.rs).
+    pub(crate) fn render_closing_view_picker(
+        &mut self,
+        frame: crate::app::panel_motion::PanelFrame,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let surface_border_state =
+            self.project_editor_surface_border_state(TitlebarMode::Agents, window);
+        let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
+        let slot = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .w_full()
+            .min_w_0()
+            .min_h_0()
+            .overflow_hidden()
+            .opacity(frame.closing_content_opacity());
+        let slot = rail_aware_pane_border(
+            slot,
+            RailFacingEdges {
+                left: true,
+                ..outer_rail_edges
+            },
+            workspace_pane_border_color_for_state(surface_border_state),
+            workspace_pane_border_color(),
+            None,
+        )
+        .child(self.render_view_picker(cx))
+        .window_corner_pane();
+        let panel = h_flex()
+            .size_full()
+            .items_stretch()
+            .bg(glass_clear(project_editor_shell_background_color()))
+            .child(
+                div()
+                    .flex_none()
+                    .h_full()
+                    .w(px(WORKSPACE_SPLIT_HANDLE_THICKNESS))
+                    .bg(project_editor_companion_divider_background_color()),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .h_full()
+                    .pt(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
+                    .child(slot),
+            );
+        crate::app::panel_motion::clip_panel_horizontally(frame, true, panel.into_any_element())
+            .into_any_element()
+    }
+
     /// CDXC:Workarea 2026-09-20 WHY:
     /// Expanded, the view panel is the workarea: no sessions column, no rail, nothing left behind,
     /// which is the whole point of screen 09. The Agents workspace is not rendered here and
@@ -224,17 +283,18 @@ impl GhostexGpuiApp {
     /// and restoring the column brings every one of them back exactly as a view switch does.
     fn render_maximized_view_panel(
         &mut self,
-        mode: TitlebarMode,
+        mode: Option<TitlebarMode>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let mode_slug = mode.element_slug();
-        let surface_border_state = self.project_editor_surface_border_state(mode, window);
+        let strip_mode = mode.unwrap_or(TitlebarMode::Agents);
+        let mode_slug = strip_mode.element_slug();
+        let surface_border_state = self.project_editor_surface_border_state(strip_mode, window);
         let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
         let surface_view = cx.entity().clone();
         // CDXC:Workarea 2026-09-23 DECISION:
         // User: with the chat hidden, every view except Browser gets a #252525 1px line above the side panel content. It replaces the pane's own top border so the edge is one line, not two.
-        let draws_top_line = mode != TitlebarMode::Browser;
+        let draws_top_line = strip_mode != TitlebarMode::Browser;
         v_flex()
             .id(format!("ghostex-gpui-workarea-maximized-{}", mode_slug))
             .pt(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
@@ -259,6 +319,9 @@ impl GhostexGpuiApp {
             .child(
                 div()
                     .on_children_prepainted(move |child_bounds, _window, cx| {
+                        let Some(mode) = mode else {
+                            return;
+                        };
                         let _ = surface_view.update(cx, |this, _cx| {
                             this.record_project_editor_surface_layout_bounds(mode, &child_bounds);
                         });
@@ -287,7 +350,10 @@ impl GhostexGpuiApp {
                             None,
                         )
                     })
-                    .child(self.render_project_editor_surface(mode, window, cx))
+                    .child(match mode {
+                        Some(mode) => self.render_project_editor_surface(mode, window, cx),
+                        None => self.render_view_picker(cx),
+                    })
                     .window_corner_pane(),
             )
             .into_any_element()

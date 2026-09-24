@@ -58,7 +58,8 @@ impl GhostexGpuiApp {
                 self.last_open_view_mode = Some(view);
                 self.view_panel_picker_open = false;
             }
-            None => self.view_panel_maximized = false,
+            None if !self.view_panel_picker_open => self.view_panel_maximized = false,
+            None => {}
         }
         self.apply_view_pane_state(cx);
     }

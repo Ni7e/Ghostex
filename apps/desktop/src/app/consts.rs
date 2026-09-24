@@ -766,7 +766,7 @@ pub(crate) const FIND_BAR_CLOSE_BUTTON_WIDTH: f32 = 41.0;
 pub(crate) const BROWSER_TOOLBAR_HEIGHT: f32 = 35.0;
 
 /// CDXC:Browser 2026-09-21 DECISION:
-/// User: the address bar's buttons match the look of the view tab strip's buttons above them and line up with them. They use the strip's panel-toggle metrics (`TITLEBAR_CONTROL_HEIGHT` tall, `TITLEBAR_BUTTON_HORIZONTAL_PADDING` either side of an 18px icon, `TITLEBAR_BUTTON_RADIUS` corners, a 2px gap), start at the strip's 6px leading inset and end at `WORKAREA_HEADER_EDGE_PADDING`. The Docs header mirrors the same numbers in `apps/desktop/views/manage/styles.ts`.
+/// User: the address bar's buttons match the look of the view tab strip's buttons above them and line up with them. They use the strip's panel-toggle metrics (`TITLEBAR_CONTROL_HEIGHT` tall, `TITLEBAR_BUTTON_HORIZONTAL_PADDING` either side of an 18px icon, `TITLEBAR_BUTTON_RADIUS` corners, a 2px gap), start at the strip's 6px leading inset and end where the strip's panel toggles end (`WORKAREA_HEADER_EDGE_PADDING` plus `WORKAREA_HEADER_PINNED_GAP`, 2026-09-24). The Docs header mirrors the same numbers in `apps/desktop/views/manage/styles.ts`.
 pub(crate) const BROWSER_TOOLBAR_BUTTON_ICON_SIZE: f32 = TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE;
 
 pub(crate) const BROWSER_TOOLBAR_BUTTON_WIDTH: f32 =

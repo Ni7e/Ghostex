@@ -153,7 +153,14 @@ impl GhostexGpuiApp {
                 strip.child(self.render_view_tab_strip_pop_out_button(active_mode, cx))
             })
             .child(self.render_view_tab_strip_expand_button(cx))
-            .child(self.render_workarea_panel_toggles(cx))
+            // Where the collapsed header puts them (WORKAREA_HEADER_PINNED_GAP).
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .mt(px(WORKAREA_HEADER_HEIGHT - WORKAREA_VIEW_TAB_STRIP_HEIGHT))
+                    .mr(px(WORKAREA_HEADER_PINNED_GAP))
+                    .child(self.render_workarea_panel_toggles(cx)),
+            )
             .into_any_element()
     }
 
@@ -561,9 +568,8 @@ impl GhostexGpuiApp {
     ) -> impl IntoElement {
         let maximized = self.view_panel_maximized();
         let fully = self.view_panel_fully_expanded();
-        // With the picker on screen there is no view to give the window to, so the control says so
-        // rather than looking live and doing nothing.
-        let enabled = self.open_view_mode().is_some();
+        // The picker can be expanded like a view (see `view_panel_maximized`).
+        let enabled = self.view_panel_open();
         let cell = |id: &'static str, icon: &'static str, active: bool| {
             div()
                 .id(id)
