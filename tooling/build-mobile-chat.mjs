@@ -149,14 +149,6 @@ const result = await esbuild.build({
   write: false,
 });
 
-if (
-  Object.keys(result.metafile.inputs).some((input) =>
-    /session-chat-model-picker(?:-effort-icons|-icons|-input)?\.(?:tsx?|css)$/.test(input)
-  )
-) {
-  throw new Error('The mobile chat bundle must not load the quick model picker or its assets.');
-}
-
 let js = '';
 let css = '';
 for (const file of result.outputFiles) {

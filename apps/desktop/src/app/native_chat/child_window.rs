@@ -16,7 +16,6 @@ impl NativeChatView {
                 .handle
                 .map(|handle| handle.window_id()),
             self.maximized_window.map(|handle| handle.window_id()),
-            self.model_picker_window.window_id(),
         ];
         if let Some(menu_source) = self.active_option_menu_source(cx)
             && (menu_source == source || children.contains(&Some(menu_source)))
@@ -28,12 +27,35 @@ impl NativeChatView {
             .then_some(source)
     }
 
-    /// CDXC:SessionChat 2026-09-19 DECISION:
-    /// User: an open image preview or quick picker is dismissed when the user switches to another session. Both are native child windows that would otherwise stay on screen over the session shown next.
+    /// CDXC:SessionChat 2026-09-24 DECISION:
+    /// User: nothing the chat pops up may stay on screen once the user switches to another session, and a modal the session still owns (the image preview, the rewind confirmation and its "could not be rewound" message, Save as Markdown, the context editor, the maximized composer) comes back when the user returns to that session, sized to the pane it is in by then. Menus, the `@` list and the floating pills are dismissed for good instead, because reopening a dropdown nobody asked for would be its own surprise. This supersedes the 2026-09-19 decision, which took the image preview and the model picker down without bringing them back.
     pub(crate) fn dismiss_windows_for_hidden_pane(&mut self, cx: &mut Context<Self>) {
-        self.close_image_viewer(cx);
-        self.dismiss_model_picker_for_hidden_pane(cx);
+        if self.pane_hidden {
+            return;
+        }
+        self.pane_hidden = true;
+        self.close_own_menu(cx);
+        self.pending_model_menu = None;
         self.hide_frosted_overlays(cx);
+        self.sync_pane_modal_windows(cx);
+    }
+
+    /// Reopens the modals the session still owns, on the pane's current frame.
+    pub(crate) fn restore_windows_for_shown_pane(&mut self, cx: &mut Context<Self>) {
+        if !self.pane_hidden {
+            return;
+        }
+        self.pane_hidden = false;
+        self.sync_pane_modal_windows(cx);
+    }
+
+    fn sync_pane_modal_windows(&mut self, cx: &mut Context<Self>) {
+        self.sync_image_viewer_window(cx);
+        self.sync_rewind_window(cx);
+        self.sync_save_markdown_window(cx);
+        self.sync_context_editor_window(cx);
+        self.sync_maximized_window(cx);
+        self.sync_suggestion_window(cx);
     }
 
     pub(super) fn pane_windows_open(&self) -> bool {
@@ -42,6 +64,35 @@ impl NativeChatView {
             || self.rewind_window.handle.is_some()
             || self.context_editor_window.handle.is_some()
             || self.maximized_window.is_some()
+    }
+
+    /// CDXC:SessionChat 2026-09-24 DECISION:
+    /// User: a modal that is still open when the pane is resized or moved to another pane is resized with it. An anchored menu cannot follow that way (its trigger moved under it), so it closes instead, which is what the 2026-09-17 model-picker rule did for the picker the model pop-up replaced.
+    pub(super) fn pane_frame_changed(&mut self, cx: &mut Context<Self>) {
+        // A menu whose first panel is still opening was asked for by this very frame.
+        if self
+            .option_menu
+            .as_ref()
+            .is_some_and(|menu| !menu.read(cx).is_opening())
+        {
+            self.close_own_menu(cx);
+        }
+        self.follow_pane_windows(cx);
+    }
+
+    /// Closes the open menu, unless it is anchored to another surface and this view is only hosting it.
+    fn close_own_menu(&mut self, cx: &mut Context<Self>) {
+        if self
+            .option_menu
+            .as_ref()
+            .is_some_and(|menu| menu.read(cx).is_outside_pane())
+        {
+            return;
+        }
+        if let Some(menu) = self.option_menu.take() {
+            menu.update(cx, |menu, cx| menu.close_with_focus(None, false, cx));
+            cx.notify();
+        }
     }
 
     /// Keep every pane-covering child window on the pane after the pane was resized or moved;

@@ -15,8 +15,10 @@ fn pill(
     open: bool,
     appearance: &ChatAppearance,
     cx: &mut Context<NativeChatView>,
+    // The model pill's frame is also kept on the view, where Option+P opens the pop-up against it.
+    store: Option<Rc<Cell<gpui::Bounds<gpui::Pixels>>>>,
 ) -> AnyElement {
-    let bounds = Rc::new(Cell::new(gpui::Bounds::default()));
+    let bounds = store.unwrap_or_else(|| Rc::new(Cell::new(gpui::Bounds::default())));
     let measured = bounds.clone();
     let scale = appearance.scale;
     let loading = label.is_empty();
@@ -36,7 +38,7 @@ fn pill(
     let tooltip = if !loading && kind != "mode" {
         let shortcut = crate::app::hotkeys::gpui_configured_hotkey_label("openModelPicker");
         if kind == "model" {
-            match shortcut.filter(|_| values["modelQuickPicker"] == true) {
+            match shortcut.filter(|_| merged_menu(values)) {
                 Some(shortcut) => format!("Model ({shortcut})"),
                 None => "Model".to_owned(),
             }
@@ -341,7 +343,15 @@ impl NativeChatView {
             .text_size(px(13.0 * appearance.scale))
             .text_color(appearance.primary)
             .when(values["showModel"] == true, |item| {
-                item.child(pill("model", model, values, open("model"), appearance, cx))
+                item.child(pill(
+                    "model",
+                    model,
+                    values,
+                    open("model"),
+                    appearance,
+                    cx,
+                    Some(self.model_pill_bounds.clone()),
+                ))
             })
             .when(
                 values["showOptions"] == true
@@ -355,6 +365,7 @@ impl NativeChatView {
                         open("options"),
                         appearance,
                         cx,
+                        None,
                     ))
                 },
             )
@@ -370,6 +381,7 @@ impl NativeChatView {
                         open("mode"),
                         appearance,
                         cx,
+                        None,
                     ))
                 },
             )
@@ -380,4 +392,9 @@ impl NativeChatView {
             )
             .into_any_element()
     }
+}
+
+/// Whether the model pill opens the model pop-up, which Option+P opens too.
+fn merged_menu(values: &Value) -> bool {
+    values["modelMenu"].is_object()
 }

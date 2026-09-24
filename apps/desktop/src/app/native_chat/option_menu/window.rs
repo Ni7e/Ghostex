@@ -59,6 +59,13 @@ pub(in crate::app::native_chat) struct ChatOptionMenu {
     compact: bool,
     /// How many times this menu has taken key status back (`retake_key`).
     rekeys: u32,
+    /// True for a menu anchored to another surface than the chat's own pane, which today is the
+    /// model pop-up over a terminal session's model pill: the chat view behind it is only its host,
+    /// so the pane going off screen must not take it down.
+    outside_pane: bool,
+    /// The model pop-up's reasoning levels Left and Right (or the Reasoning list) moved to this visit, by row key.
+    /// Kept on the menu so the Reasoning side list, a panel of its own, can set them too.
+    pub(super) model_efforts: std::collections::HashMap<String, String>,
 }
 
 pub(super) struct ChatOptionMenuPanel {
@@ -91,6 +98,15 @@ impl ChatOptionMenu {
         }
     }
 
+    /// True until the menu's first panel is on screen.
+    pub(in crate::app::native_chat) fn is_opening(&self) -> bool {
+        self.opening
+    }
+
+    pub(in crate::app::native_chat) fn is_outside_pane(&self) -> bool {
+        self.outside_pane
+    }
+
     pub(in crate::app::native_chat) fn close(
         &mut self,
         command: Option<Value>,
@@ -99,7 +115,7 @@ impl ChatOptionMenu {
         self.close_with_focus(command, true, cx);
     }
 
-    fn close_with_focus(
+    pub(in crate::app::native_chat) fn close_with_focus(
         &mut self,
         command: Option<Value>,
         restore_focus: bool,
@@ -626,6 +642,7 @@ impl NativeChatView {
         let source = window.window_handle();
         let source_focus = window.focused(cx);
         let parent = self.config.parent_native_view;
+        let outside_pane = std::mem::take(&mut self.menu_outside_pane);
         let menu = cx.new(|_| ChatOptionMenu {
             chat,
             source,
@@ -639,6 +656,8 @@ impl NativeChatView {
             parent,
             compact: below,
             rekeys: 0,
+            outside_pane,
+            model_efforts: Default::default(),
         });
         let anchor = Bounds::new(source_bounds.origin + trigger.origin, trigger.size);
         menu.update(cx, |menu, cx| {

@@ -225,7 +225,7 @@ export const storageCatalog = Object.freeze({
   modelOutbox: define(
     'modelOutbox',
     'Pending model selections',
-    chat + 'session-chat-model-picker-launcher.tsx',
+    chat + 'session-chat-model-selection-outbox.tsx',
     'ghostex.model-selection-outbox.',
     objectCodec,
     protectedDisk
@@ -474,14 +474,6 @@ export const storageCatalog = Object.freeze({
     'ghostex.promptAgent.renameSession',
     textCodec
   ),
-  terminalModel: define(
-    'terminalModel',
-    'Terminal model selection',
-    desktop + 'views/model-picker-host.tsx',
-    'ghostex.terminal-model-picker.',
-    objectCodec,
-    cache
-  ),
   openTarget: define(
     'openTarget',
     'Open in target',
@@ -586,65 +578,6 @@ export const storageCatalog = Object.freeze({
     'agentation-',
     textCodec,
     { ...collection, external: true, maxEntries: 500, maxEntryBytes: 64 * KiB, maxBytes: 256 * KiB }
-  ),
-  webSettings: define(
-    'webSettings',
-    'Web settings',
-    'apps/web/src/app/web-settings.ts',
-    'ghostexWeb.settings.v1',
-    objectCodec,
-    { maxEntryBytes: 256 * KiB, maxBytes: 256 * KiB }
-  ),
-  webSidebarWidth: define(
-    'webSidebarWidth',
-    'Web sidebar width',
-    'apps/web/src/routes/__root.tsx',
-    'ghostexWeb.sidebarWidth.v1',
-    textCodec
-  ),
-  webSidebarCollapsed: define(
-    'webSidebarCollapsed',
-    'Web sidebar disclosure',
-    'apps/web/src/routes/__root.tsx',
-    'ghostexWeb.sidebarCollapsed.v1',
-    boolean
-  ),
-  webWorkspace: define(
-    'webWorkspace',
-    'Web workspace',
-    'apps/web/src/workspace/workspace-storage.ts',
-    'ghostexWeb.workspace.v1',
-    objectCodec,
-    { maxEntryBytes: 256 * KiB, maxBytes: 256 * KiB }
-  ),
-  webMachines: define(
-    'webMachines',
-    'Web machine connections',
-    'apps/web/src/machines/machine-catalog.ts',
-    'ghostexWeb.machines.v1',
-    arrayCodec,
-    { policy: 'protected' }
-  ),
-  webCommandHeight: define(
-    'webCommandHeight',
-    'Web command pane height',
-    'apps/web/src/app/command-pane.tsx',
-    'ghostexWeb.commandPaneHeight.v1',
-    textCodec
-  ),
-  webDebugConnections: define(
-    'webDebugConnections',
-    'Web connection debugging',
-    'apps/web/src/connections/gxserver-connection.ts',
-    'ghostexWeb.debugConnections',
-    binary
-  ),
-  webDebugSidebar: define(
-    'webDebugSidebar',
-    'Web sidebar debugging',
-    'apps/web/src/sidebar-runtime/sidebar-runtime.ts',
-    'ghostexWeb.debugSidebar',
-    binary
   ),
 } as const);
 

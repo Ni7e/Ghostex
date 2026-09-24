@@ -24,7 +24,8 @@ import {
 } from './model-selection';
 import type { SessionChatOptionPersistence } from './option-state';
 import type { AgentAccountsState } from '../agent-accounts';
-import type { ModelMenuContext } from './model-menu';
+import { modelMenuAccounts, type ModelMenuContext } from './model-menu';
+import { nativeContextText } from './native-context';
 
 export interface NativeOptionSeed {
   sessionKey: string;
@@ -124,7 +125,8 @@ export function computeNativeChatOptions(
     }).filter((descriptor) => !isShiftTabModeCycler(descriptor))
   );
   const draftAgent = chat.availableAgents?.find((agent) => agent.agentId === chat.sessionAgentId);
-  const queuedControls = sessionOptions.catalog?.modelIcon === 'codex' || sessionOptions.catalog?.modelIcon === 'claude';
+  const queuedControls =
+    sessionOptions.catalog?.modelIcon === 'codex' || sessionOptions.catalog?.modelIcon === 'claude';
   // Agents outside the model catalog keep their own model and options pills; the picker needs a provider's lineup.
   const modelMenuContext: ModelMenuContext | null =
     provider && sessionOptions.catalog
@@ -142,6 +144,8 @@ export function computeNativeChatOptions(
           caps: { canPickModel: canQueue, queuedControls, canSendKey: !!chat.sendKey },
           selectionError: modelSelection.selectionError,
           disabled: !canQueue,
+          accounts: modelMenuAccounts(accounts, nativeContextText),
+          draft: !!chat.availableAgents,
         }
       : null;
   return {
@@ -155,7 +159,6 @@ export function computeNativeChatOptions(
       accountIndicator: sessionChatAccountIndicator(accounts),
       optionsTitle: sessionChatOptionsTitle(sections, values.fast, values.plan),
       optionsTooltip: sessionChatOptionsTitle(sections, values.fast, values.plan, provider ? ' ({shortcut})' : ''),
-      modelQuickPicker: !!provider,
       ...(!sessionOptions.catalog && draftAgent
         ? { model: draftAgent.name, modelDisplay: draftAgent.name, agentIcon: draftAgent.icon }
         : {}),

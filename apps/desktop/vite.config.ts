@@ -26,7 +26,6 @@ const cefHtmlEntries = [
   'kanban.html',
   'manage.html',
   'modal-host.html',
-  'model-picker.html',
   'titlebar-host.html',
 ] as const;
 /*
@@ -38,7 +37,6 @@ const cefHtmlEntryScripts = {
   'kanban.html': path.resolve(gpuiRoot, 'sidebar/kanban-main.tsx'),
   'manage.html': path.resolve(gpuiRoot, 'sidebar/manage-main.tsx'),
   'modal-host.html': path.resolve(gpuiRoot, 'views/modal-host.tsx'),
-  'model-picker.html': path.resolve(gpuiRoot, 'views/model-picker-host.tsx'),
   'titlebar-host.html': path.resolve(gpuiRoot, 'views/titlebar-host.tsx'),
 } satisfies Record<(typeof cefHtmlEntries)[number], string>;
 
@@ -434,7 +432,6 @@ export default defineConfig({
         kanban: path.resolve(gpuiRoot, 'kanban.html'),
         manage: path.resolve(gpuiRoot, 'manage.html'),
         modalHost: path.resolve(gpuiRoot, 'modal-host.html'),
-        modelPicker: path.resolve(gpuiRoot, 'model-picker.html'),
         titlebarHost: path.resolve(gpuiRoot, 'titlebar-host.html'),
       },
     },

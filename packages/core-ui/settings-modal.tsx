@@ -2140,8 +2140,8 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.terminal, 'showQuickModelPickerInTerminal') ? (
                               <ToggleField
                                 checked={draft.showQuickModelPickerInTerminal}
-                                label='Show quick model & effort picker for Claude and Codex in terminal view'
-                                description='Use the model picker shortcut in terminal view. Turn off to let the terminal handle that shortcut.'
+                                label='Model picker in terminal view'
+                                description='Show a model button in the terminal bar and open the model picker with its shortcut. Turn off to let the terminal handle that shortcut.'
                                 {...getSettingModificationProps('showQuickModelPickerInTerminal')}
                                 onChange={(checked) => updateDraft('showQuickModelPickerInTerminal', checked)}
                               />
@@ -2942,6 +2942,7 @@ export function SettingsModal({
                         'expandCollapsedProjectsOnJump'
                       )}
                       hotkeys={draft.hotkeys}
+                      preferredAgentInterface={draft.preferredAgentInterface}
                       sectionRefs={hotkeySectionRefs}
                       sectionSearches={hotkeySectionSearches}
                       showLessForExpandedProjectJumps={draft.showLessForExpandedProjectJumps}

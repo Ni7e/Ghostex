@@ -128,16 +128,12 @@ impl GhostexGpuiApp {
                                 {
                                     return;
                                 }
-                                if message["action"] == "modelPicker" {
-                                    this.open_session_chat_model_picker(session_id, cx);
-                                } else {
-                                    this.receive_session_chat_host_action(
-                                        session_id,
-                                        &message.to_string(),
-                                        window,
-                                        cx,
-                                    );
-                                }
+                                this.receive_session_chat_host_action(
+                                    session_id,
+                                    &message.to_string(),
+                                    window,
+                                    cx,
+                                );
                             });
                         })
                         .detach();

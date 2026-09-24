@@ -1,13 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { userEvent, within } from 'storybook/test';
 import { ManageRenameDialog } from '@/apps/desktop/views/manage/file-tree-ui';
 import { MANAGE_STYLES } from '@/apps/desktop/views/manage/styles';
 import { PROJECT_BOARD_STYLES } from '@/apps/desktop/views/project-board/styles';
 import { RemoteMigrateGateNotice } from '@/apps/desktop/views/project-board/remote-migrate-gate';
-import { FindPromptsHost } from '@/apps/web/src/app/find-prompts-host';
-import { MachinesControl } from '@/apps/web/src/machines/MachinesControl';
-import '@/apps/web/src/styles.css';
 import { SessionChatImageViewerProvider, useSessionChatImageViewer } from '../chat/session-chat-image-viewer';
 import { SessionChatSaveMarkdownDialog } from '../chat/session-chat-save-markdown-dialog';
 import { ModalStorySurface, modalStoryParameters } from './modal-story-surface';
@@ -16,7 +12,7 @@ const noop = () => undefined;
 
 const meta = {
   parameters: modalStoryParameters,
-  title: 'Modals/Embedded and Web',
+  title: 'Modals/Embedded',
 } satisfies Meta;
 
 export default meta;
@@ -100,25 +96,6 @@ export const ChatImageViewer: Story = {
       <SessionChatImageViewerProvider>
         <OpenImageViewer />
       </SessionChatImageViewerProvider>
-    </ModalStorySurface>
-  ),
-};
-
-export const WebMachines: Story = {
-  render: () => (
-    <div className='agents-workspace min-h-screen p-6'>
-      <MachinesControl />
-    </div>
-  ),
-  play: async ({ canvasElement }) => {
-    await userEvent.click(await within(canvasElement).findByRole('button', { name: 'Machines' }));
-  },
-};
-
-export const WebPromptSearch: Story = {
-  render: () => (
-    <ModalStorySurface>
-      <FindPromptsHost machineId='local' onClose={noop} />
     </ModalStorySurface>
   ),
 };

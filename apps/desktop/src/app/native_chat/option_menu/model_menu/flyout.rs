@@ -43,7 +43,8 @@ impl ChatOptionMenuPanel {
         let Some(state) = self.model_menu.as_ref() else {
             return;
         };
-        let Some(setting) = state.traits().get(index) else {
+        let traits = state.display_traits(&self.menu.read(cx).model_efforts);
+        let Some(setting) = traits.get(index) else {
             return;
         };
         if setting["disabled"] == true || state.view["disabled"] == true {
@@ -75,10 +76,11 @@ impl ChatOptionMenuPanel {
             cx.notify();
             return;
         }
+        let efforts = self.menu.read(cx).model_efforts.clone();
         let Some(state) = self.model_menu.as_mut() else {
             return;
         };
-        let Some(setting) = state.traits().get(index).cloned() else {
+        let Some(setting) = state.display_traits(&efforts).get(index).cloned() else {
             return;
         };
         if setting["disabled"] == true
@@ -126,6 +128,27 @@ impl ChatOptionMenuPanel {
         let Some(choice) = setting["choices"].get(index) else {
             return;
         };
+        let depth = self.depth;
+        // The Reasoning list follows the highlighted model; for any model but the one in use it only
+        // sets the level that model's pick will carry.
+        if let (Some(row), Some(value)) = (setting["browse"].as_str(), choice["value"].as_str()) {
+            let (row, value) = (row.to_owned(), value.to_owned());
+            let current = setting["browseCurrent"] == true;
+            self.menu.update(cx, |menu, cx| {
+                menu.model_efforts.insert(row, value);
+                if !current {
+                    menu.truncate(depth, true, cx);
+                    if let Some(handle) = menu.windows.get(depth.saturating_sub(1)).copied() {
+                        cx.defer(move |cx| {
+                            let _ = handle.update(cx, |_, window, _| window.refresh());
+                        });
+                    }
+                }
+            });
+            if !current {
+                return;
+            }
+        }
         let command = json!({
             "type": "modelMenuTrait",
             "id": setting["id"],
@@ -133,7 +156,6 @@ impl ChatOptionMenuPanel {
             "exitPlan": choice["exitPlan"],
             "secondary": secondary,
         });
-        let depth = self.depth;
         self.menu.update(cx, |menu, cx| {
             menu.dispatch(command, cx);
             menu.truncate(depth, true, cx);

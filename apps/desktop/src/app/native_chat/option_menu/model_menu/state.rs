@@ -1,7 +1,8 @@
 use super::super::super::state::NativeChatView;
 use super::super::window::{ChatOptionMenu, ChatOptionMenuPanel};
 use super::style::{
-    BAR_HEIGHT, BUTTON_GAP, CARD_WIDTH, ERROR_HEIGHT, LIST_HEIGHT, TRAIT_ROW_HEIGHT, button_lines,
+    BAR_HEIGHT, BUTTON_GAP, CARD_WIDTH, ERROR_HEIGHT, HINTS_HEIGHT, LIST_HEIGHT, TRAIT_ROW_HEIGHT,
+    button_lines,
 };
 use gpui::{
     AppContext as _, Bounds, Context, Entity, Pixels, ScrollStrategy, Subscription,
@@ -9,6 +10,7 @@ use gpui::{
 };
 use gpui_component::input::{InputEvent, InputState};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 
 /// CDXC:SessionChat 2026-09-21 SEE-ALSO:
 /// What the picker shows (tabs, row order, search ranking, favorites, the footer rows and the pill's label) is decided in packages/shared/session-chat-presentation/model-menu.ts and projected by packages/shared/session-chat-controller/model-menu.ts as the snapshot's `modelMenu`; native-host.ts answers `modelMenuView`, `modelMenuPick`, `modelMenuTrait` and `modelMenuFavorite`. The React twin is packages/core-ui/chat/session-chat-model-menu.tsx. This side owns only the cursor, the open side list and the search field.
@@ -20,6 +22,10 @@ pub(in crate::app::native_chat::option_menu) struct ModelMenuState {
     pub(super) active: usize,
     pub(super) flyout: Option<usize>,
     pub(super) scroll: UniformListScrollHandle,
+    /// The model row the cursor last rested on, which the Reasoning button follows while the cursor is on the footer.
+    pub(super) last_row: Option<String>,
+    /// When Left or Right last hit an end, which plays the Reasoning button's shake.
+    pub(super) shake_at: Option<std::time::Instant>,
     _input: Subscription,
 }
 
@@ -60,7 +66,7 @@ pub(in crate::app::native_chat::option_menu) fn menu_height(marker: &Value) -> f
     } else {
         0.0
     };
-    2.0 + BAR_HEIGHT * 2.0 + error + LIST_HEIGHT + tray - 14.0
+    2.0 + BAR_HEIGHT * 2.0 + error + LIST_HEIGHT + tray + HINTS_HEIGHT - 14.0
 }
 
 impl ModelMenuState {
@@ -111,6 +117,8 @@ impl ModelMenuState {
             view,
             flyout: None,
             scroll: UniformListScrollHandle::new(),
+            last_row: None,
+            shake_at: None,
             _input: subscription,
         })
     }
@@ -121,6 +129,105 @@ impl ModelMenuState {
 
     pub(super) fn traits(&self) -> &[Value] {
         self.view["traits"].as_array().map_or(&[], Vec::as_slice)
+    }
+
+    /// The row the Reasoning button follows: the highlighted model, else the one the cursor last
+    /// rested on, else the model in use.
+    pub(super) fn browsed_row(&self) -> Option<&Value> {
+        let rows = self.rows();
+        rows.get(self.active)
+            .or_else(|| {
+                let key = self.last_row.as_deref()?;
+                rows.iter().find(|row| row["key"].as_str() == Some(key))
+            })
+            .or_else(|| rows.iter().find(|row| row["selected"] == true))
+    }
+
+    /// The level a pick of `row` carries: where Left and Right left it, else the row's own.
+    pub(super) fn effort_for(&self, row: &Value, efforts: &HashMap<String, String>) -> String {
+        row["key"]
+            .as_str()
+            .and_then(|key| efforts.get(key))
+            .cloned()
+            .or_else(|| row["effort"].as_str().map(str::to_owned))
+            .unwrap_or_default()
+    }
+
+    /// The footer buttons as drawn: the Reasoning button follows the browsed row.
+    pub(super) fn display_traits(&self, efforts: &HashMap<String, String>) -> Vec<Value> {
+        let row = self.browsed_row();
+        let effort = row.map(|row| self.effort_for(row, efforts));
+        self.traits()
+            .iter()
+            .map(|setting| reasoning_for(setting, row, effort.as_deref()))
+            .collect()
+    }
+}
+
+/// CDXC:SessionChat 2026-09-24 SEE-ALSO: `modelMenuReasoningFor` in packages/shared/session-chat-presentation/model-menu.ts, which React applies to the same button; keep the two in step.
+/// The Reasoning button for the highlighted model: its levels, with the one Left and Right moved to
+/// marked. `browse` names the row, and `browseCurrent` says whether it is the model in use, whose
+/// level a choice applies at once as it always did.
+fn reasoning_for(setting: &Value, row: Option<&Value>, effort: Option<&str>) -> Value {
+    let (Some(row), Some(effort)) = (row, effort) else {
+        return setting.clone();
+    };
+    let Some(efforts) = row["efforts"]
+        .as_array()
+        .filter(|efforts| !efforts.is_empty())
+    else {
+        return setting.clone();
+    };
+    let selected = row["selected"] == true;
+    if setting["id"] != "effort"
+        || (selected
+            && setting["choices"].as_array().is_some_and(|choices| {
+                choices
+                    .iter()
+                    .any(|choice| choice["selected"] == true && choice["value"] == effort)
+            }))
+    {
+        return setting.clone();
+    }
+    let mut setting = setting.clone();
+    setting["disabled"] = false.into();
+    if let Some(label) = efforts
+        .iter()
+        .find(|entry| entry["value"] == effort)
+        .and_then(|entry| entry["label"].as_str())
+    {
+        setting["valueLabel"] = label.into();
+    }
+    setting["choices"] = efforts
+        .iter()
+        .map(|entry| {
+            json!({
+                "value": entry["value"],
+                "label": entry["label"],
+                "selected": entry["value"] == effort,
+                "isDefault": false,
+            })
+        })
+        .collect();
+    if let Some(object) = setting.as_object_mut() {
+        object.remove("toggle");
+    }
+    setting["browse"] = row["key"].clone();
+    setting["browseCurrent"] = selected.into();
+    setting
+}
+
+/// CDXC:SessionChat 2026-09-24 SEE-ALSO: `modelMenuStepEffort` in packages/shared/session-chat-presentation/model-menu.ts.
+/// The level Left or Right moves `row` to from `current`, or `None` at an end or on a model without levels.
+pub(super) fn step_effort(row: &Value, current: &str, forward: bool) -> Option<String> {
+    let efforts = row["efforts"]
+        .as_array()
+        .filter(|efforts| !efforts.is_empty())?;
+    let value = |index: usize| efforts.get(index)?["value"].as_str().map(str::to_owned);
+    match efforts.iter().position(|entry| entry["value"] == current) {
+        None => value(if forward { 0 } else { efforts.len() - 1 }),
+        Some(index) if forward => value(index + 1),
+        Some(index) => index.checked_sub(1).and_then(value),
     }
 }
 
@@ -172,10 +279,13 @@ impl ChatOptionMenuPanel {
         cx.notify();
     }
 
+    /// Picks row `index`. `effort` is the level the pick carries (the keyboard's, or one browsed
+    /// from the Reasoning list); `None` leaves the model's level as a plain click always did.
     pub(super) fn model_menu_pick(
         &mut self,
         index: usize,
         secondary: bool,
+        effort: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let Some(state) = self.model_menu.as_ref() else {
@@ -187,14 +297,84 @@ impl ChatOptionMenuPanel {
         let Some(key) = state.rows().get(index).map(|row| row["key"].clone()) else {
             return;
         };
-        self.model_menu_send(
-            json!({"type":"modelMenuPick","key":key,"secondary":secondary}),
-            cx,
-        );
+        let mut command = json!({"type":"modelMenuPick","key":key,"secondary":secondary});
+        if let Some(effort) = effort {
+            command["effort"] = effort.into();
+        }
+        self.model_menu_send(command, cx);
+    }
+
+    /// The pick the keyboard makes: the row with the level Left and Right left it on.
+    pub(super) fn model_menu_pick_with_effort(
+        &mut self,
+        index: usize,
+        secondary: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let effort = self.model_menu.as_ref().and_then(|state| {
+            let row = state.rows().get(index)?;
+            row["efforts"]
+                .as_array()
+                .is_some_and(|efforts| !efforts.is_empty())
+                .then(|| state.effort_for(row, &self.menu.read(cx).model_efforts))
+        });
+        self.model_menu_pick(index, secondary, effort, cx);
+    }
+
+    /// The level a mouse pick of row `index` carries: only one the keyboard or the Reasoning list moved.
+    pub(super) fn model_menu_browsed_effort(&self, index: usize, cx: &gpui::App) -> Option<String> {
+        let state = self.model_menu.as_ref()?;
+        let key = state.rows().get(index)?["key"].as_str()?;
+        self.menu.read(cx).model_efforts.get(key).cloned()
     }
 }
 
 impl NativeChatView {
+    /// Opens the model pop-up from Option+P or a terminal's model pill, or closes it when it is up.
+    /// `trigger` is the terminal pill's frame in `window`; `None` anchors to the composer's model pill.
+    /// A view that has no snapshot yet (created for this press) opens it as soon as one arrives.
+    /// The next menu this view opens belongs to another surface; see `ChatOptionMenu::is_outside_pane`.
+    pub(crate) fn mark_menu_outside_pane(&mut self) {
+        self.menu_outside_pane = true;
+    }
+
+    pub(crate) fn toggle_model_menu(
+        &mut self,
+        trigger: Option<Bounds<Pixels>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let trigger = trigger.unwrap_or_else(|| self.model_pill_bounds.get());
+        if !self.snapshot["modelMenu"].is_object() {
+            self.pending_model_menu = Some((trigger, window.window_handle()));
+            return;
+        }
+        self.pending_model_menu = None;
+        self.show_model_menu(trigger, window, cx);
+    }
+
+    /// Opens a pop-up asked for before the first snapshot, once the snapshot carries the picker.
+    pub(in crate::app::native_chat) fn open_pending_model_menu(&mut self, cx: &mut Context<Self>) {
+        // A pop-up the terminal view asked for is hosted by this hidden view on purpose; only the
+        // pane's own pending pop-up is dropped when the pane goes off screen.
+        if self.pane_hidden && !self.menu_outside_pane {
+            self.pending_model_menu = None;
+            return;
+        }
+        if !self.snapshot["modelMenu"].is_object() {
+            return;
+        }
+        let Some((trigger, handle)) = self.pending_model_menu.take() else {
+            return;
+        };
+        let chat = cx.entity();
+        cx.defer(move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                chat.update(cx, |chat, cx| chat.show_model_menu(trigger, window, cx));
+            });
+        });
+    }
+
     pub(in crate::app::native_chat) fn show_model_menu(
         &mut self,
         trigger: Bounds<Pixels>,

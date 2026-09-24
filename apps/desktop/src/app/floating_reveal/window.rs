@@ -271,7 +271,8 @@ impl GhostexGpuiApp {
     /// User: the quick model picker goes away instantly when the floating panel is no longer
     /// hovered and is going away. The picker (and an image preview) is a window of its own over
     /// the chat's pane, so it used to stay up for the whole slide and only closed once the panel
-    /// was gone. The hosts call this the moment the panel starts to leave.
+    /// was gone. The hosts call this the moment the panel starts to leave. Since 2026-09-24 that
+    /// picker is the composer's model pop-up (session_chat_model_picker.rs), which closes the same way.
     pub(super) fn dismiss_floating_reveal_chat_windows(&mut self, cx: &mut gpui::Context<Self>) {
         if !self
             .floating_reveal

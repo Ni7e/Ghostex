@@ -10,7 +10,6 @@ pub(crate) enum GpuiAppModalKind {
     AddProject,
     AgentHooksRequired,
     Settings,
-    ModelPicker,
     Hotkeys,
     MissingProjectFolder,
     CommandPalette,
@@ -56,7 +55,6 @@ impl GpuiAppModalKind {
             "addProject" => Some(Self::AddProject),
             "agentHooksRequired" => Some(Self::AgentHooksRequired),
             "settings" => Some(Self::Settings),
-            "modelPicker" => Some(Self::ModelPicker),
             "hotkeys" => Some(Self::Hotkeys),
             "missingProjectFolder" => Some(Self::MissingProjectFolder),
             "commandPalette" => Some(Self::CommandPalette),
@@ -102,7 +100,6 @@ impl GpuiAppModalKind {
             Self::AddProject => "addProject",
             Self::AgentHooksRequired => "agentHooksRequired",
             Self::Settings => "settings",
-            Self::ModelPicker => "modelPicker",
             Self::Hotkeys => "hotkeys",
             Self::MissingProjectFolder => "missingProjectFolder",
             Self::CommandPalette => "commandPalette",
@@ -146,7 +143,6 @@ impl GpuiAppModalKind {
             Self::AddProject => "Ghostex Add Project",
             Self::AgentHooksRequired => "Ghostex Install Required Hooks",
             Self::Settings => "Ghostex Settings",
-            Self::ModelPicker => "",
             Self::Hotkeys => "Ghostex Hotkeys",
             Self::MissingProjectFolder => "Ghostex Project Folder Missing",
             Self::CommandPalette
@@ -187,7 +183,6 @@ impl GpuiAppModalKind {
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_BROWSER_HISTORY_WINDOW_HEIGHT),
             ),
-            Self::ModelPicker => size(px(1260.0), px(1050.0)),
             /* All four Quick Access tabs share one stable child-window frame. */
             Self::CommandPalette
             | Self::PreviousSessions
@@ -308,17 +303,8 @@ impl GpuiAppModalKind {
         }
     }
 
-    /// CDXC:AppModal 2026-09-08 DECISION:
-    /// User: increase both terminal picker dimensions by 40%, to 1260x910 for Codex and 1260x1050 for Claude, centered on the main window with no window title or titlebar.
-    /// This supersedes the previous 900x650 Codex and 900x750 Claude sizes.
-    pub(crate) fn window_size_for_open(self, message: &serde_json::Value) -> Size<Pixels> {
-        if self == Self::ModelPicker
-            && message.get("provider").and_then(serde_json::Value::as_str) == Some("codex")
-        {
-            size(px(1260.0), px(910.0))
-        } else {
-            self.window_size()
-        }
+    pub(crate) fn window_size_for_open(self, _message: &serde_json::Value) -> Size<Pixels> {
+        self.window_size()
     }
 
     /// CDXC:AppModal 2026-09-08 DECISION:
@@ -417,8 +403,7 @@ impl GpuiAppModalKind {
                 "modal": self.modal_id(),
                 "type": "open",
             }),
-            Self::ModelPicker
-            | Self::BrowserHistory
+            Self::BrowserHistory
             | Self::Settings
             | Self::Hotkeys
             | Self::FindPrompts

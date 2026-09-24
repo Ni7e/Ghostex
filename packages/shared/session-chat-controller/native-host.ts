@@ -28,7 +28,6 @@ import { adoptNativeChatSettings, adoptNativeContextPreferences, computeNativeCh
 import { contextDetailsAgentFor } from '@/packages/core-ui/chat/session-chat-context-details-agents';
 import { dispatchSessionChatOption, queueSessionChatOption } from './option-dispatch';
 import { sendSessionChatOptionAware } from './option-command';
-import { NativeModelPicker } from './native-model-picker';
 import { currentAgentModelCatalog } from '../agent-model-catalog-state';
 import { createModelPickerRequest } from '../session-chat-presentation/model-picker-request';
 import { modelSelectionUnchanged } from './model-selection';
@@ -214,7 +213,6 @@ let pendingAttachments = 0;
 let draftAttachmentCount = 0;
 let optionDispatchId: string | null = null;
 let optionSwitching = false;
-let modelPicker: NativeModelPicker | null = null;
 /** The picker's tab and search text. Rust owns whether it is open and resets this when it opens. */
 let modelMenuView: { tab: ModelMenuTabId | null; query: string } = { tab: null, query: '' };
 let promptKey: string | null = null;
@@ -419,7 +417,7 @@ function publish(state: NativeChatState): void {
         });
   }
   presentation.setWorkingDirectory(transport?.presentation?.getSnapshot().workingDirectory);
-  const projection = presentation.update(state.messages, state.workingSignal, summaryMode, deferred, detailRevision);
+  const projection = presentation.update(state.messages, state.transcriptWorking, summaryMode, deferred, detailRevision);
   transcriptItems = projection.items;
   minimapMarkers = projection.minimap;
   subagentItems = subagentViewer.transcriptItems();
@@ -488,7 +486,6 @@ function publish(state: NativeChatState): void {
           },
         }
       : {}),
-    modelPicker: modelPicker?.projection() ?? null,
     modelMenu: state.modelMenuContext ? modelMenuProjection(state.modelMenuContext, modelMenuView) : null,
     contextStatusRows,
     suggestions: composerSuggestions,
@@ -967,80 +964,6 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         }
         break;
       }
-      case 'toggleModelPicker': {
-        if (modelPicker) {
-          modelPicker.finish(false);
-          break;
-        }
-        if (!chat.modelProvider) break;
-        const desired = chat.modelSelection.desired;
-        const request = createModelPickerRequest(
-          currentAgentModelCatalog(),
-          chat.modelProvider,
-          desired?.model || chat.sessionOptions.state.model?.value,
-          desired?.effort || chat.sessionOptions.state.effort?.value
-        );
-        if (!request) break;
-        const sessionKey = chat.sessionOptions.sessionKey;
-        modelPicker = new NativeModelPicker(
-          request,
-          () => publish(controller.current()),
-          (selection, scope) => {
-            const current = controller.current();
-            if (
-              selection &&
-              current.sessionOptions.sessionKey === sessionKey &&
-              !modelSelectionUnchanged(
-                selection,
-                current.modelSelection.desired,
-                {
-                  model: current.sessionOptions.state.model?.value,
-                  effort: current.sessionOptions.state.effort?.value,
-                },
-                request,
-                scope
-              )
-            ) {
-              current.modelSelection.select(selection, undefined, scope);
-            }
-            modelPicker?.dispose();
-            modelPicker = null;
-            publish(controller.current());
-          }
-        );
-        if (command.size) modelPicker.measure(command.size);
-        break;
-      }
-      case 'modelPickerMeasure':
-        modelPicker?.measure(command.size);
-        break;
-      case 'modelPickerPane':
-        modelPicker?.pane(command.size);
-        break;
-      case 'modelPickerKey':
-        modelPicker?.key(command.key);
-        break;
-      case 'modelPickerKeyUp':
-        modelPicker?.release(command.key);
-        break;
-      case 'modelPickerBlur':
-        modelPicker?.blur();
-        break;
-      case 'modelPickerControl':
-        modelPicker?.navigate(command.control);
-        break;
-      case 'modelPickerScroll':
-        modelPicker?.scroll(command.input);
-        break;
-      case 'modelPickerModel':
-        modelPicker?.chooseModel(command.index, command.save, command.pointer);
-        break;
-      case 'modelPickerEffort':
-        modelPicker?.chooseEffort(command.index, command.save);
-        break;
-      case 'modelPickerCancel':
-        modelPicker?.finish(false);
-        break;
       case 'modelMenuView':
         // A null tab is the picker opening: stars set in other sessions since the last open arrive here.
         if (command.tab === null) adoptModelFavorites(await composer('modelFavorites'));
@@ -1057,8 +980,35 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         if (!context) break;
         const row = modelMenuProjection(context, modelMenuView).rows.find((entry) => entry.key === command.key);
         if (!row) break;
-        const pick = modelMenuPick(row, context);
+        const effort = typeof command.effort === 'string' ? command.effort : undefined;
+        const pick = modelMenuPick(row, context, effort);
         if (pick.kind === 'select') {
+          // A pick that carries a reasoning level queues model and level together, as Option+P always did.
+          if (pick.effort !== undefined && chat.modelProvider) {
+            const scope = modelPickScope(chat.modelProvider, command.secondary === true);
+            const selection = { model: pick.value, effort: pick.effort };
+            const request =
+              createModelPickerRequest(
+                currentAgentModelCatalog(),
+                chat.modelProvider,
+                chat.sessionOptions.state.model?.value,
+                chat.sessionOptions.state.effort?.value
+              ) ?? null;
+            if (
+              !modelSelectionUnchanged(
+                selection,
+                chat.modelSelection.desired,
+                {
+                  model: chat.sessionOptions.state.model?.value,
+                  effort: chat.sessionOptions.state.effort?.value,
+                },
+                request,
+                scope
+              )
+            )
+              chat.modelSelection.select(selection, undefined, scope);
+            break;
+          }
           await action({
             type: 'selectOption',
             descriptorId: context.modelId,
@@ -1092,6 +1042,10 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       case 'modelMenuTrait': {
         const context = chat.modelMenuContext;
         if (!context) break;
+        if (command.id === 'account') {
+          await action({ type: 'accounts', request: { operation: 'select', accountId: command.value } });
+          break;
+        }
         await action({
           type: 'selectOption',
           descriptorId: command.id === 'context' ? context.modelId : command.id,

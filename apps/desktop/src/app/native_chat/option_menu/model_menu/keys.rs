@@ -1,12 +1,14 @@
 use super::super::window::ChatOptionMenuPanel;
 use gpui::{Context, Focusable as _, ScrollStrategy, Window};
+use serde_json::json;
 
 #[derive(Clone, Debug, PartialEq, gpui::Action)]
 #[action(namespace = ghostex_gpui, no_json)]
 pub(super) struct ModelMenuKey {
     key: String,
 }
-struct ModelMenuKeysRegistered;
+/// The model picker hotkey last bound to close the pop-up, so a changed binding is bound again.
+struct ModelMenuKeysRegistered(Option<String>);
 impl gpui::Global for ModelMenuKeysRegistered {}
 
 pub(super) const KEY_CONTEXT: &str = "ChatModelMenu";
@@ -16,10 +18,11 @@ pub(super) const KEY_CONTEXT: &str = "ChatModelMenu";
 /// the field's context, the way the composer does (keyboard.rs). Keys it does not use fall through
 /// to the field.
 pub(super) fn register(cx: &mut gpui::App) {
-    if cx.has_global::<ModelMenuKeysRegistered>() {
+    bind_toggle_chord(cx);
+    if cx.has_global::<KeysBound>() {
         return;
     }
-    cx.set_global(ModelMenuKeysRegistered);
+    cx.set_global(KeysBound);
     let keys = [
         "up",
         "down",
@@ -31,6 +34,7 @@ pub(super) fn register(cx: &mut gpui::App) {
         "shift-enter",
         "escape",
         "tab",
+        "shift-tab",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -40,6 +44,35 @@ pub(super) fn register(cx: &mut gpui::App) {
         ["ChatModelMenu > Input", "ChatModelMenu"].map(|context| {
             gpui::KeyBinding::new(&key, ModelMenuKey { key: key.clone() }, Some(context))
         })
+    }));
+}
+
+struct KeysBound;
+impl gpui::Global for KeysBound {}
+
+/// CDXC:SessionChat 2026-09-24 DECISION:
+/// User: Option+P opens the model pop-up and pressing it again closes it without saving ("I don't want to have two interfaces for picking the model"). The pop-up holds key status in its own window, so the picker hotkey is bound inside it as a close key; a changed binding is bound again the next time the pop-up opens.
+fn bind_toggle_chord(cx: &mut gpui::App) {
+    let chord = crate::app::hotkeys::gpui_configured_hotkey_key("openModelPicker")
+        .and_then(|key| crate::app::hotkeys::gpui_keystroke_from_shared_hotkey(&key));
+    if cx
+        .try_global::<ModelMenuKeysRegistered>()
+        .is_some_and(|bound| bound.0 == chord)
+    {
+        return;
+    }
+    cx.set_global(ModelMenuKeysRegistered(chord.clone()));
+    let Some(chord) = chord else {
+        return;
+    };
+    cx.bind_keys(["ChatModelMenu > Input", "ChatModelMenu"].map(|context| {
+        gpui::KeyBinding::new(
+            &chord,
+            ModelMenuKey {
+                key: "toggle".into(),
+            },
+            Some(context),
+        )
     }));
 }
 
@@ -65,6 +98,10 @@ impl ChatOptionMenuPanel {
     }
 
     /// True when the picker used the key; anything else belongs to the search field.
+    ///
+    /// CDXC:SessionChat 2026-09-24 DECISION:
+    /// User: the model pop-up is the one model picker and is driven from the keyboard (docs/2026-09-24/model-popup-keyboard/): Up and Down move through the models and then the footer buttons, wrapping round; Left and Right move the highlighted model's reasoning a level (a shake at either end or on a model without levels) and move along the footer; Enter uses the highlighted model and level in this session and Shift+Enter saves them as the agent's default; Cmd+1 to Cmd+9 only highlight that row and never apply it ("I should press enter to apply the model change", 2026-09-24, superseding Cmd+number picking); Tab and Shift+Tab switch agent tabs; Escape or the picker hotkey close without saving. The mouse keeps its old meaning: a click saves the default, a right-click this session only.
+    /// SEE-ALSO: packages/core-ui/chat/session-chat-model-menu.tsx (`onKeyDown`) answers the same keys for React.
     fn model_menu_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(state) = self.model_menu.as_mut() else {
             return false;
@@ -72,7 +109,24 @@ impl ChatOptionMenuPanel {
         let rows = state.rows().len();
         let count = rows + state.traits().len();
         match key {
-            "escape" | "tab" => self.menu.update(cx, |menu, cx| menu.close(None, cx)),
+            "escape" | "toggle" => self.menu.update(cx, |menu, cx| menu.close(None, cx)),
+            "tab" | "shift-tab" => {
+                let tabs = state.view["tabs"].as_array().cloned().unwrap_or_default();
+                if tabs.is_empty() {
+                    return true;
+                }
+                let current = tabs
+                    .iter()
+                    .position(|tab| tab["active"] == true)
+                    .unwrap_or(0);
+                let next = if key == "tab" {
+                    (current + 1) % tabs.len()
+                } else {
+                    (current + tabs.len() - 1) % tabs.len()
+                };
+                let tab = tabs[next]["id"].clone();
+                self.model_menu_send(json!({"type":"modelMenuView","tab":tab}), cx);
+            }
             "up" | "ctrl-p" | "down" | "ctrl-n" if count > 0 => {
                 let up = key == "up" || key == "ctrl-p";
                 // The footer is one stop on the way round: Left and Right move along its buttons.
@@ -86,6 +140,9 @@ impl ChatOptionMenuPanel {
                     rows % count
                 };
                 if state.active < rows {
+                    state.last_row = state.rows()[state.active]["key"]
+                        .as_str()
+                        .map(str::to_owned);
                     state
                         .scroll
                         .scroll_to_item(state.active, ScrollStrategy::Nearest);
@@ -94,7 +151,7 @@ impl ChatOptionMenuPanel {
             "enter" | "shift-enter" => {
                 let active = state.active;
                 if active < rows {
-                    self.model_menu_pick(active, key == "shift-enter", cx);
+                    self.model_menu_pick_with_effort(active, key == "enter", cx);
                 } else {
                     self.activate_model_button(active - rows, key == "shift-enter", window, cx);
                 }
@@ -109,23 +166,33 @@ impl ChatOptionMenuPanel {
                         (index + 1) % buttons
                     };
             }
-            "left" | "right" => return false,
+            "left" | "right" => {
+                let row = state.rows()[state.active].clone();
+                let efforts = &self.menu.read(cx).model_efforts;
+                let current = state.effort_for(&row, efforts);
+                match super::state::step_effort(&row, &current, key == "right") {
+                    Some(next) => {
+                        let key = row["key"].as_str().unwrap_or_default().to_owned();
+                        self.menu.update(cx, |menu, _| {
+                            menu.model_efforts.insert(key, next);
+                        });
+                    }
+                    None => state.shake_at = Some(std::time::Instant::now()),
+                }
+            }
             _ => {
-                let Some(slot) = key
-                    .strip_prefix("secondary-")
-                    .and_then(|slot| slot.parse::<usize>().ok())
-                else {
+                let Some(Ok(slot)) = key.strip_prefix("secondary-").map(str::parse::<u64>) else {
                     return false;
                 };
-                let Some(index) = state
+                if let Some(index) = state
                     .rows()
                     .iter()
-                    .position(|row| row["shortcut"].as_u64() == Some(slot as u64))
-                else {
-                    return true;
-                };
-                state.active = index;
-                self.model_menu_pick(index, false, cx);
+                    .position(|row| row["shortcut"].as_u64() == Some(slot))
+                {
+                    state.active = index;
+                    state.last_row = state.rows()[index]["key"].as_str().map(str::to_owned);
+                    state.scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                }
             }
         }
         true

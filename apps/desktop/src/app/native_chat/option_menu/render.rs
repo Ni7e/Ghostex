@@ -238,7 +238,7 @@ impl ChatOptionMenuPanel {
 impl Render for ChatOptionMenuPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.model_menu.is_some() {
-            return self.render_model_menu(cx);
+            return self.render_model_menu(window, cx);
         }
         if let Some(setting) = self.rows.first().map(|row| row["modelMenuFlyout"].clone())
             && setting.is_object()
@@ -249,7 +249,10 @@ impl Render for ChatOptionMenuPanel {
         let m = self.menu.read(cx).metrics();
         let scale = appearance.scale;
         let foreground = gpui::rgb(if appearance.light { 0x292929 } else { 0xfcfcfc });
-        let hover = gpui::rgb(if appearance.light { 0xefefef } else { 0x202020 });
+        // A wash of the menu's own ink, like `titlebar_popup_menu_hover_color` on the sidebar menus:
+        // the surface follows the chrome colour (and glass), so a fixed grey can land on the surface
+        // itself and show no highlight at all.
+        let hover = foreground.opacity(if appearance.light { 0.06 } else { 0.08 });
         let border = gpui::rgba(if appearance.light {
             0x0000001f
         } else {

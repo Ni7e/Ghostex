@@ -891,8 +891,8 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'showQuickModelPickerInTerminal',
-          subtitle: `Use the model picker shortcut (${formatSidebarHotkeyLabel('alt+p')} by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.`,
-          title: 'Show quick model & effort picker for Claude and Codex in terminal view',
+          subtitle: `Show a model button in the terminal bar and open the model picker with its shortcut (${formatSidebarHotkeyLabel('alt+p')} by default) in agent terminal sessions. Turn off to use terminal bindings.`,
+          title: 'Model picker in terminal view',
         },
         {
           key: 'showSessionIdInTerminalPanes',

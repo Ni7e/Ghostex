@@ -1372,8 +1372,6 @@ impl GhostexGpuiApp {
             let window_configuration_matches = handle
                 .update(cx, |host, _modal_window, _cx| {
                     host.current_modal.uses_react_modal_host() == modal.uses_react_modal_host()
-                        && (host.current_modal == GpuiAppModalKind::ModelPicker)
-                            == (modal == GpuiAppModalKind::ModelPicker)
                         && host.current_modal.has_titlebar() == modal.has_titlebar()
                         && host.current_modal.is_resizable() == modal.is_resizable()
                         && (modal.uses_react_modal_host() || host.current_modal == modal)
@@ -1427,14 +1425,7 @@ impl GhostexGpuiApp {
         }
 
         let mut extension_bridge_surface = None;
-        let url = if modal == GpuiAppModalKind::ModelPicker {
-            let Ok(url) =
-                gpui_cef_html_entry_url("GHOSTEX_GPUI_MODEL_PICKER_URL", "model-picker.html")
-            else {
-                return;
-            };
-            url
-        } else if modal.uses_react_modal_host() {
+        let url = if modal.uses_react_modal_host() {
             let Some(url) = app_modal_host_url().ok() else {
                 if let Some(window) = source_window {
                     window.push_notification(

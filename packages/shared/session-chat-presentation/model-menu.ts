@@ -41,6 +41,8 @@ export interface ModelMenuTab {
   icon?: string;
   name: string;
   active: boolean;
+  /** Another agent's tab in a started session: its models hand the conversation off to that agent's CLI. */
+  handoff?: boolean;
 }
 
 export interface ModelMenuVariant {
@@ -60,14 +62,25 @@ export interface ModelMenuEntry {
   variants: readonly ModelMenuVariant[];
 }
 
+export interface ModelMenuEffort {
+  value: string;
+  label: string;
+}
+
 export interface ModelMenuRow extends ModelMenuEntry {
   key: string;
   favorite: boolean;
   selected: boolean;
   /** 1 to 9 for the rows Cmd+number reaches. */
   shortcut?: number;
-  /** Favorites mix agents, so those rows name theirs on a second line. */
+  /** Favorites mix agents, so those rows lead with their agent's logo. */
   showAgent: boolean;
+  /** Picking this row hands the conversation off to another agent's CLI rather than switching this session's model. */
+  handoff?: boolean;
+  /** The reasoning levels this model offers, lowest first; empty where it has none. */
+  efforts: readonly ModelMenuEffort[];
+  /** The level a pick of this row uses until Left or Right moves it: the one in use, else the model's default. */
+  effort: string;
 }
 
 export interface ModelMenuTraitChoice {
@@ -86,8 +99,8 @@ export interface ModelMenuTrait {
   valueLabel: string | null;
   disabled?: boolean;
   choices: readonly ModelMenuTraitChoice[];
-  /** The glyph drawn beside the value: a brain for reasoning, chart bars for the context window, a bolt for fast mode. */
-  icon?: 'reasoning' | 'context' | 'fast';
+  /** The glyph drawn beside the value: a brain for reasoning, chart bars for the context window, a bolt for fast mode, a person for the account. */
+  icon?: 'reasoning' | 'context' | 'fast' | 'account';
   /** Present when the button has at most two values: the one a click moves to. Longer lists open a side list instead. */
   toggle?: { value: string; exitPlan?: boolean };
 }
@@ -218,6 +231,8 @@ export function modelMenuRows(
     selected: current !== undefined && current.provider === entry.provider && current.value === entry.value,
     shortcut: index < MODEL_MENU_SHORTCUT_ROWS ? index + 1 : undefined,
     showAgent: favoritesTab,
+    efforts: [],
+    effort: '',
   }));
 }
 
@@ -254,6 +269,133 @@ export function modelMenuEffortFor(provider: ModelPickerProvider, model: string,
     effort?.choices?.[0]?.value ??
     ''
   );
+}
+
+/**
+ * The reasoning levels a row's model offers and the one its pick starts on. For the session's own model the
+ * choices come from the session's live descriptor, so they match what the Reasoning button lists today.
+ */
+export function modelMenuRowEfforts(
+  row: Pick<ModelMenuRow, 'provider' | 'value' | 'selected'> & { variants: readonly ModelMenuVariant[] },
+  params: {
+    pickValue: string;
+    currentEffort: string | undefined;
+    sessionEffort?: SessionChatOptionDescriptor;
+  }
+): { efforts: ModelMenuEffort[]; effort: string } {
+  const descriptor =
+    row.selected && params.sessionEffort
+      ? params.sessionEffort
+      : sessionChatSessionOptionCatalog(row.provider)
+          ?.optionsForModel(params.pickValue)
+          .find((entry) => entry.id === 'effort');
+  const catalog = currentAgentModelCatalog();
+  const efforts = (descriptor?.choices ?? []).map((choice) => ({
+    value: choice.value,
+    label: agentModelCatalogEffortLabel(catalog, choice.value) || choice.label,
+  }));
+  if (efforts.length === 0) return { efforts, effort: '' };
+  const offered = (value: string | undefined) =>
+    value !== undefined && efforts.some((effort) => effort.value === value) ? value : undefined;
+  return {
+    efforts,
+    effort:
+      offered(params.currentEffort) ??
+      offered(descriptor?.defaultValue) ??
+      efforts[Math.floor(efforts.length / 2)]!.value,
+  };
+}
+
+/**
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: take away the full-screen quick picker and make the composer's model pop-up the one model picker, opened by
+ * Option+P in chat and terminal view and driven from the keyboard: "I would actually be able to use the left and
+ * right arrows to change the [effort]". Left and Right move the highlighted model's reasoning one level and stop at
+ * the ends (a small shake, also on a model with no levels); the Reasoning button shows the highlighted model's level,
+ * and Enter saves that model with it.
+ * SEE-ALSO: apps/desktop/src/app/native_chat/option_menu/model_menu/keys.rs, packages/core-ui/chat/session-chat-model-menu.tsx.
+ */
+export function modelMenuStepEffort(row: Pick<ModelMenuRow, 'efforts'>, current: string, step: -1 | 1): string | null {
+  if (row.efforts.length === 0) return null;
+  const index = row.efforts.findIndex((effort) => effort.value === current);
+  if (index < 0) return row.efforts[step > 0 ? 0 : row.efforts.length - 1]!.value;
+  return row.efforts[index + step]?.value ?? null;
+}
+
+/** The Reasoning button for the highlighted model: its levels, with the one Left and Right have moved to marked. */
+export function modelMenuReasoningFor(
+  trait: ModelMenuTrait,
+  row: Pick<ModelMenuRow, 'efforts' | 'selected'> | undefined,
+  effort: string | undefined
+): ModelMenuTrait {
+  if (trait.id !== 'effort' || !row || effort === undefined || row.efforts.length === 0) return trait;
+  if (row.selected && trait.choices.some((choice) => choice.selected && choice.value === effort)) return trait;
+  return {
+    ...trait,
+    disabled: false,
+    valueLabel: row.efforts.find((entry) => entry.value === effort)?.label ?? trait.valueLabel,
+    choices: row.efforts.map((entry) => ({
+      value: entry.value,
+      label: entry.label,
+      selected: entry.value === effort,
+      isDefault: false,
+    })),
+    toggle: undefined,
+  };
+}
+
+/** The tab Tab or Shift+Tab moves to, wrapping round. */
+export function modelMenuNextTab(
+  tabs: readonly Pick<ModelMenuTab, 'id' | 'active'>[],
+  step: -1 | 1
+): ModelMenuTabId | undefined {
+  if (tabs.length === 0) return undefined;
+  const index = Math.max(
+    tabs.findIndex((tab) => tab.active),
+    0
+  );
+  return tabs[(index + step + tabs.length) % tabs.length]!.id;
+}
+
+/** The compact key reminder along the bottom of the pop-up. */
+export const MODEL_MENU_KEY_HINTS: readonly { keys: string; label: string }[] = [
+  { keys: '↑↓', label: 'model' },
+  { keys: '←→', label: 'effort' },
+  { keys: '⇥', label: 'agent' },
+  { keys: '⏎', label: 'save' },
+  { keys: 'esc', label: 'close' },
+];
+
+/** One signed-in account the Account button can switch this session to. */
+export interface ModelMenuAccount {
+  id: string;
+  label: string;
+  current: boolean;
+  ready: boolean;
+}
+
+/**
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: accounts can be switched from the keyboard too, "but make it hidden, need to press enter to show this (same
+ * as fast mode, should take up smaller area)". With more than one signed-in account for the session's agent the
+ * footer gains an Account button beside Fast that shows the account in use; Enter or a click opens the list of
+ * accounts, and Up, Down and Enter switch. It never toggles in place, even with two accounts.
+ */
+export function modelMenuAccountTrait(accounts: readonly ModelMenuAccount[] | undefined): ModelMenuTrait | null {
+  if (!accounts || accounts.filter((account) => account.ready || account.current).length < 2) return null;
+  const current = accounts.find((account) => account.current);
+  return {
+    id: 'account',
+    label: 'Account',
+    valueLabel: current?.label ?? 'Choose',
+    icon: 'account',
+    choices: accounts.map((account) => ({
+      value: account.id,
+      label: account.label,
+      selected: account.current,
+      isDefault: false,
+    })),
+  };
 }
 
 const TRAIT_LABELS: Record<string, string> = { effort: 'Reasoning' };
