@@ -38,6 +38,9 @@ impl NativeChatView {
         );
         let content = if self.list.item_count() == 0 {
             let state = self.snapshot.clone();
+            if let Some(stage) = self.transcript_loading_stage(&state) {
+                return self.render_loading_hold(stage, &p, cx);
+            }
             self.render_empty_transcript_region(&state, &p, cx)
         } else {
             let transcript = list(
@@ -50,14 +53,15 @@ impl NativeChatView {
             .pb(px(self.transcript_inset));
             self.scrollable_transcript(transcript, cx)
         };
-        div()
-            .size_full()
-            .min_w_0()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .child(content)
-            .into_any_element()
+        self.reveal_transcript(
+            div()
+                .size_full()
+                .min_w_0()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(content),
+        )
     }
 
     /// The cached transcript view, created on the first draw, marked for drawing again on every chat

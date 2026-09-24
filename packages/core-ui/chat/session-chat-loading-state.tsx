@@ -7,9 +7,10 @@ const rem = (px: number) => `${px / 16}rem`;
 
 /**
  * CDXC:SessionChat 2026-09-19 DECISION:
- * User: while an old chat's transcript is loading, show a skeleton in the transcript area so it looks nice while we wait, in both GPUI and React chat.
+ * User: while an old chat's transcript is loading, show a skeleton in the transcript area so it looks nice while we wait.
  * The skeleton replaces the "Loading conversation…" line and, since the same-day decision in new-session-welcome.ts, appears at once; the Retry stage keeps its timing.
- * SEE-ALSO: packages/shared/session-chat-presentation/transcript-skeleton.json, apps/desktop/src/app/native_chat/transcript_skeleton.rs.
+ * The GPUI chat dropped its copy of this skeleton on 2026-09-24 and fades the transcript in instead (apps/desktop/src/app/native_chat/transcript_reveal.rs).
+ * SEE-ALSO: packages/shared/session-chat-presentation/transcript-skeleton.json.
  */
 export function SessionChatLoadingState({ stage, onRetry }: { stage: SessionChatLoadingStage; onRetry: () => void }) {
   return (

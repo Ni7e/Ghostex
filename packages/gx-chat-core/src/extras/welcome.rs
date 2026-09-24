@@ -13,12 +13,13 @@ use crate::document::EmptyState;
 use crate::extras::agent_tasks::js_trim;
 use crate::extras::agents::{agent_icon_id, default_agent_by_id, is_sidebar_agent_icon};
 
-/// How long a transcript read stays blank before the skeleton appears.
+/// How long a transcript read stays `blank` before it reports the `indicator` stage.
 ///
 /// CDXC:SessionChat 2026-09-19 DECISION:
-/// User: the skeleton shows the moment a transcript starts loading, in both GPUI and React chat;
-/// the pane must react at once instead of holding blank. This supersedes the 600ms blank hold from
-/// the same day.
+/// User: the skeleton shows the moment a transcript starts loading, in React chat; the pane must
+/// react at once instead of holding blank. This supersedes the 600ms blank hold from the same day.
+/// The GPUI chat draws no skeleton for either stage since 2026-09-24 and fades the transcript in
+/// once it is ready (apps/desktop/src/app/native_chat/transcript_reveal.rs).
 pub const LOADING_INDICATOR_DELAY_MS: i64 = 0;
 /// How long a transcript read runs before the empty region offers Retry.
 pub const LOADING_RETRY_DELAY_MS: i64 = 12_000;

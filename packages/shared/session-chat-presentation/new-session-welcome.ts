@@ -81,7 +81,8 @@ export function wrapNewSessionWelcomeTitle(title: string): string {
  * How long a transcript read stays blank before the skeleton appears.
  *
  * CDXC:SessionChat 2026-09-19 DECISION:
- * User: the skeleton shows the moment a transcript starts loading, in both GPUI and React chat; the pane must react at once instead of holding blank. This supersedes the 600ms blank hold from the same day.
+ * User: the skeleton shows the moment a transcript starts loading, in React chat; the pane must react at once instead of holding blank. This supersedes the 600ms blank hold from the same day.
+ * The GPUI chat draws no skeleton for either stage since 2026-09-24 and fades the transcript in once it is ready (apps/desktop/src/app/native_chat/transcript_reveal.rs).
  */
 export const SESSION_CHAT_LOADING_INDICATOR_DELAY_MS = 0;
 /** How long a transcript read runs before the empty region offers Retry. */
