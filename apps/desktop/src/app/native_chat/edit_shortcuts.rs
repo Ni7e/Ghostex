@@ -23,6 +23,23 @@ fn typed_text(keystroke: &gpui::Keystroke) -> Option<&str> {
     Some(text)
 }
 
+/// Focuses `field` and dispatches `keystroke` again on the next turn, so the field's own bindings
+/// and key listeners handle it exactly as if it had been focused when the key was pressed.
+fn focus_and_replay(
+    field: &gpui::Entity<gpui_component::input::InputState>,
+    keystroke: &gpui::Keystroke,
+    window: &mut Window,
+    cx: &mut Context<NativeChatView>,
+) {
+    field.read(cx).focus_handle(cx).focus(window, cx);
+    let replay = keystroke.clone();
+    window.defer(cx, move |window, cx| {
+        REPLAYING.with(|flag| flag.set(true));
+        window.dispatch_keystroke(replay, cx);
+        REPLAYING.with(|flag| flag.set(false));
+    });
+}
+
 fn platform() -> &'static str {
     if cfg!(target_os = "macos") {
         "mac"
@@ -357,6 +374,13 @@ impl NativeChatView {
         if REPLAYING.with(Cell::get) {
             return false;
         }
+        /*
+        CDXC:SessionChat 2026-09-24 DECISION:
+        User: Cmd+F focuses the find bar, and while the bar is shown typing goes to it until Escape or its close button, then the chat box receives input again. The find bar is the background typing target while it is open, through this same path.
+        */
+        if let Some(search) = self.search_input.clone() {
+            return self.background_key_into(&search, keystroke, window, cx);
+        }
         let Some(input) = self.input.clone() else {
             return false;
         };
@@ -407,13 +431,48 @@ impl NativeChatView {
         if !intent.is_some_and(|intent| intent.is_object()) {
             return false;
         }
-        input.read(cx).focus_handle(cx).focus(window, cx);
-        let replay = keystroke.clone();
-        window.defer(cx, move |window, cx| {
-            REPLAYING.with(|flag| flag.set(true));
-            window.dispatch_keystroke(replay, cx);
-            REPLAYING.with(|flag| flag.set(false));
-        });
+        focus_and_replay(&input, keystroke, window, cx);
+        true
+    }
+
+    /// Background typing into a single-line chat field (the find bar): typed text lands at its
+    /// caret, and Enter, Escape, the arrows, deletion and editing chords are replayed into it so
+    /// the field's own key handling (next/previous match, close) answers them.
+    fn background_key_into(
+        &mut self,
+        field: &gpui::Entity<gpui_component::input::InputState>,
+        keystroke: &gpui::Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if let Some(text) = typed_text(keystroke) {
+            let text = text.to_owned();
+            field.update(cx, |field, cx| {
+                field.focus(window, cx);
+                field.replace_text_in_range(None, &text, window, cx);
+            });
+            return true;
+        }
+        let modifiers = keystroke.modifiers;
+        let navigation = matches!(
+            keystroke.key.as_str(),
+            "enter"
+                | "escape"
+                | "backspace"
+                | "delete"
+                | "up"
+                | "down"
+                | "left"
+                | "right"
+                | "home"
+                | "end"
+        );
+        let edit_chord = (modifiers.platform || modifiers.control)
+            && matches!(keystroke.key.as_str(), "a" | "c" | "v" | "x" | "z");
+        if !navigation && !edit_chord {
+            return false;
+        }
+        focus_and_replay(field, keystroke, window, cx);
         true
     }
 
