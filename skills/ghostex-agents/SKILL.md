@@ -1,5 +1,5 @@
 ---
-name: ghostex-agents-orchestration
+name: ghostex-agents
 description: >-
   Use this skill when you need other agents to do part of the work inside
   Ghostex, or when agents have to message each other to coordinate work:
@@ -9,10 +9,12 @@ description: >-
   that are already running, waiting for one to finish, and closing it
   afterwards. It points you at the `ghostex` CLI help pages that document
   these commands and adds the habits that keep a multi-agent run reliable.
+  Also use it to read or search another session's thread, past or present,
+  for example when the user asks what was said or decided there.
 disable-model-invocation: true
 ---
 
-# ghostex-agents-orchestration
+# ghostex-agents
 
 Ghostex lets one agent launch, message, read, and close other agent sessions
 through the `ghostex` CLI (`gx` is the same binary). The CLI help is the source
@@ -62,14 +64,62 @@ guessing a replacement.
 6. **Confirm delivery.** Accepted or queued does not mean read. Read the
    session chat (or the queue) after sending before you assume the agent is
    working on it, and before you ever send the same message again.
-7. **Wait on a signal, not a guess.** Ask the agent to end its final message
-   with a unique last line (for example `TASK 3 COMPLETE` or
-   `TASK 3 BLOCKED: reason`), then use `wait-for-text` or a long-polling chat
-   read instead of a hand-rolled sleep loop. Idle alone does not prove the
-   work is complete.
+7. **Wait on a signal, not a guess.** Ask the agent to send its result back to
+   you with `ghostex agents send <the Reply to ref from its header>` when it
+   finishes, and to end its final message with a unique last line (for example
+   `TASK 3 COMPLETE` or `TASK 3 BLOCKED: reason`). The send reaches you
+   without polling; `wait-for-text` on the sentinel is the backup. If the task
+   writes a results file, its appearance is a third signal: act on whichever
+   arrives first. Idle alone does not prove the work is complete.
 8. **Read the result, then decide.** Read the agent's reply, check the work
    yourself when it matters, and only then close the session or send the next
    task.
+
+## Read another thread (past or present)
+
+Use this when the user asks what was said or decided in another session ("check
+my messages in that thread", "did we already talk about this"). Read it through
+the CLI, not the agent's raw transcript file: the CLI works for every agent
+type, keeps the thread in order, and marks harness-injected rows.
+
+1. **Pick the reference.** Pass whatever the user pasted: a sidebar Copy Details
+   block gives a Global Ref (`S…:P…:G…`), which is best, plus a Session ID,
+   Routing ID, Agent Session ID and a zmx name in Persistence, and all of them
+   work. A title works when it is unique. If two sessions match, the error
+   lists their global refs; pick one. Sleeping sessions read fine, and reading
+   never wakes them.
+2. **Search first, then read.** Look for the topic, with one row of context so
+   each hit comes with its reply:
+
+   ```bash
+   ghostex read-session-chat <ref> --grep "mobile|react native" --context 1 --format text
+   ```
+
+   `--grep` is case-insensitive, `|` separates alternatives, and it searches
+   the whole thread. Matched rows say `match` in their header; the rows around
+   them are context. Add `--role user` to match only what the user typed.
+3. **Read the whole thread when the search is not enough.**
+   `--all --format text` prints every turn as prompt plus final reply, with the
+   tool work collapsed into one note. `--all --role user --format text` lists
+   just the user's messages, the quickest way to recover what they asked for
+   and decided. Output is large for long threads: trim it with `--last <n>`
+   (the newest n rows) or `--since <local date or time>` instead of printing
+   everything. Text output is in local time with the UTC offset in its header,
+   so convert before comparing with UTC times such as Copy Details' Last
+   Active. Add `--history-mode detail` only when you need every tool call.
+   `ghostex read-session-chat --help` lists every flag.
+4. **Check the thread's own records.** Long threads usually keep a plan or
+   progress file (`docs/<date>/<topic>/PLAN.md`, `PROGRESS.md`) that the
+   thread's last messages link to. Read it for the current state instead of
+   reconstructing it from the chat.
+5. **Report what you found with its date**, and say which parts are decisions
+   the user made and which are only the other agent's proposals.
+
+`--all`, `--grep`, `--role`, `--context`, `--since`, `--last` and `--format` need a Ghostex release
+from 2026-09-24 or later. On an older one `read-session-chat` prints the newest
+rows only: page back with `--history-mode turns --before-offset <beforeOffset
+from the previous result>` until `hasMore` is false, and pass the global ref
+from `ghostex sessions --json` as the session.
 
 ## Habits that keep runs reliable
 
@@ -78,8 +128,9 @@ guessing a replacement.
   a two or three line summary of the previous result to the next one.
 - **Anchor completion patterns to the start of a line.** Agents stream their
   reasoning, so an unanchored pattern matches a sentinel mentioned mid
-  sentence. Some agents prefix final messages with a bullet character, so
-  allow one optional leading character.
+  sentence. Agent terminals indent lines and some add a bullet, so allow
+  leading whitespace plus one optional character:
+  `^\s*\S?\s*TASK 3 COMPLETE\s*$`.
 - **The sentinel must be the very last line.** Anything printed after it can
   push it out of the window the wait command inspects.
 - **Reusing a session for another round? Change the token, not the window.**
@@ -92,7 +143,8 @@ guessing a replacement.
   a good limit) before handing the remaining findings to the user.
 - **Diagnose before you act on a failed wait.** A timeout or a missing session
   does not always mean the agent died: read its chat or terminal text and the
-  session list first. If it is genuinely stuck, tell the user rather than
+  session list first. If `read-session-chat` shows empty messages for that
+  agent, read its terminal with `read-text` instead. If it is genuinely stuck, tell the user rather than
   killing it blindly.
 - **Closing a session stops its agent**, including unfinished work. Read the
   result first. When the user may want to inspect the work, leave finished

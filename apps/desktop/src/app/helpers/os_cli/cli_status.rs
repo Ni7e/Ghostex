@@ -101,7 +101,7 @@ pub(crate) fn gpui_ghostex_cli_probe() -> Result<GpuiGhostexCliProbe, String> {
         browser_skill_path: skill_path("ghostex-browser-use"),
         computer_use_skill_path: skill_path("ghostex-computer-use"),
         embedded_browser_skill_path: skill_path("ghostex-embedded-browser-use"),
-        agents_orchestration_skill_path: skill_path("ghostex-agents-orchestration"),
+        agents_orchestration_skill_path: skill_path("ghostex-agents"),
         manage_beads_skill_path: skill_path("ghostex-manage-beads"),
         generate_title_skill_path: skill_path("ghostex-auto-rename-session"),
         ghostex_path: ghostex_path.as_ref().map(|path| gpui_path_string(path)),
@@ -197,9 +197,9 @@ pub(crate) fn gpui_ghostex_cli_status_message(detail_override: Option<&str>) -> 
                 "Ghostex CLI skill is not installed.".to_string()
             });
             parts.push(if agents_orchestration_skill_installed {
-                "Ghostex Agents Orchestration skill is installed.".to_string()
+                "Ghostex Agents skill is installed.".to_string()
             } else {
-                "Ghostex Agents Orchestration skill is not installed.".to_string()
+                "Ghostex Agents skill is not installed.".to_string()
             });
             parts.push(if manage_beads_skill_installed {
                 "Ghostex Manage Beads skill is installed.".to_string()

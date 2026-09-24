@@ -213,7 +213,7 @@ export type SidebarGhostexCliStatusMessage = {
   manageBeadsSkillPath?: string;
   /**
    * CDXC:AgentSkills 2026-09-19 WHY:
-   * `$ghostex-agents-orchestration` (which replaced the Fable 5.6 orchestration skill in the same slot) shipped after existing hosts, so its
+   * `$ghostex-agents` (first shipped as `$ghostex-agents-orchestration`, which replaced the Fable 5.6 orchestration skill in the same slot) shipped after existing hosts, so its
    * status fields stay optional and consumers must treat a missing value as
    * not installed instead of requiring every host build to send it.
    */
