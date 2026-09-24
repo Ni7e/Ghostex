@@ -488,6 +488,16 @@ pub fn snapshot_frame_result(frame: &ChatSnapshotFrame) -> ReadSessionChatResult
     result
 }
 
+/// Whether a snapshot owns the three read-only draft-agent fields: any of them present, `null`
+/// included (`'sessionAgentId' in event`). Every gxserver socket frame omits all three; a host
+/// that synthesizes snapshots from reads sends all three, `null` for the ones a promoted session's
+/// read no longer carries.
+pub fn snapshot_owns_draft_agents(frame: &ChatSnapshotFrame) -> bool {
+    !frame.session_agent_id.is_absent()
+        || !frame.available_agents.is_absent()
+        || !frame.switchable_agents.is_absent()
+}
+
 fn snapshot_as_result(
     frame: &ChatSnapshotFrame,
     previous: Option<&FoldedSnapshot>,
@@ -503,14 +513,11 @@ fn snapshot_as_result(
     folded.result.working = frame.working;
     folded.result.agent = frame.agent.clone();
     // `{...previous, ...base}`: a frame that owns the three read-only draft-agent fields sets
-    // them, and one that does not leaves what the previous fold held.
-    if frame.session_agent_id.is_some()
-        || frame.available_agents.is_some()
-        || frame.switchable_agents.is_some()
-    {
-        folded.result.session_agent_id = frame.session_agent_id.clone();
-        folded.result.available_agents = frame.available_agents.clone();
-        folded.result.switchable_agents = frame.switchable_agents.clone();
+    // them (an owned `null` clears one), and one that does not leaves what the previous fold held.
+    if snapshot_owns_draft_agents(frame) {
+        folded.result.session_agent_id = frame.session_agent_id.value().cloned();
+        folded.result.available_agents = frame.available_agents.value().cloned();
+        folded.result.switchable_agents = frame.switchable_agents.value().cloned();
     }
     folded.result.lifecycle = frame.lifecycle.clone();
     folded.result.state = frame.state.clone();
@@ -594,7 +601,7 @@ fn incoming_lifecycle<'a>(
 fn incoming_session_agent_id<'a>(incoming: &'a StateCarrier<'a>) -> Option<&'a String> {
     match incoming {
         StateCarrier::Read(result) => result.session_agent_id.as_ref(),
-        StateCarrier::Snapshot(frame) => frame.session_agent_id.as_ref(),
+        StateCarrier::Snapshot(frame) => frame.session_agent_id.value(),
         _ => None,
     }
 }

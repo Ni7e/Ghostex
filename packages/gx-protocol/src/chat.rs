@@ -266,14 +266,16 @@ pub struct ChatSnapshotFrame {
     /// A host that synthesizes snapshots from reads (the mobile SSH host, and the retained-session
     /// store's own `snapshotEvent`) sets them as own properties deliberately, including a cleared
     /// one on promotion. Absent means the frame does not own them and the folded value stands;
-    /// present means it does. `controller.ts` tests exactly that with
-    /// `'sessionAgentId' in event`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_agent_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub available_agents: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub switchable_agents: Option<Value>,
+    /// present means it does, and an explicit `null` clears the field. `controller.ts` tests
+    /// exactly that with `'sessionAgentId' in event`; JSON has no `undefined`, so a host that
+    /// crosses a JSON boundary spells "owned and cleared" as `null`. Every gxserver socket frame
+    /// omits all three.
+    #[serde(default, skip_serializing_if = "Tri::is_absent")]
+    pub session_agent_id: Tri<String>,
+    #[serde(default, skip_serializing_if = "Tri::is_absent")]
+    pub available_agents: Tri<Value>,
+    #[serde(default, skip_serializing_if = "Tri::is_absent")]
+    pub switchable_agents: Tri<Value>,
     /// Absent on a snapshot or replaced frame means cleared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<TurnLifecycle>,
