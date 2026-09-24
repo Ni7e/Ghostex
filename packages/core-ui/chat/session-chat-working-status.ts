@@ -84,6 +84,21 @@ export function deriveSessionChatWorkingOverride(input: SessionChatWorkingInput)
   return 'working';
 }
 
+/**
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: fold a finished turn into "Worked for Xs" right away instead of waiting; this supersedes the 8-second settle hold. The fold keys on the turn lifecycle: a terminal lifecycle for the current run settles the transcript even while hooks or background work keep the live signal on, so the fold lands with the final reply.
+ * Not `working`: its trailing-prose recovery settles whenever assistant text is the newest row, which is every commentary line of an agent answering a background task, and each one would fold and unfold the transcript.
+ * An agent whose transcript carries no lifecycle (Pi) folds when the live signal drops. The fold is sticky once it lands (`stickySessionChatTranscriptWorking` in session-chat-presentation/turns.ts).
+ */
+export function sessionChatTranscriptWorking(input: {
+  /** The live signal with the local Stop suppression applied. */
+  working: boolean;
+  lifecycle: SessionChatTurnLifecycle | null;
+  workingStartedAt: number | null;
+}): boolean {
+  return input.working && !lifecycleTerminatesCurrentTurn(input.lifecycle, input.workingStartedAt);
+}
+
 export interface SessionChatStatusMergeInput {
   serverStatus: SessionChatStatus;
   loading: boolean;

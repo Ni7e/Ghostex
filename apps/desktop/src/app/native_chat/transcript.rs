@@ -4,10 +4,10 @@ use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::StatefulInteractiveElement;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
-    Styled as _, Window, div, px, relative,
+    AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _,
+    Window, div, px, relative,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 pub(crate) fn text(value: &Value, key: &str) -> String {
     value[key].as_str().unwrap_or_default().to_string()
@@ -28,6 +28,7 @@ impl NativeChatView {
         expanded: bool,
         cx: &mut Context<Self>,
     ) {
+        self.worked_fold.toggled(&id, !expanded, cx.reduce_motion());
         if expanded {
             self.expanded.remove(&id);
             self.collapsed.insert(id);
@@ -122,92 +123,18 @@ impl NativeChatView {
             }
             row.into_any_element()
         } else if item["kind"] == "completed-work" {
-            let mut work_appearance = p.clone();
-            work_appearance.primary = p.muted;
-            let id = format!("work:{}", text(&item, "id"));
-            let expanded = self.is_expanded(&id, p.verbose);
-            // Every row of a finished turn hides its own writes; they belong to the turn's
-            // "N files changed" fold below the heading (file_change_card.rs).
-            self.hide_file_changes = true;
-            let mut row = div().flex().flex_col().w_full().gap(px(8.0 * s));
-            let heading = if item["expandable"] == true {
-                let disclosure = self.disclosure(
-                    id.clone(),
-                    text(&item, "label"),
-                    expanded,
-                    Some(json!({"type":"loadWork","id":item["id"],"work":item["deferred"]}))
-                        .filter(|_| item["deferred"].is_object()),
-                    &work_appearance,
-                    cx,
-                );
-                div()
-                    .text_color(p.muted)
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(disclosure)
-                    .into_any_element()
-            } else {
-                div()
-                    .pl(px(24.0 * s))
-                    .text_color(p.muted.opacity(0.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(text(&item, "label"))
-                    .into_any_element()
-            };
-            row = row.child(heading);
-            row = row.child(
-                div()
-                    .h(px(1.0))
-                    .mt(px(2.0 * s))
-                    .mb(px(8.0 * s))
-                    .w_full()
-                    .bg(p.border),
-            );
-            if expanded {
-                // React hangs the whole log off the rail the "Worked for" heading opened
-                // (`SessionChatExpansion`), so the turn's work reads as one indented block.
-                let mut log: Vec<AnyElement> = Vec::new();
-                if let Some(notice) = self.deferred_work_notice(item, &p, cx) {
-                    log.push(notice);
-                }
-                self.in_work_fold = true;
-                for message in item["work"].as_array().into_iter().flatten() {
-                    log.push(self.message_row(message, &p, window, cx));
-                }
-                self.in_work_fold = false;
-                if !log.is_empty() {
-                    row = row.child(disclosure_body(
-                        &p,
-                        DisclosureRail::Marker,
-                        8.0,
-                        id,
-                        "Collapse completed work",
-                        log,
-                        cx,
-                    ));
-                }
-            }
-            if let Some(files) = self.completed_files_fold(item, &p, cx) {
-                row = row.child(files);
-            }
-            for message in item["artifacts"].as_array().into_iter().flatten() {
-                row = row.child(self.message_row(message, &p, window, cx));
-            }
-            // The turn's answered questions, lifted out of the fold so an exchange the reader took
-            // part in is never buried by a collapsed "Worked for Xs" section.
-            if let Some(cards) = self.question_exchange_cards(
-                &format!("work:{}", text(&item, "id")),
-                &item["questions"],
-                &p,
-                cx,
-            ) {
-                row = row.child(cards);
-            }
-            if item["final"].is_object() {
-                row = row.child(self.message_row(&item["final"], &p, window, cx));
-            }
-            self.hide_file_changes = false;
-            row.into_any_element()
+            self.completed_work_row(item, &p, window, cx)
         } else {
+            // A prompt drawn with its turn's rows still open below it; when the same turn comes
+            // back folded, `worked_fold_motion.rs` folds those rows away instead of swapping them.
+            if item["message"]["role"] == "user"
+                && !items.get(index + 1).is_some_and(|next| {
+                    next["kind"] == "completed-work" && next["id"] == item["message"]["id"]
+                })
+            {
+                self.worked_fold
+                    .saw_live(&format!("work:{}", text(&item["message"], "id")));
+            }
             self.message_row(&item["message"], &p, window, cx)
         };
         div()
@@ -336,6 +263,7 @@ impl NativeChatView {
             )
             .child(div().flex_1().min_w_0().child(label))
             .on_click(cx.listener(move |this, _, _, cx| {
+                this.worked_fold.toggled(&id, !expanded, cx.reduce_motion());
                 if expanded {
                     this.expanded.remove(&id);
                     this.collapsed.insert(id.clone());
@@ -363,7 +291,7 @@ impl NativeChatView {
         self.rich_markdown(id, content, references, p, cx)
     }
 
-    fn message_row(
+    pub(super) fn message_row(
         &mut self,
         message: &Value,
         p: &ChatAppearance,

@@ -9,9 +9,11 @@ import {
   completedWorkRenderItems,
   finalAssistantMessageIds,
   partitionCompletedChatWork,
+  stickySessionChatTranscriptWorking,
   summaryModeTurns,
   workedDurationLabel,
   type CompletedWorkTurn,
+  type SessionChatFoldMemory,
   type SummaryModeTurn,
   type SessionChatRenderItem,
 } from '@/packages/shared/session-chat-presentation/turns';
@@ -48,6 +50,11 @@ import { normalizeghostexHotkeySettings } from '../../../shared/ghostex-hotkeys'
 import { type SessionChatMessage, type SessionChatTheme } from '../../../shared/session-chat';
 import { formatSidebarHotkeyLabel } from '../../hotkey-label';
 import { SessionChatDisclosure, SessionChatExpansion, anchorSessionChatExpansionTop } from '../session-chat-expansion';
+import {
+  SESSION_CHAT_WORKED_FOLD_TIMING,
+  SessionChatWorkedPart,
+  useSessionChatWorkedFold,
+} from '../session-chat-worked-fold';
 import { SessionChatFileChangeCards, SessionChatFileChangeInteractionContext } from '../session-chat-file-change-card';
 import { splitSessionChatFileChanges } from '../session-chat-file-changes';
 import {
@@ -189,6 +196,7 @@ const CompletedWork = memo(
 );
 
 function CompletedWorkBody({
+  foldingFromLive = false,
   onAnnotate,
   onExpand,
   onSaveMarkdown,
@@ -196,6 +204,8 @@ function CompletedWorkBody({
   turn,
   verboseMode,
 }: {
+  /** The turn's rows were live in the previous render, so they fold away instead of vanishing. */
+  foldingFromLive?: boolean;
   onAnnotate?: (markdown: string) => void;
   onExpand: (target: HTMLElement | null) => void;
   onSaveMarkdown?: (markdown: string) => void;
@@ -210,6 +220,7 @@ function CompletedWorkBody({
   verboseMode: boolean;
 }) {
   const [open, setOpen] = useSessionChatDisclosureState('completed-work', verboseMode);
+  const { motion, armed, toggled, style: motionStyle } = useSessionChatWorkedFold(foldingFromLive, open);
   const [filesOpen, setFilesOpen] = useState(false);
   const deferred = useDeferredSessionChatWork(turn.user.deferredWork, open || filesOpen);
   const work = useMemo(
@@ -233,87 +244,159 @@ function CompletedWorkBody({
     ...(turn.user.deferredWork?.filePaths ?? []),
   ]).size;
 
-  return (
-    <div className='ghostex-chat-completed-turn'>
+  const trigger = (
+    <Button
+      aria-expanded={hasWork ? open : undefined}
+      className='ghostex-chat-completed-work-trigger'
+      disabled={!hasWork}
+      onClick={() => {
+        if (hasWork) {
+          if (!open) {
+            onExpand(triggerRef.current);
+          }
+          toggled(!open);
+          setOpen((value) => !value);
+        }
+      }}
+      ref={triggerRef}
+      size='xs'
+      type='button'
+      variant='ghost'
+    >
+      {/* The chevron LEADS, in the transcript's marker slot, like every
+          other disclosure. It used to trail the label, which left this row
+          as the only expander on the surface whose glyph was not on the
+          column. The slot stays even with no work to disclose, so a turn
+          with nothing behind it does not shift its label left. */}
+      <span className='ghostex-chat-marker-slot'>
+        {hasWork ? (
+          <IconChevronRight aria-hidden='true' className={cn('ghostex-chat-disclosure-chevron', open && 'is-open')} />
+        ) : null}
+      </span>
+      <span>
+        {workedDurationLabel(turn.user.timestamp, turn.final?.timestamp ?? turn.user.deferredWork?.completedAt ?? null)}
+      </span>
+    </Button>
+  );
+  const log = (
+    <SessionChatExpansion
+      bodyClassName='ghostex-chat-completed-work-content'
+      label='Collapse completed work'
+      onCollapse={() => setOpen(false)}
+    >
+      {turn.user.deferredWork && !deferred.messages ? (
+        <DeferredWorkLoading error={deferred.error} retry={deferred.retry} />
+      ) : (
+        collapsedWork.map((message) => (
+          <MessageRow
+            hideFileChanges
+            key={message.id}
+            message={message}
+            questionPairsAsRows
+            showAssistantCopy={false}
+            verboseMode={verboseMode}
+          />
+        ))
+      )}
+    </SessionChatExpansion>
+  );
+  const logShown = hasWork && (open || motion === 'close');
+  const T = SESSION_CHAT_WORKED_FOLD_TIMING;
+
+  /*
+  CDXC:SessionChat 2026-09-24 SEE-ALSO:
+  The fold's motion (session-chat-worked-fold.tsx) is GPUI's completed_work_row.rs: folding dims the rows that were live and eases them shut while the heading, its divider, the block's bottom space and the files line grow in; opening or closing eases the log. Every moving part carries its own gap, so the first and last frames match the settled turn.
+  */
+  const workBlock =
+    motion === 'fold' ? (
+      <div className='ghostex-chat-completed-work' data-worked-motion='fold'>
+        <SessionChatWorkedPart delayMs={T.headingDelayMs} ms={T.headingMs} open={armed} shutOpacity={0}>
+          <div className='ghostex-chat-worked-heading' data-arriving={armed ? 'false' : 'true'}>
+            {trigger}
+            <Separator />
+          </div>
+        </SessionChatWorkedPart>
+        {collapsedWork.length > 0 ? (
+          <SessionChatWorkedPart delayMs={T.collapseDelayMs} ms={T.collapseMs} open={!armed}>
+            <div className='ghostex-chat-worked-rows' data-dim={armed ? 'true' : 'false'}>
+              {collapsedWork.map((message) => (
+                <MessageRow key={message.id} message={message} showAssistantCopy={false} verboseMode={verboseMode} />
+              ))}
+            </div>
+          </SessionChatWorkedPart>
+        ) : null}
+        <SessionChatWorkedPart delayMs={T.headingDelayMs} ms={T.headingMs} open={armed}>
+          <div className='h-4' />
+        </SessionChatWorkedPart>
+      </div>
+    ) : motion ? (
+      <div className='ghostex-chat-completed-work' data-worked-motion={motion}>
+        {trigger}
+        <div className='ghostex-chat-worked-part-gap'>
+          <Separator />
+        </div>
+        {logShown ? (
+          <SessionChatWorkedPart ms={T.toggleMs} open={motion === 'open' ? armed : !armed}>
+            <div className='ghostex-chat-worked-part-gap'>
+              <div
+                className='ghostex-chat-worked-rows'
+                data-dim={(motion === 'open' ? !armed : armed) ? 'true' : 'false'}
+              >
+                {log}
+              </div>
+            </div>
+          </SessionChatWorkedPart>
+        ) : null}
+      </div>
+    ) : (
       <div className='ghostex-chat-completed-work'>
-        <Button
-          aria-expanded={hasWork ? open : undefined}
-          className='ghostex-chat-completed-work-trigger'
-          disabled={!hasWork}
-          onClick={() => {
-            if (hasWork) {
-              if (!open) {
-                onExpand(triggerRef.current);
-              }
-              setOpen((value) => !value);
-            }
-          }}
-          ref={triggerRef}
-          size='xs'
-          type='button'
-          variant='ghost'
-        >
-          {/* The chevron LEADS, in the transcript's marker slot, like every
-              other disclosure. It used to trail the label, which left this row
-              as the only expander on the surface whose glyph was not on the
-              column. The slot stays even with no work to disclose, so a turn
-              with nothing behind it does not shift its label left. */}
-          <span className='ghostex-chat-marker-slot'>
-            {hasWork ? (
-              <IconChevronRight
-                aria-hidden='true'
-                className={cn('ghostex-chat-disclosure-chevron', open && 'is-open')}
-              />
-            ) : null}
-          </span>
-          <span>
-            {workedDurationLabel(
-              turn.user.timestamp,
-              turn.final?.timestamp ?? turn.user.deferredWork?.completedAt ?? null
-            )}
-          </span>
-        </Button>
+        {trigger}
         <Separator />
-        {hasWork && open ? (
-          <SessionChatExpansion
-            bodyClassName='ghostex-chat-completed-work-content'
-            label='Collapse completed work'
-            onCollapse={() => setOpen(false)}
+        {hasWork && open ? log : null}
+      </div>
+    );
+
+  return (
+    <div className='ghostex-chat-completed-turn' style={motionStyle}>
+      {workBlock}
+      {changedFileCount > 0 ? (
+        motion === 'fold' ? (
+          <SessionChatWorkedPart delayMs={T.headingDelayMs} ms={T.headingMs} open={armed} shutOpacity={0}>
+            <SessionChatDisclosure
+              stateKey='files-changed'
+              onOpenChange={setFilesOpen}
+              label={
+                simpleMode
+                  ? sessionChatSimpleEditLabel(changedFileCount)
+                  : `${changedFileCount} ${changedFileCount === 1 ? 'file' : 'files'} changed`
+              }
+              onExpand={onExpand}
+            >
+              {turn.user.deferredWork && !deferred.messages ? (
+                <DeferredWorkLoading error={deferred.error} retry={deferred.retry} />
+              ) : (
+                <SessionChatFileChangeCards changes={fileChanges} messageId={turn.user.id} inDisclosure />
+              )}
+            </SessionChatDisclosure>
+          </SessionChatWorkedPart>
+        ) : (
+          <SessionChatDisclosure
+            stateKey='files-changed'
+            onOpenChange={setFilesOpen}
+            label={
+              simpleMode
+                ? sessionChatSimpleEditLabel(changedFileCount)
+                : `${changedFileCount} ${changedFileCount === 1 ? 'file' : 'files'} changed`
+            }
+            onExpand={onExpand}
           >
             {turn.user.deferredWork && !deferred.messages ? (
               <DeferredWorkLoading error={deferred.error} retry={deferred.retry} />
             ) : (
-              collapsedWork.map((message) => (
-                <MessageRow
-                  hideFileChanges
-                  key={message.id}
-                  message={message}
-                  questionPairsAsRows
-                  showAssistantCopy={false}
-                  verboseMode={verboseMode}
-                />
-              ))
+              <SessionChatFileChangeCards changes={fileChanges} messageId={turn.user.id} inDisclosure />
             )}
-          </SessionChatExpansion>
-        ) : null}
-      </div>
-      {changedFileCount > 0 ? (
-        <SessionChatDisclosure
-          stateKey='files-changed'
-          onOpenChange={setFilesOpen}
-          label={
-            simpleMode
-              ? sessionChatSimpleEditLabel(changedFileCount)
-              : `${changedFileCount} ${changedFileCount === 1 ? 'file' : 'files'} changed`
-          }
-          onExpand={onExpand}
-        >
-          {turn.user.deferredWork && !deferred.messages ? (
-            <DeferredWorkLoading error={deferred.error} retry={deferred.retry} />
-          ) : (
-            <SessionChatFileChangeCards changes={fileChanges} messageId={turn.user.id} inDisclosure />
-          )}
-        </SessionChatDisclosure>
+          </SessionChatDisclosure>
+        )
       ) : null}
       {visibleArtifacts.map((message) => (
         <MessageRow
@@ -633,17 +716,38 @@ export function SessionChatMessageList({
 
   const normalizedMessages = useMemo(() => normalizeChatTranscript(messages), [messages]);
   const rendered = useMemo(() => foldChatTranscript(normalizedMessages), [normalizedMessages]);
-  const renderItems = useMemo(
-    () => completedWorkRenderItems(rendered, isWorking, interactedMessageIds, normalizedMessages),
-    [isWorking, rendered, interactedMessageIds, normalizedMessages]
+  // A landed fold stays folded through a working blip until a new row arrives (turns.ts).
+  const foldMemory = useMemo<SessionChatFoldMemory>(() => ({}), [sessionKey]);
+  const transcriptWorking = useMemo(
+    () => stickySessionChatTranscriptWorking(messages, isWorking, foldMemory),
+    [foldMemory, isWorking, messages]
   );
+  const renderItems = useMemo(
+    () => completedWorkRenderItems(rendered, transcriptWorking, interactedMessageIds, normalizedMessages),
+    [transcriptWorking, rendered, interactedMessageIds, normalizedMessages]
+  );
+  // Turns the last committed render drew with their rows still open. A turn that comes back folded
+  // folds those rows away instead of swapping them out (session-chat-worked-fold.tsx).
+  const liveTurnIds = useMemo(() => {
+    const ids = new Set<string>();
+    renderItems.forEach((item, index) => {
+      if (item.kind !== 'message' || item.message.role !== 'user') return;
+      const next = renderItems[index + 1];
+      if (!(next?.kind === 'completed-work' && next.turn.user.id === item.message.id)) ids.add(item.message.id);
+    });
+    return ids;
+  }, [renderItems]);
+  const committedLiveTurnIdsRef = useRef<ReadonlySet<string>>(liveTurnIds);
+  useEffect(() => {
+    committedLiveTurnIdsRef.current = liveTurnIds;
+  }, [liveTurnIds]);
   const copyableAssistantMessageIds = useMemo(
-    () => finalAssistantMessageIds(rendered, isWorking),
-    [isWorking, rendered]
+    () => finalAssistantMessageIds(rendered, transcriptWorking),
+    [transcriptWorking, rendered]
   );
   const summaryTurns = useMemo(
-    () => summaryModeTurns(rendered, copyableAssistantMessageIds, isWorking),
-    [copyableAssistantMessageIds, isWorking, rendered]
+    () => summaryModeTurns(rendered, copyableAssistantMessageIds, transcriptWorking),
+    [copyableAssistantMessageIds, transcriptWorking, rendered]
   );
 
   const pendingMessageId = useMemo(() => {
@@ -942,6 +1046,7 @@ export function SessionChatMessageList({
                               />
                             ) : (
                               <CompletedWork
+                                foldingFromLive={committedLiveTurnIdsRef.current.has(item.turn.user.id)}
                                 onExpand={anchorExpandedAreaTop}
                                 {...(onAnnotateMessage ? { onAnnotate: onAnnotateMessage } : {})}
                                 {...(saveMessageMarkdown && listMessageMarkdownPaths

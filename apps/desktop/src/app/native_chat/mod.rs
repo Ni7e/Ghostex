@@ -18,6 +18,7 @@ mod binding;
 mod cards;
 mod child_window;
 mod choice_rows;
+mod completed_work_row;
 mod composer_animation;
 mod composer_not_ready;
 mod composer_references;
@@ -82,8 +83,6 @@ mod transcript_skeleton;
 
 mod terminal_dialog;
 
-mod model_picker;
-
 mod option_menu;
 
 mod option_pills;
@@ -96,6 +95,7 @@ mod suggestions;
 
 mod clipboard;
 
+mod worked_fold_motion;
 mod working_spark;
 mod working_strip;
 

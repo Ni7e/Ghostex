@@ -55,9 +55,8 @@ fn scope<'a>(
 /// Rebuilds the viewer's item list when one of its inputs moved.
 ///
 /// Called once per event from family f's settle. The TypeScript calls `project()` from exactly
-/// three places (a restart, a finished read, and the settle hold expiring), and all three are a
-/// change to the page, the agent path or the working flag, so an inputs guard is the same decision
-/// without the call sites.
+/// two places (a restart and a finished read), and both are a change to the page, the agent path
+/// or the working flag, so an inputs guard is the same decision without the call sites.
 pub fn refresh(state: &mut ChatState, context: &ChatContext) {
     let Some(page) = state.extras.subagent.page.clone() else {
         // `if (!page) { this.items = []; return; }`: the caches are NOT cleared here, only by a
@@ -72,6 +71,7 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
     // row pointing back at the transcript being shown is not a link.
     if state.extras.subagent.view.agent_path != next_path {
         state.extras.subagent.view.agent_path = next_path;
+        state.extras.subagent.view.fold_settled_at = None;
         state.extras.subagent.view.invalidate();
     }
     let directory = state.transcript_view.working_directory.clone();
@@ -79,7 +79,12 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
         state.extras.subagent.view.working_directory = directory;
         state.extras.subagent.view.invalidate();
     }
-    let working = state.extras.subagent.working;
+    // The viewer's own `NativeChatPresentation.update` applies the sticky fold with its own memory.
+    let working = crate::transcript::turns::sticky_transcript_working(
+        &rows,
+        state.extras.subagent.working,
+        &mut state.extras.subagent.view.fold_settled_at,
+    );
     let inputs = ProjectionInputs {
         composed: rows.clone(),
         composition_identity: 0,

@@ -14,6 +14,7 @@ import {
   agentDisplayName,
 } from '../session-chat-presentation/agent-message';
 import { completedChatWork, projectChatTranscript } from '../session-chat-presentation/transcript';
+import { stickySessionChatTranscriptWorking, type SessionChatFoldMemory } from '../session-chat-presentation/turns';
 import { sessionChatSuppressedTurnPresentation } from '@/packages/core-ui/chat/session-chat-noise';
 import { sessionChatProseMarkdown } from '../session-chat-presentation/prose-blocks';
 import { classifySessionChatSystemCard } from '../session-chat-presentation/system-cards';
@@ -128,6 +129,7 @@ export class NativeChatPresentation {
   private modelsById = new Map<string, { source: SessionChatMessage; model: ProjectedMessage }>();
   private messages?: readonly SessionChatMessage[];
   private working?: boolean;
+  private foldMemory: SessionChatFoldMemory = {};
   private summary?: boolean;
   private detailRevision = -1;
   private projection?: ReturnType<typeof projectChatTranscript>;
@@ -152,6 +154,7 @@ export class NativeChatPresentation {
   setAgentPath(agentPath: string) {
     if (agentPath === this.agentPath) return;
     this.agentPath = agentPath;
+    this.foldMemory = {};
     this.models = new WeakMap();
     this.modelsById.clear();
     this.result = undefined;
@@ -247,6 +250,7 @@ export class NativeChatPresentation {
     deferred: ReadonlyMap<string, SessionChatMessage[]>,
     detailRevision: number
   ) {
+    working = stickySessionChatTranscriptWorking(messages, working, this.foldMemory);
     const changed = messages !== this.messages || working !== this.working;
     if (changed || !this.projection) {
       this.messages = messages;

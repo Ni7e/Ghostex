@@ -17,7 +17,6 @@ use serde_json::{json, Map, Value};
 use crate::effect::Effect;
 use crate::extras::agent_fleet::subagent_model_label;
 use crate::extras::subagent_target::{SubagentTarget, ROOT_AGENT_PATH};
-use crate::extras::working_strip::SETTLE_HOLD_MS;
 use crate::state::{ChatContext, ChatState, SubagentGap, SubagentRequest, SubagentState};
 use crate::wire::ChatRpcMethod;
 
@@ -59,7 +58,6 @@ fn restart(state: &mut SubagentState, next_request: u64) -> Vec<Effect> {
     state.request = None;
     state.busy = false;
     state.poll_at_ms = None;
-    state.hold_until_ms = None;
     state.error = None;
     state.loading_earlier = false;
     state.working = false;
@@ -134,8 +132,8 @@ pub fn settle_rpc(
     }
     let effects = match outcome {
         Ok(result) => match pending.gap.clone() {
-            Some(gap) => continue_gap(state, &pending, gap, result, context, next_request),
-            None => first_page(state, &pending, result, context, next_request),
+            Some(gap) => continue_gap(state, &pending, gap, result, next_request),
+            None => first_page(state, &pending, result, next_request),
         },
         Err(message) => {
             state.error = Some(message);
@@ -155,7 +153,6 @@ fn first_page(
     state: &mut SubagentState,
     pending: &SubagentRequest,
     next: &Value,
-    context: &ChatContext,
     next_request: u64,
 ) -> Vec<Effect> {
     // A daemon predating child reads must never paint the main conversation in the viewer.
@@ -189,7 +186,7 @@ fn first_page(
             }
         }
     }
-    finish(state, pending, next.clone(), context);
+    finish(state, pending, next.clone());
     Vec::new()
 }
 
@@ -199,13 +196,12 @@ fn continue_gap(
     pending: &SubagentRequest,
     mut gap: SubagentGap,
     read: &Value,
-    context: &ChatContext,
     next_request: u64,
 ) -> Vec<Effect> {
     let read_before = before_offset(read);
     // A page that does not move the cursor backwards would loop forever, so the walk stops.
     if read_before.is_none_or(|before| before >= gap.cursor) {
-        return finish_gap(state, pending, gap, context);
+        return finish_gap(state, pending, gap);
     }
     let mut list = messages(read);
     list.extend(messages(&gap.page));
@@ -215,7 +211,7 @@ fn continue_gap(
     if gap.has_more && gap.cursor > gap.last_offset {
         return read_gap(state, pending, gap, next_request);
     }
-    finish_gap(state, pending, gap, context)
+    finish_gap(state, pending, gap)
 }
 
 /// One more page of the walk.
@@ -247,53 +243,27 @@ fn finish_gap(
     state: &mut SubagentState,
     pending: &SubagentRequest,
     gap: SubagentGap,
-    context: &ChatContext,
 ) -> Vec<Effect> {
     let mut next = gap.page;
     next["beforeOffset"] = Value::from(gap.cursor);
     next["hasMore"] = Value::Bool(gap.has_more);
-    finish(state, pending, next, context);
+    finish(state, pending, next);
     Vec::new()
 }
 
-/// The merge that ends every read, and the settle hold it applies.
-fn finish(
-    state: &mut SubagentState,
-    pending: &SubagentRequest,
-    next: Value,
-    context: &ChatContext,
-) {
+/// The merge that ends every read; the viewer's working flag follows the page's lifecycle at once.
+fn finish(state: &mut SubagentState, pending: &SubagentRequest, next: Value) {
     state.page = Some(merge_page(pending, next));
     state.error = None;
-    settle_hold(state, working_lifecycle(state.page.as_ref()), context);
+    state.working = working_lifecycle(state.page.as_ref());
 }
 
-/// `settle`: going working is applied at once; settling waits out the hold, exactly as the React
-/// hook does.
-pub fn settle_hold(state: &mut SubagentState, live: bool, context: &ChatContext) {
-    if live {
-        state.hold_until_ms = None;
-        state.working = true;
-        return;
-    }
-    if !state.working || state.hold_until_ms.is_some() {
-        return;
-    }
-    state.hold_until_ms = Some(context.now_ms + SETTLE_HOLD_MS);
-}
-
-/// The hold expiring and the poll coming due, both of which the host drives with a tick.
+/// The poll coming due, which the host drives with a tick.
 pub fn settle_tick(
     state: &mut SubagentState,
     context: &ChatContext,
     next_request: u64,
 ) -> Vec<Effect> {
-    if let Some(until) = state.hold_until_ms {
-        if context.now_ms >= until {
-            state.hold_until_ms = None;
-            state.working = false;
-        }
-    }
     match state.poll_at_ms {
         Some(due) if context.now_ms >= due && !state.stack.is_empty() => {
             request(state, false, next_request)

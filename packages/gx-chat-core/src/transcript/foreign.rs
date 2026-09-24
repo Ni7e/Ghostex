@@ -227,10 +227,15 @@ pub fn is_role(message: &ChatMessage, role: ChatRole) -> bool {
 
 /// Family a: whether the agent is working, which decides the turn boundaries.
 ///
-/// `presentation.update(state.messages, state.workingSignal, …)` in `native-host.ts`: the
-/// projection is keyed on the controller's `workingSignal && !interrupted`, the raw live signal
-/// (an optimistic echo, a compaction, the server's flag or status, the host's own signal) before
-/// the lifecycle settle, not on the settled `working` the document publishes.
+/// `presentation.update(state.messages, state.transcriptWorking, …)` in `native-host.ts`, after
+/// `NativeChatPresentation.update` has applied the sticky fold: the live signal until the turn
+/// lifecycle ends the run ([`crate::session::working::transcript_working`]), held settled while the
+/// newest row is the one the transcript settled on. [`crate::transcript::rows::refresh`] records
+/// that settle; this only reads it, so pure readers get the same answer.
 pub fn is_working(state: &crate::state::ChatState) -> bool {
-    crate::session::working::working_signal(state) && !state.session.interrupted
+    crate::session::working::transcript_working(state)
+        && !crate::transcript::turns::sticky_fold_holds(
+            &state.messages.composed,
+            state.transcript_view.fold_settled_at.as_deref(),
+        )
 }

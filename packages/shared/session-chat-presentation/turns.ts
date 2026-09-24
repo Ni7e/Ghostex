@@ -240,6 +240,28 @@ export function completedWorkRenderItems(
   return items;
 }
 
+/** What a transcript remembers about its last fold: the newest row it had when it settled. */
+export interface SessionChatFoldMemory {
+  settledAtMessageId?: string;
+}
+
+/**
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: once a turn has folded into "Worked for Xs", a working blip alone must not reopen it; it reopens (animated) only when a new transcript row lands, and folds again when that work ends.
+ * The live signal still flaps at turn boundaries (hooks, a Stop hook that continues the turn, a follow-up), and the 8-second settle hold that used to hide that is gone. So a transcript that settled keeps treating the session as settled until its newest row changes; any appended row (a tool call, a streamed reply, a task notification, a new prompt) hands the decision back to the live signal.
+ * Returns the working flag the projection should use, and records the settle into `memory`, which the caller keeps for the life of one transcript.
+ */
+export function stickySessionChatTranscriptWorking(
+  messages: readonly SessionChatMessage[],
+  working: boolean,
+  memory: SessionChatFoldMemory
+): boolean {
+  const newest = messages.at(-1)?.id;
+  const effective = working && (memory.settledAtMessageId === undefined || memory.settledAtMessageId !== newest);
+  memory.settledAtMessageId = effective ? undefined : newest;
+  return effective;
+}
+
 export function workedDurationLabel(startedAt: number | null, completedAt: number | null): string {
   if (startedAt === null || completedAt === null || completedAt < startedAt) {
     return 'Worked';

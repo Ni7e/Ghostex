@@ -100,7 +100,10 @@ import {
 } from '@/packages/core-ui/chat/session-chat-terminal-stream';
 import type { SessionChatTransport } from '@/packages/core-ui/chat/session-chat-transport';
 import { selectSessionChatViewState, sessionChatTranscriptStatusAfterState } from '@/packages/core-ui/chat/session-chat-view-state';
-import { deriveSessionChatWorkingOverride } from '@/packages/core-ui/chat/session-chat-working-status';
+import {
+  deriveSessionChatWorkingOverride,
+  sessionChatTranscriptWorking,
+} from '@/packages/core-ui/chat/session-chat-working-status';
 import {
   FrameState,
   INITIAL_STALL_THRESHOLD_MS,
@@ -1811,7 +1814,11 @@ export function computeSessionChat(
     screenProbed,
     view,
     working,
-    workingSignal: workingSignal && !interrupted,
+    transcriptWorking: sessionChatTranscriptWorking({
+      working: workingSignal && !interrupted,
+      lifecycle,
+      workingStartedAt: workingStartedAtRef.current,
+    }),
     sessionWorking: sessionActivityWorking || externalWorking === true,
     ...(transportSendKey ? { sendKey } : {}),
   };
