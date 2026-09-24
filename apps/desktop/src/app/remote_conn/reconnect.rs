@@ -41,6 +41,11 @@ impl GhostexGpuiApp {
             == Some(true);
         let connect_generation =
             self.next_gpui_remote_gxserver_connect_generation(&remote_machine_id);
+        let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        let config = gpui_remote_machine_config_from_settings(
+            settings_snapshot.object(),
+            &remote_machine_id,
+        );
         if self
             .source_code_server_runtime
             .target
@@ -55,13 +60,22 @@ impl GhostexGpuiApp {
                 )
             })
         {
-            self.stop_source_code_server_runtime(cx);
+            self.refresh_source_code_server_runtime_child(cx);
+            // CDXC:CodeEditor 2026-09-23 WHY:
+            // Code owns a separate SSH connection. Restarting it for an automatic API-only reconnect races the old listener's shutdown and can accept that old listener as the new launch's readiness.
+            let preserve_code = automatic
+                && !install_approved
+                && self.source_code_server_runtime.state == SourceCodeServerRuntimeLaunchState::Ready
+                && config.as_ref().is_some_and(|config| {
+                    !config.disabled && self.source_code_server_runtime.target.as_ref().is_some_and(|target| {
+                        matches!(&target.endpoint, SourceCodeServerRuntimeEndpoint::Remote { machine_config, .. } if machine_config == config)
+                    })
+                });
+            if !preserve_code {
+                self.stop_source_code_server_runtime(cx);
+            }
         }
-        let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
-        let Some(config) = gpui_remote_machine_config_from_settings(
-            settings_snapshot.object(),
-            &remote_machine_id,
-        ) else {
+        let Some(config) = config else {
             self.dispatch_gpui_remote_machine_status(remote_machine_id.as_str(), "invalid", cx);
             self.dispatch_gpui_app_modal_toast(
                 "warning",

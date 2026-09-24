@@ -49,7 +49,7 @@ impl GhostexGpuiApp {
                         })
                 });
         }
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         {
             let retained_askpass = self
                 .agents_gpui_terminal_viewer_recipes
@@ -649,7 +649,29 @@ impl GhostexGpuiApp {
         let font = terminal_gpui_engine::gpui_engine_terminal_font_config(&engine_config);
         let (sink, event_rx) = terminal_element::TerminalView::event_channel();
         let spawn_started = Instant::now();
-        let mut model = terminal_model::TerminalModel::spawn(spawn_config, sink).ok()?;
+        let argument_utf16_length = spawn_config
+            .args
+            .iter()
+            .map(|argument| argument.encode_utf16().count() + 1)
+            .sum::<usize>();
+        let mut model = match terminal_model::TerminalModel::spawn(spawn_config, sink) {
+            Ok(model) => model,
+            Err(error) => {
+                let os_error = error
+                    .chain()
+                    .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+                    .and_then(std::io::Error::raw_os_error);
+                support_logs::append(
+                    support_logs::GpuiSupportLog::TerminalFocus,
+                    "gpui.terminalEngine.spawnFailed",
+                    serde_json::json!({
+                        "osErrorCode": os_error,
+                        "argumentUtf16Length": argument_utf16_length,
+                    }),
+                );
+                return None;
+            }
+        };
         support_logs::append_temporary(
             support_logs::GpuiSupportLog::TerminalFocus,
             "TEMP.remoteNewTerminal.engineProcessSpawned",
@@ -814,7 +836,12 @@ impl GhostexGpuiApp {
                 let working_directory = osc_states
                     .get(&runtime_session_id)
                     .and_then(|state| state.pwd.clone());
-                self.open_gpui_engine_terminal_action_url(url, working_directory.as_deref(), cx);
+                self.open_gpui_engine_terminal_action_url(
+                    url,
+                    working_directory.as_deref(),
+                    target,
+                    cx,
+                );
             }
             TerminalViewEvent::PasteRequested => {
                 let _ = self.paste_into_focused_terminal_from_clipboard(cx);

@@ -26,6 +26,7 @@ use ghostex_gx_core::{CloseAfterDoneInput, DelayedSendInput, ProjectDiffStats};
 use serde_json::Value;
 
 use crate::GhostexGpuiApp;
+use crate::app::helpers::gpui_remote_project_reference_from_project_id;
 use crate::app::native_sidebar::model::NativeSidebarRevealRequest;
 
 /// What the channel has delivered.
@@ -90,9 +91,25 @@ impl GhostexGpuiApp {
             return;
         };
         let mut reveal: Option<NativeSidebarRevealRequest> = None;
+        let remote_project = self.gpui_app_modal_active_project_id().filter(|id| {
+            self.app_modal_window.is_some()
+                && gpui_remote_project_reference_from_project_id(id).is_some()
+        });
+        let mut remote_actions_changed = false;
         let facts = &mut self.gx_store.runtime_facts;
         match value.get("kind").and_then(Value::as_str) {
             Some("hud") => {
+                if let Some(project) = remote_project.as_deref() {
+                    remote_actions_changed = facts
+                        .hud
+                        .as_deref()
+                        .and_then(|hud| hud.get("commandsByProject"))
+                        .and_then(|rows| rows.get(project))
+                        != value
+                            .get("hud")
+                            .and_then(|hud| hud.get("commandsByProject"))
+                            .and_then(|rows| rows.get(project));
+                }
                 facts.hud = value.get("hud").cloned().map(Arc::new);
                 facts.hud_generation += 1;
                 facts.counters.hud_posts += 1;
@@ -161,6 +178,54 @@ impl GhostexGpuiApp {
         // Everything the list still borrows moved with this post, so the list is brought up to
         // date now rather than at the next thing that happens to move the store.
         self.gx_store_sidebar_state_changed(cx);
+        if remote_actions_changed {
+            self.refresh_open_gpui_app_modal_sidebar_state_in_background(cx);
+        }
+    }
+
+    /// CDXC:AgentLauncher 2026-09-23 WHY:
+    /// Settings shares the sidebar's machine-scoped project Actions; a local HUD read cannot resolve a remote project and supplies unrelated defaults. Global Actions still come from the local Settings hydrate.
+    pub(crate) fn with_remote_project_action_rows(&self, mut message: Value) -> Value {
+        if let Some(project) = self
+            .gpui_app_modal_active_project_id()
+            .filter(|id| gpui_remote_project_reference_from_project_id(id).is_some())
+        {
+            message["hud"]["commands"] = self
+                .gx_store
+                .runtime_facts
+                .hud
+                .as_deref()
+                .and_then(|hud| hud.get("commandsByProject"))
+                .and_then(|rows| rows.get(&project))
+                .cloned()
+                .unwrap_or_else(|| Value::Array(Vec::new()));
+        }
+        message
+    }
+
+    pub(crate) fn gpui_action_scope_for_command(
+        &self,
+        command_id: &str,
+    ) -> Option<crate::app::helpers::GpuiSidebarCommandScope> {
+        use crate::app::helpers::GpuiSidebarCommandScope;
+        let hud = self.gx_store.runtime_facts.hud.as_deref()?;
+        let contains = |rows: Option<&Value>| {
+            rows.and_then(Value::as_array).is_some_and(|rows| {
+                rows.iter()
+                    .any(|row| row["commandId"].as_str() == Some(command_id))
+            })
+        };
+        let project = self.gpui_app_modal_active_project_id()?;
+        let project_match = contains(
+            hud.get("commandsByProject")
+                .and_then(|rows| rows.get(&project)),
+        );
+        let global_match = contains(hud.get("globalCommands"));
+        match (project_match, global_match) {
+            (true, false) => Some(GpuiSidebarCommandScope::Project),
+            (false, true) => Some(GpuiSidebarCommandScope::Global),
+            _ => None,
+        }
     }
 
     /// Remembers a reveal this app asked for itself (the titlebar's Reveal Active Session), which

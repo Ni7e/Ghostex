@@ -81,6 +81,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 scraper = { version = "0.24", default-features = false }
 sha2 = "0.10"
 tar = "0.4"
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "io-util", "macros"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 ureq = { version = "3.3.0", default-features = false, features = ["platform-verifier", "rustls"] }
 # CDXC:SessionChat 2026-09-22 WHY: the Rust chat host mints the draft ids and the chat client id the brain must not generate itself (the core reads no random source), in the same v4 shape `crypto.randomUUID()` produces inside QuickJS. Already in the graph through packages/chat-runtime.
 uuid = { version = "1", features = ["v4"] }
@@ -107,6 +109,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security_Cryptography",
+    "Win32_Security_Credentials",
     "Win32_Storage_FileSystem",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",

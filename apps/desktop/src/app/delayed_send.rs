@@ -19,6 +19,16 @@ use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
 use crate::*;
+
+struct GpuiDeletedActionSession {
+    session_id: CommandSessionId,
+    command_id: String,
+    scope: GpuiSidebarCommandScope,
+    local_key: Option<GpuiLocalWorkspaceSessionKey>,
+    remote_reference: Option<GpuiRemoteAttachSessionReference>,
+    run_id: Option<String>,
+}
+
 impl GhostexGpuiApp {
     pub(crate) fn handle_gpui_sidebar_agent_metadata_command(
         &mut self,
@@ -85,15 +95,30 @@ impl GhostexGpuiApp {
                 }
             };
         let failure_order_sync_result = write.order_sync_result("error", Vec::new());
-        if let Some(command_id) = write.deleted_command_id().map(str::to_string) {
-            self.close_gpui_deleted_sidebar_command_session(command_id.as_str(), cx);
-        }
+        let remote_target = (write.scope() == GpuiSidebarCommandScope::Project)
+            .then(|| {
+                gpui_remote_project_reference_from_project_id(
+                    gpui_sidebar_command_write_active_project_id(&write),
+                )
+            })
+            .flatten()
+            .and_then(|project| {
+                self.gpui_remote_gxserver_request_target(&project.remote_machine_id)
+            });
+        let deleted_session = self.gpui_session_for_deleted_action(&write);
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let result = background
-                .spawn(async move { gpui_apply_sidebar_command_metadata_write(write) })
+                .spawn(
+                    async move { gpui_apply_sidebar_command_metadata_write(write, remote_target) },
+                )
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if result.is_ok()
+                    && let Some(deleted_session) = deleted_session
+                {
+                    this.close_gpui_deleted_sidebar_command_session(deleted_session, cx);
+                }
                 this.finish_gpui_sidebar_metadata_write(
                     GpuiSidebarMetadataWriteKind::Commands,
                     result,
@@ -105,17 +130,91 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    pub(crate) fn close_gpui_deleted_sidebar_command_session(
+    /// CDXC:AgentLauncher 2026-09-23 WHY:
+    /// Built-in Action IDs repeat across projects and computers. A delete captures only its proven owner tab, then verifies that same run after the daemon accepts the mutation; failed writes and newer runs must keep their terminals.
+    fn gpui_session_for_deleted_action(
+        &self,
+        write: &GpuiSidebarCommandMetadataWrite,
+    ) -> Option<GpuiDeletedActionSession> {
+        let command_id = write.deleted_command_id()?;
+        self.command_pane
+            .flat_tab_ids()
+            .into_iter()
+            .find_map(|(_, session_id)| {
+                let session = self.command_pane.session(session_id)?;
+                if session.action_command_id.as_deref() != Some(command_id)
+                    || session.action_scope != Some(write.scope())
+                {
+                    return None;
+                }
+                let local_key = session.gxserver_session_key.clone();
+                let remote_reference =
+                    self.command_remote_action_session_for_command_tab(session_id);
+                if write.scope() == GpuiSidebarCommandScope::Project {
+                    let project_id = gpui_sidebar_command_write_active_project_id(write);
+                    let matches = match gpui_remote_project_reference_from_project_id(project_id) {
+                        Some(project) => remote_reference.as_ref().is_some_and(|session| {
+                            session.remote_machine_id == project.remote_machine_id
+                                && session.project_id == project.project_id
+                        }),
+                        None => {
+                            remote_reference.is_none()
+                                && local_key
+                                    .as_ref()
+                                    .is_some_and(|key| key.project_id == project_id)
+                        }
+                    };
+                    if !matches {
+                        return None;
+                    }
+                }
+                Some(GpuiDeletedActionSession {
+                    session_id,
+                    command_id: command_id.to_string(),
+                    scope: write.scope(),
+                    local_key,
+                    remote_reference,
+                    run_id: session.action_run_id.clone(),
+                })
+            })
+    }
+
+    fn close_gpui_deleted_sidebar_command_session(
         &mut self,
-        command_id: &str,
+        deleted: GpuiDeletedActionSession,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        let Some((group_id, session_id)) = self
+        let session_id = deleted.session_id;
+        if self.command_remote_action_session_for_command_tab(session_id)
+            != deleted.remote_reference
+        {
+            return false;
+        }
+        let Some((group_id, _)) = self
             .command_pane
-            .take_action_session_slot_for_action_close(command_id)
+            .flat_tab_ids()
+            .into_iter()
+            .find(|(_, id)| *id == session_id)
         else {
             return false;
         };
+        let Some(session) = self.command_pane.session_mut(session_id) else {
+            return false;
+        };
+        if session.action_command_id.as_deref() != Some(deleted.command_id.as_str())
+            || session.action_scope != Some(deleted.scope)
+            || session.gxserver_session_key != deleted.local_key
+            || session.action_run_id != deleted.run_id
+        {
+            return false;
+        }
+        session.activity = CommandTerminalActivity::Idle;
+        session.action_command_id = None;
+        session.action_scope = None;
+        session.action_close_terminal_on_exit = false;
+        session.action_play_completion_sound = false;
+        session.action_run_id = None;
+        session.action_status_file_path = None;
         self.clear_gpui_command_delayed_send_timer(session_id);
         self.clear_gpui_command_close_after_done_timer(session_id);
         if !self
@@ -148,6 +247,7 @@ impl GhostexGpuiApp {
         match result {
             Ok(order_sync_result) => {
                 self.refresh_open_gpui_app_modal_sidebar_state_in_background(cx);
+                self.refresh_titlebar_actions_in_background(cx);
                 if let Some(order_sync_result) = order_sync_result {
                     self.dispatch_open_gpui_app_modal_message(order_sync_result, cx);
                 }

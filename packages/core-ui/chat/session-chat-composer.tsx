@@ -416,7 +416,7 @@ export interface SessionChatComposerProps {
    * instead of the browser file input; image paths insert "[Image #N](path)"
    * and everything else "[File #N](path)".
    */
-  onPickPaths?: () => Promise<string[]>;
+  onPickPaths?: (selection?: 'files' | 'folders') => Promise<string[]>;
   /**
    * Absolute paths of the OS drag currently over this page, captured by the
    * host shell at drag-enter (Chromium never exposes `File.path` to a page).
@@ -1395,6 +1395,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
             // Do not overwrite a next draft typed while the send was in flight.
             // Put the failed message first so retrying still preserves send order.
             restoreComposerText(text);
+            // Keep the refusal after restoring the draft; native-host's preserveError actions mirror this ordering.
             /*
           CDXC:SessionChat 2026-09-04: the user's own Escape cancelled this
           send before its Enter (`sendCancelled`). Nothing failed and the
@@ -2013,11 +2014,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
      * (folders included), no byte upload, inserted through the shared
      * native-path reference logic.
      */
-    const attachFromNativePicker = (): void => {
+    const attachFromNativePicker = (selection?: 'files' | 'folders'): void => {
       pendingComposerOperationsRef.current += 1;
       void (async () => {
         try {
-          await insertNativePathReferences((await onPickPaths?.()) ?? []);
+          await insertNativePathReferences((await onPickPaths?.(selection)) ?? []);
         } catch (error) {
           console.error('[session-chat] attach picker failed', error);
         } finally {
@@ -2935,12 +2936,17 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                       ? {
                           onAttach: () => {
                             if (onPickPaths) {
-                              attachFromNativePicker();
+                              attachFromNativePicker(
+                                typeof navigator !== 'undefined' && /Linux/i.test(navigator.platform) ? 'files' : undefined
+                              );
                             } else {
                               fileInputRef.current?.click();
                             }
                           },
                         }
+                      : {})}
+                    {...(onPickPaths && typeof navigator !== 'undefined' && /Linux/i.test(navigator.platform)
+                      ? { onAttachFolders: () => attachFromNativePicker('folders') }
                       : {})}
                   />
                   {showStopButton ? (

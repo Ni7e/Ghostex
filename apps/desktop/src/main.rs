@@ -170,6 +170,10 @@ pub(crate) use crate::app::core::*;
 pub(crate) use crate::app::view_scopes::*;
 
 fn main() {
+    #[cfg(windows)]
+    if gpui_run_windows_remote_ssh_askpass() {
+        return;
+    }
     if std::env::var_os("GHOSTEX_CHAT_PREVIEW_STATE").is_some() {
         chat_preview::run();
         return;
@@ -248,6 +252,8 @@ fn main() {
     #[cfg(target_os = "macos")]
     application.on_open_urls(queue_gpui_os_integration_urls);
     application.run(move |cx| {
+        #[cfg(target_os = "windows")]
+        cef::register_windows_shutdown(cx);
         gpui_component::init(cx);
         apply_gpui_component_theme(cx);
         #[cfg(target_os = "macos")]
@@ -349,6 +355,14 @@ fn main() {
             ]);
             bindings
         };
+        // CDXC:Clipboard 2026-09-23 DECISION:
+        // User: Ctrl+Shift+V on Windows and Linux terminals uses the same local clipboard paste action, while configured hotkeys keep precedence. Sending raw Ctrl+V instead makes remote PowerShell paste the remote computer's clipboard.
+        #[cfg(not(target_os = "macos"))]
+        cx.bind_keys([KeyBinding::new(
+            "ctrl-shift-v",
+            PasteIntoFocusedTerminal,
+            Some(terminal_element::TERMINAL_KEY_CONTEXT),
+        )]);
         cx.bind_keys(shell_key_bindings);
         // The user's configured hotkey table binds after the base defaults so
         // configured chords win conflicts. Ids dispatch through the shared

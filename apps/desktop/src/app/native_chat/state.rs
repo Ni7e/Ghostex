@@ -506,19 +506,29 @@ impl NativeChatView {
     }
 
     pub(crate) fn insert_prompt(&mut self, content: &str, cx: &mut Context<Self>) {
-        self.replace_draft(content, false, cx);
+        self.replace_draft(content, false, false, cx);
     }
 
-    fn replace_draft(&mut self, content: &str, history: bool, cx: &mut Context<Self>) {
+    fn replace_draft(
+        &mut self,
+        content: &str,
+        history: bool,
+        preserve_error: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.draft = content.to_string();
         self.draft_revision += 1;
         self.input_needs_sync = true;
         self.input_undoable = true;
         self.focus_requested = true;
         if self.composer_ready {
-            self.invoke(json!({"type":"editDraft", "text":self.draft, "draftVersion":{"draftId":self.draft_id,"revision":self.draft_revision.max(1)},"history":history}),cx);
+            self.invoke(json!({"type":"editDraft", "text":self.draft, "draftVersion":{"draftId":self.draft_id,"revision":self.draft_revision.max(1)},"history":history,"preserveError":preserve_error}),cx);
         }
-        self.save_draft(cx);
+        if preserve_error && self.composer_ready {
+            self.invoke(json!({"type":"saveDraft","content":self.draft,"draftVersion":{"draftId":self.draft_id,"revision":self.draft_revision},"preserveError":true}),cx);
+        } else {
+            self.save_draft(cx);
+        }
         cx.notify();
     }
 
@@ -681,7 +691,7 @@ impl NativeChatView {
                 Some("rpc") => self.rpc(request.clone(), cx),
                 Some("broker") => cx.emit(NativeChatEvent::Broker(request.clone())),
                 Some("composerClearExpected") => {
-                    if request["params"]["text"].as_str() == Some(self.draft.as_str()) { self.replace_draft("",false,cx); }
+                    if request["params"]["text"].as_str() == Some(self.draft.as_str()) { self.replace_draft("",false,false,cx); }
                 }
                 Some("returnedPrompt") => self.invoke(json!({"type":"applyReturned","text":request["params"]["text"],"current":self.draft}),cx),
                 Some("composerInit") => {
@@ -780,7 +790,7 @@ impl NativeChatView {
                 }
                 Some("actionError") => { cx.notify(); }
                 Some("composer") => {
-                    self.replace_draft(request["params"]["content"].as_str().unwrap_or_default(), request["method"] == "history", cx);
+                    self.replace_draft(request["params"]["content"].as_str().unwrap_or_default(), request["method"] == "history", request["params"]["preserveError"] == true, cx);
                     self.input_caret = request["params"]["caret"].as_u64().map(|caret|caret as usize);
                 }
                 _ => {}
@@ -807,6 +817,7 @@ impl NativeChatView {
             return;
         }
         let endpoint = format!("/api/{method}");
+        let diagnostic_method = method.to_owned();
         let import_attachments = method == "importNativeAttachments";
         let mut params = request["params"].as_object().cloned().unwrap_or_default();
         params.insert("projectId".into(), config.project_id.into());
@@ -827,6 +838,17 @@ impl NativeChatView {
                     Ok(value) => (value, Value::Null),
                     Err(error) => (Value::Null, error),
                 };
+                crate::support_logs::append_for_scenario(
+                    crate::support_logs::GpuiSupportLog::SessionChat,
+                    "gpui.sessionChat.viewState",
+                    "sessionChat.nativeRpcResult",
+                    json!({
+                        "method": diagnostic_method,
+                        "requestId": id,
+                        "succeeded": error.is_null(),
+                        "errorCode": error["code"],
+                    }),
+                );
                 if let Some(runtime) = &this.runtime {
                     runtime.call("resolve", vec![id, value, error]);
                 }

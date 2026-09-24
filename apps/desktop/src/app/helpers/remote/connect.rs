@@ -38,7 +38,7 @@ pub(crate) fn gpui_connect_remote_gxserver(
     gpui_connect_remote_gxserver_platform(config, install_approved, progress_tx)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub(crate) fn gpui_connect_remote_gxserver_platform(
     _config: GpuiRemoteMachineConfig,
     _install_approved: bool,
@@ -50,7 +50,7 @@ pub(crate) fn gpui_connect_remote_gxserver_platform(
     )
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) fn gpui_connect_remote_gxserver_platform(
     config: GpuiRemoteMachineConfig,
     install_approved: bool,
@@ -92,7 +92,7 @@ pub(crate) fn gpui_connect_remote_gxserver_platform(
     result
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) fn gpui_connect_remote_gxserver_platform_inner(
     config: GpuiRemoteMachineConfig,
     install_approved: bool,
@@ -376,7 +376,7 @@ pub(crate) fn gpui_remote_process_failure_is_ssh_transport(
     .any(|needle| stderr.contains(needle))
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) fn gpui_probe_remote_execution_target(
     config: &GpuiRemoteMachineConfig,
 ) -> Result<GpuiRemoteExecutionTarget, GpuiRemoteExecutionTargetProbeError> {

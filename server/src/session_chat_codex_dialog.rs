@@ -100,7 +100,30 @@ fn update_prompt_dialog(mut dialog: TerminalDialog) -> TerminalDialog {
         "with the install method it was set up with"
     };
     let (current, latest) = (current.to_string(), latest.to_string());
-    dialog.id = format!("{UPDATE_PROMPT_ID_PREFIX}{}", dialog.id);
+    // CDXC:AgentScreenDetection 2026-09-23 WHY:
+    // Chat/terminal resizing reflows this prompt without changing its choices; raw screen hashes rejected valid answers. Retain the versions, full installer command and numbered choices in the identity, while the fresh capture supplies the current highlight.
+    let choices: Vec<_> = dialog
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row.number,
+                format!(
+                    "{} {}",
+                    row.label,
+                    row.description.as_deref().unwrap_or_default()
+                )
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
+            )
+        })
+        .collect();
+    let identity = json!([current, latest, choices]).to_string();
+    dialog.id = format!(
+        "{UPDATE_PROMPT_ID_PREFIX}{:x}",
+        Sha256::digest(identity.as_bytes())
+    );
     dialog.title = format!("Update Codex to {latest}?");
     dialog.body = format!(
         "This session runs Codex {current}. Update now installs {latest} {method}. Codex quits to install it, so start it again in this session afterwards."

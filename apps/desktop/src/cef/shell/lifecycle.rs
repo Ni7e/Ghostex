@@ -448,6 +448,13 @@ pub(crate) fn cef_origins_match(lhs: &str, rhs: &str) -> bool {
     }
 }
 
+/// CDXC:CefRuntime 2026-09-23 WHY:
+/// GPUI's Windows event loop calls ExitProcess after its quit callback, so shutdown after Application::run is unreachable. The app-level observer survives closing the main view; its future runs after GPUI removes the windows and flushes their drops, before Windows tears down CEF's DLL and worker threads.
+#[cfg(target_os = "windows")]
+pub(crate) fn register_windows_shutdown(cx: &gpui::App) {
+    cx.on_app_quit(|_| async { shutdown() }).detach();
+}
+
 #[allow(dead_code)]
 pub fn shutdown() {
     let Some(state) = CEF_RUNTIME.get() else {
@@ -467,6 +474,7 @@ pub fn shutdown() {
     CEF_GLOBAL_REQUEST_CONTEXT.with(|context| {
         context.borrow_mut().take();
     });
+    clear_remote_browser_contexts();
     platform::invalidate_message_pump();
     cef::shutdown();
     CEF_CONTEXT_INITIALIZED.store(false, Ordering::Release);

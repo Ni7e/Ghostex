@@ -120,6 +120,19 @@ pub(crate) fn on_demand_component_store() -> Result<Option<component_store::Comp
     component_store::ComponentStore::from_manifest(manifest).map(Some)
 }
 
+/// CDXC:CodeEditor 2026-09-23 WHY:
+/// Windows seals the Linux editor inside its WSL component archive; remote Linux uses that same verified archive so POSIX modes and links never pass through NTFS extraction.
+pub(crate) fn source_code_server_component_store_platform(
+    target: &SourceCodeServerRuntimeTarget,
+) -> Option<String> {
+    let platform = target.component_platform()?;
+    #[cfg(target_os = "windows")]
+    if let Some(architecture) = platform.strip_prefix("linux-") {
+        return Some(format!("windows-{architecture}"));
+    }
+    Some(platform.to_string())
+}
+
 pub(crate) fn source_code_server_runtime_availability(
     target: &SourceCodeServerRuntimeTarget,
 ) -> SourceCodeServerRuntimeAvailability {
@@ -133,8 +146,9 @@ pub(crate) fn source_code_server_runtime_availability(
         return SourceCodeServerRuntimeAvailability::Available;
     }
     #[cfg(windows)]
-    if windows_terminal_backend::current_preference()
-        == windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell
+    if matches!(&target.endpoint, SourceCodeServerRuntimeEndpoint::Local)
+        && windows_terminal_backend::current_preference()
+            == windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell
     {
         return if source_code_server_resolve_repo_root().is_ok() {
             SourceCodeServerRuntimeAvailability::Available
@@ -161,7 +175,8 @@ pub(crate) fn source_code_server_runtime_availability(
             );
         }
     };
-    let installed = match target.component_platform() {
+    let component_platform = source_code_server_component_store_platform(target);
+    let installed = match component_platform.as_deref() {
         Some(platform) => {
             store.query_current_for_platform(SOURCE_CODE_SERVER_COMPONENT_NAME, platform)
         }
@@ -185,8 +200,8 @@ pub(crate) fn source_code_server_install_component(
     let mut report_progress = |progress: component_store::ComponentStoreProgress| {
         let _ = progress_tx.unbounded_send(progress.phase);
     };
-    let component_platform = target.and_then(SourceCodeServerRuntimeTarget::component_platform);
-    let installed = match component_platform {
+    let component_platform = target.and_then(source_code_server_component_store_platform);
+    let installed = match component_platform.as_deref() {
         Some(platform) => store.install_for_platform(
             SOURCE_CODE_SERVER_COMPONENT_NAME,
             platform,

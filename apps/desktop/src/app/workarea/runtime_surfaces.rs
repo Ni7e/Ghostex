@@ -481,7 +481,7 @@ impl GhostexGpuiApp {
         CDXC:CodeEditor 2026-06-24-23:17:
         Source uses the same active-workarea-only materialization edge, with one extra predecessor: ensure the shared code-server runtime is launching or ready before asking the URL gate for a Source CefSurface. Until the app-owned runtime reaches ready, this method leaves Source on its loading/error placeholder instead of creating an about:blank or dead localhost surface.
         */
-        let mut changed = false;
+        let mut changed = self.refresh_source_code_server_runtime_child(cx);
         if !self.project_workarea_runtime_cef_surface_is_current(
             ProjectWorkareaCefSurfaceSlotKey::Source,
         ) {
@@ -530,6 +530,12 @@ impl GhostexGpuiApp {
         };
         if self.source_code_server_runtime.state != SourceCodeServerRuntimeLaunchState::Ready
             || target.project_path != pending.project_path
+            || pending
+                .remote_target
+                .as_ref()
+                .is_some_and(|remote| remote != target)
+            || (pending.remote_target.is_none()
+                && !matches!(target.endpoint, SourceCodeServerRuntimeEndpoint::Local))
             || !self.project_workarea_runtime_cef_surface_is_current(
                 ProjectWorkareaCefSurfaceSlotKey::Source,
             )
@@ -546,6 +552,15 @@ impl GhostexGpuiApp {
         cx.spawn(async move |this, cx| {
             let result = background
                 .spawn(async move {
+                    if let Some(target) = &pending.remote_target {
+                        return crate::app::session_chat_context_menu::open_remote_source_file(
+                            target,
+                            &pending.file_path,
+                            pending.line,
+                            pending.column,
+                            pending.remote_working_directory.as_deref(),
+                        );
+                    }
                     source_code_server_open_file_in_existing_instance(
                         &pending.file_path,
                         pending.line,

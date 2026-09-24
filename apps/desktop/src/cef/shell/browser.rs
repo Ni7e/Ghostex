@@ -54,6 +54,9 @@ pub struct CefBrowser {
     pub(crate) extension_bridge_installed: bool,
     session_chat_bootstrap: StdRc<RefCell<Option<SidebarGxserverBootstrap>>>,
     trusted_gxserver_entry_identity: Option<String>,
+    /// CDXC:Browser 2026-09-23 WHY:
+    /// Remote reconnect disposes CEF surfaces while retaining their tabs. Mark app-owned disposal before releasing the native view so synchronous or deferred DoClose callbacks cannot turn that teardown into a user-requested tab close.
+    app_initiated_close: StdRc<Cell<bool>>,
 }
 
 impl CefBrowser {
@@ -239,6 +242,7 @@ impl CefBrowser {
         let keyboard_handler =
             surface_keyboard_handler(keyboard_zoom_enabled, page_metadata_handler.clone());
         let browser_lifecycle_handler = page_metadata_handler.clone();
+        let app_initiated_close = StdRc::new(Cell::new(false));
         let session_chat_bootstrap = StdRc::new(RefCell::new(sidebar_gxserver_bootstrap.clone()));
         let load_handler = if let Some(surface) = extension_bridge_surface
             .clone()
@@ -298,6 +302,7 @@ impl CefBrowser {
                 popup_open_handler,
                 browser_lifecycle_handler,
                 false,
+                app_initiated_close.clone(),
             )),
             Some(context_menu_handler),
             display_handler,
@@ -386,6 +391,7 @@ impl CefBrowser {
             extension_bridge_installed,
             session_chat_bootstrap,
             trusted_gxserver_entry_identity,
+            app_initiated_close,
         })
     }
 
@@ -877,6 +883,7 @@ impl CefBrowser {
 
 impl Drop for CefBrowser {
     fn drop(&mut self) {
+        self.app_initiated_close.set(true);
         #[cfg(target_os = "macos")]
         if let Some(view) = self.native_view() {
             platform::dispose_sidebar_hover_reveal(view);

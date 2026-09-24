@@ -802,6 +802,9 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
     return;
   }
   const clearedError = operationError !== undefined;
+  /** CDXC:SessionChat 2026-09-23 WHY:
+   * Restoring a rejected send persists the recovered draft through native edit/save actions. Those bookkeeping actions must preserve the refusal card, matching React's restore-then-set-error ordering in session-chat-composer.tsx.
+   */
   if (
     ![
       'restoreSubmission',
@@ -809,7 +812,8 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       'suggestionHighlight',
       'measureComposer',
       'measureContextStatus',
-    ].includes(command.type)
+    ].includes(command.type) &&
+    command.preserveError !== true
   ) {
     operationError = undefined;
     operationErrorCode = undefined;
@@ -1231,7 +1235,10 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         requests.push({
           kind: 'composer',
           method: 'insert',
-          params: { content: restoreUndeliveredChatText(command.text, command.current) },
+          params: {
+            content: restoreUndeliveredChatText(command.text, command.current),
+            preserveError: true,
+          },
         });
         break;
       case 'handoff': {

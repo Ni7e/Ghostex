@@ -137,6 +137,9 @@ pub(crate) fn command_pane_model_to_shell_state_json_with_optional_delayed_send_
                         "actionCommandId".to_string(),
                         serde_json::Value::String(command_id.clone()),
                     );
+                    if let Some(scope) = session.action_scope {
+                        object.insert("actionScope".to_string(), serde_json::json!(scope.mutation_target()));
+                    }
                 }
                 if let Some((timer, remaining_ms)) = restored_timer
                     && let Some(object) = session_json.as_object_mut()
@@ -451,6 +454,11 @@ pub(crate) fn command_session_from_shell_state(
         .with_sleeping(is_sleeping);
     if let Some(command_id) = action_command_id {
         session = session.with_action_command_id(command_id);
+        session.action_scope = match json_string_field(object, "actionScope") {
+            Some("command") => Some(crate::app::helpers::GpuiSidebarCommandScope::Project),
+            Some("globalCommand") => Some(crate::app::helpers::GpuiSidebarCommandScope::Global),
+            _ => None,
+        };
     }
     Some(session)
 }

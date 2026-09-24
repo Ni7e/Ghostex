@@ -3,53 +3,57 @@ CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
-import { moveGpuiWorkspaceSessionToSubgroup, parseGpuiWorkspaceSessionSubgroupId } from '../workspace-session-groups';
-import { GpuiGxserverRpcError } from './client';
 import {
-  GPUI_AGENT_PROMPT_READY_DELAY_MS,
-  GPUI_AGENT_PROMPT_STEP_DELAY_MS,
+  moveGpuiWorkspaceSessionToSubgroup,
+  parseGpuiWorkspaceSessionSubgroupId,
+} from "../workspace-session-groups";
+import { GpuiGxserverRpcError } from "./client";
+import {
   GPUI_GXSERVER_CHATS_GROUP_ID,
   GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
   GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
-} from './constants';
-import type { GpuiSidebarRuntime } from './core';
-import { createGpuiSidebarSettings } from './helpers/bootstrap';
-import { delayGpuiAgentPromptStep, normalizeNonEmptyString } from './helpers/records';
+} from "./constants";
+import type { GpuiSidebarRuntime } from "./core";
+import { createGpuiSidebarSettings } from "./helpers/bootstrap";
+import { normalizeNonEmptyString } from "./helpers/records";
 import {
   createGpuiRemotePresentationSessionId,
   parseGpuiRemotePresentationGroupId,
   parseGpuiRemotePresentationProjectId,
-} from './helpers/remote-presentation';
-import { gpuiWorkspaceTerminalTitleCommandForAgent } from './helpers/terminal-lifecycle';
-import { gpuiProjectNameFromPath } from './helpers/worktrees';
+} from "./helpers/remote-presentation";
+import { gpuiWorkspaceTerminalTitleCommandForAgent } from "./helpers/terminal-lifecycle";
+import { gpuiProjectNameFromPath } from "./helpers/worktrees";
 import type {
   GpuiCreatedProjectAgentSessionRecord,
   GpuiFirstPromptTitleRuntimeSettings,
   GpuiGxserverCreatedSessionResult,
   GpuiRemoteProjectReference,
-} from './types-and-protocol';
-import { openAppModal } from '@/packages/core-ui/app-modal-host-bridge';
+} from "./types-and-protocol";
+import { openAppModal } from "@/packages/core-ui/app-modal-host-bridge";
 import {
   resolveEffectivePreferredAgentInterface,
   type ghostexSettings,
   type PreferredAgentInterface,
-} from '@/packages/shared/ghostex-settings';
+} from "@/packages/shared/ghostex-settings";
 import {
   createGxserverPresentationProjectGroupId,
   parseGxserverPresentationProjectGroupId,
-} from '@/packages/shared/gxserver-presentation-sidebar-projection';
+} from "@/packages/shared/gxserver-presentation-sidebar-projection";
 import type {
   GxserverInstallAgentHooksResult,
   GxserverProjectDomainState,
   GxserverReadAgentHookStatusResult,
-} from '@/packages/shared/gxserver-protocol';
-import type { SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
+} from "@/packages/shared/gxserver-protocol";
+import type { SidebarToExtensionMessage } from "@/packages/shared/session-grid-contract";
 import {
   DEFAULT_TERMINAL_SESSION_TITLE,
   createAgentSessionDefaultTitle,
-} from '@/packages/shared/session-grid-contract';
-import { getDefaultSidebarAgentByIcon, type SidebarAgentButton } from '@/packages/shared/sidebar-agents';
-import { DEFAULT_BROWSER_LAUNCH_URL } from '@/packages/shared/sidebar-commands';
+} from "@/packages/shared/session-grid-contract";
+import {
+  getDefaultSidebarAgentByIcon,
+  type SidebarAgentButton,
+} from "@/packages/shared/sidebar-agents";
+import { DEFAULT_BROWSER_LAUNCH_URL } from "@/packages/shared/sidebar-commands";
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -63,50 +67,78 @@ at the bottom of this file is what keeps the two in step.
 export interface GpuiSidebarRuntimeSessionCreateMethods {
   createFirstPromptTitleRuntimeSettings(
     firstUserMessage?: string,
-    firstUserInputDraft?: string
+    firstUserInputDraft?: string,
   ): GpuiFirstPromptTitleRuntimeSettings;
-  resolveSessionTitleGenerationCommandForGxserver(settings: ghostexSettings): string | undefined;
-  createQuickProject(kind: 'agent' | 'terminal'): Promise<GxserverProjectDomainState | undefined>;
+  resolveSessionTitleGenerationCommandForGxserver(
+    settings: ghostexSettings,
+  ): string | undefined;
+  createQuickProject(
+    kind: "agent" | "terminal",
+  ): Promise<GxserverProjectDomainState | undefined>;
   createQuickTerminal(): Promise<void>;
   createQuickAgentSession(agentId: string, accountId?: string): Promise<void>;
   openQuickBrowserTab(): void;
   openBrowserPaneInGroup(groupId?: string): void;
   createSession(groupId?: string | undefined): Promise<void>;
-  createProjectTerminal(message: Extract<SidebarToExtensionMessage, { type: 'createProjectTerminal' }>): Promise<void>;
+  createProjectTerminal(
+    message: Extract<
+      SidebarToExtensionMessage,
+      { type: "createProjectTerminal" }
+    >,
+  ): Promise<void>;
   startAgentSessionProviderAndSendPrompt(
     startProvider: () => Promise<unknown>,
     sendPrompt: (promptText: string) => Promise<unknown>,
     prompt?: string,
-    renameCommand?: string
+    renameCommand?: string,
   ): Promise<void>;
   startRemoteAgentSessionAndSendPrompt(
     machineId: string,
     projectId: string,
     sessionId: string,
-    prompt?: string
+    prompt?: string,
   ): Promise<void>;
   startLocalAgentSessionAndSendPrompt(
     projectId: string,
     sessionId: string,
     prompt?: string,
-    renameCommand?: string
+    renameCommand?: string,
   ): Promise<void>;
-  createAgentSessionFromSidebarLaunch(agentId: string, groupId?: string | undefined, accountId?: string): Promise<void>;
-  requestAgentSessionLaunch(agentId: string, groupId?: string | undefined, accountId?: string): Promise<void>;
+  createAgentSessionFromSidebarLaunch(
+    agentId: string,
+    groupId?: string | undefined,
+    accountId?: string,
+  ): Promise<void>;
+  requestAgentSessionLaunch(
+    agentId: string,
+    groupId?: string | undefined,
+    accountId?: string,
+  ): Promise<void>;
   confirmAgentHookLaunch(
-    message: Extract<SidebarToExtensionMessage, { type: 'confirmAgentHookLaunch' }>
+    message: Extract<
+      SidebarToExtensionMessage,
+      { type: "confirmAgentHookLaunch" }
+    >,
   ): Promise<void>;
-  createAgentSession(agentId: string, groupId?: string | undefined, accountId?: string): Promise<void>;
+  createAgentSession(
+    agentId: string,
+    groupId?: string | undefined,
+    accountId?: string,
+  ): Promise<void>;
   searchPreviousSessionsByText(): void;
   handleGpuiOsIntegrationCommand(payload: unknown): Promise<void>;
   createGhostexHelpChat(question: string, projectPath: string): Promise<void>;
-  createOsIntegrationTerminal(input: { command?: string; cwd?: string; title?: string }): Promise<void>;
+  createOsIntegrationTerminal(input: {
+    command?: string;
+    cwd?: string;
+    title?: string;
+  }): Promise<void>;
   openOsIntegrationProjectPaths(entries: unknown[]): Promise<void>;
   createAgentSessionForProject(
     project: GxserverProjectDomainState,
     agent: SidebarAgentButton,
     prompt: string,
-    title?: string
+    title?: string,
   ): Promise<string>;
   createAgentSessionRecordForProject(
     project: GxserverProjectDomainState,
@@ -121,7 +153,7 @@ export interface GpuiSidebarRuntimeSessionCreateMethods {
       preferredInterface?: PreferredAgentInterface;
       renameTitleAfterStart?: string;
       title?: string;
-    }
+    },
   ): Promise<GpuiCreatedProjectAgentSessionRecord>;
   createRemoteAgentSessionForProject(
     remoteScope: GpuiRemoteProjectReference,
@@ -134,7 +166,7 @@ export interface GpuiSidebarRuntimeSessionCreateMethods {
       draft?: boolean;
       firstUserInputDraft?: string;
       preferredInterface?: PreferredAgentInterface;
-    }
+    },
   ): Promise<void>;
 }
 
@@ -142,7 +174,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
   createFirstPromptTitleRuntimeSettings(
     this: GpuiSidebarRuntime,
     firstUserMessage?: string,
-    firstUserInputDraft?: string
+    firstUserInputDraft?: string,
   ): GpuiFirstPromptTitleRuntimeSettings {
     /*
     CDXC:SessionTitles 2026-07-04-21:52:
@@ -156,7 +188,8 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     const runtimeSettings: GpuiFirstPromptTitleRuntimeSettings = {
       firstPromptTitleGenerationAgent: settings.sessionTitleGenerationAgent,
     };
-    const command = this.resolveSessionTitleGenerationCommandForGxserver(settings);
+    const command =
+      this.resolveSessionTitleGenerationCommandForGxserver(settings);
     if (command) {
       runtimeSettings.firstPromptTitleGenerationCommand = command;
     }
@@ -180,35 +213,41 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
 
   resolveSessionTitleGenerationCommandForGxserver(
     this: GpuiSidebarRuntime,
-    settings: ghostexSettings
+    settings: ghostexSettings,
   ): string | undefined {
-    if (settings.sessionTitleGenerationAgent === 'custom') {
+    if (settings.sessionTitleGenerationAgent === "custom") {
       return settings.customSessionTitleGenerationCommand.trim() || undefined;
     }
-    return this.resolveSidebarAgent(settings.sessionTitleGenerationAgent)?.command?.trim() || undefined;
+    return (
+      this.resolveSidebarAgent(
+        settings.sessionTitleGenerationAgent,
+      )?.command?.trim() || undefined
+    );
   },
 
   async createQuickProject(
     this: GpuiSidebarRuntime,
-    kind: 'agent' | 'terminal'
+    kind: "agent" | "terminal",
   ): Promise<GxserverProjectDomainState | undefined> {
     if (!this.client) {
-      this.postSidebarActionToast('warning', 'Quick action unavailable', {
-        description: 'gxserver is not connected.',
+      this.postSidebarActionToast("warning", "Quick action unavailable", {
+        description: "gxserver is not connected.",
       });
       return undefined;
     }
     try {
-      const response = await this.client.rpc<{ project: GxserverProjectDomainState }>('/api/createQuickProject', {
+      const response = await this.client.rpc<{
+        project: GxserverProjectDomainState;
+      }>("/api/createQuickProject", {
         kind,
       });
       this.upsertDomainProject(response.project);
       this.focusProjectId(response.project.projectId);
-      this.publishPresentation('patch');
+      this.publishPresentation("patch");
       return response.project;
     } catch {
-      this.postSidebarActionToast('error', 'Quick action failed', {
-        description: 'Ghostex could not create the Quick workspace.',
+      this.postSidebarActionToast("error", "Quick action failed", {
+        description: "Ghostex could not create the Quick workspace.",
       });
       return undefined;
     }
@@ -221,21 +260,31 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     workspace first, then create its initial running terminal through the
     ordinary gxserver session path.
     */
-    const project = await this.createQuickProject('terminal');
+    const project = await this.createQuickProject("terminal");
     if (project) {
-      await this.createSession(createGxserverPresentationProjectGroupId(project.projectId));
+      await this.createSession(
+        createGxserverPresentationProjectGroupId(project.projectId),
+      );
     }
   },
 
-  async createQuickAgentSession(this: GpuiSidebarRuntime, agentId: string, accountId?: string): Promise<void> {
+  async createQuickAgentSession(
+    this: GpuiSidebarRuntime,
+    agentId: string,
+    accountId?: string,
+  ): Promise<void> {
     /*
     Match macOS createNativeAgentChat: a Quick agent never launches inside the
     active code project. Give it a new projectless chat workspace, then reuse
     the same configured-agent launch path as project headers.
     */
-    const project = await this.createQuickProject('agent');
+    const project = await this.createQuickProject("agent");
     if (project) {
-      await this.createAgentSession(agentId, createGxserverPresentationProjectGroupId(project.projectId), accountId);
+      await this.createAgentSession(
+        agentId,
+        createGxserverPresentationProjectGroupId(project.projectId),
+        accountId,
+      );
     }
   },
 
@@ -243,8 +292,13 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     openQuickHeaderBrowserUrl(this, DEFAULT_BROWSER_LAUNCH_URL);
   },
 
-  openBrowserPaneInGroup(this: GpuiSidebarRuntime, groupId = this.activeGroupId): void {
-    const projectId = groupId ? this.resolveWorkspaceGroupProjectId(groupId) : undefined;
+  openBrowserPaneInGroup(
+    this: GpuiSidebarRuntime,
+    groupId = this.activeGroupId,
+  ): void {
+    const projectId = groupId
+      ? this.resolveWorkspaceGroupProjectId(groupId)
+      : undefined;
     if (!groupId || !projectId) {
       return;
     }
@@ -269,12 +323,16 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       only the fixed action plus the machine-scoped project id.
       */
       if (
-        !this.postRemoteProjectNativeAction('openRemoteProjectPortsBrowser', remoteProject, {
-          groupId,
-          type: 'openBrowserPaneInGroup',
-        })
+        !this.postRemoteProjectNativeAction(
+          "openRemoteProjectPortsBrowser",
+          remoteProject,
+          {
+            groupId,
+            type: "openBrowserPaneInGroup",
+          },
+        )
       ) {
-        this.postSidebarActionToast('warning', 'Browser unavailable');
+        this.postSidebarActionToast("warning", "Browser unavailable");
       }
       return;
     }
@@ -283,70 +341,94 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     }
     this.activeProjectId = projectId;
     this.activeGroupId = groupId;
-    this.publishPresentation('patch');
+    this.publishPresentation("patch");
 
     const post = window.ghostexGpui?.postOpenBrowserUrl;
     if (
-      typeof post !== 'function' ||
+      typeof post !== "function" ||
       !post(
         JSON.stringify({
           projectId,
-          reuse: 'none',
+          reuse: "none",
           type: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
           url: DEFAULT_BROWSER_LAUNCH_URL,
           version: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
-        })
+        }),
       )
     ) {
-      this.postSidebarActionToast('warning', 'Browser unavailable');
+      this.postSidebarActionToast("warning", "Browser unavailable");
     }
   },
 
-  async createSession(this: GpuiSidebarRuntime, groupId = this.activeGroupId): Promise<void> {
-    const subgroup = groupId ? parseGpuiWorkspaceSessionSubgroupId(groupId) : undefined;
-    const subgroupRemoteProject = subgroup ? parseGpuiRemotePresentationProjectId(subgroup.projectId) : undefined;
-    const remoteGroup = groupId && !subgroup ? parseGpuiRemotePresentationGroupId(groupId) : undefined;
+  async createSession(
+    this: GpuiSidebarRuntime,
+    groupId = this.activeGroupId,
+  ): Promise<void> {
+    const subgroup = groupId
+      ? parseGpuiWorkspaceSessionSubgroupId(groupId)
+      : undefined;
+    const subgroupRemoteProject = subgroup
+      ? parseGpuiRemotePresentationProjectId(subgroup.projectId)
+      : undefined;
+    const remoteGroup =
+      groupId && !subgroup
+        ? parseGpuiRemotePresentationGroupId(groupId)
+        : undefined;
     const remoteTarget = subgroupRemoteProject ?? remoteGroup;
     if (remoteTarget) {
-      await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(remoteTarget.machineId, '/api/createSession', {
-        kind: 'terminal',
-        lifecycleState: 'running',
-        projectId: remoteTarget.projectId,
-        surface: 'workspace',
-        title: DEFAULT_TERMINAL_SESSION_TITLE,
-      })
+      await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(
+        remoteTarget.machineId,
+        "/api/createSession",
+        {
+          kind: "terminal",
+          lifecycleState: "running",
+          projectId: remoteTarget.projectId,
+          surface: "workspace",
+          title: DEFAULT_TERMINAL_SESSION_TITLE,
+        },
+      )
         .then((response) => {
-          const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+          const createdSessionId = normalizeNonEmptyString(
+            response.session?.sessionId,
+          );
           if (createdSessionId) {
             if (subgroup && subgroupRemoteProject) {
               this.workspaceGroups = moveGpuiWorkspaceSessionToSubgroup(
                 this.workspaceGroups,
                 subgroup.projectId,
                 createdSessionId,
-                subgroup.groupId
+                subgroup.groupId,
               );
               this.persistWorkspaceGroups();
             }
             const createdReference = {
               machineId: remoteTarget.machineId,
-              projectId: normalizeNonEmptyString(response.session?.projectId) ?? remoteTarget.projectId,
+              projectId:
+                normalizeNonEmptyString(response.session?.projectId) ??
+                remoteTarget.projectId,
               sessionId: createdSessionId,
             };
             this.setRemotePresentationSessionFocus(createdReference);
-            this.postRemoteSessionNativeAction('openRemoteSessionTerminal', createdReference, {
-              sessionId: createGpuiRemotePresentationSessionId(
-                createdReference.machineId,
-                createdReference.projectId,
-                createdReference.sessionId
-              ),
-              type: 'focusSession',
-            });
+            this.postRemoteSessionNativeAction(
+              "openRemoteSessionTerminal",
+              createdReference,
+              {
+                sessionId: createGpuiRemotePresentationSessionId(
+                  createdReference.machineId,
+                  createdReference.projectId,
+                  createdReference.sessionId,
+                ),
+                type: "focusSession",
+              },
+            );
           }
-          this.refreshRemotePresentationFromGxserver(remoteTarget.machineId).catch(() => undefined);
+          this.refreshRemotePresentationFromGxserver(
+            remoteTarget.machineId,
+          ).catch(() => undefined);
         })
         .catch(() => {
-          this.postRemoteToast('warning', 'Remote session failed', {
-            description: 'The remote gxserver could not create that session.',
+          this.postRemoteToast("warning", "Remote session failed", {
+            description: "The remote gxserver could not create that session.",
           });
         });
       return;
@@ -371,33 +453,45 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     */
     let response: GpuiGxserverCreatedSessionResult;
     try {
-      response = await this.client.rpc<GpuiGxserverCreatedSessionResult>('/api/createSession', {
-        ...(projectId ? { projectId } : {}),
-        kind: 'terminal',
-        lifecycleState: 'running',
-        surface: 'workspace',
-        title: DEFAULT_TERMINAL_SESSION_TITLE,
-      });
+      response = await this.client.rpc<GpuiGxserverCreatedSessionResult>(
+        "/api/createSession",
+        {
+          ...(projectId ? { projectId } : {}),
+          kind: "terminal",
+          lifecycleState: "running",
+          surface: "workspace",
+          title: DEFAULT_TERMINAL_SESSION_TITLE,
+        },
+      );
     } catch (error) {
       if (
         projectId &&
         error instanceof GpuiGxserverRpcError &&
-        error.code === 'projectPathUnavailable' &&
+        error.code === "projectPathUnavailable" &&
         this.presentMissingProjectFolder(projectId)
       ) {
-        void this.refreshDomainPresentationSnapshotFromClient('patch').catch(() => undefined);
+        void this.refreshDomainPresentationSnapshotFromClient("patch").catch(
+          () => undefined,
+        );
         return;
       }
       throw error;
     }
-    const createdProjectId = normalizeNonEmptyString(response.session?.projectId) ?? projectId;
-    const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
-    if (subgroup && createdProjectId === subgroup.projectId && createdSessionId) {
+    const createdProjectId =
+      normalizeNonEmptyString(response.session?.projectId) ?? projectId;
+    const createdSessionId = normalizeNonEmptyString(
+      response.session?.sessionId,
+    );
+    if (
+      subgroup &&
+      createdProjectId === subgroup.projectId &&
+      createdSessionId
+    ) {
       this.workspaceGroups = moveGpuiWorkspaceSessionToSubgroup(
         this.workspaceGroups,
         subgroup.projectId,
         createdSessionId,
-        subgroup.groupId
+        subgroup.groupId,
       );
       this.persistWorkspaceGroups();
     }
@@ -408,7 +502,10 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
 
   async createProjectTerminal(
     this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'createProjectTerminal' }>
+    message: Extract<
+      SidebarToExtensionMessage,
+      { type: "createProjectTerminal" }
+    >,
   ): Promise<void> {
     /*
     CDXC:PlatformSupport 2026-07-26:
@@ -425,46 +522,57 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     const groupId = message.groupId;
     const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
     if (remoteGroup) {
-      if (!this.postRemoteProjectNativeAction('openRemoteProjectTerminal', remoteGroup, message)) {
-        this.postRemoteToast('warning', 'Remote session failed', {
-          description: 'Ghostex could not create that remote terminal.',
+      if (
+        !this.postRemoteProjectNativeAction(
+          "openRemoteProjectTerminal",
+          remoteGroup,
+          message,
+        )
+      ) {
+        this.postRemoteToast("warning", "Remote session failed", {
+          description: "Ghostex could not create that remote terminal.",
         });
       }
       return;
     }
     const projectId = parseGxserverPresentationProjectGroupId(groupId);
-    const isWindowsHost = typeof navigator !== 'undefined' && /Windows/iu.test(navigator.userAgent);
+    const isWindowsHost =
+      typeof navigator !== "undefined" && /Windows/iu.test(navigator.userAgent);
     if (!isWindowsHost) {
       await this.createSession(groupId);
       return;
     }
     const postCreate = window.ghostexGpui?.postCreateProjectTerminal;
-    if (!projectId || typeof postCreate !== 'function') {
-      this.postSidebarActionToast('warning', 'Terminal unavailable');
+    if (!projectId || typeof postCreate !== "function") {
+      this.postSidebarActionToast("warning", "Terminal unavailable");
       return;
     }
     try {
       const accepted = postCreate(
         JSON.stringify({
           projectId,
-          type: 'ghostex.gpui.sidebar.createProjectTerminal',
+          type: "ghostex.gpui.sidebar.createProjectTerminal",
           version: 1,
-        })
+        }),
       );
       if (!accepted) {
-        this.postSidebarActionToast('warning', 'Terminal unavailable');
+        this.postSidebarActionToast("warning", "Terminal unavailable");
       }
     } catch {
-      this.postSidebarActionToast('warning', 'Terminal unavailable');
+      this.postSidebarActionToast("warning", "Terminal unavailable");
     }
   },
 
+  /**
+   * CDXC:Worktrees 2026-09-23 WHY:
+   * A fixed startup delay can type the first prompt before the agent owns its composer. Like ghostex agents create, retain each prompt in the daemon's durable startup queue and let shared chat readiness and paste verification control delivery; queue receipts preserve rename-before-prompt order.
+   */
   async startAgentSessionProviderAndSendPrompt(
     this: GpuiSidebarRuntime,
     startProvider: () => Promise<unknown>,
     sendPrompt: (promptText: string) => Promise<unknown>,
     prompt?: string,
-    renameCommand?: string
+    renameCommand?: string,
   ): Promise<void> {
     await startProvider();
     const promptText = normalizeNonEmptyString(prompt);
@@ -472,13 +580,30 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     if (!promptText && !renameText) {
       return;
     }
-    await delayGpuiAgentPromptStep(GPUI_AGENT_PROMPT_READY_DELAY_MS);
+    const queuePrompt = async (text: string): Promise<void> => {
+      const receipt = await sendPrompt(text);
+      if (!receipt || typeof receipt !== "object" || !("prompt" in receipt)) {
+        throw new Error(
+          "gxserver did not confirm the startup prompt was queued. Inspect this session before retrying.",
+        );
+      }
+      const queued = receipt.prompt;
+      if (
+        !queued ||
+        typeof queued !== "object" ||
+        !("id" in queued) ||
+        !normalizeNonEmptyString(queued.id)
+      ) {
+        throw new Error(
+          "gxserver did not return a startup prompt receipt. Inspect this session before retrying.",
+        );
+      }
+    };
     if (renameText) {
-      await sendPrompt(renameText);
-      await delayGpuiAgentPromptStep(GPUI_AGENT_PROMPT_STEP_DELAY_MS);
+      await queuePrompt(renameText);
     }
     if (promptText) {
-      await sendPrompt(promptText);
+      await queuePrompt(promptText);
     }
   },
 
@@ -487,32 +612,32 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     machineId: string,
     projectId: string,
     sessionId: string,
-    prompt?: string
+    prompt?: string,
   ): Promise<void> {
     await this.startAgentSessionProviderAndSendPrompt(
       () =>
         this.requestRemoteGxserver(
           machineId,
-          '/api/startSessionProvider',
+          "/api/startSessionProvider",
           {
             projectId,
             sessionId,
           },
-          { timeoutMs: 15_000 }
+          { timeoutMs: 15_000 },
         ),
       (promptText) =>
         this.requestRemoteGxserver(
           machineId,
-          '/api/sendSessionMessage',
+          "/api/queueSessionChatPrompt",
           {
             projectId,
             sessionId,
-            submit: true,
+            startupSend: true,
             text: promptText,
           },
-          { timeoutMs: 15_000 }
+          { timeoutMs: 15_000 },
         ),
-      prompt
+      prompt,
     );
   },
 
@@ -521,27 +646,27 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     projectId: string,
     sessionId: string,
     prompt?: string,
-    renameCommand?: string
+    renameCommand?: string,
   ): Promise<void> {
     const client = this.client;
     if (!client) {
-      throw new Error('gxserver is unavailable.');
+      throw new Error("gxserver is unavailable.");
     }
     await this.startAgentSessionProviderAndSendPrompt(
       () =>
-        client.rpc('/api/startSessionProvider', {
+        client.rpc("/api/startSessionProvider", {
           projectId,
           sessionId,
         }),
       (promptText) =>
-        client.rpc('/api/sendSessionMessage', {
+        client.rpc("/api/queueSessionChatPrompt", {
           projectId,
           sessionId,
-          submit: true,
+          startupSend: true,
           text: promptText,
         }),
       prompt,
-      renameCommand
+      renameCommand,
     );
   },
 
@@ -549,7 +674,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     this: GpuiSidebarRuntime,
     agentId: string,
     groupId?: string | undefined,
-    accountId?: string
+    accountId?: string,
   ): Promise<void> {
     if (groupId === GPUI_GXSERVER_CHATS_GROUP_ID) {
       await this.createQuickAgentSession(agentId, accountId);
@@ -562,38 +687,60 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     this: GpuiSidebarRuntime,
     agentId: string,
     groupId?: string | undefined,
-    accountId?: string
+    accountId?: string,
   ): Promise<void> {
     const normalizedAgentId = agentId.trim();
     const agent = this.resolveSidebarAgent(normalizedAgentId);
     const hookAgentId = getDefaultSidebarAgentByIcon(agent?.icon)?.agentId;
-    if (!normalizedAgentId || !agent || !hookAgentId || hookAgentId === 'zcode') {
-      await this.createAgentSessionFromSidebarLaunch(agentId, groupId, accountId);
+    if (
+      !normalizedAgentId ||
+      !agent ||
+      !hookAgentId ||
+      hookAgentId === "zcode"
+    ) {
+      await this.createAgentSessionFromSidebarLaunch(
+        agentId,
+        groupId,
+        accountId,
+      );
       return;
     }
 
-    const remoteGroup = groupId ? parseGpuiRemotePresentationGroupId(groupId) : undefined;
+    const remoteGroup = groupId
+      ? parseGpuiRemotePresentationGroupId(groupId)
+      : undefined;
     let status: GxserverReadAgentHookStatusResult;
     try {
       status = remoteGroup
         ? await this.requestRemoteGxserver<GxserverReadAgentHookStatusResult>(
             remoteGroup.machineId,
-            '/api/readAgentHookStatus',
-            { agentIds: [hookAgentId] }
+            "/api/readAgentHookStatus",
+            { agentIds: [hookAgentId] },
           )
-        : await this.client!.rpc<GxserverReadAgentHookStatusResult>('/api/readAgentHookStatus', {
-            agentIds: [hookAgentId],
-          });
+        : await this.client!.rpc<GxserverReadAgentHookStatusResult>(
+            "/api/readAgentHookStatus",
+            {
+              agentIds: [hookAgentId],
+            },
+          );
     } catch {
-      this.postSidebarActionToast('warning', 'Unable to check agent hooks', {
+      this.postSidebarActionToast("warning", "Unable to check agent hooks", {
         description: `Ghostex could not verify ${agent.name} hooks. Try opening the agent again.`,
       });
       return;
     }
 
     const hookStatus = status.agents.find((row) => row.agentId === hookAgentId);
-    if (!hookStatus || hookStatus.status === 'installed' || hookStatus.status === 'cliMissing') {
-      await this.createAgentSessionFromSidebarLaunch(agentId, groupId, accountId);
+    if (
+      !hookStatus ||
+      hookStatus.status === "installed" ||
+      hookStatus.status === "cliMissing"
+    ) {
+      await this.createAgentSessionFromSidebarLaunch(
+        agentId,
+        groupId,
+        accountId,
+      );
       return;
     }
 
@@ -603,54 +750,82 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       groupId,
       hookAgentId,
       accountId,
-      modal: 'agentHooksRequired',
-      type: 'open',
+      modal: "agentHooksRequired",
+      type: "open",
     });
   },
 
   async confirmAgentHookLaunch(
     this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'confirmAgentHookLaunch' }>
+    message: Extract<
+      SidebarToExtensionMessage,
+      { type: "confirmAgentHookLaunch" }
+    >,
   ): Promise<void> {
     const agent = this.resolveSidebarAgent(message.agentId);
     const agentName = agent?.name ?? message.agentId;
     if (!message.installHooks) {
-      this.postSidebarActionToast('warning', `Install hooks for ${agentName}`, {
+      this.postSidebarActionToast("warning", `Install hooks for ${agentName}`, {
         description:
-          'Install and approve the hooks in order for Chat View to work correctly. Resuming and working/done indicators also require hooks.',
+          "Install and approve the hooks in order for Chat View to work correctly. Resuming and working/done indicators also require hooks.",
       });
-      await this.createAgentSessionFromSidebarLaunch(message.agentId, message.groupId, message.accountId);
+      await this.createAgentSessionFromSidebarLaunch(
+        message.agentId,
+        message.groupId,
+        message.accountId,
+      );
       return;
     }
 
-    const remoteGroup = message.groupId ? parseGpuiRemotePresentationGroupId(message.groupId) : undefined;
+    const remoteGroup = message.groupId
+      ? parseGpuiRemotePresentationGroupId(message.groupId)
+      : undefined;
     let result: GxserverInstallAgentHooksResult;
     try {
       result = remoteGroup
         ? await this.requestRemoteGxserver<GxserverInstallAgentHooksResult>(
             remoteGroup.machineId,
-            '/api/installAgentHooks',
+            "/api/installAgentHooks",
             { agentIds: [message.hookAgentId] },
-            { timeoutMs: 120_000 }
+            { timeoutMs: 120_000 },
           )
-        : await this.client!.rpc<GxserverInstallAgentHooksResult>('/api/installAgentHooks', {
-            agentIds: [message.hookAgentId],
-          });
+        : await this.client!.rpc<GxserverInstallAgentHooksResult>(
+            "/api/installAgentHooks",
+            {
+              agentIds: [message.hookAgentId],
+            },
+          );
     } catch {
-      this.postSidebarActionToast('error', `Could not install ${agentName} hooks`, {
-        description: 'Open Settings > Agents > Agent Hooks and try again.',
-      });
+      this.postSidebarActionToast(
+        "error",
+        `Could not install ${agentName} hooks`,
+        {
+          description: "Open Settings > Agents > Agent Hooks and try again.",
+        },
+      );
       return;
     }
 
-    const installed = result.agents.some((row) => row.agentId === message.hookAgentId && row.status === 'installed');
+    const installed = result.agents.some(
+      (row) =>
+        row.agentId === message.hookAgentId && row.status === "installed",
+    );
     if (!installed) {
-      this.postSidebarActionToast('error', `Could not install ${agentName} hooks`, {
-        description: 'Open Settings > Agents > Agent Hooks to review the hook status.',
-      });
+      this.postSidebarActionToast(
+        "error",
+        `Could not install ${agentName} hooks`,
+        {
+          description:
+            "Open Settings > Agents > Agent Hooks to review the hook status.",
+        },
+      );
       return;
     }
-    await this.createAgentSessionFromSidebarLaunch(message.agentId, message.groupId, message.accountId);
+    await this.createAgentSessionFromSidebarLaunch(
+      message.agentId,
+      message.groupId,
+      message.accountId,
+    );
   },
 
   /**
@@ -662,14 +837,16 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     this: GpuiSidebarRuntime,
     agentId: string,
     groupId = this.activeGroupId,
-    accountId?: string
+    accountId?: string,
   ): Promise<void> {
-    const remoteGroup = groupId ? parseGpuiRemotePresentationGroupId(groupId) : undefined;
+    const remoteGroup = groupId
+      ? parseGpuiRemotePresentationGroupId(groupId)
+      : undefined;
     if (remoteGroup) {
       const normalizedAgentId = agentId.trim();
       if (!normalizedAgentId) {
-        this.postRemoteToast('warning', 'Remote agent unavailable', {
-          description: 'Choose a configured agent for this remote project.',
+        this.postRemoteToast("warning", "Remote agent unavailable", {
+          description: "Choose a configured agent for this remote project.",
         });
         return;
       }
@@ -678,13 +855,16 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       Remote agent launches must let the owning remote gxserver resolve default and project-custom agent commands from remote project metadata. GPUI sends only the selected agent id, project id, surface, and a require-command guard through Rust's authenticated tunnel, never a renderer-provided command string.
       */
       const remoteAgent = this.resolveSidebarAgent(normalizedAgentId);
-      const title = createAgentSessionDefaultTitle(remoteAgent?.name ?? normalizedAgentId);
-      const response = await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(
-        remoteGroup.machineId,
-        '/api/createAgentSession',
-        {
-          agentId: normalizedAgentId,
-          /*
+      const title = createAgentSessionDefaultTitle(
+        remoteAgent?.name ?? normalizedAgentId,
+      );
+      const response =
+        await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(
+          remoteGroup.machineId,
+          "/api/createAgentSession",
+          {
+            agentId: normalizedAgentId,
+            /*
           CDXC:Drafts 2026-08-28:
           Sidebar agent launches carry no prompt, so the remote gxserver creates
           a draft row. Chat-first launches start the CLI through native
@@ -692,23 +872,31 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
           stays a draft until a first user prompt actually reaches the agent.
           Never combine with firstUserMessage.
           */
-          draft: true,
-          projectId: remoteGroup.projectId,
-          requireLaunchCommand: true,
-          runtimeSettings: { ...this.createFirstPromptTitleRuntimeSettings(), ...(accountId ? { accountId } : {}) },
-          surface: 'workspace',
-          title,
-        }
-      ).catch(() => {
-        this.postRemoteToast('warning', 'Remote agent failed', {
-          description: 'The remote gxserver could not create that agent session.',
+            draft: true,
+            projectId: remoteGroup.projectId,
+            requireLaunchCommand: true,
+            runtimeSettings: {
+              ...this.createFirstPromptTitleRuntimeSettings(),
+              ...(accountId ? { accountId } : {}),
+            },
+            surface: "workspace",
+            title,
+          },
+        ).catch(() => {
+          this.postRemoteToast("warning", "Remote agent failed", {
+            description:
+              "The remote gxserver could not create that agent session.",
+          });
+          return undefined;
         });
-        return undefined;
-      });
       if (response) {
-        const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+        const createdSessionId = normalizeNonEmptyString(
+          response.session?.sessionId,
+        );
         if (createdSessionId) {
-          const createdProjectId = normalizeNonEmptyString(response.session?.projectId) ?? remoteGroup.projectId;
+          const createdProjectId =
+            normalizeNonEmptyString(response.session?.projectId) ??
+            remoteGroup.projectId;
           this.setRemotePresentationSessionFocus({
             machineId: remoteGroup.machineId,
             projectId: createdProjectId,
@@ -717,40 +905,46 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
           if (
             resolveEffectivePreferredAgentInterface(
               createGpuiSidebarSettings(this.runtimeSettings),
-              normalizedAgentId
-            ) === 'chat'
+              normalizedAgentId,
+            ) === "chat"
           ) {
             this.postRemoteSessionNativeAction(
-              'openRemoteSessionTerminal',
+              "openRemoteSessionTerminal",
               {
                 machineId: remoteGroup.machineId,
                 projectId: createdProjectId,
                 sessionId: createdSessionId,
               },
-              { agentId, groupId, type: 'runSidebarAgent' },
-              { keepView: true, preferredInterface: 'chat' }
+              { agentId, groupId, type: "runSidebarAgent" },
+              { keepView: true, preferredInterface: "chat" },
             );
           } else {
             await this.startRemoteAgentSessionAndSendPrompt(
               remoteGroup.machineId,
               createdProjectId,
-              createdSessionId
+              createdSessionId,
             ).catch(() => {
-              this.postRemoteToast('warning', 'Remote agent failed', {
-                description: 'The remote gxserver could not start that agent session.',
+              this.postRemoteToast("warning", "Remote agent failed", {
+                description:
+                  "The remote gxserver could not start that agent session.",
               });
             });
           }
         }
-        this.refreshRemotePresentationFromGxserver(remoteGroup.machineId).catch(() => undefined);
+        this.refreshRemotePresentationFromGxserver(remoteGroup.machineId).catch(
+          () => undefined,
+        );
       }
       return;
     }
-    const projectId = groupId ? parseGxserverPresentationProjectGroupId(groupId) : this.activeProjectId;
+    const projectId = groupId
+      ? parseGxserverPresentationProjectGroupId(groupId)
+      : this.activeProjectId;
     if (projectId && !this.ensureLocalProjectPathAvailable(projectId)) {
       return;
     }
-    const isWindowsHost = typeof navigator !== 'undefined' && /Windows/iu.test(navigator.userAgent);
+    const isWindowsHost =
+      typeof navigator !== "undefined" && /Windows/iu.test(navigator.userAgent);
     if (isWindowsHost) {
       /*
       CDXC:PlatformSupport 2026-08-11:
@@ -764,8 +958,12 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       */
       const postCreate = window.ghostexGpui?.postCreateProjectAgent;
       const normalizedAgentId = agentId.trim();
-      if (!projectId || !normalizedAgentId || typeof postCreate !== 'function') {
-        this.postSidebarActionToast('warning', 'Agent unavailable');
+      if (
+        !projectId ||
+        !normalizedAgentId ||
+        typeof postCreate !== "function"
+      ) {
+        this.postSidebarActionToast("warning", "Agent unavailable");
         return;
       }
       try {
@@ -774,19 +972,19 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
             agentId: normalizedAgentId,
             preferredInterface: resolveEffectivePreferredAgentInterface(
               createGpuiSidebarSettings(this.runtimeSettings),
-              normalizedAgentId
+              normalizedAgentId,
             ),
             projectId,
             accountId,
-            type: 'ghostex.gpui.sidebar.createProjectAgent',
+            type: "ghostex.gpui.sidebar.createProjectAgent",
             version: 1,
-          })
+          }),
         );
         if (!accepted) {
-          this.postSidebarActionToast('warning', 'Agent unavailable');
+          this.postSidebarActionToast("warning", "Agent unavailable");
         }
       } catch {
-        this.postSidebarActionToast('warning', 'Agent unavailable');
+        this.postSidebarActionToast("warning", "Agent unavailable");
       }
       return;
     }
@@ -799,9 +997,11 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     }
     let response: GpuiGxserverCreatedSessionResult;
     try {
-      response = await this.client.rpc<GpuiGxserverCreatedSessionResult>('/api/createAgentSession', {
-        agentId: agent.agentId,
-        /*
+      response = await this.client.rpc<GpuiGxserverCreatedSessionResult>(
+        "/api/createAgentSession",
+        {
+          agentId: agent.agentId,
+          /*
         CDXC:Drafts 2026-08-28:
         A sidebar agent launch has no prompt, so the row is created as a draft.
         The agent CLI is NOT started here: `focusLocalWorkspaceSession` below
@@ -810,37 +1010,45 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
         missing provider, so trust/login/update screens surface while the user
         types. gxserver drops `draftStatus` when the first prompt lands.
         */
-        draft: true,
-        launchSettings: {
-          agentCommand: agent.command,
-          icon: agent.icon,
+          draft: true,
+          launchSettings: {
+            agentCommand: agent.command,
+            icon: agent.icon,
+          },
+          projectId,
+          runtimeSettings: {
+            ...this.createFirstPromptTitleRuntimeSettings(),
+            ...(accountId ? { accountId } : {}),
+          },
+          surface: "workspace",
+          title: createAgentSessionDefaultTitle(agent.name),
         },
-        projectId,
-        runtimeSettings: { ...this.createFirstPromptTitleRuntimeSettings(), ...(accountId ? { accountId } : {}) },
-        surface: 'workspace',
-        title: createAgentSessionDefaultTitle(agent.name),
-      });
+      );
     } catch (error) {
       if (
         error instanceof GpuiGxserverRpcError &&
-        error.code === 'projectPathUnavailable' &&
+        error.code === "projectPathUnavailable" &&
         this.presentMissingProjectFolder(projectId)
       ) {
-        void this.refreshDomainPresentationSnapshotFromClient('patch').catch(() => undefined);
+        void this.refreshDomainPresentationSnapshotFromClient("patch").catch(
+          () => undefined,
+        );
         return;
       }
       throw error;
     }
-    const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+    const createdSessionId = normalizeNonEmptyString(
+      response.session?.sessionId,
+    );
     if (createdSessionId) {
       const preferredAgentInterface = resolveEffectivePreferredAgentInterface(
         createGpuiSidebarSettings(this.runtimeSettings),
-        agent.agentId
+        agent.agentId,
       );
       this.focusLocalWorkspaceSession(
         normalizeNonEmptyString(response.session?.projectId) ?? projectId,
         createdSessionId,
-        { keepView: true, preferredInterface: preferredAgentInterface }
+        { keepView: true, preferredInterface: preferredAgentInterface },
       );
     }
   },
@@ -854,8 +1062,8 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
   */
   searchPreviousSessionsByText(this: GpuiSidebarRuntime): void {
     this.postGhostexHotkeyAction({
-      actionId: 'openFindPrompts',
-      type: 'runGhostexHotkeyAction',
+      actionId: "openFindPrompts",
+      type: "runGhostexHotkeyAction",
     });
   },
 
@@ -876,13 +1084,19 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
   Find "launch session" threw `not a function` in the sidebar. Restored verbatim
   as a module method; the desktop typecheck gate is what surfaced it.
   */
-  async handleGpuiOsIntegrationCommand(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
-    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : undefined;
+  async handleGpuiOsIntegrationCommand(
+    this: GpuiSidebarRuntime,
+    payload: unknown,
+  ): Promise<void> {
+    const record =
+      payload && typeof payload === "object"
+        ? (payload as Record<string, unknown>)
+        : undefined;
     const action = normalizeNonEmptyString(record?.action);
     if (!record || !action) {
       return;
     }
-    if (action === 'createQuickTerminal') {
+    if (action === "createQuickTerminal") {
       await this.createOsIntegrationTerminal({
         command: normalizeNonEmptyString(record.command),
         cwd: normalizeNonEmptyString(record.cwd),
@@ -890,18 +1104,23 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       });
       return;
     }
-    if (action === 'openProjectPaths') {
-      await this.openOsIntegrationProjectPaths(Array.isArray(record.projects) ? record.projects : []);
-      return;
-    }
-    if (action === 'createGhostexHelpChat') {
-      await this.createGhostexHelpChat(
-        typeof record.question === 'string' ? record.question : '',
-        normalizeNonEmptyString(record.projectPath) ?? ''
+    if (action === "openProjectPaths") {
+      await this.openOsIntegrationProjectPaths(
+        Array.isArray(record.projects) ? record.projects : [],
       );
       return;
     }
-    this.postSidebarActionToast('warning', 'Unsupported OS integration action.');
+    if (action === "createGhostexHelpChat") {
+      await this.createGhostexHelpChat(
+        typeof record.question === "string" ? record.question : "",
+        normalizeNonEmptyString(record.projectPath) ?? "",
+      );
+      return;
+    }
+    this.postSidebarActionToast(
+      "warning",
+      "Unsupported OS integration action.",
+    );
   },
 
   /*
@@ -917,11 +1136,11 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       command?: string;
       cwd?: string;
       title?: string;
-    }
+    },
   ): Promise<void> {
     if (!this.client || !input.cwd) {
-      this.postSidebarActionToast('warning', 'Open Terminal failed', {
-        description: 'ghostex://terminal needs the local gxserver.',
+      this.postSidebarActionToast("warning", "Open Terminal failed", {
+        description: "ghostex://terminal needs the local gxserver.",
       });
       return;
     }
@@ -931,36 +1150,47 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
         path: input.cwd,
       });
       this.focusProjectId(project.projectId);
-      this.publishPresentation('patch');
+      this.publishPresentation("patch");
       const title =
-        input.title ?? normalizeNonEmptyString(gpuiProjectNameFromPath(input.cwd)) ?? DEFAULT_TERMINAL_SESSION_TITLE;
+        input.title ??
+        normalizeNonEmptyString(gpuiProjectNameFromPath(input.cwd)) ??
+        DEFAULT_TERMINAL_SESSION_TITLE;
       const response = input.command
-        ? await this.client.rpc<GpuiGxserverCreatedSessionResult>('/api/createAgentSession', {
-            agentId: 'os-integration-terminal',
-            launchSettings: {
-              agentCommand: input.command,
+        ? await this.client.rpc<GpuiGxserverCreatedSessionResult>(
+            "/api/createAgentSession",
+            {
+              agentId: "os-integration-terminal",
+              launchSettings: {
+                agentCommand: input.command,
+              },
+              projectId: project.projectId,
+              surface: "workspace",
+              title,
             },
-            projectId: project.projectId,
-            surface: 'workspace',
-            title,
-          })
-        : await this.client.rpc<GpuiGxserverCreatedSessionResult>('/api/createSession', {
-            kind: 'terminal',
-            lifecycleState: 'running',
-            projectId: project.projectId,
-            surface: 'workspace',
-            title,
-          });
-      const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+          )
+        : await this.client.rpc<GpuiGxserverCreatedSessionResult>(
+            "/api/createSession",
+            {
+              kind: "terminal",
+              lifecycleState: "running",
+              projectId: project.projectId,
+              surface: "workspace",
+              title,
+            },
+          );
+      const createdSessionId = normalizeNonEmptyString(
+        response.session?.sessionId,
+      );
       if (createdSessionId) {
         this.focusLocalWorkspaceSession(
-          normalizeNonEmptyString(response.session?.projectId) ?? project.projectId,
-          createdSessionId
+          normalizeNonEmptyString(response.session?.projectId) ??
+            project.projectId,
+          createdSessionId,
         );
       }
     } catch {
-      this.postSidebarActionToast('error', 'Open Terminal failed', {
-        description: 'gxserver could not create the requested terminal.',
+      this.postSidebarActionToast("error", "Open Terminal failed", {
+        description: "gxserver could not create the requested terminal.",
       });
     }
   },
@@ -979,7 +1209,11 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
   project lookup, the default prompt agent, and focusing the new session, so
   the chat takes the same draft launch path as Export transcript.
   */
-  async createGhostexHelpChat(this: GpuiSidebarRuntime, question: string, projectPath: string): Promise<void> {
+  async createGhostexHelpChat(
+    this: GpuiSidebarRuntime,
+    question: string,
+    projectPath: string,
+  ): Promise<void> {
     // Keep the caller's trailing space: the open-ended row stages
     // `$ghostex-help ` so the user types straight after the skill mention.
     const draft = question.trimStart();
@@ -988,51 +1222,68 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     }
     const agent = this.resolveSidebarAgent(this.resolveDefaultPromptAgentId());
     if (!agent?.command) {
-      this.postSidebarActionToast('warning', 'Ghostex Help unavailable', {
-        description: 'Choose a default prompt agent in Settings > Agents first.',
+      this.postSidebarActionToast("warning", "Ghostex Help unavailable", {
+        description:
+          "Choose a default prompt agent in Settings > Agents first.",
       });
       return;
     }
     if (!projectPath) {
-      this.postSidebarActionToast('error', 'Ghostex Help failed', {
-        description: 'The Ghostex config folder is unknown, so no project could host the help chat.',
+      this.postSidebarActionToast("error", "Ghostex Help failed", {
+        description:
+          "The Ghostex config folder is unknown, so no project could host the help chat.",
       });
       return;
     }
     const preferredInterface = resolveEffectivePreferredAgentInterface(
       createGpuiSidebarSettings(this.runtimeSettings),
-      agent.agentId
+      agent.agentId,
     );
     try {
       const project =
         this.resolveDomainProjectScope({ projectPath }) ??
-        (await this.registerProjectPath({ name: 'Ghostex', path: projectPath }));
-      await this.createAgentSessionRecordForProject(project, agent, '', {
+        (await this.registerProjectPath({
+          name: "Ghostex",
+          path: projectPath,
+        }));
+      await this.createAgentSessionRecordForProject(project, agent, "", {
         draft: true,
-        errorMessage: 'Ghostex could not start the help chat.',
+        errorMessage: "Ghostex could not start the help chat.",
         firstUserInputDraft: draft,
         preferredInterface,
-        title: 'Ghostex Help',
+        title: "Ghostex Help",
       });
-      this.postSidebarActionToast('info', 'Edit the prompt and press Enter to learn more about Ghostex.');
+      this.postSidebarActionToast(
+        "info",
+        "Edit the prompt and press Enter to learn more about Ghostex.",
+      );
     } catch (error) {
-      this.postSidebarActionToast('error', 'Ghostex Help failed', {
-        description: error instanceof Error ? error.message : 'Ghostex could not start the help chat.',
+      this.postSidebarActionToast("error", "Ghostex Help failed", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Ghostex could not start the help chat.",
       });
     }
   },
 
-  async openOsIntegrationProjectPaths(this: GpuiSidebarRuntime, entries: unknown[]): Promise<void> {
+  async openOsIntegrationProjectPaths(
+    this: GpuiSidebarRuntime,
+    entries: unknown[],
+  ): Promise<void> {
     if (!this.client) {
-      this.postSidebarActionToast('warning', 'Open failed', {
-        description: 'Opening paths needs the local gxserver.',
+      this.postSidebarActionToast("warning", "Open failed", {
+        description: "Opening paths needs the local gxserver.",
       });
       return;
     }
     let focusProjectId: string | undefined;
     let failedCount = 0;
     for (const entry of entries.slice(0, 16)) {
-      const record = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : undefined;
+      const record =
+        entry && typeof entry === "object"
+          ? (entry as Record<string, unknown>)
+          : undefined;
       const path = normalizeNonEmptyString(record?.path);
       if (!path) {
         continue;
@@ -1048,13 +1299,13 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       }
     }
     if (failedCount > 0) {
-      this.postSidebarActionToast('error', 'Open failed', {
-        description: 'gxserver could not open a requested folder as a project.',
+      this.postSidebarActionToast("error", "Open failed", {
+        description: "gxserver could not open a requested folder as a project.",
       });
     }
     if (focusProjectId) {
       this.focusProjectId(focusProjectId);
-      this.publishPresentation('patch');
+      this.publishPresentation("patch");
     }
   },
 
@@ -1063,10 +1314,11 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     project: GxserverProjectDomainState,
     agent: SidebarAgentButton,
     prompt: string,
-    title = createAgentSessionDefaultTitle(agent.name)
+    title = createAgentSessionDefaultTitle(agent.name),
   ): Promise<string> {
     const defaultTitle = createAgentSessionDefaultTitle(agent.name);
-    const renameTitle = title.trim() !== defaultTitle ? title.trim() : undefined;
+    const renameTitle =
+      title.trim() !== defaultTitle ? title.trim() : undefined;
     /*
     CDXC:Git 2026-07-11-06:14:
     Match macOS `runSidebarGitPromptAction` + `stageNativeAgentPrompt`: create
@@ -1077,10 +1329,15 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     path treat a brand-new row as a trusted resume title; a failed lookup then
     leaves the workflow prompt in a plain shell.
     */
-    const created = await this.createAgentSessionRecordForProject(project, agent, prompt, {
-      renameTitleAfterStart: renameTitle,
-      title: defaultTitle,
-    });
+    const created = await this.createAgentSessionRecordForProject(
+      project,
+      agent,
+      prompt,
+      {
+        renameTitleAfterStart: renameTitle,
+        title: defaultTitle,
+      },
+    );
     return created.sessionId;
   },
 
@@ -1099,31 +1356,33 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       preferredInterface?: PreferredAgentInterface;
       renameTitleAfterStart?: string;
       title?: string;
-    } = {}
+    } = {},
   ): Promise<GpuiCreatedProjectAgentSessionRecord> {
     if (!this.client) {
-      throw new Error('gxserver is unavailable.');
+      throw new Error("gxserver is unavailable.");
     }
     const response = await this.client.rpc<{
       session?: {
         agentSessionId?: string;
         agentSessionPath?: string;
-        runtimeSettings?: { agentSessionId?: string; agentSessionPath?: string };
+        runtimeSettings?: {
+          agentSessionId?: string;
+          agentSessionPath?: string;
+        };
         sessionId?: string;
         zmxName?: string;
       };
-    }>('/api/createAgentSession', {
+    }>("/api/createAgentSession", {
       ...(options.agentEffort ? { agentEffort: options.agentEffort } : {}),
       agentId: agent.agentId,
       ...(options.agentModel ? { agentModel: options.agentModel } : {}),
       /*
-      CDXC:Drafts 2026-09-02:
-      A promptless launch (Handoff / Export) is a draft exactly like a sidebar
-      launch: chat-eligible from the first frame instead of only once the
-      agent's hooks report a conversation id. Never combined with a prompt —
-      the prompt paths below promote the row the moment the prompt is sent.
+      CDXC:Drafts 2026-09-23 WHY:
+      An initial prompt is still unsent until the durable startup queue delivers it. Keep the new session chat-eligible as a draft while its input box starts, then let the shared delivery path promote it; this supersedes treating a supplied prompt as already sent.
       */
-      ...(options.draft && !normalizeNonEmptyString(prompt) ? { draft: true } : {}),
+      ...(options.draft || normalizeNonEmptyString(prompt)
+        ? { draft: true }
+        : {}),
       launchSettings: {
         agentCommand: agent.command,
         icon: agent.icon,
@@ -1131,27 +1390,37 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       projectId: project.projectId,
       runtimeSettings: this.createFirstPromptTitleRuntimeSettings(
         options.renameTitleAfterStart ? undefined : prompt,
-        options.firstUserInputDraft
+        options.firstUserInputDraft,
       ),
-      surface: 'workspace',
+      surface: "workspace",
       title: options.title ?? createAgentSessionDefaultTitle(agent.name),
     });
     const session = response.session;
     const sessionId = normalizeNonEmptyString(session?.sessionId);
     if (!sessionId) {
-      throw new Error(options.errorMessage ?? 'Could not create an agent session in the worktree.');
+      throw new Error(
+        options.errorMessage ??
+          "Could not create an agent session in the worktree.",
+      );
     }
     this.focusLocalWorkspaceSession(
       project.projectId,
       sessionId,
-      options.preferredInterface === 'chat' ? { preferredInterface: 'chat' } : undefined
+      options.preferredInterface === "chat"
+        ? { preferredInterface: "chat" }
+        : undefined,
     );
     const renameTitle = normalizeNonEmptyString(options.renameTitleAfterStart);
     if (normalizeNonEmptyString(prompt) || renameTitle) {
       const renameCommand = renameTitle
         ? `/${gpuiWorkspaceTerminalTitleCommandForAgent(agent.agentId)} ${renameTitle}`
         : undefined;
-      await this.startLocalAgentSessionAndSendPrompt(project.projectId, sessionId, prompt, renameCommand);
+      await this.startLocalAgentSessionAndSendPrompt(
+        project.projectId,
+        sessionId,
+        prompt,
+        renameCommand,
+      );
     }
     return {
       agentSessionId:
@@ -1178,31 +1447,45 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       draft?: boolean;
       firstUserInputDraft?: string;
       preferredInterface?: PreferredAgentInterface;
-    } = {}
+    } = {},
   ): Promise<void> {
-    const response = await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(
-      remoteScope.machineId,
-      '/api/createAgentSession',
-      {
-        ...(options.agentEffort ? { agentEffort: options.agentEffort } : {}),
-        agentId,
-        ...(options.agentModel ? { agentModel: options.agentModel } : {}),
-        // CDXC:Drafts 2026-09-02: same draft rule as the local helper.
-        ...(options.draft && !normalizeNonEmptyString(prompt) ? { draft: true } : {}),
-        projectId: remoteScope.projectId,
-        requireLaunchCommand: true,
-        runtimeSettings: this.createFirstPromptTitleRuntimeSettings(prompt, options.firstUserInputDraft),
-        surface: 'workspace',
-        title,
-      },
-      { timeoutMs: 20_000 }
-    );
+    const response =
+      await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(
+        remoteScope.machineId,
+        "/api/createAgentSession",
+        {
+          ...(options.agentEffort ? { agentEffort: options.agentEffort } : {}),
+          agentId,
+          ...(options.agentModel ? { agentModel: options.agentModel } : {}),
+          // The same unsent-first-prompt draft rule as the local helper.
+          ...(options.draft || normalizeNonEmptyString(prompt)
+            ? { draft: true }
+            : {}),
+          projectId: remoteScope.projectId,
+          requireLaunchCommand: true,
+          runtimeSettings: this.createFirstPromptTitleRuntimeSettings(
+            prompt,
+            options.firstUserInputDraft,
+          ),
+          surface: "workspace",
+          title,
+        },
+        { timeoutMs: 20_000 },
+      );
     const sessionId = normalizeNonEmptyString(response.session?.sessionId);
     if (sessionId) {
-      const projectId = normalizeNonEmptyString(response.session?.projectId) ?? remoteScope.projectId;
-      await this.startRemoteAgentSessionAndSendPrompt(remoteScope.machineId, projectId, sessionId, prompt).catch(() => {
-        this.postRemoteToast('warning', 'Remote agent prompt failed', {
-          description: 'The remote gxserver could not start that agent session or deliver its prompt.',
+      const projectId =
+        normalizeNonEmptyString(response.session?.projectId) ??
+        remoteScope.projectId;
+      await this.startRemoteAgentSessionAndSendPrompt(
+        remoteScope.machineId,
+        projectId,
+        sessionId,
+        prompt,
+      ).catch(() => {
+        this.postRemoteToast("warning", "Remote agent prompt failed", {
+          description:
+            "The remote gxserver could not start that agent session or deliver its prompt.",
         });
       });
       this.setRemotePresentationSessionFocus({
@@ -1210,20 +1493,25 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
         projectId,
         sessionId,
       });
-      if (options.preferredInterface === 'chat') {
+      if (options.preferredInterface === "chat") {
         this.postRemoteSessionNativeAction(
-          'openRemoteSessionTerminal',
+          "openRemoteSessionTerminal",
           { machineId: remoteScope.machineId, projectId, sessionId },
-          { agentId, type: 'runSidebarAgent' },
-          { preferredInterface: 'chat' }
+          { agentId, type: "runSidebarAgent" },
+          { preferredInterface: "chat" },
         );
       }
     }
-    await this.refreshRemotePresentationFromGxserver(remoteScope.machineId).catch(() => undefined);
+    await this.refreshRemotePresentationFromGxserver(
+      remoteScope.machineId,
+    ).catch(() => undefined);
   },
 };
 
-function openQuickHeaderBrowserUrl(runtime: GpuiSidebarRuntime, url: string): void {
+function openQuickHeaderBrowserUrl(
+  runtime: GpuiSidebarRuntime,
+  url: string,
+): void {
   /*
   GPUI currently owns Browser tabs at the window level instead of as Agents
   workspace sessions. Send the Quick header's explicit browser launch through
@@ -1232,21 +1520,21 @@ function openQuickHeaderBrowserUrl(runtime: GpuiSidebarRuntime, url: string): vo
   is otherwise disabled in Quick context.
   */
   const post = window.ghostexGpui?.postOpenBrowserUrl;
-  if (typeof post !== 'function') {
-    runtime.postSidebarActionToast('warning', 'Quick Browser unavailable');
+  if (typeof post !== "function") {
+    runtime.postSidebarActionToast("warning", "Quick Browser unavailable");
     return;
   }
   const accepted = post(
     JSON.stringify({
-      origin: 'quickHeader',
-      reuse: 'none',
+      origin: "quickHeader",
+      reuse: "none",
       type: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
       url,
       version: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
-    })
+    }),
   );
   if (!accepted) {
-    runtime.postSidebarActionToast('warning', 'Quick Browser unavailable');
+    runtime.postSidebarActionToast("warning", "Quick Browser unavailable");
   }
 }
 

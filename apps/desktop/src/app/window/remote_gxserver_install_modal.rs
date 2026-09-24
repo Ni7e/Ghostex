@@ -31,10 +31,10 @@ enum InlineRun {
 /// The `CardDescription` of the React modal, run by run.
 const DETAIL_RUNS: [InlineRun; 15] = [
     InlineRun::Text(
-        "If you continue, Ghostex will copy its compatible bundled remote package over SSH into ",
+        "If you continue, Ghostex will copy its compatible bundled remote package over SSH, start gxserver, then connect through an SSH tunnel. On macOS, Linux, or WSL, the package is installed into ",
     ),
     InlineRun::Code("${XDG_DATA_HOME:-~/.local/share}/ghostex/gxserver"),
-    InlineRun::Text(", expose "),
+    InlineRun::Text(", exposing "),
     InlineRun::Code("gxserver"),
     InlineRun::Text(", "),
     InlineRun::Code("zmx"),
@@ -47,7 +47,7 @@ const DETAIL_RUNS: [InlineRun; 15] = [
     InlineRun::Text(" from "),
     InlineRun::Code("~/.local/bin"),
     InlineRun::Text(
-        " when possible, start gxserver, then connect through an SSH tunnel. Windows machines use the selected or default WSL2 distribution, and Ghostex installs the Linux package in that distribution's home directory.",
+        " when possible. Windows connections follow Windows Environment on the remote computer, which defaults to native PowerShell. Selecting a WSL distribution in Advanced uses that distribution instead.",
     ),
 ];
 

@@ -41,7 +41,11 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn titlebar_git_popup_content_height(&self) -> f32 {
-        let Some(state) = self.titlebar_git_menu_state.as_ref() else {
+        let Some(state) = self
+            .titlebar_git_menu_state
+            .as_ref()
+            .filter(|state| !state.is_busy && state.is_repo)
+        else {
             return titlebar_popup_menu_height_for_rows(&[TITLEBAR_POPUP_MENU_ROW_HEIGHT]);
         };
         let section_label_height =

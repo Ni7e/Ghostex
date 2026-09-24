@@ -1,5 +1,5 @@
 //! The header's trailing half: the Start / Open / Commit split buttons, the ⋯ menu, the two panel
-//! toggles, and the platform caption controls on Linux.
+//! toggles. Platform caption controls belong to the rightmost band region.
 
 use std::time::Duration;
 
@@ -27,9 +27,6 @@ use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::window::*;
 use crate::*;
-
-#[cfg(target_os = "linux")]
-use gpui::WindowControlArea;
 
 /// CDXC:Theming 2026-09-20 WHY:
 /// The 2026-09-19 light screens draw Start, Open and Commit as raised white controls, because a
@@ -528,23 +525,6 @@ impl GhostexGpuiApp {
                     .child(buttons),
             )
             .child(pinned);
-        #[cfg(target_os = "linux")]
-        let controls = controls.when(
-            matches!(
-                window.window_decorations(),
-                gpui::Decorations::Client { .. }
-            ),
-            |this| {
-                this.child(
-                    div()
-                        .id("ghostex-gpui-workarea-header-window-controls-gap")
-                        .h_full()
-                        .w(px(TITLEBAR_BUTTON_WIDTH))
-                        .window_control_area(WindowControlArea::Drag),
-                )
-                .child(self.render_titlebar_window_controls(window, cx))
-            },
-        );
         controls
     }
 }

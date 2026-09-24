@@ -907,6 +907,17 @@ pub enum SessionChatSendStep {
     ClearComposer {
         agent: String,
     },
+    /// CDXC:SessionFork 2026-09-24 WHY:
+    /// A startup rename can wait behind a prompt or manual rename in the input queue. Recheck persisted ownership before pasting and submitting. A failed send can leave its exact rename staged, so that retry completes only the owned command's Enter without clearing or repasting; different input remains untouched.
+    GuardForkRename {
+        agent: String,
+        title: String,
+        state_db_file: PathBuf,
+        server_id: String,
+        first_user_message: Option<String>,
+        rename_requested_at: Option<String>,
+        expected_composer: Option<String>,
+    },
     /// Hold the sequence until the session's screen proves `text` reached the
     /// agent's composer (CDXC:Clipboard). Settles `settle_ms`,
     /// then polls captures until the deadline `timeout_ms` sets. Failing this
@@ -1668,6 +1679,51 @@ async fn run_session_chat_send_worker(
                         outcome = Err(SessionChatSendError::new(
                             SessionChatSendFailure::ComposerNotReady,
                             SESSION_CHAT_SHELL_PROMPT_NOT_REACHED.to_string(),
+                        ));
+                        break;
+                    }
+                }
+                SessionChatSendStep::GuardForkRename {
+                    agent,
+                    title,
+                    state_db_file,
+                    server_id,
+                    first_user_message,
+                    rename_requested_at,
+                    expected_composer,
+                } => {
+                    let matches_composer = capture_session_terminal_text_vt(&zmx_name)
+                        .await
+                        .and_then(|screen| {
+                            crate::session_chat_composer::session_chat_composer_input(
+                                &agent, &screen,
+                            )
+                        })
+                        .is_some_and(|input| match expected_composer.as_deref() {
+                            Some(expected) => !input.is_empty() && input.text == expected,
+                            None => input.is_empty(),
+                        });
+                    let owned = rusqlite::Connection::open_with_flags(
+                        state_db_file,
+                        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                    )
+                    .ok()
+                    .and_then(|db| {
+                        DomainRepository::new(&db, &server_id)
+                            .get_session(&project_id, &session_id)
+                            .ok()
+                            .flatten()
+                    })
+                    .is_some_and(|session| {
+                        crate::server::fork_initial_rename_is_current(&session, &title)
+                            && read_runtime_text(&session, "firstUserMessage") == first_user_message
+                            && read_runtime_text(&session, "pendingAgentTitleRequestRequestedAt")
+                                == rename_requested_at
+                    });
+                    if !matches_composer || !owned {
+                        outcome = Err(SessionChatSendError::not_attempted(
+                            "The fork rename no longer owns the expected agent composer."
+                                .to_string(),
                         ));
                         break;
                     }

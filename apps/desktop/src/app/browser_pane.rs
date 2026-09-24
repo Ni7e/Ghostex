@@ -627,6 +627,12 @@ impl GhostexGpuiApp {
             .browser_tabs
             .tab(tab_id)
             .and_then(|tab| tab.remote_machine_id.clone());
+        support_logs::append_for_scenario(
+            support_logs::GpuiSupportLog::SidebarRefresh,
+            "native.sidebar.refresh",
+            "gpui.browserSurface.ensure",
+            serde_json::json!({"tabId":tab_id.0,"runtimeKey":self.browser_tabs_runtime_key,"remote":remote_machine_id.is_some(),"blankUrl":url.is_empty() || url == "about:blank","activeMode":format!("{:?}",self.active_mode)}),
+        );
         let profile = if let Some(machine_id) = remote_machine_id.as_deref() {
             use sha2::{Digest, Sha256};
             let tunnel = self.ensure_remote_browser_tunnel(machine_id, false, cx)?;
@@ -703,6 +709,12 @@ impl GhostexGpuiApp {
             }
         };
         self.browser_surfaces.insert(tab_id, surface.clone());
+        support_logs::append_for_scenario(
+            support_logs::GpuiSupportLog::SidebarRefresh,
+            "native.sidebar.refresh",
+            "gpui.browserSurface.created",
+            serde_json::json!({"tabId":tab_id.0,"runtimeKey":self.browser_tabs_runtime_key,"initiallyVisible":initially_visible}),
+        );
         Some(surface)
     }
 
@@ -774,6 +786,14 @@ impl GhostexGpuiApp {
         let original_project_name = self.project_name.clone();
 
         Rc::new(move |event: cef::BrowserPageMetadataEvent| {
+            if let cef::BrowserPageMetadataEvent::LoadingStateChanged { is_loading, .. } = &event {
+                support_logs::append_for_scenario(
+                    support_logs::GpuiSupportLog::SidebarRefresh,
+                    "native.sidebar.refresh",
+                    "gpui.browserSurface.loading",
+                    serde_json::json!({"tabId":tab_id.0,"runtimeKey":runtime_key,"loading":is_loading}),
+                );
+            }
             let remote_favicon_url = match &event {
                 cef::BrowserPageMetadataEvent::FaviconUrlChanged(Some(url)) => Some(url.clone()),
                 _ => None,

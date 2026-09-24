@@ -1515,7 +1515,9 @@ export function computeSessionChat(
         const id = nextSessionChatPendingSendId();
         pendingId = id;
         const baseEntry: SessionChatPendingSend = {
-          afterMessageId: last?.id ?? null,
+          // CDXC:SessionChat 2026-09-23 WHY:
+          // An empty transcript has no earlier turn to exclude. Using the client's send time as its boundary strands the first echo when a remote host's clock is behind the client, so leave that boundary unrestricted; existing transcripts retain their message identity and host timestamp.
+          afterMessageId: last?.id,
           afterMessageTimestamp: last?.timestamp ?? null,
           id,
           imagePaths,

@@ -53,6 +53,18 @@ impl GhostexGpuiApp {
         message: &serde_json::Value,
         cx: &mut gpui::Context<Self>,
     ) {
+        support_logs::append_for_scenario(
+            support_logs::GpuiSupportLog::SessionChat,
+            "gpui.sessionChat.viewState",
+            "sessionChat.nativeBrokerRequest",
+            serde_json::json!({
+                "generation": generation,
+                "method": message["method"],
+                "requestId": message["requestId"],
+                "hasBinding": self.session_chat_runtime_key(generation).is_some(),
+                "brokerReady": self.session_chat_broker_epoch.is_some(),
+            }),
+        );
         let Some(key) = self.session_chat_runtime_key(generation) else {
             return;
         };
@@ -117,6 +129,9 @@ impl GhostexGpuiApp {
             if let Some(value) = message["params"][field].as_u64() {
                 params.insert(field.to_string(), value.into());
             }
+        }
+        if let Some(catalog) = message["params"]["catalog"].as_bool() {
+            params.insert("catalog".into(), catalog.into());
         }
         if method == "adoptDrafts" {
             let Some(drafts) = message["params"]["drafts"]
@@ -197,6 +212,27 @@ impl GhostexGpuiApp {
         force: bool,
         cx: &mut gpui::Context<Self>,
     ) {
+        // CDXC:RemoteMachines 2026-09-23 WHY:
+        // Reconnecting can replace the SSH forward port while native chat views remain alive. Refresh their mutation/upload target alongside the shared read broker, including parked views, without recreating controllers or drafts.
+        let native_views = self
+            .native_chat_views
+            .values()
+            .chain(
+                self.parked_agents_chat_runtimes_by_project
+                    .values()
+                    .flat_map(|parked| parked.native_views.values()),
+            )
+            .cloned()
+            .collect::<Vec<_>>();
+        for view in native_views {
+            let machine_id = view.read(cx).config.machine_id.clone();
+            if machine_id == crate::app::gx_chat::LOCAL_MACHINE_ID {
+                continue;
+            }
+            if let Some(target) = self.gpui_remote_gxserver_request_target(&machine_id) {
+                view.update(cx, |view, _| view.config.remote = Some(target));
+            }
+        }
         let Some(epoch) = self.session_chat_broker_epoch.clone() else {
             return;
         };
@@ -242,6 +278,18 @@ impl GhostexGpuiApp {
         message: &serde_json::Value,
         cx: &mut gpui::Context<Self>,
     ) {
+        support_logs::append_for_scenario(
+            support_logs::GpuiSupportLog::SessionChat,
+            "gpui.sessionChat.viewState",
+            "sessionChat.nativeBrokerResponse",
+            serde_json::json!({
+                "generation": message["generation"],
+                "kind": message["kind"],
+                "requestId": message["requestId"],
+                "epochMatches": message["epoch"].as_str() == self.session_chat_broker_epoch.as_deref(),
+                "hasFailure": message["error"].is_string(),
+            }),
+        );
         let Some(epoch) = message["epoch"]
             .as_str()
             .filter(|epoch| !epoch.is_empty() && epoch.len() < 100)

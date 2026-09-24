@@ -236,17 +236,6 @@ pub(crate) const TITLEBAR_CONTROL_HEIGHT: f32 = 27.0;
 pub(crate) const TITLEBAR_PROJECT_CONTEXT_DISABLED_REASON: &str =
     "Switch to a project to access this view";
 
-/*
-CDXC:Titlebar 2026-08-20:
-Source (Code) has no working remote runtime yet: code-server is launched on this
-machine against a local path, so a machine-scoped remote project would open the
-wrong tree. Disable the tab for remote projects through the same availability
-contract the Quick/projectless reasons use, so the tab click, the compact mode
-menu, hotkeys, and restored-mode coercion all refuse it in one place.
-*/
-pub(crate) const TITLEBAR_REMOTE_SOURCE_DISABLED_REASON: &str =
-    "Code is currently disabled for remote projects";
-
 /// Fixed square width kept only for the Linux caption-control gap; every other header button sizes
 /// to its icon now.
 #[cfg(target_os = "linux")]

@@ -41,8 +41,8 @@ pub(crate) fn gpui_remote_sidebar_request_path_allowed(path: &str) -> bool {
             Creating a remote agent session is a two-step daemon operation:
             `/api/createAgentSession` writes the row and queues the agent's
             launch startup text, then `/api/startSessionProvider` spawns the
-            zmx provider that actually runs the agent, and `/api/sendSessionMessage`
-            delivers the workflow prompt. Leaving the second and third steps off
+            zmx provider that actually runs the agent, and `/api/queueSessionChatPrompt`
+            durably queues the workflow prompt for verified delivery. Leaving the second and third steps off
             this allowlist made every remote agent launch report "Remote agent
             failed" at the Rust boundary and silently dropped Git/worktree
             workflow prompts. Params below are reshaped to the two ids (plus a
@@ -51,6 +51,7 @@ pub(crate) fn gpui_remote_sidebar_request_path_allowed(path: &str) -> bool {
             */
             | "/api/startSessionProvider"
             | "/api/sendSessionMessage"
+            | "/api/queueSessionChatPrompt"
             | "/api/updateSession"
             | "/api/requestSessionRename"
             /*
@@ -176,6 +177,12 @@ pub(crate) fn gpui_remote_sidebar_request_params(
         }
         "/api/startSessionProvider" => gpui_remote_sidebar_session_lifecycle_params(params, None),
         "/api/sendSessionMessage" => gpui_remote_sidebar_send_session_message_params(params),
+        "/api/queueSessionChatPrompt" => {
+            let mut shaped = gpui_remote_sidebar_send_session_message_params(params)?;
+            shaped.as_object_mut()?.remove("submit");
+            shaped["startupSend"] = serde_json::json!(true);
+            Some(shaped)
+        }
         "/api/settleSession"
         | "/api/unsettleSession"
         | "/api/unsnoozeSession"
@@ -886,6 +893,12 @@ pub(crate) fn gpui_remote_sidebar_response_payload(
             gpui_remote_sidebar_agent_hook_status_response_payload(result)
         }
         "/api/scheduleDelayedSend" | "/api/postponeDelayedSend" => serde_json::json!({}),
+        "/api/queueSessionChatPrompt" => result
+            .pointer("/prompt/id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control))
+            .map(|id| serde_json::json!({ "prompt": { "id": id } }))
+            .unwrap_or(serde_json::Value::Null),
         "/api/cancelDelayedSend" => serde_json::json!({
             "changed": result
                 .get("changed")

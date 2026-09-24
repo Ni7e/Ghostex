@@ -233,7 +233,7 @@ async fn discover_provider(provider: ProviderKind, cwd: &Path) -> Value {
     let version = first_non_empty_line(&version_probe.stdout)
         .or_else(|| first_non_empty_line(&version_probe.stderr));
     let auth_args: &[&str] = match provider {
-        ProviderKind::GitHub => &["auth", "status", "--json", "hosts"],
+        ProviderKind::GitHub => &["auth", "status", "--active"],
         ProviderKind::GitLab => &["auth", "status"],
         _ => &[],
     };
@@ -297,84 +297,27 @@ fn unknown_auth(detail: Option<String>) -> Value {
     provider_auth("unknown", None, None, detail)
 }
 
-#[derive(Debug)]
-struct GitHubAuthAccount {
-    account: String,
-    active: bool,
-    authenticated: bool,
-    error: Option<String>,
-    host: String,
-}
-
-fn parse_github_auth_accounts(stdout: &str) -> Option<Vec<GitHubAuthAccount>> {
-    let parsed: Value = serde_json::from_str(stdout.trim()).ok()?;
-    let hosts = parsed.get("hosts")?.as_object()?;
-    let mut accounts = Vec::new();
-    for entries in hosts.values() {
-        for entry in entries.as_array()? {
-            let host = entry
-                .get("host")
-                .and_then(Value::as_str)?
-                .trim()
-                .to_string();
-            let login = entry
-                .get("login")
-                .and_then(Value::as_str)?
-                .trim()
-                .to_string();
-            if host.is_empty() || login.is_empty() {
-                continue;
-            }
-            accounts.push(GitHubAuthAccount {
-                account: login,
-                active: entry.get("active").and_then(Value::as_bool) == Some(true),
-                authenticated: entry.get("state").and_then(Value::as_str) == Some("success"),
-                error: entry
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string),
-                host: host.to_lowercase(),
-            });
-        }
-    }
-    Some(accounts)
-}
-
+/// CDXC:AddProject 2026-09-23 WHY:
+/// GitHub CLI 2.67 rejects `auth status --json`, so discovery uses `--active` and its authenticated account line on every host instead of requiring the newer JSON format.
 fn parse_github_auth(output: &ProbeOutput) -> Value {
     let combined = output.combined();
-    let accounts = parse_github_auth_accounts(&output.stdout);
-    if let Some(accounts) = accounts {
-        let authenticated = accounts
-            .iter()
-            .find(|entry| entry.authenticated && entry.active)
-            .or_else(|| accounts.iter().find(|entry| entry.authenticated));
-        if let Some(account) = authenticated {
-            return provider_auth(
-                "authenticated",
-                Some(account.account.clone()),
-                Some(account.host.clone()),
-                None,
-            );
-        }
-        let failed = accounts
-            .iter()
-            .find(|entry| entry.active)
-            .or_else(|| accounts.first());
-        return provider_auth(
-            "unauthenticated",
-            None,
-            failed.map(|entry| entry.host.clone()),
-            Some(
-                failed
-                    .and_then(|entry| entry.error.clone())
-                    .unwrap_or_else(|| {
-                        "Run `gh auth login` to authenticate GitHub CLI with an active account."
-                            .to_string()
-                    }),
-            ),
-        );
+    for line in sanitized_auth_lines(&combined) {
+        let line = line.trim_start_matches(|character: char| !character.is_ascii_alphanumeric());
+        let lower = line.to_lowercase();
+        let Some(rest) = lower.strip_prefix("logged in to ") else {
+            continue;
+        };
+        let Some(host) = rest
+            .split_whitespace()
+            .next()
+            .filter(|host| is_host_token(host))
+        else {
+            continue;
+        };
+        let Some(account) = parse_logged_in_account(line) else {
+            continue;
+        };
+        return provider_auth("authenticated", Some(account), Some(host.to_string()), None);
     }
     if output.exit_code != 0 {
         return provider_auth(
@@ -780,7 +723,7 @@ mod tests {
     #[test]
     fn github_auth_reports_the_active_authenticated_account() {
         let auth = parse_github_auth(&probe(
-            r#"{"hosts":{"github.com":[{"state":"success","active":true,"host":"GitHub.com","login":"octocat"}]}}"#,
+            "GitHub.com\n  ✓ Logged in to GitHub.com account octocat (keyring)\n  - Active account: true\n",
             "",
             0,
         ));
@@ -792,11 +735,7 @@ mod tests {
 
     #[test]
     fn github_auth_reports_unauthenticated_with_the_account_error() {
-        let auth = parse_github_auth(&probe(
-            r#"{"hosts":{"github.com":[{"state":"error","error":"token expired","active":true,"host":"github.com","login":"octocat"}]}}"#,
-            "",
-            1,
-        ));
+        let auth = parse_github_auth(&probe("token expired\n", "", 1));
         assert_eq!(auth["status"], json!("unauthenticated"));
         assert_eq!(auth["detail"], json!("token expired"));
     }

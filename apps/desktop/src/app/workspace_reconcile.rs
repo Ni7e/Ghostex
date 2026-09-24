@@ -1241,7 +1241,7 @@ impl GhostexGpuiApp {
         */
         self.command_remote_action_sessions =
             command_remote_action_sessions_from_command_model(&self.command_pane);
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         self.command_remote_attach_askpass_scripts.clear();
         self.command_gxserver_attach_pending.clear();
         self.command_terminal_launch_payload_source
@@ -1911,6 +1911,7 @@ impl GhostexGpuiApp {
                 cef::BrowserPopupPlacement::Selected,
             );
             if let Some(created_tab_id) = created_tab_id {
+                self.assign_new_browser_tab_project_machine(created_tab_id);
                 self.reveal_new_browser_tab(created_tab_id);
             }
             self.browser_url = default_url;
@@ -1985,6 +1986,7 @@ impl GhostexGpuiApp {
             self.browser_profiles.active_profile_id(),
             default_url.clone(),
         ) {
+            self.assign_new_browser_tab_project_machine(created_tab_id);
             self.reveal_new_browser_tab(created_tab_id);
             self.browser_url = default_url;
             self.change_active_mode_with_pane_state(TitlebarMode::Browser, cx);
@@ -2274,6 +2276,8 @@ impl GhostexGpuiApp {
         if self.browser_tabs.tabs.len() != 1 || active_tab.state != BrowserTabState::AddressOnly {
             return false;
         }
+        let tab_id = active_tab.id;
+        self.assign_new_browser_tab_project_machine(tab_id);
 
         /*
         CDXC:Browser 2026-07-14:

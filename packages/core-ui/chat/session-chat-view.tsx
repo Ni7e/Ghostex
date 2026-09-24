@@ -991,7 +991,7 @@ export function SessionChatView({
   }, [transport]);
   const pickPaths = useMemo(() => {
     const pickAttachmentPaths = transport.pickAttachmentPaths?.bind(transport);
-    return pickAttachmentPaths ? () => pickAttachmentPaths() : undefined;
+    return pickAttachmentPaths ? (selection?: 'files' | 'folders') => pickAttachmentPaths(selection) : undefined;
   }, [transport]);
   const nativeDropPaths = useMemo(() => {
     const readDropPaths = transport.readDropPaths?.bind(transport);
