@@ -179,6 +179,28 @@ impl GhostexGpuiApp {
         }))
     }
 
+    /// Fork for a session's own chat or terminal controls, run as the same store fork its sidebar
+    /// row's Fork runs. `false` when the store does not own that fork (a chat project's session, a
+    /// row it does not hold yet), which the caller hands to the runtime as before.
+    pub(crate) fn gx_store_run_workspace_session_fork(
+        &mut self,
+        project_id: &str,
+        session_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let session = SessionKey::local(project_id, session_id);
+        self.gx_store_run_sidebar_fork(
+            &serde_json::json!({
+                "type": "command",
+                "message": {
+                    "type": "forkSession",
+                    "sessionId": session.to_sidebar_session_id(),
+                },
+            }),
+            cx,
+        )
+    }
+
     /// Answers a `forkSession` command in Rust when the store owns it.
     ///
     /// Nothing local happens until the daemon has made the session, so there is no optimistic
@@ -505,12 +527,24 @@ impl GhostexGpuiApp {
     /// The same selection with a placement target, which is what a fork sends: the new pane is
     /// appended beside the row it was forked from rather than beside whichever pane happens to be
     /// focused when the call comes back.
+    ///
+    /// CDXC:SessionFork 2026-09-24 DECISION:
+    /// User: forking a session from its sidebar row's Fork or from the chat's More actions > Fork switches to the forked session.
+    /// The fork becomes the workspace's focused session before its attach is requested, because a sidebar-focus attach completes only while the presentation focus still names its session (`spawn_local_workspace_attach_plan`). The TypeScript fork published that focus before posting the terminal focus; the store's fork has no such publish, so its attach plan came back ready and was dropped, leaving the source session on screen. A fork from another project's row takes that project's workspace first, as a row click does, and the old tab list goes with it until the runtime publishes the new project's one.
     fn gx_store_place_local_workspace_session(
         &mut self,
         session: &SessionKey,
         placement_target: Option<&SessionKey>,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.swap_agents_workspace_to_project_id(Some(session.project_id.clone()), cx);
+        let focus_state = &mut self.sidebar_gxserver_presentation_focus_state;
+        if focus_state.active_project_id.as_deref() != Some(session.project_id.as_str()) {
+            focus_state.active_project_id = Some(session.project_id.clone());
+            focus_state.active_project_tab_sessions = None;
+            focus_state.visible_session_ids.clear();
+        }
+        focus_state.focused_session_id = Some(session.session_id.clone());
         self.gx_store_select_local_workspace_session(
             session,
             placement_target,

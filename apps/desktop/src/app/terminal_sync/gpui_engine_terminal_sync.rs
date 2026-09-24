@@ -953,7 +953,20 @@ impl GhostexGpuiApp {
             TerminalAgentActionRequest::CloseAfterDone => {
                 let _ = self.toggle_gpui_close_after_done_for_agents_session(session_id, cx);
             }
+            // The chat's and the terminal bar's Fork run the store's fork, the one the sidebar
+            // row's Fork runs, so both switch to the fork the same way (CDXC:SessionFork
+            // 2026-09-24 in gx_store/sidebar_lifecycle.rs). The runtime keeps the forks the store
+            // declines.
             TerminalAgentActionRequest::Fork => {
+                let key = self
+                    .local_workspace_session_mappings
+                    .iter()
+                    .find_map(|(key, mapped)| (*mapped == session_id).then(|| key.clone()));
+                if key.is_some_and(|key| {
+                    self.gx_store_run_workspace_session_fork(&key.project_id, &key.session_id, cx)
+                }) {
+                    return;
+                }
                 let _ = self.dispatch_gpui_workspace_terminal_runtime_action(
                     "forkSession",
                     session_id,
