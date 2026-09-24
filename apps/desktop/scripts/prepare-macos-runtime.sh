@@ -1122,6 +1122,22 @@ if [[ "${GHOSTEX_MACOS_CODE_SERVER_COMPONENT_ONLY:-0}" == "1" ]]; then
 	exit 0
 fi
 
+# CDXC:Build 2026-09-24 SEE-ALSO:
+# `bun run start:server` (tooling/start-gxserver.mjs) rebuilds only the gxserver package through this mode and installs it into the running app. It packages the zmx binary the last full start staged; building zmx stays the full start's job.
+if [[ "${GHOSTEX_MACOS_GXSERVER_ONLY:-0}" == "1" ]]; then
+	if [[ ! -x "$WEB_DIR/bin/zmx" ]]; then
+		echo "The staged zmx binary is missing: $WEB_DIR/bin/zmx. Run \`bun run start\` once first." >&2
+		exit 1
+	fi
+	package_gxserver_if_needed
+	mkdir -p "$CLI_DIR"
+	cp "$WEB_DIR/gxserver/bin/ghostex" "$CLI_DIR/ghostex"
+	ln -sfh "ghostex" "$CLI_DIR/gx"
+	chmod 755 "$CLI_DIR/ghostex"
+	printf 'Prepared the gxserver package only at %s\n' "$WEB_DIR/gxserver"
+	exit 0
+fi
+
 # CDXC:Build 2026-05-29-11:24: `bun run start` builds zmx and its Ghostty Zig dependency.
 # Both are on Zig 0.16 now (zmx was re-ported onto upstream/main for 0.16, matching the
 # vendored ghostty pin), so the repo needs exactly one Zig toolchain. An explicit `ZIG` still

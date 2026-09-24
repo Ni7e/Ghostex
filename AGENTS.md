@@ -20,6 +20,7 @@ Chat rules go only into `gx-chat-core`, never also into the TypeScript chat brai
 - Don't get stuck on stale git locks: delete them and continue without confirmation.
 - Don't write any tests unless the user explicitly asks for them.
 - Never run `bun run start` or any command that would restart the app unless the user asks you to.
+- **Exception: `bun run start:server` (macOS).** Run it without asking whenever a gxserver change (`server/src/`, or a crate it compiles in such as `packages/find` or `packages/paths`) has to be proven against the live app, then test the fix for real (the GPUI web build, `ghostex` CLI verbs, `zmx history`) instead of reporting it untested. It rebuilds only gxserver, signs it and installs it into `/Applications/Ghostex.app` in place, then restarts just the daemon: the app window stays open and reconnects, and zmx sessions and their agents keep running through the ~2s gap. It never replaces zmx (it refuses when zmx changed; that needs `bun run start`). Mention in your report that you ran it. Desktop-app changes still need `bun run start`.
 - Never switch this folder to another branch. Several agents share one worktree, so it stays on `main` unless the user explicitly requests otherwise; work that needs another branch goes in a temporary copy-on-write folder copy.
 
 ### Always provide clickable artifact links

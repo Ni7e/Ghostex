@@ -10,6 +10,7 @@
     "start": "bun tooling/start-gpui.mjs",
     "chat:lab": "bun tooling/chat-preview.mjs",
     "start:isolated": "bun tooling/start-gpui.mjs --isolated",
+    "start:server": "bun tooling/start-gxserver.mjs",
     "gx:isolated": "bun tooling/isolated-gpui.mjs",
     "start:web": "bun run web:build && cd server && cargo run --quiet --bin ghostex -- web --dist-dir ../apps/gpui-web/www/dist",
     "build": "apps/desktop/scripts/prepare-macos-runtime.sh && apps/desktop/scripts/build-macos-app.sh",
