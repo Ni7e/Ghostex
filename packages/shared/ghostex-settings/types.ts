@@ -470,7 +470,7 @@ export type ghostexSettings = {
    */
   diagnosticLogging: DiagnosticLoggingSettings;
   renameSessionOnDoubleClick: boolean;
-  /** Show project artwork or the folder/worktree fallback beside project names. */
+  /** Show project artwork or the first-letter square beside project names. */
   showProjectIcons: boolean;
   hideSessionAgentIconUntilHover: boolean;
   hideBrowserFaviconUntilHover: boolean;

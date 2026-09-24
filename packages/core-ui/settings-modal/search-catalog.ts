@@ -374,7 +374,7 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'showProjectIcons',
-          subtitle: 'Show project artwork or a folder or worktree icon beside project names.',
+          subtitle: 'Show project artwork or a square with the project’s first letter beside project names.',
           title: 'Show project icons',
         },
         /*

@@ -21,7 +21,7 @@ How to use this file:
 - **Follow the active session's Space** `sidebarSpaceFollowActiveSession` (boolean, default false): Switch the selected Space to the one that owns a session you open from outside it, such as through Back/Forward or Search by Prompt. Requires Spaces.
 - **Keep the previous project live for** `projectSwitchKeepAliveMinutes` (number 0 to 60 default 10): After you switch to another project or Space, keep the terminals, chats, and view that were open in the previous project running for this many minutes so switching back is instant. 0 releases them right away.
 - **Sidebar visibility memory** `sidebarVisibilityMemory` (one of shared | perView; default shared) [advanced]: Keep one sidebar state everywhere, or remember it separately for Agents and for the wide views (Browser, Code, Docs, Kanban, Automate). Option labels: shared = Same in every view, perView = Remembered per view.
-- **Show project icons** `showProjectIcons` (boolean, default true) [advanced]: Show project artwork or a folder or worktree icon beside project names.
+- **Show project icons** `showProjectIcons` (boolean, default true) [advanced]: Show project artwork or a square with the project’s first letter beside project names.
 - **Hide agent icon until hover** `hideSessionAgentIconUntilHover` (boolean, default false) [advanced]: Hide session agent icons until a session row is hovered.
 - **Hide browser favicon until hover** `hideBrowserFaviconUntilHover` (boolean, default false) [advanced]: Hide browser page favicons until a session row is hovered.
 - **Hide last active time** `hideLastActiveTimeOnSessionCards` (boolean, default true) [advanced]: Hide Last Active timestamps from session-card title rows.
