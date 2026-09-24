@@ -189,8 +189,21 @@ impl GhostexGpuiApp {
                     },
                 );
             } else if previous != Some(visibility) {
-                let (_, rows) = view.read(cx).model().size();
-                let cols = ZMX_RESTING_GRID_COLS;
+                // CDXC:Zmx 2026-09-24 WHY:
+                // A parked viewer keeps its display-width grid instead of reflowing to the resting
+                // width: since editors never lead the election (loop.zig), a hidden session's daemon
+                // retains the size its viewer claimed, so the mirror at that size faithfully absorbs
+                // the streamed output and redisplay needs no reflow at all. The 200-column park was
+                // re-wrapping hidden output against a grid the daemon no longer uses, and the
+                // redisplay then painted that mismatched reflow — an older-looking conversation
+                // — for a few frames before live output corrected it. Chat keeps the resting width:
+                // the chat claim itself widens the daemon to 200 columns.
+                let (current_cols, rows) = view.read(cx).model().size();
+                let cols = if visibility == GpuiEngineTerminalZmxVisibility::Chat {
+                    ZMX_RESTING_GRID_COLS
+                } else {
+                    current_cols
+                };
                 view.update(cx, |view, cx| {
                     view.resize_grid(cols, rows, cx);
                     let sequence = if visibility == GpuiEngineTerminalZmxVisibility::Chat {
