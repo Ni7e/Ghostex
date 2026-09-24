@@ -88,6 +88,7 @@ import {
   DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
   DEFAULT_ghostex_SETTINGS,
   DIAGNOSTIC_LOGGING_SCENARIOS,
+  PANEL_ANIMATION_SPEED_OPTIONS,
   PREFERRED_AGENT_INTERFACE_OPTIONS,
   SESSION_CHAT_THEME_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
@@ -97,6 +98,7 @@ import {
   normalizeTerminalDevServerIgnoredPortRules,
   type DiagnosticLoggingScenarioId,
   type DiagnosticLoggingSettings,
+  type PanelAnimationSpeed,
   type PreferredAgentInterface,
   type SidebarSettingsPresetId,
   type TerminalViewWidthMode,
@@ -1131,6 +1133,7 @@ export function DisabledCommandPreviewField({
 }
 
 export function ColorField({
+  dependent,
   advanced,
   description,
   isModified,
@@ -1139,6 +1142,7 @@ export function ColorField({
   onResetToDefault,
   value,
 }: {
+  dependent?: boolean;
   advanced?: boolean;
   description?: string;
   label: string;
@@ -1150,6 +1154,7 @@ export function ColorField({
   return (
     <SettingRow
       advanced={advanced}
+      dependent={dependent}
       description={description}
       htmlFor={id}
       isModified={isModified}
@@ -1570,6 +1575,53 @@ export function SidebarSpacesField({
         value={value ? 'on' : 'off'}
       >
         {SIDEBAR_SPACES_ENABLED_OPTIONS.map((option, index) => (
+          <SegmentedControlItem
+            aria-label={option.label}
+            id={index === 0 ? id : undefined}
+            key={option.value}
+            value={option.value}
+          >
+            {option.label}
+          </SegmentedControlItem>
+        ))}
+      </SegmentedControl>
+    </SettingRow>
+  );
+}
+
+export function PanelAnimationSpeedField({
+  advanced,
+  description,
+  isModified,
+  label,
+  onChange,
+  onResetToDefault,
+  value,
+}: {
+  advanced?: boolean;
+  description?: string;
+  label: string;
+  onChange: (value: PanelAnimationSpeed) => void;
+  value: PanelAnimationSpeed;
+} & SettingModificationProps) {
+  const id = useId();
+  return (
+    <SettingRow
+      advanced={advanced}
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
+      <SegmentedControl
+        aria-label={label}
+        onValueChange={(nextValue) => {
+          onChange(nextValue as PanelAnimationSpeed);
+        }}
+        value={value}
+      >
+        {PANEL_ANIMATION_SPEED_OPTIONS.map((option, index) => (
           <SegmentedControlItem
             aria-label={option.label}
             id={index === 0 ? id : undefined}

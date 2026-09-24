@@ -544,7 +544,11 @@ impl GhostexGpuiApp {
             icon: gpui_platform_window_icon(),
             show: true,
             is_resizable: false,
-            display_id: self.main_window_display_id,
+            display_id: crate::app::window::popup_frame::display_at(
+                self.main_window_bounds.center(),
+                cx,
+            )
+            .or(self.main_window_display_id),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Ghostex Plugins".into()),
                 appears_transparent: false,

@@ -77,7 +77,9 @@ impl NativeChatView {
             .flatten()
             .enumerate()
         {
-            let selected = text(&draft, "other").trim().is_empty()
+            // A multi-select note is sent beside the picks, so they stay visible while it is typed.
+            let selected = (question["multiSelect"] == true
+                || text(&draft, "other").trim().is_empty())
                 && draft["indices"].as_array().is_some_and(|indices| {
                     indices
                         .iter()
@@ -201,7 +203,9 @@ impl NativeChatView {
             .px(px(16.0 * s))
             .pt(px(12.0 * s))
             .pb(px(if collapsed { 12.0 } else { 6.0 } * s))
-            .hover(|style| style.bg(p.foreground.opacity(0.04)))
+            // The footer's buttons always follow, so only the top corners meet the card's rounding.
+            .rounded_t(px((12.0 * s - 1.0).max(0.0)))
+            .hover(|style| style.bg(super::cards::card_hover_fill(p)))
             .child(
                 gpui::svg()
                     .path("titlebar/help-circle.svg")

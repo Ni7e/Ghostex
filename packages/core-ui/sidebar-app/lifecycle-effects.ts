@@ -5,7 +5,7 @@ import {
   getSidebarTitlebarForegroundForBackground,
   getAccentColorForSettings,
   getLightAccentColorForSettings,
-  getSessionChatBackgroundForChrome,
+  getWorkAreaBackgroundForSettings,
   getSidebarTitlebarMenuBackgroundForChrome,
   getSidebarTitlebarGradientColors,
 } from '../../shared/ghostex-settings';
@@ -347,11 +347,11 @@ export function useSidebarDocumentChromeEffects({
     );
     document.body.style.setProperty(
       '--ghostex-session-chat-dark-background',
-      getSessionChatBackgroundForChrome(effectiveSettings.customSidebarTitlebarBackgroundColor)
+      getWorkAreaBackgroundForSettings(effectiveSettings, false)
     );
     document.body.style.setProperty(
       '--ghostex-session-chat-light-background',
-      getSessionChatBackgroundForChrome(effectiveSettings.customSidebarTitlebarLightBackgroundColor)
+      getWorkAreaBackgroundForSettings(effectiveSettings, true)
     );
     /**
      * CDXC:Theming 2026-09-23 SEE-ALSO:

@@ -52,3 +52,14 @@ export function areSettingsModalNavigationStatesEqual(
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
+
+let rememberedThemeAdvancedOpen = false;
+
+/** Whether the Theme page's Advanced part was left open, for the rest of this app session. */
+export function getRememberedThemeAdvancedOpen(): boolean {
+  return rememberedThemeAdvancedOpen;
+}
+
+export function rememberThemeAdvancedOpen(open: boolean): void {
+  rememberedThemeAdvancedOpen = open;
+}

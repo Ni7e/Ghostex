@@ -13,6 +13,7 @@
 use serde_json::Value;
 
 use crate::menus::catalog::AgentModelCatalog;
+use crate::menus::context::preferences::default_preferences;
 use crate::menus::context::{ContextDetailsAgent, ContextDetailsPreferences, ContextEditorState};
 use crate::menus::picker::model_menu::ModelMenuCatalogs;
 use crate::menus::picker::projection::model_menu_projection;
@@ -144,10 +145,23 @@ impl Default for ContextState {
 /// CDXC:AgentProviders 2026-09-08 DECISION:
 /// User: keep the same Claude UI and status line, but save popover and status-line settings
 /// independently for Claude and Codex.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ContextPreferencesByAgent {
     pub claude: ContextDetailsPreferences,
     pub codex: ContextDetailsPreferences,
+    pub cursor: ContextDetailsPreferences,
+}
+
+/// Each agent's recommended record until storage answers, like the TypeScript's
+/// `normalizeSessionChatContextDetailsPreferences(null, agent)`.
+impl Default for ContextPreferencesByAgent {
+    fn default() -> Self {
+        Self {
+            claude: default_preferences(ContextDetailsAgent::Claude),
+            codex: default_preferences(ContextDetailsAgent::Codex),
+            cursor: default_preferences(ContextDetailsAgent::Cursor),
+        }
+    }
 }
 
 impl ContextPreferencesByAgent {
@@ -156,6 +170,7 @@ impl ContextPreferencesByAgent {
         match agent {
             ContextDetailsAgent::Claude => &self.claude,
             ContextDetailsAgent::Codex => &self.codex,
+            ContextDetailsAgent::Cursor => &self.cursor,
         }
     }
 
@@ -164,6 +179,7 @@ impl ContextPreferencesByAgent {
         match agent {
             ContextDetailsAgent::Claude => &mut self.claude,
             ContextDetailsAgent::Codex => &mut self.codex,
+            ContextDetailsAgent::Cursor => &mut self.cursor,
         }
     }
 }

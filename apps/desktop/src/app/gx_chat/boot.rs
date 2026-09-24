@@ -58,6 +58,7 @@ pub(super) fn read(session_key: &str, now_ms: i64, errors: &mut BootReads) -> Co
     let model_catalog = parse(load("modelCatalog", "", now_ms, errors));
     let claude_context = parse(load("claudeContext", "", now_ms, errors));
     let codex_context = parse(load("codexContext", "", now_ms, errors));
+    let cursor_context = parse(load("cursorContext", "", now_ms, errors));
     let dismissed_notice = parse(load("notices", session_key, now_ms, errors));
     let summary_mode = decode_summary(load("summary", session_key, now_ms, errors).as_deref());
     let verbose_override = decode_verbose(load("verbose", session_key, now_ms, errors).as_deref());
@@ -70,7 +71,11 @@ pub(super) fn read(session_key: &str, now_ms: i64, errors: &mut BootReads) -> Co
         model_outboxes: scoped("modelOutbox", session_key, now_ms, errors),
         model_catalog,
         chat_settings: serde_json::to_value(chat_settings()).unwrap_or(Value::Null),
-        context_preferences: json!({ "claude": claude_context, "codex": codex_context }),
+        context_preferences: json!({
+            "claude": claude_context,
+            "codex": codex_context,
+            "cursor": cursor_context,
+        }),
         dismissed_notice,
         summary_mode,
         verbose_override: match verbose_override {

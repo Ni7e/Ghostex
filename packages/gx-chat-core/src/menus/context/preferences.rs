@@ -27,6 +27,7 @@ use crate::menus::context::status::{ContextDetailStatus, ContextDetailsAgent};
 /// The store the two records live in; the host owns the key prefixes.
 pub const CONTEXT_PREFERENCES_STORE_CLAUDE: &str = "claudeContext";
 pub const CONTEXT_PREFERENCES_STORE_CODEX: &str = "codexContext";
+pub const CONTEXT_PREFERENCES_STORE_CURSOR: &str = "cursorContext";
 
 /// The record for one agent.
 pub fn context_preferences_key(agent: ContextDetailsAgent) -> StorageKey {
@@ -34,6 +35,7 @@ pub fn context_preferences_key(agent: ContextDetailsAgent) -> StorageKey {
         store: match agent {
             ContextDetailsAgent::Claude => CONTEXT_PREFERENCES_STORE_CLAUDE,
             ContextDetailsAgent::Codex => CONTEXT_PREFERENCES_STORE_CODEX,
+            ContextDetailsAgent::Cursor => CONTEXT_PREFERENCES_STORE_CURSOR,
         }
         .to_string(),
         suffix: String::new(),
@@ -164,13 +166,69 @@ fn normalize_order(
     order
 }
 
+/// `defaultSessionChatContextDetailsPreferences`: what an agent uses before anything is saved,
+/// and what Reset to recommended restores.
+///
+/// CDXC:SessionChatDetectedOptions 2026-09-23 DECISION:
+/// User: a new install starts with the maintainer's own "More details" and status-line setup for
+/// Claude and Codex, and Reset to recommended returns to it. Claude stars Account, Model limit, 5h
+/// limit, 7d limit and Repository; Codex stars Account email, 7d limit, 7d reset and Account
+/// resets. This supersedes "starred is never a default". User: Cursor never shows the model or
+/// reasoning effort by default, in the status line or More details, because the chat box already
+/// shows both; it stars Context used and Context tokens.
+pub fn default_preferences(agent: ContextDetailsAgent) -> ContextDetailsPreferences {
+    let (shown, starred): (&[(&str, bool)], &[&str]) = match agent {
+        ContextDetailsAgent::Claude => (
+            &[("fiveHourReset", false)],
+            &[
+                "accountName",
+                "modelLimit",
+                "fiveHourLimit",
+                "sevenDayLimit",
+                "repo",
+            ],
+        ),
+        ContextDetailsAgent::Codex => (
+            &[
+                ("fiveHourLimit", false),
+                ("fiveHourReset", false),
+                ("sevenDayReset", true),
+                ("accountEmail", true),
+            ],
+            &[
+                "accountEmail",
+                "sevenDayLimit",
+                "sevenDayReset",
+                "accountResets",
+            ],
+        ),
+        ContextDetailsAgent::Cursor => (
+            &[
+                ("thinking", false),
+                ("contextUsed", true),
+                ("contextTokens", true),
+            ],
+            &["contextUsed", "contextTokens"],
+        ),
+    };
+    ContextDetailsPreferences {
+        shown: shown
+            .iter()
+            .map(|(id, flag)| (id.to_string(), *flag))
+            .collect(),
+        starred: starred.iter().map(|id| (id.to_string(), true)).collect(),
+        order: BTreeMap::new(),
+        starred_order: starred.iter().map(|id| id.to_string()).collect(),
+    }
+}
+
 /// `normalizeSessionChatContextDetailsPreferences`.
 pub fn normalize_preferences(
     candidate: Option<&Value>,
     agent: ContextDetailsAgent,
 ) -> ContextDetailsPreferences {
     let Some(Value::Object(record)) = candidate else {
-        return ContextDetailsPreferences::default();
+        return default_preferences(agent);
     };
     let starred_order = match record.get("starredOrder") {
         Some(Value::Array(ids)) => {

@@ -979,6 +979,34 @@ impl GhostexGpuiApp {
         true
     }
 
+    /// CDXC:CommandPane 2026-09-23 DECISION:
+    /// User: "make right middle clicking on the command pane tabs bar in an empty area just close all the terminals there". A middle-click on empty tab-bar space closes every tab that bar shows: one command group's tabs, or on the collapsed strip every Commands pane tab it lists (never the Terminal view's), each through the same close as the tab's own middle-click.
+    pub(crate) fn close_all_command_pane_tabs_in_bar(
+        &mut self,
+        group_id: Option<CommandPaneGroupId>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let tabs = match group_id {
+            Some(group_id) => self
+                .command_pane
+                .find_leaf(group_id)
+                .map(|leaf| {
+                    leaf.tab_group
+                        .tabs
+                        .iter()
+                        .map(|tab| (group_id, tab.session_id))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            None => self.command_pane.panel_flat_tab_ids(),
+        };
+        let mut closed = false;
+        for (group_id, session_id) in tabs {
+            closed |= self.close_command_pane_tab(group_id, session_id, cx);
+        }
+        closed
+    }
+
     pub(crate) fn close_command_pane_tabs_for_scope(
         &mut self,
         group_id: CommandPaneGroupId,

@@ -7,6 +7,7 @@
 #import <dispatch/dispatch.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import <QuartzCore/QuartzCore.h>
 #import <os/lock.h>
 #import <stdbool.h>
 #import <stdint.h>
@@ -1119,6 +1120,42 @@ void GhostexGpuiCEFLogResizeDiagnostic(int browserId, int width, int height,
         @"was_resized_us=%llu total_us=%llu",
         browserId, width, height, (unsigned long long)frameUs,
         (unsigned long long)wasResizedUs, (unsigned long long)totalUs);
+}
+
+/*
+ CDXC:Workarea 2026-09-23 WHY:
+ While a panel slides, a web page whose frame would move or poke outside its
+ clip is made transparent instead of hidden: hiding a view that holds the first
+ responder hands the window's keyboard focus to the window itself. The alpha is
+ set on the view and on its layer because Chromium's view may host its own layer.
+*/
+void GhostexGpuiCEFSetNativeViewMotionHidden(void *nativeView, bool hidden,
+                                             double fadeInSeconds) {
+  NSView *view = (__bridge NSView *)nativeView;
+  if (!view) {
+    return;
+  }
+  static NSString *const fadeKey = @"ghostexMotionFade";
+  CGFloat alpha = hidden ? 0.0 : 1.0;
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  view.alphaValue = alpha;
+  if (view.layer) {
+    [view.layer removeAnimationForKey:fadeKey];
+    view.layer.opacity = (float)alpha;
+  }
+  [CATransaction commit];
+  // Coming back after a slide, the page fades in the way the panel's GPUI
+  // content does; Core Animation runs it, so nothing drives it per frame.
+  if (!hidden && fadeInSeconds > 0.0 && view.layer) {
+    CABasicAnimation *fade = [CABasicAnimation animationWithKeyPath:@"opacity"];
+    fade.fromValue = @0.0;
+    fade.toValue = @1.0;
+    fade.duration = fadeInSeconds;
+    fade.timingFunction =
+        [CAMediaTimingFunction functionWithControlPoints:0.0:0.0:0.58:1.0];
+    [view.layer addAnimation:fade forKey:fadeKey];
+  }
 }
 
 void GhostexGpuiCEFSetNativeViewVisible(void *nativeView, bool visible) {

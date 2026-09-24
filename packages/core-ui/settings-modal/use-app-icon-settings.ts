@@ -109,25 +109,32 @@ export function useAppIconSettings({
     }
     vscode.postMessage({ type: 'pickTerminalBackgroundImageFile' });
   };
+  /** Settings -> Window glass -> Custom image: same round trip, answered as windowGlassImageFilePicked. */
+  const chooseWindowGlassImageFile = (appearance: 'dark' | 'light') => {
+    if (!vscode) {
+      return;
+    }
+    vscode.postMessage({ appearance, type: 'pickWindowGlassImageFile' });
+  };
   useEffect(() => {
     if (!isOpen || !nativeFilePickerAvailable) {
       return;
     }
     const handlePickedBackgroundImage = (event: Event) => {
       const message = (event as CustomEvent<unknown>).detail;
-      if (
-        !message ||
-        typeof message !== 'object' ||
-        !('type' in message) ||
-        message.type !== 'terminalBackgroundImageFilePicked'
-      ) {
+      if (!message || typeof message !== 'object' || !('type' in message)) {
         return;
       }
       const path = 'path' in message && typeof message.path === 'string' ? message.path.trim() : '';
       if (!path) {
         return;
       }
-      updateDraft('terminalBackgroundImage', path);
+      if (message.type === 'terminalBackgroundImageFilePicked') {
+        updateDraft('terminalBackgroundImage', path);
+      } else if (message.type === 'windowGlassImageFilePicked') {
+        const appearance = 'appearance' in message && message.appearance === 'light' ? 'light' : 'dark';
+        updateDraft(appearance === 'light' ? 'windowGlassImageLight' : 'windowGlassImageDark', path);
+      }
     };
     window.addEventListener('ghostex-app-modal-host-message', handlePickedBackgroundImage);
     return () => {
@@ -138,6 +145,7 @@ export function useAppIconSettings({
   return {
     chooseAppIconFile,
     chooseTerminalBackgroundImageFile,
+    chooseWindowGlassImageFile,
     nativeFilePickerAvailable,
     selectAppIcon,
   };

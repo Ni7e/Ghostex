@@ -192,6 +192,13 @@ export const storageCatalog = Object.freeze({
     'ghostex.chat.context-details.codex.v1',
     objectCodec
   ),
+  cursorContext: define(
+    'cursorContext',
+    'Cursor context display',
+    chat + 'session-chat-context-details.ts',
+    'ghostex.chat.context-details.cursor.v1',
+    objectCodec
+  ),
   notices: define(
     'notices',
     'Dismissed chat notices',

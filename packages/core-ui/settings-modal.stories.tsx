@@ -193,6 +193,7 @@ function SettingsModalStory({
   initialSettings?: ghostexSettings;
   initialTab?:
     | 'settings'
+    | 'theme'
     | 'integrations'
     | 'projects'
     | 'agents'
@@ -458,6 +459,10 @@ export const Extensions: Story = {
  * one card). Between them they cover every field primitive the redesign
  * touches.
  */
+export const Theme: Story = {
+  render: () => <SettingsModalStory initialTab='theme' />,
+};
+
 export const Hotkeys: Story = {
   render: () => <SettingsModalStory initialTab='hotkeys' />,
 };

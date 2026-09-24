@@ -66,7 +66,7 @@ pub(crate) fn browser_tab_action_cluster_color() -> Hsla {
 }
 
 pub(crate) fn browser_tab_separator_color() -> Hsla {
-    chrome_color(0x252525, 0xd4d4d4).into()
+    glass_divider(chrome_color(0x252525, 0xd4d4d4).into())
 }
 
 pub(crate) fn browser_tab_text_color(state: BrowserTabState, is_active: bool) -> Hsla {

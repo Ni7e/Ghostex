@@ -95,27 +95,21 @@ pub(crate) fn refresh_gpui_visual_settings(
         gpui_settings_hex_rgb(object.get("workspaceActivePaneBorderColor")).unwrap_or(0x3b82f6),
         Ordering::Relaxed,
     );
-    let configured_workspace = object
-        .get("workspaceBackgroundColor")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .and_then(|_| gpui_settings_hex_rgb(object.get("workspaceBackgroundColor")))
-        .map(|rgb| if rgb == 0 { 0x010101 } else { rgb });
     let terminal_settings = settings.gpui_terminal_engine_settings();
     let terminal_is_light = terminal_settings.uses_light_theme(gpui_system_uses_light_appearance());
     /*
-    CDXC:Theming 2026-09-22 DECISION:
-    User: the terminal background and the active tab follow the theme like the chat does. The
-    workspace and every terminal pane paint the theme's content colour for the terminal's own
-    appearance (the chrome in light mode, one step off it in dark), superseding the Ghostty config
-    background and the light palette's background. An explicit Terminal Background setting still
-    wins in dark mode.
+    CDXC:Theming 2026-09-23 DECISION:
+    User: the terminal background and the active tab follow the theme like the chat does, then
+    "wtf does terminal color have to do with workarea theme??? pls make this more intuitive pls".
+    The work area always paints the theme's content colour for the terminal's own appearance (the
+    chrome in light mode, one step off it in dark), so the theme's tint and Background contrast
+    always reach it, superseding the Ghostty config background and the light palette's background.
+    The Terminal background setting no longer touches the work area: it follows the theme by
+    default, and a chosen colour only replaces the colour behind terminal cells in dark mode
+    (`GpuiTerminalConfig::apply_color_scheme`). Supersedes the 2026-09-22 rule that an explicit
+    Terminal Background won for the whole dark work area.
     */
-    let workspace = if terminal_is_light {
-        gpui_terminal_theme_background_rgb(object, true)
-    } else {
-        configured_workspace.unwrap_or_else(|| gpui_terminal_theme_background_rgb(object, false))
-    };
+    let workspace = gpui_terminal_theme_background_rgb(object, terminal_is_light);
     GPUI_WORKSPACE_BACKGROUND_RGB.store(u64::from(workspace), Ordering::Relaxed);
     GPUI_TERMINAL_PADDING_BACKGROUND_RGB.store(
         if terminal_is_light {
@@ -168,6 +162,7 @@ pub(crate) fn refresh_gpui_visual_settings(
     GPUI_TITLEBAR_GRADIENT_RIGHT_RGB.store(u64::from(gradient_right), Ordering::Relaxed);
     GPUI_TITLEBAR_FOREGROUND_RGB.store(u64::from(titlebar_foreground), Ordering::Relaxed);
     refresh_window_glass(object);
+    crate::app::panel_motion::refresh_panel_motion_speed(object);
 }
 
 /// The theme's content colour for terminals of one appearance: the same rule the chat uses, so a
@@ -176,9 +171,7 @@ pub(crate) fn gpui_terminal_theme_background_rgb(
     object: &serde_json::Map<String, serde_json::Value>,
     light: bool,
 ) -> u32 {
-    session_chat_background_for_chrome(resolved_custom_sidebar_titlebar_background_for_variant(
-        object, light,
-    ))
+    work_area_background_for_variant(object, light)
 }
 
 /// The background a terminal engine paints for the current settings and system appearance.
@@ -471,7 +464,7 @@ pub(crate) fn workspace_terminal_placeholder_action_text_color(
 }
 
 pub(crate) fn workspace_pane_border_color() -> Hsla {
-    chrome_color(0x202020, 0xe5e5e5).into()
+    glass_divider(chrome_color(0x202020, 0xe5e5e5).into())
 }
 
 pub(crate) fn workspace_pane_focused_border_color() -> Hsla {
@@ -499,9 +492,9 @@ pub(crate) fn workspace_pane_border_color_for_state(state: WorkspacePaneBorderSt
 /// This supersedes the 2026-09-14 decision that restored the left and top edges. The remaining right and bottom edges keep #d4d4d4 in light mode with dark mode unchanged, and still carry the focus/attention colours.
 pub(crate) fn browser_pane_border_color_for_state(state: WorkspacePaneBorderState) -> Hsla {
     match state {
-        WorkspacePaneBorderState::Neutral => chrome_color(0x202020, 0xd4d4d4).into(),
+        WorkspacePaneBorderState::Neutral => glass_divider(chrome_color(0x202020, 0xd4d4d4).into()),
         WorkspacePaneBorderState::Focused if !show_active_pane_outline() => {
-            chrome_color(0x202020, 0xd4d4d4).into()
+            glass_divider(chrome_color(0x202020, 0xd4d4d4).into())
         }
         _ => workspace_pane_border_color_for_state(state),
     }
@@ -515,7 +508,7 @@ pub(crate) fn project_editor_companion_border_color_for_state(
             workspace_pane_focused_border_color()
         }
         WorkspacePaneBorderState::Neutral | WorkspacePaneBorderState::Focused => {
-            chrome_color(0x252525, 0xd4d4d4).into()
+            glass_divider(chrome_color(0x252525, 0xd4d4d4).into())
         }
         WorkspacePaneBorderState::Attention => workspace_pane_attention_border_color(),
     }
@@ -540,7 +533,7 @@ pub(crate) fn project_editor_companion_divider_background_color() -> Hsla {
 }
 
 pub(crate) fn maximized_view_panel_top_line_color() -> Hsla {
-    chrome_color(0x252525, 0xe5e5e5).into()
+    glass_divider(chrome_color(0x252525, 0xe5e5e5).into())
 }
 
 pub(crate) fn command_pane_chrome_color() -> Hsla {
@@ -569,7 +562,7 @@ pub(crate) fn command_pane_panel_separator_color() -> Hsla {
     CDXC:CommandPane 2026-06-25-13:19:
     Native command-panel boundaries use the workspace separator line #1e1e1e for the panel edge, separate from focused pane outlines and titlebar command separators.
     */
-    chrome_color(0x1e1e1e, 0xd4d4d4).into()
+    glass_divider(chrome_color(0x1e1e1e, 0xd4d4d4).into())
 }
 
 pub(crate) fn command_pane_border_color() -> Hsla {
@@ -577,11 +570,11 @@ pub(crate) fn command_pane_border_color() -> Hsla {
     CDXC:CommandPane 2026-06-25-13:19:
     Native inactive command terminal pane outlines use #111111, not the translucent command titlebar separator. Keep the inactive command group outline distinct from titlebar chrome.
     */
-    chrome_color(0x111111, 0xe5e5e5).into()
+    glass_divider(chrome_color(0x111111, 0xe5e5e5).into())
 }
 
 pub(crate) fn command_pane_side_edge_color() -> Hsla {
-    chrome_color(0x252525, 0xd4d4d4).into()
+    glass_divider(chrome_color(0x252525, 0xd4d4d4).into())
 }
 
 pub(crate) fn command_pane_hidden_border_color() -> Hsla {
@@ -623,10 +616,19 @@ pub(crate) fn command_pane_tab_hover_background_color(is_active: bool, is_sleepi
 }
 
 pub(crate) fn command_pane_native_composited_tab_color(overlay_alpha: f32) -> Hsla {
+    let light = CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed);
+    /*
+    CDXC:Theming 2026-09-23 DECISION:
+    User: the command pane's active tab and its + button must "fit better with the bar behind them". Under window glass the bar paints nothing, so a tab is only its overlay (a wash of the ink) and the icon buttons are clear with a wash on hover, instead of opaque fills baked over the chrome colour.
+    */
+    if window_glass_active() {
+        return rgb(if light { 0x000000 } else { 0xffffff })
+            .opacity(overlay_alpha)
+            .into();
+    }
     // The tab overlays composite over the themed command chrome (see command_pane_chrome_color)
     // rather than the fixed AppKit base, so the tabs carry the same tint as their bar.
     let base: gpui::Rgba = project_editor_shell_background_color().into();
-    let light = CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed);
     let channel = |value: f32| -> f32 {
         let value = value * 255.0;
         if light {
@@ -759,12 +761,14 @@ pub(crate) fn command_terminal_tab_status_indicator_opacity(
     }
 }
 
+/// CDXC:CommandPane 2026-09-23 DECISION:
+/// User: the command pane's panel buttons (Keep open, Minimize) "need to match the look of the + button in the command pane tabs bar". Their cluster takes the + button's own fill, so under window glass it is clear like the + button instead of a solid block behind them.
 pub(crate) fn command_pane_control_cluster_color() -> Hsla {
-    chrome_color(0x0e0e0e, 0xfafafa).into()
+    command_pane_control_button_color()
 }
 
 pub(crate) fn command_pane_control_button_color() -> Hsla {
-    chrome_color(0x0e0e0e, 0xfafafa).into()
+    glass_clear(chrome_color(0x0e0e0e, 0xfafafa).into())
 }
 
 pub(crate) fn command_pane_control_text_color() -> Hsla {
@@ -772,6 +776,9 @@ pub(crate) fn command_pane_control_text_color() -> Hsla {
 }
 
 pub(crate) fn command_pane_control_hover_color() -> Hsla {
+    if window_glass_active() {
+        return chrome_ink().opacity(0.08).into();
+    }
     tab_bar_button_hover_color()
 }
 

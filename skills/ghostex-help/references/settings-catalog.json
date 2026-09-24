@@ -3,11 +3,3002 @@
   "generatedBy": "tooling/ghostex-help/generate.ts",
   "settings": [
     {
-      "key": "sidebarTheme",
-      "title": "App theme",
-      "subtitle": "Follow the system appearance by default, or choose Light or Dark.",
+      "key": "sidebarSettingsPreset",
+      "title": "Preset",
+      "subtitle": "Apply a sidebar UI preset or show Custom when controlled settings diverge.",
       "tab": "settings",
       "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "ui",
+      "options": [
+        {
+          "label": "Recommended",
+          "value": "recommended"
+        },
+        {
+          "label": "Codex",
+          "value": "codex"
+        },
+        {
+          "label": "Minimal",
+          "value": "minimal"
+        },
+        {
+          "label": "Detailed",
+          "value": "detailed"
+        },
+        {
+          "label": "Custom",
+          "value": "custom"
+        }
+      ],
+      "agentWritable": false
+    },
+    {
+      "key": "sidebarSpacesEnabled",
+      "title": "Spaces",
+      "subtitle": "Show a row of Space filter buttons in each server's sidebar section.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "options": [
+        {
+          "label": "Off",
+          "value": "off"
+        },
+        {
+          "label": "On",
+          "value": "on"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "sidebarSpaceSwitchBehavior",
+      "title": "When switching to a Space",
+      "subtitle": "Reopen the session you last had open in a Space when you switch to it, in the view its project was in. Requires Spaces.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "enum",
+      "default": "restore",
+      "options": [
+        {
+          "label": "Restore the Space's projects",
+          "value": "restore"
+        },
+        {
+          "label": "Don't switch projects",
+          "value": "keep"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "sidebarSpaceFollowActiveSession",
+      "title": "Follow the active session's Space",
+      "subtitle": "Switch the selected Space to the one that owns a session you open from outside it, such as through Back/Forward or Search by Prompt. Requires Spaces.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "projectSwitchKeepAliveMinutes",
+      "title": "Keep the previous project live for",
+      "subtitle": "After you switch to another project or Space, keep the terminals, chats, and view that were open in the previous project running for this many minutes so switching back is instant. 0 releases them right away.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "number",
+      "default": 10,
+      "min": 0,
+      "max": 60,
+      "agentWritable": true
+    },
+    {
+      "key": "sidebarVisibilityMemory",
+      "title": "Sidebar visibility memory",
+      "subtitle": "Keep one sidebar state everywhere, or remember it separately for Agents and for the wide views (Browser, Code, Docs, Kanban, Automate).",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "enum",
+      "default": "shared",
+      "options": [
+        {
+          "label": "Same in every view",
+          "value": "shared"
+        },
+        {
+          "label": "Remembered per view",
+          "value": "perView"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "showProjectIcons",
+      "title": "Show project icons",
+      "subtitle": "Show project artwork or a folder or worktree icon beside project names.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "hideSessionAgentIconUntilHover",
+      "title": "Hide agent icon until hover",
+      "subtitle": "Hide session agent icons until a session row is hovered.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "hideBrowserFaviconUntilHover",
+      "title": "Hide browser favicon until hover",
+      "subtitle": "Hide browser page favicons until a session row is hovered.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "hideLastActiveTimeOnSessionCards",
+      "title": "Hide last active time",
+      "subtitle": "Hide Last Active timestamps from session-card title rows.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "hideProjectHeaderDiffStats",
+      "title": "Hide project git stats",
+      "subtitle": "Hide +added/-removed line counts in sidebar project rows.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "showProjectEditorDiffFileCount",
+      "title": "Show changed-file count",
+      "subtitle": "Show changed-file counts in sidebar project row git stats.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "hideMenuBarSessionStatusIndicators",
+      "title": "Show Menu Bar Session Indicators",
+      "subtitle": "Show the menu bar session status badges.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "sidebarCollapseAnimationDurationMs",
+      "title": "Collapse animation speed",
+      "subtitle": "Set how quickly sidebar sections, groups, and projects expand or collapse, and how quickly the floating sidebar and Agents Panel slide in from the window edge. Set to 0 for no animation.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "number",
+      "default": 400,
+      "min": 0,
+      "max": 1000,
+      "step": 100,
+      "agentWritable": true
+    },
+    {
+      "key": "panelAnimationSpeed",
+      "title": "Panel animations",
+      "subtitle": "Set how fast the sidebar, the side panel, the Agents Panel and the bottom or right panel slide open and closed: Off, Slow, Normal or Fast. Reduce Motion in your computer settings always turns it off.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "enum",
+      "default": "normal",
+      "options": [
+        {
+          "label": "Off",
+          "value": "off"
+        },
+        {
+          "label": "Slow",
+          "value": "slow"
+        },
+        {
+          "label": "Normal",
+          "value": "normal"
+        },
+        {
+          "label": "Fast",
+          "value": "fast"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "sidebarTooltipDelayMs",
+      "title": "Tooltip Delay",
+      "subtitle": "Set how long sidebar hover labels wait before appearing. Set to 0 to show them immediately.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "number",
+      "default": 600,
+      "min": 0,
+      "max": 2000,
+      "step": 100,
+      "agentWritable": true
+    },
+    {
+      "key": "sidebarDefaultWidthPx",
+      "title": "Default Width",
+      "subtitle": "Width restored when double-clicking the sidebar resize handle.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "number",
+      "default": 275,
+      "min": 150,
+      "max": 520,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "commandsPanelDefaultHeightPx",
+      "title": "Command Pane Default Height",
+      "subtitle": "Height used when opening the command pane and when double-clicking its top resize rail.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "number",
+      "default": 125,
+      "min": 40,
+      "max": 600,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "commandsPanelSide",
+      "title": "Command Pane Side",
+      "subtitle": "Dock the command pane below the workspace or to its right.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "enum",
+      "default": "bottom",
+      "options": [
+        {
+          "label": "Bottom",
+          "value": "bottom"
+        },
+        {
+          "label": "Right",
+          "value": "right"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "commandsPanelAutoMinimize",
+      "title": "Auto-minimize Commands pane",
+      "subtitle": "Minimize the Commands pane after you stop using it and move focus elsewhere. Commands keep running.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "commandsPanelAutoMinimizeDelaySeconds",
+      "title": "Minimize after",
+      "subtitle": "How long the Commands pane stays open after focus and the pointer leave it.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "number",
+      "default": 60,
+      "options": [
+        {
+          "label": "15 seconds",
+          "value": "15"
+        },
+        {
+          "label": "30 seconds",
+          "value": "30"
+        },
+        {
+          "label": "1 minute",
+          "value": "60"
+        },
+        {
+          "label": "2 minutes",
+          "value": "120"
+        },
+        {
+          "label": "5 minutes",
+          "value": "300"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "projectSessionListCollapsedCount",
+      "title": "Compact Session Rows",
+      "subtitle": "Rows a project shows in Compact mode before its \"Show all\" row. Rows in collapsed sections do not count.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "number",
+      "default": 13,
+      "min": 1,
+      "max": 50,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "agentManagerZoomPercent",
+      "title": "Sidebar Interface Size",
+      "subtitle": "Scale the sidebar interface.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "number",
+      "default": 100,
+      "min": 50,
+      "max": 200,
+      "agentWritable": true
+    },
+    {
+      "key": "createSessionOnSidebarDoubleClick",
+      "title": "Double-click empty sidebar space to create a session",
+      "subtitle": "Create a session from empty sidebar space.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "enableSessionParking",
+      "title": "Enable session parking",
+      "subtitle": "Move deferred sessions into a collapsible Parked section at the bottom of the sidebar.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "sleepSessionWhenParking",
+      "title": "Sleep session when parking",
+      "subtitle": "Sleep a session automatically when it is moved into the Parked section.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "showTagMenuWhenParking",
+      "title": "Park & Snooze with tags",
+      "subtitle": "Open the Tag as menu when a session is parked or snoozed so it can be tagged right away.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "unparkAfterSendingMessage",
+      "title": "Unpark after sending a message",
+      "subtitle": "Move a parked session out of the Parked section when you send it a message.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "renameSessionOnDoubleClick",
+      "title": "Double-click session cards to rename",
+      "subtitle": "Makes clicking on a session respond a bit slower so we can detect the double click",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "sessionCardHoverButtons",
+      "title": "Session hover buttons (click to toggle, drag to reorder)",
+      "subtitle": "Buttons a session card shows when you hover it. Click an icon to turn it on or off; drag icons to reorder them. Buttons to the right of the chevron always show, buttons to its left hide until the chevron is clicked. By default the strip is Tag, Park, Sleep, chevron, Close.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sessionCards",
+      "sectionTitle": "Session Cards",
+      "type": "json",
+      "default": [
+        {
+          "enabled": false,
+          "id": "rename"
+        },
+        {
+          "enabled": false,
+          "id": "pin"
+        },
+        {
+          "enabled": false,
+          "id": "note"
+        },
+        {
+          "enabled": false,
+          "id": "snooze"
+        },
+        {
+          "enabled": false,
+          "id": "closeAfterDone"
+        },
+        {
+          "enabled": true,
+          "id": "tag"
+        },
+        {
+          "enabled": true,
+          "id": "park"
+        },
+        {
+          "enabled": true,
+          "id": "sleep"
+        },
+        {
+          "enabled": true,
+          "id": "chevron"
+        },
+        {
+          "enabled": true,
+          "id": "close"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": false
+    },
+    {
+      "key": "showSessionCardHoverButtonsInContextMenu",
+      "title": "Hover buttons also in context menu",
+      "subtitle": "Keep the enabled hover buttons at the top of the session right-click menu too, in their right-to-left order on the card. Close is never listed while it is on the card. Turn off to leave every button out of the menu once it is on the card.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sessionCards",
+      "sectionTitle": "Session Cards",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "sidebarSessionTagListItems",
+      "title": "Tag Filter List",
+      "subtitle": "Add your own tags, then reorder, hide, disable, or delete tags and their separators for the sidebar and the Tag as menu.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebarTags",
+      "sectionTitle": "Sidebar Tags",
+      "type": "json",
+      "default": [
+        {
+          "enabled": true,
+          "id": "favorite",
+          "tag": "favorite",
+          "type": "tag",
+          "visible": true
+        },
+        {
+          "enabled": false,
+          "id": "high-priority",
+          "tag": "high-priority",
+          "type": "tag",
+          "visible": false
+        },
+        {
+          "enabled": false,
+          "id": "low-priority",
+          "tag": "low-priority",
+          "type": "tag",
+          "visible": false
+        },
+        {
+          "enabled": true,
+          "id": "separator-priority-progress",
+          "type": "separator",
+          "visible": true
+        },
+        {
+          "enabled": false,
+          "id": "todo",
+          "tag": "todo",
+          "type": "tag",
+          "visible": false
+        },
+        {
+          "enabled": true,
+          "id": "in-progress",
+          "tag": "in-progress",
+          "type": "tag",
+          "visible": true
+        },
+        {
+          "enabled": true,
+          "id": "testing",
+          "tag": "testing",
+          "type": "tag",
+          "visible": true
+        },
+        {
+          "enabled": true,
+          "id": "blocked",
+          "tag": "blocked",
+          "type": "tag",
+          "visible": true
+        },
+        {
+          "enabled": true,
+          "id": "on-hold",
+          "tag": "on-hold",
+          "type": "tag",
+          "visible": true
+        },
+        {
+          "enabled": true,
+          "id": "done",
+          "tag": "done",
+          "type": "tag",
+          "visible": true
+        },
+        {
+          "enabled": true,
+          "id": "separator-progress-type",
+          "type": "separator",
+          "visible": true
+        },
+        {
+          "enabled": true,
+          "id": "research",
+          "tag": "research",
+          "type": "tag",
+          "visible": true
+        },
+        {
+          "enabled": false,
+          "id": "bug",
+          "tag": "bug",
+          "type": "tag",
+          "visible": false
+        },
+        {
+          "enabled": false,
+          "id": "feature",
+          "tag": "feature",
+          "type": "tag",
+          "visible": false
+        },
+        {
+          "enabled": true,
+          "id": "design",
+          "tag": "design",
+          "type": "tag",
+          "visible": true
+        },
+        {
+          "enabled": true,
+          "id": "separator-type-untagged",
+          "type": "separator",
+          "visible": true
+        },
+        {
+          "enabled": true,
+          "id": "untagged",
+          "type": "untagged",
+          "visible": true
+        }
+      ],
+      "options": [
+        {
+          "label": "Favorite",
+          "value": "favorite"
+        },
+        {
+          "label": "High Priority",
+          "value": "high-priority"
+        },
+        {
+          "label": "Low Priority",
+          "value": "low-priority"
+        },
+        {
+          "label": "Separator",
+          "value": "separator-priority-progress"
+        },
+        {
+          "label": "Todo",
+          "value": "todo"
+        },
+        {
+          "label": "In Progress",
+          "value": "in-progress"
+        },
+        {
+          "label": "Testing",
+          "value": "testing"
+        },
+        {
+          "label": "Blocked",
+          "value": "blocked"
+        },
+        {
+          "label": "On Hold",
+          "value": "on-hold"
+        },
+        {
+          "label": "Done",
+          "value": "done"
+        },
+        {
+          "label": "Separator",
+          "value": "separator-progress-type"
+        },
+        {
+          "label": "Research",
+          "value": "research"
+        },
+        {
+          "label": "Bug",
+          "value": "bug"
+        },
+        {
+          "label": "Feature",
+          "value": "feature"
+        },
+        {
+          "label": "Design",
+          "value": "design"
+        },
+        {
+          "label": "Separator",
+          "value": "separator-type-untagged"
+        },
+        {
+          "label": "No tag",
+          "value": "untagged"
+        },
+        {
+          "label": "Hide tag",
+          "value": "hide"
+        },
+        {
+          "label": "Disable tag",
+          "value": "disable"
+        },
+        {
+          "label": "Reorder tags",
+          "value": "reorder"
+        }
+      ],
+      "agentWritable": false
+    },
+    {
+      "key": "preferredAgentInterface",
+      "title": "Default view for compatible agents",
+      "subtitle": "Automatically switch to chat as soon as Ghostex detects that an agent session supports it.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "enum",
+      "default": "chat",
+      "options": [
+        {
+          "label": "Terminal",
+          "value": "terminal"
+        },
+        {
+          "label": "Chat",
+          "value": "chat"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "sessionChatFontFamily",
+      "title": "Chat font family",
+      "subtitle": "Use any installed font in chat messages and the prompt composer.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "string",
+      "default": "",
+      "agentWritable": true
+    },
+    {
+      "key": "sessionChatZoomPercent",
+      "title": "Default chat zoom (%)",
+      "subtitle": "Scale the desktop chat interface, including messages and the prompt composer, from 70% to 200% in 5% steps. Default: 100%.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "number",
+      "default": 100,
+      "min": 70,
+      "max": 200,
+      "step": 5,
+      "agentWritable": true
+    },
+    {
+      "key": "sessionChatCustomTranscriptWidthEnabled",
+      "title": "Custom transcript width",
+      "subtitle": "Let the transcript use a different width from the prompt composer.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "sessionChatTranscriptWidthPercent",
+      "title": "Transcript width",
+      "subtitle": "Set the centered transcript width without changing the prompt composer.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "number",
+      "default": 75,
+      "min": 50,
+      "max": 100,
+      "step": 5,
+      "agentWritable": true
+    },
+    {
+      "key": "sessionChatFileEditPreviews",
+      "title": "Show file edit previews",
+      "subtitle": "Show the first seven code lines in each file edit. Turn off to show only the path and change counts.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "sessionChatKeepComposerExpanded",
+      "title": "Keep chat box expanded while scrolling",
+      "subtitle": "Keep the desktop chat box at full size while you scroll the transcript instead of shrinking it as you scroll up and growing it back at the end.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "sessionChatSimpleMode",
+      "title": "Simple mode",
+      "subtitle": "Simplify all chats: hide tool command previews and group file edits behind an expandable file count.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "sessionChatVerboseMode",
+      "title": "Verbose mode",
+      "subtitle": "Expand thinking blocks to show their tool calls by default. Each chat can override it from its composer.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "webLinkOpenTarget",
+      "title": "Open links in",
+      "subtitle": "Open web links from terminal output (Command-click), session chat, and detected dev servers in the project Browser view or the system default browser.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "tools",
+      "groupTitle": "Tools",
+      "section": "browser",
+      "sectionTitle": "Browser",
+      "type": "enum",
+      "default": "internal-browser",
+      "options": [
+        {
+          "label": "Internal Browser",
+          "value": "internal-browser"
+        },
+        {
+          "label": "System Default Browser",
+          "value": "system-default-browser"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "terminalDevServerDetectionEnabled",
+      "title": "Detect running servers in terminals",
+      "subtitle": "Detect localhost dev server URLs from terminal output.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "tools",
+      "groupTitle": "Tools",
+      "section": "terminalDevServers",
+      "sectionTitle": "Dev Servers",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalDevServerIgnoredPortRules",
+      "title": "Ignored ports",
+      "subtitle": "Hide detected servers on specific ports or inclusive port ranges.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "tools",
+      "groupTitle": "Tools",
+      "section": "terminalDevServers",
+      "sectionTitle": "Dev Servers",
+      "type": "json",
+      "default": [],
+      "options": [
+        {
+          "label": "9229",
+          "value": "9229"
+        },
+        {
+          "label": "24678-24680",
+          "value": "24678-24680"
+        }
+      ],
+      "agentWritable": false
+    },
+    {
+      "key": "codeServerLinkVscodeUserConfig",
+      "title": "Use VS Code settings",
+      "subtitle": "Use the VS Code settings from the local VS Code install.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "tools",
+      "groupTitle": "Tools",
+      "section": "editor",
+      "sectionTitle": "Editor",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "codeServerUseVscodeInsidersUserConfig",
+      "title": "Use VS Code Insiders settings",
+      "subtitle": "Use the VS Code Insiders user settings directory.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "tools",
+      "groupTitle": "Tools",
+      "section": "editor",
+      "sectionTitle": "Editor",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "showUntrackedProjectDiffWhenNoTrackedChanges",
+      "title": "Show untracked lines without tracked changes",
+      "subtitle": "When tracked git diff is +0 -0, show untracked line counts in project headers (Starship-style prompts ignore untracked lines).",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "tools",
+      "groupTitle": "Tools",
+      "section": "editor",
+      "sectionTitle": "Editor",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "markdownFileOpenView",
+      "title": "Markdown files",
+      "subtitle": "Choose whether Markdown links from agent chat open in Docs or Code.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "tools",
+      "groupTitle": "Tools",
+      "section": "fileOpening",
+      "sectionTitle": "File opening",
+      "type": "enum",
+      "default": "docs",
+      "options": [
+        {
+          "label": "Docs",
+          "value": "docs"
+        },
+        {
+          "label": "Code",
+          "value": "code"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "htmlFileOpenView",
+      "title": "HTML files",
+      "subtitle": "Choose whether HTML links from agent chat open in Docs or Code.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "tools",
+      "groupTitle": "Tools",
+      "section": "fileOpening",
+      "sectionTitle": "File opening",
+      "type": "enum",
+      "default": "docs",
+      "options": [
+        {
+          "label": "Docs",
+          "value": "docs"
+        },
+        {
+          "label": "Code",
+          "value": "code"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "ghosttySettingsActions",
+      "title": "Ghostty settings actions",
+      "subtitle": "Recommended Ghostty settings, Ghostty config file, Ghostty docs, and Ghostty defaults.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "ui",
+      "options": [
+        {
+          "label": "Apply recommended",
+          "value": "applyRecommendedGhosttySettings"
+        },
+        {
+          "label": "Open Ghostty config",
+          "value": "openGhosttyConfigFile"
+        },
+        {
+          "label": "Open Ghostty docs",
+          "value": "openGhosttySettingsDocs"
+        },
+        {
+          "label": "Reset Ghostty defaults",
+          "value": "resetGhosttySettingsToDefault"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": false
+    },
+    {
+      "key": "workspaceBackgroundColor",
+      "title": "Terminal background",
+      "subtitle": "Only changes the terminal panes. Leave on Follow theme to match your theme.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "string",
+      "default": "",
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalBackgroundImage",
+      "title": "Background Image",
+      "subtitle": "Absolute path to an image drawn behind terminal panes.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "string",
+      "default": "",
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalBackgroundImageOpacity",
+      "title": "Background Image Opacity",
+      "subtitle": "Blend the background image toward the terminal background color.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "number",
+      "default": 1,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalBackgroundImageFit",
+      "title": "Background Image Fit",
+      "subtitle": "How the background image is scaled inside each pane.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "enum",
+      "default": "cover",
+      "options": [
+        {
+          "label": "Cover",
+          "value": "cover"
+        },
+        {
+          "label": "Contain",
+          "value": "contain"
+        },
+        {
+          "label": "Stretch",
+          "value": "stretch"
+        },
+        {
+          "label": "Natural size",
+          "value": "natural"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalFontFamily",
+      "title": "Font Family",
+      "subtitle": "Type a Ghostty font-family name.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "string",
+      "default": "JetBrains Mono",
+      "agentWritable": true
+    },
+    {
+      "key": "terminalFontSize",
+      "title": "Font Size",
+      "subtitle": "Set terminal text size.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "number",
+      "default": 13,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalFontWeight",
+      "title": "Font Weight",
+      "subtitle": "Set terminal text weight.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "number",
+      "default": 300,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalLineHeight",
+      "title": "Line Height",
+      "subtitle": "Adjust terminal row height.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "number",
+      "default": 1.2,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalLetterSpacing",
+      "title": "Letter Spacing",
+      "subtitle": "Adjust spacing between glyphs.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "number",
+      "default": 0,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalViewWidthMode",
+      "title": "Terminal width mode",
+      "subtitle": "Use the full pane, match the chat transcript, or set an independent terminal width.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "enum",
+      "default": "full",
+      "options": [
+        {
+          "label": "Full",
+          "value": "full"
+        },
+        {
+          "label": "Match Chat",
+          "value": "match-chat"
+        },
+        {
+          "label": "Custom",
+          "value": "custom"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalViewWidthPercent",
+      "title": "Terminal Width (%)",
+      "subtitle": "Set the centered terminal body width as a percentage.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "number",
+      "default": 75,
+      "min": 50,
+      "max": 100,
+      "step": 5,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalWidthApplyToCommandPaneTerminals",
+      "title": "Apply Width to Command Pane Terminals",
+      "subtitle": "Apply the narrower terminal width to command pane terminals too.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalPaneHorizontalPaddingPx",
+      "title": "Horizontal Padding",
+      "subtitle": "Add left and right inner padding inside the terminal content area.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "number",
+      "default": 16,
+      "min": 0,
+      "max": 64,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalPaneVerticalPaddingPx",
+      "title": "Vertical Padding",
+      "subtitle": "Add top and bottom inner padding inside the terminal content area.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 64,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalCursorStyle",
+      "title": "Cursor Style",
+      "subtitle": "Choose the cursor shape.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "enum",
+      "default": "bar",
+      "options": [
+        {
+          "label": "Line",
+          "value": "bar"
+        },
+        {
+          "label": "Block",
+          "value": "block"
+        },
+        {
+          "label": "Underline",
+          "value": "underline"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "terminalCursorStyleBlink",
+      "title": "Cursor blink",
+      "subtitle": "Blink the terminal cursor.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "clickToWakeSleepingSessions",
+      "title": "Click to Wake Sleeping Panes",
+      "subtitle": "Select sleeping pane tabs without waking them until the empty pane is clicked.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "showQuickModelPickerInTerminal",
+      "title": "Show quick model & effort picker for Claude and Codex in terminal view",
+      "subtitle": "Use the model picker shortcut (⌥P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "showSessionIdInTerminalPanes",
+      "title": "Show session id in terminal panes",
+      "subtitle": "Show the provider session id in the top-right corner of terminal panes.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "showNotificationOnTerminalBell",
+      "title": "Show notification on terminal bell",
+      "subtitle": "Treat terminal bell events as session attention.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "promptEditorBackend",
+      "title": "⌃G prompt editor",
+      "subtitle": "Choose which editor ⌃G uses when a terminal prompt asks for $EDITOR.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "enum",
+      "default": "monaco",
+      "options": [
+        {
+          "label": "Ghostex editor",
+          "value": "monaco"
+        },
+        {
+          "label": "Use default from this machine",
+          "value": "inherit"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "windowsTerminalBackend",
+      "title": "Windows Environment",
+      "subtitle": "Windows only. PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "enum",
+      "default": "powershell",
+      "options": [
+        {
+          "label": "PowerShell (Native)",
+          "value": "powershell"
+        },
+        {
+          "label": "WSL (Linux)",
+          "value": "wsl"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "windowsWslDistribution",
+      "title": "WSL distribution",
+      "subtitle": "Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "string",
+      "default": "",
+      "agentWritable": true
+    },
+    {
+      "key": "terminalScrollbackLimitMb",
+      "title": "Scrollback limit",
+      "subtitle": "Set scrollback memory per terminal surface.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalBehavior",
+      "sectionTitle": "Terminal Behavior",
+      "type": "number",
+      "default": 15,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalCopyOnSelect",
+      "title": "Copy on select",
+      "subtitle": "Copy selected terminal text automatically.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalBehavior",
+      "sectionTitle": "Terminal Behavior",
+      "type": "enum",
+      "default": "false",
+      "options": [
+        {
+          "label": "Off",
+          "value": "false"
+        },
+        {
+          "label": "Selection clipboard",
+          "value": "true"
+        },
+        {
+          "label": "System and selection clipboard",
+          "value": "clipboard"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalConfirmCloseSurface",
+      "title": "Confirm close",
+      "subtitle": "Confirm before closing terminal surfaces.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalBehavior",
+      "sectionTitle": "Terminal Behavior",
+      "type": "enum",
+      "default": "true",
+      "options": [
+        {
+          "label": "Smart confirmation",
+          "value": "true"
+        },
+        {
+          "label": "Always confirm",
+          "value": "always"
+        },
+        {
+          "label": "Do not confirm",
+          "value": "false"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalClipboardTrimTrailingSpaces",
+      "title": "Trim trailing spaces on copy",
+      "subtitle": "Trim trailing whitespace when copying terminal text.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalBehavior",
+      "sectionTitle": "Terminal Behavior",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalClipboardPasteProtection",
+      "title": "Paste protection",
+      "subtitle": "Ask before pasting text Ghostty considers unsafe.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalBehavior",
+      "sectionTitle": "Terminal Behavior",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalPastePreviewableImages",
+      "title": "Paste previewable images",
+      "subtitle": "Paste clipboard images as previewable Markdown links with ⌘V. Hold ⌘ over the linked path to preview it in the terminal, and see the same image preview in the ⌃G Rich Prompt Editor.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalBehavior",
+      "sectionTitle": "Terminal Behavior",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalMouseHideWhileTyping",
+      "title": "Hide mouse while typing",
+      "subtitle": "Hide the pointer while typing in the terminal.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalBehavior",
+      "sectionTitle": "Terminal Behavior",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalScrollbar",
+      "title": "Scrollbar",
+      "subtitle": "Control whether Ghostty shows its native scrollback scrollbar.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalBehavior",
+      "sectionTitle": "Terminal Behavior",
+      "type": "enum",
+      "default": "system",
+      "options": [
+        {
+          "label": "System",
+          "value": "system"
+        },
+        {
+          "label": "Never",
+          "value": "never"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalMouseScrollMultiplierPrecision",
+      "title": "Precision scroll multiplier",
+      "subtitle": "Trackpads and high-resolution scroll wheels. Ghostty default is 1.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalScrolling",
+      "sectionTitle": "Terminal Scrolling",
+      "type": "number",
+      "default": 1,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalMouseScrollMultiplierDiscrete",
+      "title": "Discrete scroll multiplier",
+      "subtitle": "Traditional notched mouse wheels. Ghostty default is 3.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalScrolling",
+      "sectionTitle": "Terminal Scrolling",
+      "type": "number",
+      "default": 1,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "terminalScrollToBottomWhenTyping",
+      "title": "Scroll to bottom when typing",
+      "subtitle": "Keep the prompt visible while typing.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminalScrolling",
+      "sectionTitle": "Terminal Scrolling",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "autoSleepCodeEditorIdleMinutes",
+      "title": "VS Code Auto Sleep",
+      "subtitle": "Choose when inactive VS Code panes sleep, or turn Auto Sleep off.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "autoSleep",
+      "sectionTitle": "Auto Sleep",
+      "type": "number",
+      "default": 10,
+      "options": [
+        {
+          "label": "Off",
+          "value": "0"
+        },
+        {
+          "label": "5 minutes",
+          "value": "5"
+        },
+        {
+          "label": "10 minutes",
+          "value": "10"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30"
+        },
+        {
+          "label": "1 hour",
+          "value": "60"
+        },
+        {
+          "label": "2 hours",
+          "value": "120"
+        },
+        {
+          "label": "5 hours",
+          "value": "300"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "autoSleepGitEditorIdleMinutes",
+      "title": "Git Auto Sleep",
+      "subtitle": "Choose when inactive Git panes sleep, or turn Auto Sleep off.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "autoSleep",
+      "sectionTitle": "Auto Sleep",
+      "type": "number",
+      "default": 5,
+      "options": [
+        {
+          "label": "Off",
+          "value": "0"
+        },
+        {
+          "label": "5 minutes",
+          "value": "5"
+        },
+        {
+          "label": "10 minutes",
+          "value": "10"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30"
+        },
+        {
+          "label": "1 hour",
+          "value": "60"
+        },
+        {
+          "label": "2 hours",
+          "value": "120"
+        },
+        {
+          "label": "5 hours",
+          "value": "300"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "autoSleepProjectEditorIdleMinutes",
+      "title": "Project Auto Sleep",
+      "subtitle": "Choose when inactive Project panes sleep, or turn Auto Sleep off.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "autoSleep",
+      "sectionTitle": "Auto Sleep",
+      "type": "number",
+      "default": 5,
+      "options": [
+        {
+          "label": "Off",
+          "value": "0"
+        },
+        {
+          "label": "5 minutes",
+          "value": "5"
+        },
+        {
+          "label": "10 minutes",
+          "value": "10"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30"
+        },
+        {
+          "label": "1 hour",
+          "value": "60"
+        },
+        {
+          "label": "2 hours",
+          "value": "120"
+        },
+        {
+          "label": "5 hours",
+          "value": "300"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "autoSleepBrowserIdleMinutes",
+      "title": "Browser Auto Sleep",
+      "subtitle": "Choose when inactive browser panes sleep, or turn Auto Sleep off.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "autoSleep",
+      "sectionTitle": "Auto Sleep",
+      "type": "number",
+      "default": 10,
+      "options": [
+        {
+          "label": "Off",
+          "value": "0"
+        },
+        {
+          "label": "5 minutes",
+          "value": "5"
+        },
+        {
+          "label": "10 minutes",
+          "value": "10"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30"
+        },
+        {
+          "label": "1 hour",
+          "value": "60"
+        },
+        {
+          "label": "2 hours",
+          "value": "120"
+        },
+        {
+          "label": "5 hours",
+          "value": "300"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "autoSleepAgentIdleMinutes",
+      "title": "Agent Auto Sleep",
+      "subtitle": "Choose when eligible agent terminals sleep, or turn Auto Sleep off.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "autoSleep",
+      "sectionTitle": "Auto Sleep",
+      "type": "number",
+      "default": 0,
+      "options": [
+        {
+          "label": "Off",
+          "value": "0"
+        },
+        {
+          "label": "5 minutes",
+          "value": "5"
+        },
+        {
+          "label": "10 minutes",
+          "value": "10"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30"
+        },
+        {
+          "label": "1 hour",
+          "value": "60"
+        },
+        {
+          "label": "2 hours",
+          "value": "120"
+        },
+        {
+          "label": "5 hours",
+          "value": "300"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "autoSleepRequireAgentResumeCommand",
+      "title": "Require resume command",
+      "subtitle": "Only auto-sleep agent sessions Ghostex can wake with a resume command.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "autoSleep",
+      "sectionTitle": "Auto Sleep",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "autoSleepFavoriteAgentSessions",
+      "title": "Include favorite agents",
+      "subtitle": "Allow favorite agent sessions to auto-sleep.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "autoSleep",
+      "sectionTitle": "Auto Sleep",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "hideKeepAwakeTitlebarControl",
+      "title": "Hide Keep Awake",
+      "subtitle": "Hide the Keep Awake entry from the sidebar menu.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "power",
+      "sectionTitle": "Power",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "keepAwakeDefaultDurationMinutes",
+      "title": "Default keep-awake duration",
+      "subtitle": "Choose the duration Keep Awake uses by default.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "power",
+      "sectionTitle": "Power",
+      "type": "number",
+      "default": 0,
+      "options": [
+        {
+          "label": "Until turned off",
+          "value": "0"
+        },
+        {
+          "label": "2 hours",
+          "value": "120"
+        },
+        {
+          "label": "5 hours",
+          "value": "300"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "keepAwakeAllowDisplaySleep",
+      "title": "Allow display sleep",
+      "subtitle": "Keep the computer awake but allow the display to turn off.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "power",
+      "sectionTitle": "Power",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "keepAwakePreventLidSleep",
+      "title": "Prevent lid-close sleep",
+      "subtitle": "Optional. When Keep Awake is on, Ghostex can install a small privileged helper once so closing the lid stays awake only for that active keep-awake session.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "power",
+      "sectionTitle": "Power",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "keepAwakeActivateOnLaunch",
+      "title": "Activate on launch",
+      "subtitle": "Start preventing sleep when Ghostex launches.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "power",
+      "sectionTitle": "Power",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "keepAwakeActivateOnExternalDisplay",
+      "title": "Activate on external display",
+      "subtitle": "Start preventing sleep when an external display is connected.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "power",
+      "sectionTitle": "Power",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "keepAwakeWhileWorkingSessions",
+      "title": "Keep awake for working sessions",
+      "subtitle": "Keep the computer awake while sessions are working and for 20 minutes after.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "power",
+      "sectionTitle": "Power",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "keepAwakeBatteryThresholdPercent",
+      "title": "Battery threshold",
+      "subtitle": "Stop preventing sleep below this battery level, or turn the rule off.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "power",
+      "sectionTitle": "Power",
+      "type": "number",
+      "default": 0,
+      "options": [
+        {
+          "label": "Off",
+          "value": "0"
+        },
+        {
+          "label": "10%",
+          "value": "10"
+        },
+        {
+          "label": "15%",
+          "value": "15"
+        },
+        {
+          "label": "20%",
+          "value": "20"
+        },
+        {
+          "label": "25%",
+          "value": "25"
+        },
+        {
+          "label": "30%",
+          "value": "30"
+        },
+        {
+          "label": "35%",
+          "value": "35"
+        },
+        {
+          "label": "40%",
+          "value": "40"
+        },
+        {
+          "label": "45%",
+          "value": "45"
+        },
+        {
+          "label": "50%",
+          "value": "50"
+        },
+        {
+          "label": "55%",
+          "value": "55"
+        },
+        {
+          "label": "60%",
+          "value": "60"
+        },
+        {
+          "label": "65%",
+          "value": "65"
+        },
+        {
+          "label": "70%",
+          "value": "70"
+        },
+        {
+          "label": "75%",
+          "value": "75"
+        },
+        {
+          "label": "80%",
+          "value": "80"
+        },
+        {
+          "label": "85%",
+          "value": "85"
+        },
+        {
+          "label": "90%",
+          "value": "90"
+        }
+      ],
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "keepAwakeDeactivateOnLowPowerMode",
+      "title": "Deactivate in Low Power Mode",
+      "subtitle": "Stop preventing sleep when Low Power Mode is enabled.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "power",
+      "sectionTitle": "Power",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "keepAwakeDeactivateOnUserSwitch",
+      "title": "Deactivate on user switch",
+      "subtitle": "Stop preventing sleep when this user session is no longer active.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "system",
+      "groupTitle": "System",
+      "section": "power",
+      "sectionTitle": "Power",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "completionSound",
+      "title": "Completion Sound",
+      "subtitle": "Sound for terminal completions, or Off.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "notifications",
+      "groupTitle": "Notifications",
+      "section": "sounds",
+      "sectionTitle": "Sounds",
+      "type": "enum",
+      "default": "arcade",
+      "options": [
+        {
+          "label": "Off",
+          "value": "off"
+        },
+        {
+          "label": "Ping",
+          "value": "ping"
+        },
+        {
+          "label": "Ping Double",
+          "value": "pingdouble"
+        },
+        {
+          "label": "Glass",
+          "value": "glass"
+        },
+        {
+          "label": "Glimmer",
+          "value": "glimmer"
+        },
+        {
+          "label": "Shamisen",
+          "value": "shamisen"
+        },
+        {
+          "label": "Shamisen Reverb",
+          "value": "shamisenreverb"
+        },
+        {
+          "label": "Arcade",
+          "value": "arcade"
+        },
+        {
+          "label": "Arcade Boost",
+          "value": "arcadeboost"
+        },
+        {
+          "label": "Confirmation 001",
+          "value": "confirmation-001"
+        },
+        {
+          "label": "Confirmation 002",
+          "value": "confirmation-002"
+        },
+        {
+          "label": "Confirmation 003",
+          "value": "confirmation-003"
+        },
+        {
+          "label": "Confirmation 004",
+          "value": "confirmation-004"
+        },
+        {
+          "label": "Notification Pop",
+          "value": "notification-pop"
+        },
+        {
+          "label": "Success Chime",
+          "value": "success-chime"
+        },
+        {
+          "label": "High Up",
+          "value": "high-up"
+        },
+        {
+          "label": "High Down",
+          "value": "high-down"
+        },
+        {
+          "label": "Low Three Tone",
+          "value": "low-three-tone"
+        },
+        {
+          "label": "Tone 1",
+          "value": "tone-1"
+        },
+        {
+          "label": "Three Tone 1",
+          "value": "three-tone-1"
+        },
+        {
+          "label": "Three Tone 2",
+          "value": "three-tone-2"
+        },
+        {
+          "label": "Two Tone 1",
+          "value": "two-tone-1"
+        },
+        {
+          "label": "Two Tone 2",
+          "value": "two-tone-2"
+        },
+        {
+          "label": "Power Up 5",
+          "value": "power-up-5"
+        },
+        {
+          "label": "Power Up 6",
+          "value": "power-up-6"
+        },
+        {
+          "label": "Power Up 8",
+          "value": "power-up-8"
+        },
+        {
+          "label": "Coin Collect",
+          "value": "coin-collect"
+        },
+        {
+          "label": "Phaser Up 5",
+          "value": "phaser-up-5"
+        },
+        {
+          "label": "Zap Two Tone",
+          "value": "zap-two-tone"
+        },
+        {
+          "label": "Mission Completed (Male)",
+          "value": "voiceover-pack-male-mission-completed"
+        },
+        {
+          "label": "Mission Completed (Female)",
+          "value": "voiceover-pack-female-mission-completed"
+        },
+        {
+          "label": "You Win (Male)",
+          "value": "voiceover-pack-male-you-win"
+        },
+        {
+          "label": "Congratulations (Female)",
+          "value": "voiceover-pack-female-congratulations"
+        },
+        {
+          "label": "Flawless Victory",
+          "value": "flawless-victory"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "showMacOSAttentionNotifications",
+      "title": "Attention Notifications",
+      "subtitle": "Show a system notification when a session needs attention.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "notifications",
+      "groupTitle": "Notifications",
+      "section": "sounds",
+      "sectionTitle": "Sounds",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "attentionNotificationActions",
+      "title": "Agent Completion Alert Test",
+      "subtitle": "Test the current completion alert settings or open Notification Settings.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "notifications",
+      "groupTitle": "Notifications",
+      "section": "sounds",
+      "sectionTitle": "Sounds",
+      "type": "ui",
+      "advanced": true,
+      "agentWritable": false
+    },
+    {
+      "key": "actionCompletionSound",
+      "title": "Action Completion Sound",
+      "subtitle": "Sound for action completions.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "notifications",
+      "groupTitle": "Notifications",
+      "section": "sounds",
+      "sectionTitle": "Sounds",
+      "type": "enum",
+      "default": "shamisen",
+      "options": [
+        {
+          "label": "Ping",
+          "value": "ping"
+        },
+        {
+          "label": "Ping Double",
+          "value": "pingdouble"
+        },
+        {
+          "label": "Glass",
+          "value": "glass"
+        },
+        {
+          "label": "Glimmer",
+          "value": "glimmer"
+        },
+        {
+          "label": "Shamisen",
+          "value": "shamisen"
+        },
+        {
+          "label": "Shamisen Reverb",
+          "value": "shamisenreverb"
+        },
+        {
+          "label": "Arcade",
+          "value": "arcade"
+        },
+        {
+          "label": "Arcade Boost",
+          "value": "arcadeboost"
+        },
+        {
+          "label": "Confirmation 001",
+          "value": "confirmation-001"
+        },
+        {
+          "label": "Confirmation 002",
+          "value": "confirmation-002"
+        },
+        {
+          "label": "Confirmation 003",
+          "value": "confirmation-003"
+        },
+        {
+          "label": "Confirmation 004",
+          "value": "confirmation-004"
+        },
+        {
+          "label": "Notification Pop",
+          "value": "notification-pop"
+        },
+        {
+          "label": "Success Chime",
+          "value": "success-chime"
+        },
+        {
+          "label": "High Up",
+          "value": "high-up"
+        },
+        {
+          "label": "High Down",
+          "value": "high-down"
+        },
+        {
+          "label": "Low Three Tone",
+          "value": "low-three-tone"
+        },
+        {
+          "label": "Tone 1",
+          "value": "tone-1"
+        },
+        {
+          "label": "Three Tone 1",
+          "value": "three-tone-1"
+        },
+        {
+          "label": "Three Tone 2",
+          "value": "three-tone-2"
+        },
+        {
+          "label": "Two Tone 1",
+          "value": "two-tone-1"
+        },
+        {
+          "label": "Two Tone 2",
+          "value": "two-tone-2"
+        },
+        {
+          "label": "Power Up 5",
+          "value": "power-up-5"
+        },
+        {
+          "label": "Power Up 6",
+          "value": "power-up-6"
+        },
+        {
+          "label": "Power Up 8",
+          "value": "power-up-8"
+        },
+        {
+          "label": "Coin Collect",
+          "value": "coin-collect"
+        },
+        {
+          "label": "Phaser Up 5",
+          "value": "phaser-up-5"
+        },
+        {
+          "label": "Zap Two Tone",
+          "value": "zap-two-tone"
+        },
+        {
+          "label": "Mission Completed (Male)",
+          "value": "voiceover-pack-male-mission-completed"
+        },
+        {
+          "label": "Mission Completed (Female)",
+          "value": "voiceover-pack-female-mission-completed"
+        },
+        {
+          "label": "You Win (Male)",
+          "value": "voiceover-pack-male-you-win"
+        },
+        {
+          "label": "Congratulations (Female)",
+          "value": "voiceover-pack-female-congratulations"
+        },
+        {
+          "label": "Flawless Victory",
+          "value": "flawless-victory"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "copySound",
+      "title": "Copy Sound",
+      "subtitle": "Play a short sound when copying to the clipboard, including text from the chat composer.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "notifications",
+      "groupTitle": "Notifications",
+      "section": "sounds",
+      "sectionTitle": "Sounds",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "showBetaFeatures",
+      "title": "Enable Experimental Features",
+      "subtitle": "Show experimental surfaces: OS Integration settings, Browser color scheme, and Keep Awake.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "advanced",
+      "groupTitle": "Advanced",
+      "section": "beta",
+      "sectionTitle": "Experimental",
+      "type": "boolean",
+      "default": false,
+      "advanced": true,
+      "agentWritable": true
+    },
+    {
+      "key": "appShotsEnabled",
+      "title": "App Shots",
+      "subtitle": "Enable App Shots: press the App Shots hotkey to capture a window screenshot into the prompt.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "appShots",
+      "sectionTitle": "App Shots (beta)",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "appShotsHotkey",
+      "title": "App Shots hotkey",
+      "subtitle": "Which modifier chord captures an App Shot.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "appShots",
+      "sectionTitle": "App Shots (beta)",
+      "type": "enum",
+      "default": "both-command",
+      "options": [
+        {
+          "label": "Both ⌘ keys",
+          "value": "both-command"
+        },
+        {
+          "label": "Both ⇧ keys",
+          "value": "both-shift"
+        },
+        {
+          "label": "Both ⌥ keys",
+          "value": "both-option"
+        },
+        {
+          "label": "Double-tap Left ⇧",
+          "value": "double-left-shift"
+        },
+        {
+          "label": "Double-tap Left ⌥",
+          "value": "double-left-option"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "appShotsMetadataEnabled",
+      "title": "App Shots metadata",
+      "subtitle": "Also paste window metadata with the App Shot image link.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "appShots",
+      "sectionTitle": "App Shots (beta)",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "showAdvancedSettings",
+      "title": "Show Advanced settings",
+      "subtitle": "Show the rows marked Advanced in Settings.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "settingsModal",
+      "sectionTitle": "Settings window",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "gpuiTitlebarActionCommandByProject",
+      "title": "gpuiTitlebarActionCommandByProject",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": {},
+      "agentWritable": false
+    },
+    {
+      "key": "gpuiTitlebarOpenTargetByProject",
+      "title": "gpuiTitlebarOpenTargetByProject",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": {},
+      "agentWritable": false
+    },
+    {
+      "key": "settingsModalNavigation",
+      "title": "settingsModalNavigation",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": {
+        "activeTab": "settings",
+        "scrollTopByTab": {},
+        "version": 1
+      },
+      "agentWritable": false
+    },
+    {
+      "key": "projectWebsiteViews",
+      "title": "projectWebsiteViews",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": {},
+      "agentWritable": false
+    },
+    {
+      "key": "appIconSourceId",
+      "title": "appIconSourceId",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "string",
+      "default": "",
+      "advanced": true,
+      "agentWritable": false
+    },
+    {
+      "key": "customSidebarTitlebarLightBackgroundColor",
+      "title": "customSidebarTitlebarLightBackgroundColor",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "string",
+      "default": "#f4f4f5",
+      "agentWritable": false
+    },
+    {
+      "key": "hotkeys",
+      "title": "hotkeys",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": {
+        "scrollChatToBottom": "ctrl+shift+down",
+        "createSession": "cmd+t",
+        "openCommandPalette": "cmd+shift+p",
+        "openSessionSearchPalette": "cmd+p",
+        "openNewThreadPalette": "cmd+shift+t",
+        "openCommandsPanel": "f12",
+        "openSettings": "cmd+,",
+        "openExtensions": "",
+        "openGhostexHelp": "",
+        "openHotkeys": "cmd+.",
+        "toggleSidebarCollapsed": "cmd+b",
+        "toggleViewPanel": "cmd+alt+b",
+        "expandViewPanel": "cmd+ctrl+e",
+        "expandViewPanelFully": "cmd+ctrl+shift+e",
+        "renameActiveSession": "cmd+r",
+        "openBrowserPane": "cmd+n",
+        "switchAgentsView": "",
+        "switchSourceView": "",
+        "switchGitHubView": "",
+        "switchKanbanView": "",
+        "switchManageView": "",
+        "switchAutomateView": "",
+        "switchTerminalView": "",
+        "switchTitlebarView1": "alt+1",
+        "switchTitlebarView2": "alt+2",
+        "switchTitlebarView3": "alt+3",
+        "switchTitlebarView4": "alt+4",
+        "switchTitlebarView5": "alt+5",
+        "switchTitlebarView6": "alt+6",
+        "switchTitlebarView7": "alt+7",
+        "switchTitlebarView8": "alt+8",
+        "switchTitlebarView9": "alt+9",
+        "rotatePanesClockwise": "ctrl+shift+l",
+        "mergeAllTabs": "ctrl+shift+m",
+        "delayedSend": "ctrl+shift+s",
+        "closeAfterDone": "",
+        "openModelPicker": "alt+p",
+        "promptEditor": "ctrl+g",
+        "attachFileOrFolder": "cmd+alt+p",
+        "sessionNote": "cmd+alt+n",
+        "stashPrompt": "alt+s",
+        "stashedPrompts": "cmd+alt+s",
+        "exportTranscript": "cmd+alt+e",
+        "toggleAgentActions": "cmd+alt+a",
+        "toggleChatView": "alt+g",
+        "openFindPrompts": "cmd+shift+f",
+        "scrollTerminalToTop": "",
+        "scrollTerminalToBottom": "",
+        "splitSessionRight": "alt+shift+d",
+        "forkSession": "ctrl+shift+f",
+        "reloadSession": "ctrl+shift+r",
+        "sleepFocusedSession": "",
+        "wakeFocusedSession": "",
+        "closeFocusedSession": "",
+        "popOutPane": "ctrl+shift+o",
+        "focusPreviousGroup": "",
+        "focusNextGroup": "",
+        "navigateHistoryBack": "cmd+[",
+        "navigateHistoryForward": "cmd+]",
+        "openNotifications": "cmd+i",
+        "jumpToLatestUnreadNotification": "cmd+shift+u",
+        "deferNotificationAndJumpNext": "cmd+ctrl+u",
+        "focusPreviousSession": "ctrl+shift+tab",
+        "focusNextSession": "ctrl+tab",
+        "focusPreviousPaneTab": "cmd+alt+[",
+        "focusNextPaneTab": "cmd+alt+]",
+        "focusUp": "cmd+alt+up",
+        "focusRight": "cmd+alt+right",
+        "focusDown": "cmd+alt+down",
+        "focusLeft": "cmd+alt+left",
+        "jumpToProject1": "cmd+ctrl+1",
+        "jumpToProject2": "cmd+ctrl+2",
+        "jumpToProject3": "cmd+ctrl+3",
+        "jumpToProject4": "cmd+ctrl+4",
+        "jumpToProject5": "cmd+ctrl+5",
+        "jumpToProject6": "cmd+ctrl+6",
+        "jumpToProject7": "cmd+ctrl+7",
+        "jumpToProject8": "cmd+ctrl+8",
+        "jumpToProject9": "cmd+ctrl+9",
+        "focusSessionSlot1": "cmd+1",
+        "focusSessionSlot2": "cmd+2",
+        "focusSessionSlot3": "cmd+3",
+        "focusSessionSlot4": "cmd+4",
+        "focusSessionSlot5": "cmd+5",
+        "focusSessionSlot6": "cmd+6",
+        "focusSessionSlot7": "cmd+7",
+        "focusSessionSlot8": "cmd+8",
+        "focusSessionSlot9": "cmd+9",
+        "runActionSlot1": "ctrl+shift+1",
+        "runActionSlot2": "ctrl+shift+2",
+        "runActionSlot3": "ctrl+shift+3",
+        "runActionSlot4": "ctrl+shift+4",
+        "runActionSlot5": "ctrl+shift+5",
+        "splitMore": "cmd+d",
+        "splitMoreDown": "cmd+shift+d"
+      },
+      "agentWritable": false
+    },
+    {
+      "key": "customViewTemplates",
+      "title": "customViewTemplates",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": [],
+      "agentWritable": false
+    },
+    {
+      "key": "viewScopes",
+      "title": "viewScopes",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": {},
+      "agentWritable": false
+    },
+    {
+      "key": "customWorkspaceOpenTargets",
+      "title": "customWorkspaceOpenTargets",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": [],
+      "agentWritable": false
+    },
+    {
+      "key": "workspaceOpenTargetAvailability",
+      "title": "workspaceOpenTargetAvailability",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": {
+        "availableTargetIds": [
+          "finder"
+        ],
+        "checkedAtMs": 0,
+        "resolvedAppNames": {},
+        "resolvedCommands": {}
+      },
+      "agentWritable": false
+    },
+    {
+      "key": "workspaceOpenTargetHiddenIds",
+      "title": "workspaceOpenTargetHiddenIds",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": [],
+      "agentWritable": false
+    },
+    {
+      "key": "remoteMachines",
+      "title": "remoteMachines",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": [],
+      "agentWritable": false
+    },
+    {
+      "key": "petOverlayEnabled",
+      "title": "Pet overlay",
+      "subtitle": "Show the draggable animated pet in the sidebar (also Wake Pet / Sleep Pet in Quick Access).",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "statusIndicators",
+      "groupTitle": "Status Indicators",
+      "section": "statusIndicators",
+      "sectionTitle": "Status Indicators",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "selectedPetId",
+      "title": "Pet",
+      "subtitle": "Which pet sprite the overlay shows.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "statusIndicators",
+      "groupTitle": "Status Indicators",
+      "section": "statusIndicators",
+      "sectionTitle": "Status Indicators",
+      "type": "string",
+      "default": "boo",
+      "agentWritable": true
+    },
+    {
+      "key": "sidebarTheme",
+      "title": "Appearance",
+      "subtitle": "Follow the system appearance by default, or choose Light or Dark.",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -34,8 +3025,8 @@
       "key": "darkThemePreset",
       "title": "Dark theme",
       "subtitle": "Preset dark chrome for the sidebar and window, or Custom to tune its contrast and tint.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -78,8 +3069,8 @@
       "key": "customSidebarTitlebarBackgroundDarknessPercent",
       "title": "Dark theme background contrast",
       "subtitle": "Contrast of the dark sidebar and window chrome background while Dark theme is Custom.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -94,8 +3085,8 @@
       "key": "customSidebarTitlebarBackgroundTintColor",
       "title": "Dark theme background tint",
       "subtitle": "Subtle tint of the dark sidebar and window chrome background while Dark theme is Custom.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -108,8 +3099,8 @@
       "key": "lightThemePreset",
       "title": "Light theme",
       "subtitle": "Preset light chrome for the sidebar and window, or Custom to tune its contrast and tint.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -149,11 +3140,39 @@
       "agentWritable": true
     },
     {
+      "key": "themeSidebarContrast",
+      "title": "Sidebar contrast",
+      "subtitle": "The sidebar's contrast. Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "number",
+      "default": 0,
+      "agentWritable": true
+    },
+    {
+      "key": "themeWorkAreaContrast",
+      "title": "Work area contrast",
+      "subtitle": "The work area's contrast (chat, terminals and views). Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "number",
+      "default": 0,
+      "agentWritable": true
+    },
+    {
       "key": "customSidebarTitlebarLightBackgroundLightnessPercent",
       "title": "Light theme background contrast",
       "subtitle": "Contrast of the light sidebar and window chrome background while Light theme is Custom.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -166,8 +3185,8 @@
       "key": "customSidebarTitlebarLightBackgroundTintColor",
       "title": "Light theme background tint",
       "subtitle": "Subtle tint of the light sidebar and window chrome background while Light theme is Custom.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -180,8 +3199,8 @@
       "key": "sessionChatTheme",
       "title": "Chat theme",
       "subtitle": "Follow the app theme by default, or override chat with Light, Dark, or System.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -212,8 +3231,8 @@
       "key": "terminalColorScheme",
       "title": "Terminal theme",
       "subtitle": "Follow the app theme by default, or override terminals with Light, Dark, or System.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -244,8 +3263,8 @@
       "key": "terminalGhosttyLightTheme",
       "title": "Terminal light palette",
       "subtitle": "Uses your configured Ghostty light theme, or GitHub Light when no theme is configured.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -2204,8 +5223,8 @@
       "key": "terminalGhosttyTheme",
       "title": "Terminal dark palette",
       "subtitle": "Uses your configured Ghostty dark theme, or GitHub Dark when no theme is configured.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -4167,9 +7186,9 @@
     {
       "key": "windowGlass",
       "title": "Window glass",
-      "subtitle": "Let the blurred desktop show through the window. Automatic uses glass in dark mode only.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "subtitle": "Let the blurred desktop show through the window. By default, light mode stays opaque.",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -4178,26 +7197,162 @@
       "default": "auto",
       "options": [
         {
-          "label": "Automatic (glass in dark mode)",
+          "label": "Glass in dark mode",
           "value": "auto"
         },
         {
-          "label": "Frosted glass",
+          "label": "Always glass",
           "value": "frosted"
         },
         {
-          "label": "Opaque",
+          "label": "Always opaque",
           "value": "opaque"
         }
       ],
       "agentWritable": true
     },
     {
+      "key": "windowGlassSource",
+      "title": "Glass shows",
+      "subtitle": "Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "enum",
+      "default": "desktopAndWindows",
+      "options": [
+        {
+          "label": "Desktop and windows",
+          "value": "desktopAndWindows"
+        },
+        {
+          "label": "Wallpaper only",
+          "value": "wallpaper"
+        },
+        {
+          "label": "Custom image",
+          "value": "customImage"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassImagePlacement",
+      "title": "Glass picture position",
+      "subtitle": "Where the wallpaper or custom picture sits behind the glass. Stays with the desktop can trail the window while you drag it.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "enum",
+      "default": "static",
+      "options": [
+        {
+          "label": "Moves with the window",
+          "value": "static"
+        },
+        {
+          "label": "Stays with the desktop",
+          "value": "desktop"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassImageDark",
+      "title": "Glass image for dark mode",
+      "subtitle": "The picture the glass blurs in dark mode when Glass shows is Custom image.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "string",
+      "default": "",
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassImageLight",
+      "title": "Glass image for light mode",
+      "subtitle": "The picture the glass blurs in light mode when Glass shows is Custom image.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "string",
+      "default": "",
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassSidebarOpacityDark",
+      "title": "Sidebar tint in dark mode",
+      "subtitle": "How much of the desktop the sidebar hides in dark mode. Lower shows more of your desktop through it.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "number",
+      "default": 80,
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassWorkAreaTintDark",
+      "title": "Work area tint in dark mode",
+      "subtitle": "How much of the desktop the work area hides in dark mode, set on its own so either area can be the darker one. Lower shows more of your desktop through it.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "number",
+      "default": 88,
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassSidebarOpacityLight",
+      "title": "Sidebar tint in light mode",
+      "subtitle": "How much of the desktop the sidebar hides in light mode. Lower shows more of your desktop through it.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "number",
+      "default": 88,
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassWorkAreaTintLight",
+      "title": "Work area tint in light mode",
+      "subtitle": "How much of the desktop the work area hides in light mode, set on its own so either area can be the darker one. Lower shows more of your desktop through it.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "number",
+      "default": 93,
+      "agentWritable": true
+    },
+    {
       "key": "showActivePaneOutline",
       "title": "Show Active Pane Outline",
       "subtitle": "Show an outline around the currently focused pane.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -4211,8 +7366,8 @@
       "key": "workspaceActivePaneBorderColor",
       "title": "Active Pane Border",
       "subtitle": "Color of the outline around the currently focused pane.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -4226,8 +7381,8 @@
       "key": "workspacePaneGap",
       "title": "Pane gap",
       "subtitle": "Gap in pixels between split panes in the Agents view.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -4240,8 +7395,8 @@
       "key": "customSidebarTitlebarForegroundColor",
       "title": "Sidebar foreground color (derived)",
       "subtitle": "Derived from Background Contrast and Background Tint; change those instead.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -4254,8 +7409,8 @@
       "key": "customSidebarTitlebarBackgroundColor",
       "title": "Sidebar background color (derived)",
       "subtitle": "Derived from Background Contrast and Background Tint; change those instead.",
-      "tab": "settings",
-      "tabTitle": "General",
+      "tab": "theme",
+      "tabTitle": "Theme",
       "group": "appearance",
       "groupTitle": "Theme",
       "section": "theming",
@@ -4263,2967 +7418,6 @@
       "type": "string",
       "default": "#0b0b0b",
       "agentWritable": false
-    },
-    {
-      "key": "appIconSourceId",
-      "title": "App Icon",
-      "subtitle": "Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "appearance",
-      "groupTitle": "Theme",
-      "section": "appIcon",
-      "sectionTitle": "App Icon",
-      "type": "string",
-      "default": "",
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "sidebarSettingsPreset",
-      "title": "Preset",
-      "subtitle": "Apply a sidebar UI preset or show Custom when controlled settings diverge.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "ui",
-      "options": [
-        {
-          "label": "Recommended",
-          "value": "recommended"
-        },
-        {
-          "label": "Codex",
-          "value": "codex"
-        },
-        {
-          "label": "Minimal",
-          "value": "minimal"
-        },
-        {
-          "label": "Detailed",
-          "value": "detailed"
-        },
-        {
-          "label": "Custom",
-          "value": "custom"
-        }
-      ],
-      "agentWritable": false
-    },
-    {
-      "key": "sidebarSpacesEnabled",
-      "title": "Spaces",
-      "subtitle": "Show a row of Space filter buttons in each server's sidebar section.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": false,
-      "options": [
-        {
-          "label": "Off",
-          "value": "off"
-        },
-        {
-          "label": "On",
-          "value": "on"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "sidebarSpaceSwitchBehavior",
-      "title": "When switching to a Space",
-      "subtitle": "Reopen the session you last had open in a Space when you switch to it, in the view its project was in. Requires Spaces.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "enum",
-      "default": "restore",
-      "options": [
-        {
-          "label": "Restore the Space's projects",
-          "value": "restore"
-        },
-        {
-          "label": "Don't switch projects",
-          "value": "keep"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "sidebarSpaceFollowActiveSession",
-      "title": "Follow the active session's Space",
-      "subtitle": "Switch the selected Space to the one that owns a session you open from outside it, such as through Back/Forward or Search by Prompt. Requires Spaces.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "projectSwitchKeepAliveMinutes",
-      "title": "Keep the previous project live for",
-      "subtitle": "After you switch to another project or Space, keep the terminals, chats, and view that were open in the previous project running for this many minutes so switching back is instant. 0 releases them right away.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "number",
-      "default": 10,
-      "min": 0,
-      "max": 60,
-      "agentWritable": true
-    },
-    {
-      "key": "sidebarVisibilityMemory",
-      "title": "Sidebar visibility memory",
-      "subtitle": "Keep one sidebar state everywhere, or remember it separately for Agents and for the wide views (Browser, Code, Docs, Kanban, Automate).",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "enum",
-      "default": "shared",
-      "options": [
-        {
-          "label": "Same in every view",
-          "value": "shared"
-        },
-        {
-          "label": "Remembered per view",
-          "value": "perView"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "showProjectIcons",
-      "title": "Show project icons",
-      "subtitle": "Show project artwork or a folder or worktree icon beside project names.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": true,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "hideSessionAgentIconUntilHover",
-      "title": "Hide agent icon until hover",
-      "subtitle": "Hide session agent icons until a session row is hovered.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "hideBrowserFaviconUntilHover",
-      "title": "Hide browser favicon until hover",
-      "subtitle": "Hide browser page favicons until a session row is hovered.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "hideLastActiveTimeOnSessionCards",
-      "title": "Hide last active time",
-      "subtitle": "Hide Last Active timestamps from session-card title rows.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": true,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "hideProjectHeaderDiffStats",
-      "title": "Hide project git stats",
-      "subtitle": "Hide +added/-removed line counts in sidebar project rows.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "showProjectEditorDiffFileCount",
-      "title": "Show changed-file count",
-      "subtitle": "Show changed-file counts in sidebar project row git stats.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "hideMenuBarSessionStatusIndicators",
-      "title": "Show Menu Bar Session Indicators",
-      "subtitle": "Show the menu bar session status badges.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "sidebarCollapseAnimationDurationMs",
-      "title": "Collapse animation speed",
-      "subtitle": "Set how quickly sidebar sections, groups, and projects expand or collapse, and how quickly the floating sidebar and Agents Panel slide in from the window edge. Set to 0 for no animation.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "number",
-      "default": 400,
-      "min": 0,
-      "max": 1000,
-      "step": 100,
-      "agentWritable": true
-    },
-    {
-      "key": "sidebarTooltipDelayMs",
-      "title": "Tooltip Delay",
-      "subtitle": "Set how long sidebar hover labels wait before appearing. Set to 0 to show them immediately.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "number",
-      "default": 600,
-      "min": 0,
-      "max": 2000,
-      "step": 100,
-      "agentWritable": true
-    },
-    {
-      "key": "sidebarDefaultWidthPx",
-      "title": "Default Width",
-      "subtitle": "Width restored when double-clicking the sidebar resize handle.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "number",
-      "default": 275,
-      "min": 150,
-      "max": 520,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "commandsPanelDefaultHeightPx",
-      "title": "Command Pane Default Height",
-      "subtitle": "Height used when opening the command pane and when double-clicking its top resize rail.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "number",
-      "default": 125,
-      "min": 40,
-      "max": 600,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "commandsPanelSide",
-      "title": "Command Pane Side",
-      "subtitle": "Dock the command pane below the workspace or to its right.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "enum",
-      "default": "bottom",
-      "options": [
-        {
-          "label": "Bottom",
-          "value": "bottom"
-        },
-        {
-          "label": "Right",
-          "value": "right"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "commandsPanelAutoMinimize",
-      "title": "Auto-minimize Commands pane",
-      "subtitle": "Minimize the Commands pane after you stop using it and move focus elsewhere. Commands keep running.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": true,
-      "agentWritable": true
-    },
-    {
-      "key": "commandsPanelAutoMinimizeDelaySeconds",
-      "title": "Minimize after",
-      "subtitle": "How long the Commands pane stays open after focus and the pointer leave it.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "number",
-      "default": 60,
-      "options": [
-        {
-          "label": "15 seconds",
-          "value": "15"
-        },
-        {
-          "label": "30 seconds",
-          "value": "30"
-        },
-        {
-          "label": "1 minute",
-          "value": "60"
-        },
-        {
-          "label": "2 minutes",
-          "value": "120"
-        },
-        {
-          "label": "5 minutes",
-          "value": "300"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "projectSessionListCollapsedCount",
-      "title": "Compact Session Rows",
-      "subtitle": "Rows a project shows in Compact mode before its \"Show all\" row. Rows in collapsed sections do not count.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "number",
-      "default": 13,
-      "min": 1,
-      "max": 50,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "agentManagerZoomPercent",
-      "title": "Sidebar Interface Size",
-      "subtitle": "Scale the sidebar interface.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "number",
-      "default": 100,
-      "min": 50,
-      "max": 200,
-      "agentWritable": true
-    },
-    {
-      "key": "createSessionOnSidebarDoubleClick",
-      "title": "Double-click empty sidebar space to create a session",
-      "subtitle": "Create a session from empty sidebar space.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "enableSessionParking",
-      "title": "Enable session parking",
-      "subtitle": "Move deferred sessions into a collapsible Parked section at the bottom of the sidebar.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": true,
-      "agentWritable": true
-    },
-    {
-      "key": "sleepSessionWhenParking",
-      "title": "Sleep session when parking",
-      "subtitle": "Sleep a session automatically when it is moved into the Parked section.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "showTagMenuWhenParking",
-      "title": "Park & Snooze with tags",
-      "subtitle": "Open the Tag as menu when a session is parked or snoozed so it can be tagged right away.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": true,
-      "agentWritable": true
-    },
-    {
-      "key": "unparkAfterSendingMessage",
-      "title": "Unpark after sending a message",
-      "subtitle": "Move a parked session out of the Parked section when you send it a message.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": true,
-      "agentWritable": true
-    },
-    {
-      "key": "renameSessionOnDoubleClick",
-      "title": "Double-click session cards to rename",
-      "subtitle": "Makes clicking on a session respond a bit slower so we can detect the double click",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "sessionCardHoverButtons",
-      "title": "Session hover buttons (click to toggle, drag to reorder)",
-      "subtitle": "Buttons a session card shows when you hover it. Click an icon to turn it on or off; drag icons to reorder them. Buttons to the right of the chevron always show, buttons to its left hide until the chevron is clicked. By default the strip is Tag, Park, Sleep, chevron, Close.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sessionCards",
-      "sectionTitle": "Session Cards",
-      "type": "json",
-      "default": [
-        {
-          "enabled": false,
-          "id": "rename"
-        },
-        {
-          "enabled": false,
-          "id": "pin"
-        },
-        {
-          "enabled": false,
-          "id": "note"
-        },
-        {
-          "enabled": false,
-          "id": "snooze"
-        },
-        {
-          "enabled": false,
-          "id": "closeAfterDone"
-        },
-        {
-          "enabled": true,
-          "id": "tag"
-        },
-        {
-          "enabled": true,
-          "id": "park"
-        },
-        {
-          "enabled": true,
-          "id": "sleep"
-        },
-        {
-          "enabled": true,
-          "id": "chevron"
-        },
-        {
-          "enabled": true,
-          "id": "close"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": false
-    },
-    {
-      "key": "showSessionCardHoverButtonsInContextMenu",
-      "title": "Hover buttons also in context menu",
-      "subtitle": "Keep the enabled hover buttons at the top of the session right-click menu too, in their right-to-left order on the card. Close is never listed while it is on the card. Turn off to leave every button out of the menu once it is on the card.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sessionCards",
-      "sectionTitle": "Session Cards",
-      "type": "boolean",
-      "default": true,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "sidebarSessionTagListItems",
-      "title": "Tag Filter List",
-      "subtitle": "Add your own tags, then reorder, hide, disable, or delete tags and their separators for the sidebar and the Tag as menu.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebarTags",
-      "sectionTitle": "Sidebar Tags",
-      "type": "json",
-      "default": [
-        {
-          "enabled": true,
-          "id": "favorite",
-          "tag": "favorite",
-          "type": "tag",
-          "visible": true
-        },
-        {
-          "enabled": false,
-          "id": "high-priority",
-          "tag": "high-priority",
-          "type": "tag",
-          "visible": false
-        },
-        {
-          "enabled": false,
-          "id": "low-priority",
-          "tag": "low-priority",
-          "type": "tag",
-          "visible": false
-        },
-        {
-          "enabled": true,
-          "id": "separator-priority-progress",
-          "type": "separator",
-          "visible": true
-        },
-        {
-          "enabled": false,
-          "id": "todo",
-          "tag": "todo",
-          "type": "tag",
-          "visible": false
-        },
-        {
-          "enabled": true,
-          "id": "in-progress",
-          "tag": "in-progress",
-          "type": "tag",
-          "visible": true
-        },
-        {
-          "enabled": true,
-          "id": "testing",
-          "tag": "testing",
-          "type": "tag",
-          "visible": true
-        },
-        {
-          "enabled": true,
-          "id": "blocked",
-          "tag": "blocked",
-          "type": "tag",
-          "visible": true
-        },
-        {
-          "enabled": true,
-          "id": "on-hold",
-          "tag": "on-hold",
-          "type": "tag",
-          "visible": true
-        },
-        {
-          "enabled": true,
-          "id": "done",
-          "tag": "done",
-          "type": "tag",
-          "visible": true
-        },
-        {
-          "enabled": true,
-          "id": "separator-progress-type",
-          "type": "separator",
-          "visible": true
-        },
-        {
-          "enabled": true,
-          "id": "research",
-          "tag": "research",
-          "type": "tag",
-          "visible": true
-        },
-        {
-          "enabled": false,
-          "id": "bug",
-          "tag": "bug",
-          "type": "tag",
-          "visible": false
-        },
-        {
-          "enabled": false,
-          "id": "feature",
-          "tag": "feature",
-          "type": "tag",
-          "visible": false
-        },
-        {
-          "enabled": true,
-          "id": "design",
-          "tag": "design",
-          "type": "tag",
-          "visible": true
-        },
-        {
-          "enabled": true,
-          "id": "separator-type-untagged",
-          "type": "separator",
-          "visible": true
-        },
-        {
-          "enabled": true,
-          "id": "untagged",
-          "type": "untagged",
-          "visible": true
-        }
-      ],
-      "options": [
-        {
-          "label": "Favorite",
-          "value": "favorite"
-        },
-        {
-          "label": "High Priority",
-          "value": "high-priority"
-        },
-        {
-          "label": "Low Priority",
-          "value": "low-priority"
-        },
-        {
-          "label": "Separator",
-          "value": "separator-priority-progress"
-        },
-        {
-          "label": "Todo",
-          "value": "todo"
-        },
-        {
-          "label": "In Progress",
-          "value": "in-progress"
-        },
-        {
-          "label": "Testing",
-          "value": "testing"
-        },
-        {
-          "label": "Blocked",
-          "value": "blocked"
-        },
-        {
-          "label": "On Hold",
-          "value": "on-hold"
-        },
-        {
-          "label": "Done",
-          "value": "done"
-        },
-        {
-          "label": "Separator",
-          "value": "separator-progress-type"
-        },
-        {
-          "label": "Research",
-          "value": "research"
-        },
-        {
-          "label": "Bug",
-          "value": "bug"
-        },
-        {
-          "label": "Feature",
-          "value": "feature"
-        },
-        {
-          "label": "Design",
-          "value": "design"
-        },
-        {
-          "label": "Separator",
-          "value": "separator-type-untagged"
-        },
-        {
-          "label": "No tag",
-          "value": "untagged"
-        },
-        {
-          "label": "Hide tag",
-          "value": "hide"
-        },
-        {
-          "label": "Disable tag",
-          "value": "disable"
-        },
-        {
-          "label": "Reorder tags",
-          "value": "reorder"
-        }
-      ],
-      "agentWritable": false
-    },
-    {
-      "key": "preferredAgentInterface",
-      "title": "Default view for compatible agents",
-      "subtitle": "Automatically switch to chat as soon as Ghostex detects that an agent session supports it.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "chat",
-      "groupTitle": "Chat",
-      "section": "chat",
-      "sectionTitle": "Chat",
-      "type": "enum",
-      "default": "chat",
-      "options": [
-        {
-          "label": "Terminal",
-          "value": "terminal"
-        },
-        {
-          "label": "Chat",
-          "value": "chat"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "sessionChatFontFamily",
-      "title": "Chat font family",
-      "subtitle": "Use any installed font in chat messages and the prompt composer.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "chat",
-      "groupTitle": "Chat",
-      "section": "chat",
-      "sectionTitle": "Chat",
-      "type": "string",
-      "default": "",
-      "agentWritable": true
-    },
-    {
-      "key": "sessionChatZoomPercent",
-      "title": "Default chat zoom (%)",
-      "subtitle": "Scale the desktop chat interface, including messages and the prompt composer, from 70% to 200% in 5% steps. Default: 100%.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "chat",
-      "groupTitle": "Chat",
-      "section": "chat",
-      "sectionTitle": "Chat",
-      "type": "number",
-      "default": 100,
-      "min": 70,
-      "max": 200,
-      "step": 5,
-      "agentWritable": true
-    },
-    {
-      "key": "sessionChatCustomTranscriptWidthEnabled",
-      "title": "Custom transcript width",
-      "subtitle": "Let the transcript use a different width from the prompt composer.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "chat",
-      "groupTitle": "Chat",
-      "section": "chat",
-      "sectionTitle": "Chat",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "sessionChatTranscriptWidthPercent",
-      "title": "Transcript width",
-      "subtitle": "Set the centered transcript width without changing the prompt composer.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "chat",
-      "groupTitle": "Chat",
-      "section": "chat",
-      "sectionTitle": "Chat",
-      "type": "number",
-      "default": 75,
-      "min": 50,
-      "max": 100,
-      "step": 5,
-      "agentWritable": true
-    },
-    {
-      "key": "sessionChatFileEditPreviews",
-      "title": "Show file edit previews",
-      "subtitle": "Show the first seven code lines in each file edit. Turn off to show only the path and change counts.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "chat",
-      "groupTitle": "Chat",
-      "section": "chat",
-      "sectionTitle": "Chat",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "sessionChatKeepComposerExpanded",
-      "title": "Keep chat box expanded while scrolling",
-      "subtitle": "Keep the desktop chat box at full size while you scroll the transcript instead of shrinking it as you scroll up and growing it back at the end.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "chat",
-      "groupTitle": "Chat",
-      "section": "chat",
-      "sectionTitle": "Chat",
-      "type": "boolean",
-      "default": true,
-      "agentWritable": true
-    },
-    {
-      "key": "sessionChatSimpleMode",
-      "title": "Simple mode",
-      "subtitle": "Simplify all chats: hide tool command previews and group file edits behind an expandable file count.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "chat",
-      "groupTitle": "Chat",
-      "section": "chat",
-      "sectionTitle": "Chat",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "sessionChatVerboseMode",
-      "title": "Verbose mode",
-      "subtitle": "Expand thinking blocks to show their tool calls by default. Each chat can override it from its composer.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "chat",
-      "groupTitle": "Chat",
-      "section": "chat",
-      "sectionTitle": "Chat",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "webLinkOpenTarget",
-      "title": "Open links in",
-      "subtitle": "Open web links from terminal output (Command-click), session chat, and detected dev servers in the project Browser view or the system default browser.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "tools",
-      "groupTitle": "Tools",
-      "section": "browser",
-      "sectionTitle": "Browser",
-      "type": "enum",
-      "default": "internal-browser",
-      "options": [
-        {
-          "label": "Internal Browser",
-          "value": "internal-browser"
-        },
-        {
-          "label": "System Default Browser",
-          "value": "system-default-browser"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "terminalDevServerDetectionEnabled",
-      "title": "Detect running servers in terminals",
-      "subtitle": "Detect localhost dev server URLs from terminal output.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "tools",
-      "groupTitle": "Tools",
-      "section": "terminalDevServers",
-      "sectionTitle": "Dev Servers",
-      "type": "boolean",
-      "default": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalDevServerIgnoredPortRules",
-      "title": "Ignored ports",
-      "subtitle": "Hide detected servers on specific ports or inclusive port ranges.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "tools",
-      "groupTitle": "Tools",
-      "section": "terminalDevServers",
-      "sectionTitle": "Dev Servers",
-      "type": "json",
-      "default": [],
-      "options": [
-        {
-          "label": "9229",
-          "value": "9229"
-        },
-        {
-          "label": "24678-24680",
-          "value": "24678-24680"
-        }
-      ],
-      "agentWritable": false
-    },
-    {
-      "key": "codeServerLinkVscodeUserConfig",
-      "title": "Use VS Code settings",
-      "subtitle": "Use the VS Code settings from the local VS Code install.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "tools",
-      "groupTitle": "Tools",
-      "section": "editor",
-      "sectionTitle": "Editor",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "codeServerUseVscodeInsidersUserConfig",
-      "title": "Use VS Code Insiders settings",
-      "subtitle": "Use the VS Code Insiders user settings directory.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "tools",
-      "groupTitle": "Tools",
-      "section": "editor",
-      "sectionTitle": "Editor",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "showUntrackedProjectDiffWhenNoTrackedChanges",
-      "title": "Show untracked lines without tracked changes",
-      "subtitle": "When tracked git diff is +0 -0, show untracked line counts in project headers (Starship-style prompts ignore untracked lines).",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "tools",
-      "groupTitle": "Tools",
-      "section": "editor",
-      "sectionTitle": "Editor",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "markdownFileOpenView",
-      "title": "Markdown files",
-      "subtitle": "Choose whether Markdown links from agent chat open in Docs or Code.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "tools",
-      "groupTitle": "Tools",
-      "section": "fileOpening",
-      "sectionTitle": "File opening",
-      "type": "enum",
-      "default": "docs",
-      "options": [
-        {
-          "label": "Docs",
-          "value": "docs"
-        },
-        {
-          "label": "Code",
-          "value": "code"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "htmlFileOpenView",
-      "title": "HTML files",
-      "subtitle": "Choose whether HTML links from agent chat open in Docs or Code.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "tools",
-      "groupTitle": "Tools",
-      "section": "fileOpening",
-      "sectionTitle": "File opening",
-      "type": "enum",
-      "default": "docs",
-      "options": [
-        {
-          "label": "Docs",
-          "value": "docs"
-        },
-        {
-          "label": "Code",
-          "value": "code"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "ghosttySettingsActions",
-      "title": "Ghostty settings actions",
-      "subtitle": "Recommended Ghostty settings, Ghostty config file, Ghostty docs, and Ghostty defaults.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "ui",
-      "options": [
-        {
-          "label": "Apply recommended",
-          "value": "applyRecommendedGhosttySettings"
-        },
-        {
-          "label": "Open Ghostty config",
-          "value": "openGhosttyConfigFile"
-        },
-        {
-          "label": "Open Ghostty docs",
-          "value": "openGhosttySettingsDocs"
-        },
-        {
-          "label": "Reset Ghostty defaults",
-          "value": "resetGhosttySettingsToDefault"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": false
-    },
-    {
-      "key": "workspaceBackgroundColor",
-      "title": "Terminal Background",
-      "subtitle": "Color shown behind terminal panes.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "string",
-      "default": "#010101",
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalBackgroundImage",
-      "title": "Background Image",
-      "subtitle": "Absolute path to an image drawn behind terminal panes.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "string",
-      "default": "",
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalBackgroundImageOpacity",
-      "title": "Background Image Opacity",
-      "subtitle": "Blend the background image toward the terminal background color.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "number",
-      "default": 1,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalBackgroundImageFit",
-      "title": "Background Image Fit",
-      "subtitle": "How the background image is scaled inside each pane.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "enum",
-      "default": "cover",
-      "options": [
-        {
-          "label": "Cover",
-          "value": "cover"
-        },
-        {
-          "label": "Contain",
-          "value": "contain"
-        },
-        {
-          "label": "Stretch",
-          "value": "stretch"
-        },
-        {
-          "label": "Natural size",
-          "value": "natural"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalFontFamily",
-      "title": "Font Family",
-      "subtitle": "Type a Ghostty font-family name.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "string",
-      "default": "JetBrains Mono",
-      "agentWritable": true
-    },
-    {
-      "key": "terminalFontSize",
-      "title": "Font Size",
-      "subtitle": "Set terminal text size.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "number",
-      "default": 13,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalFontWeight",
-      "title": "Font Weight",
-      "subtitle": "Set terminal text weight.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "number",
-      "default": 300,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalLineHeight",
-      "title": "Line Height",
-      "subtitle": "Adjust terminal row height.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "number",
-      "default": 1.2,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalLetterSpacing",
-      "title": "Letter Spacing",
-      "subtitle": "Adjust spacing between glyphs.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "number",
-      "default": 0,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalViewWidthMode",
-      "title": "Terminal width mode",
-      "subtitle": "Use the full pane, match the chat transcript, or set an independent terminal width.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "enum",
-      "default": "full",
-      "options": [
-        {
-          "label": "Full",
-          "value": "full"
-        },
-        {
-          "label": "Match Chat",
-          "value": "match-chat"
-        },
-        {
-          "label": "Custom",
-          "value": "custom"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalViewWidthPercent",
-      "title": "Terminal Width (%)",
-      "subtitle": "Set the centered terminal body width as a percentage.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "number",
-      "default": 75,
-      "min": 50,
-      "max": 100,
-      "step": 5,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalWidthApplyToCommandPaneTerminals",
-      "title": "Apply Width to Command Pane Terminals",
-      "subtitle": "Apply the narrower terminal width to command pane terminals too.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalPaneHorizontalPaddingPx",
-      "title": "Horizontal Padding",
-      "subtitle": "Add left and right inner padding inside the terminal content area.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "number",
-      "default": 16,
-      "min": 0,
-      "max": 64,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalPaneVerticalPaddingPx",
-      "title": "Vertical Padding",
-      "subtitle": "Add top and bottom inner padding inside the terminal content area.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "number",
-      "default": 0,
-      "min": 0,
-      "max": 64,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalCursorStyle",
-      "title": "Cursor Style",
-      "subtitle": "Choose the cursor shape.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "enum",
-      "default": "bar",
-      "options": [
-        {
-          "label": "Line",
-          "value": "bar"
-        },
-        {
-          "label": "Block",
-          "value": "block"
-        },
-        {
-          "label": "Underline",
-          "value": "underline"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "terminalCursorStyleBlink",
-      "title": "Cursor blink",
-      "subtitle": "Blink the terminal cursor.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "boolean",
-      "default": true,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "clickToWakeSleepingSessions",
-      "title": "Click to Wake Sleeping Panes",
-      "subtitle": "Select sleeping pane tabs without waking them until the empty pane is clicked.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "boolean",
-      "default": true,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "showQuickModelPickerInTerminal",
-      "title": "Show quick model & effort picker for Claude and Codex in terminal view",
-      "subtitle": "Use the model picker shortcut (⌥P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "boolean",
-      "default": true,
-      "agentWritable": true
-    },
-    {
-      "key": "showSessionIdInTerminalPanes",
-      "title": "Show session id in terminal panes",
-      "subtitle": "Show the provider session id in the top-right corner of terminal panes.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "showNotificationOnTerminalBell",
-      "title": "Show notification on terminal bell",
-      "subtitle": "Treat terminal bell events as session attention.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "promptEditorBackend",
-      "title": "⌃G prompt editor",
-      "subtitle": "Choose which editor ⌃G uses when a terminal prompt asks for $EDITOR.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "enum",
-      "default": "monaco",
-      "options": [
-        {
-          "label": "Ghostex editor",
-          "value": "monaco"
-        },
-        {
-          "label": "Use default from this machine",
-          "value": "inherit"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "windowsTerminalBackend",
-      "title": "Windows Environment",
-      "subtitle": "Windows only. PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "enum",
-      "default": "powershell",
-      "options": [
-        {
-          "label": "PowerShell (Native)",
-          "value": "powershell"
-        },
-        {
-          "label": "WSL (Linux)",
-          "value": "wsl"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "windowsWslDistribution",
-      "title": "WSL distribution",
-      "subtitle": "Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminal",
-      "sectionTitle": "Terminal",
-      "type": "string",
-      "default": "",
-      "agentWritable": true
-    },
-    {
-      "key": "terminalScrollbackLimitMb",
-      "title": "Scrollback limit",
-      "subtitle": "Set scrollback memory per terminal surface.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalBehavior",
-      "sectionTitle": "Terminal Behavior",
-      "type": "number",
-      "default": 15,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalCopyOnSelect",
-      "title": "Copy on select",
-      "subtitle": "Copy selected terminal text automatically.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalBehavior",
-      "sectionTitle": "Terminal Behavior",
-      "type": "enum",
-      "default": "false",
-      "options": [
-        {
-          "label": "Off",
-          "value": "false"
-        },
-        {
-          "label": "Selection clipboard",
-          "value": "true"
-        },
-        {
-          "label": "System and selection clipboard",
-          "value": "clipboard"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalConfirmCloseSurface",
-      "title": "Confirm close",
-      "subtitle": "Confirm before closing terminal surfaces.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalBehavior",
-      "sectionTitle": "Terminal Behavior",
-      "type": "enum",
-      "default": "true",
-      "options": [
-        {
-          "label": "Smart confirmation",
-          "value": "true"
-        },
-        {
-          "label": "Always confirm",
-          "value": "always"
-        },
-        {
-          "label": "Do not confirm",
-          "value": "false"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalClipboardTrimTrailingSpaces",
-      "title": "Trim trailing spaces on copy",
-      "subtitle": "Trim trailing whitespace when copying terminal text.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalBehavior",
-      "sectionTitle": "Terminal Behavior",
-      "type": "boolean",
-      "default": true,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalClipboardPasteProtection",
-      "title": "Paste protection",
-      "subtitle": "Ask before pasting text Ghostty considers unsafe.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalBehavior",
-      "sectionTitle": "Terminal Behavior",
-      "type": "boolean",
-      "default": true,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalPastePreviewableImages",
-      "title": "Paste previewable images",
-      "subtitle": "Paste clipboard images as previewable Markdown links with ⌘V. Hold ⌘ over the linked path to preview it in the terminal, and see the same image preview in the ⌃G Rich Prompt Editor.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalBehavior",
-      "sectionTitle": "Terminal Behavior",
-      "type": "boolean",
-      "default": true,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalMouseHideWhileTyping",
-      "title": "Hide mouse while typing",
-      "subtitle": "Hide the pointer while typing in the terminal.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalBehavior",
-      "sectionTitle": "Terminal Behavior",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalScrollbar",
-      "title": "Scrollbar",
-      "subtitle": "Control whether Ghostty shows its native scrollback scrollbar.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalBehavior",
-      "sectionTitle": "Terminal Behavior",
-      "type": "enum",
-      "default": "system",
-      "options": [
-        {
-          "label": "System",
-          "value": "system"
-        },
-        {
-          "label": "Never",
-          "value": "never"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalMouseScrollMultiplierPrecision",
-      "title": "Precision scroll multiplier",
-      "subtitle": "Trackpads and high-resolution scroll wheels. Ghostty default is 1.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalScrolling",
-      "sectionTitle": "Terminal Scrolling",
-      "type": "number",
-      "default": 1,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalMouseScrollMultiplierDiscrete",
-      "title": "Discrete scroll multiplier",
-      "subtitle": "Traditional notched mouse wheels. Ghostty default is 3.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalScrolling",
-      "sectionTitle": "Terminal Scrolling",
-      "type": "number",
-      "default": 1,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "terminalScrollToBottomWhenTyping",
-      "title": "Scroll to bottom when typing",
-      "subtitle": "Keep the prompt visible while typing.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "terminal",
-      "groupTitle": "Terminal",
-      "section": "terminalScrolling",
-      "sectionTitle": "Terminal Scrolling",
-      "type": "boolean",
-      "default": true,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "autoSleepCodeEditorIdleMinutes",
-      "title": "VS Code Auto Sleep",
-      "subtitle": "Choose when inactive VS Code panes sleep, or turn Auto Sleep off.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "autoSleep",
-      "sectionTitle": "Auto Sleep",
-      "type": "number",
-      "default": 10,
-      "options": [
-        {
-          "label": "Off",
-          "value": "0"
-        },
-        {
-          "label": "5 minutes",
-          "value": "5"
-        },
-        {
-          "label": "10 minutes",
-          "value": "10"
-        },
-        {
-          "label": "15 minutes",
-          "value": "15"
-        },
-        {
-          "label": "30 minutes",
-          "value": "30"
-        },
-        {
-          "label": "1 hour",
-          "value": "60"
-        },
-        {
-          "label": "2 hours",
-          "value": "120"
-        },
-        {
-          "label": "5 hours",
-          "value": "300"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "autoSleepGitEditorIdleMinutes",
-      "title": "Git Auto Sleep",
-      "subtitle": "Choose when inactive Git panes sleep, or turn Auto Sleep off.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "autoSleep",
-      "sectionTitle": "Auto Sleep",
-      "type": "number",
-      "default": 5,
-      "options": [
-        {
-          "label": "Off",
-          "value": "0"
-        },
-        {
-          "label": "5 minutes",
-          "value": "5"
-        },
-        {
-          "label": "10 minutes",
-          "value": "10"
-        },
-        {
-          "label": "15 minutes",
-          "value": "15"
-        },
-        {
-          "label": "30 minutes",
-          "value": "30"
-        },
-        {
-          "label": "1 hour",
-          "value": "60"
-        },
-        {
-          "label": "2 hours",
-          "value": "120"
-        },
-        {
-          "label": "5 hours",
-          "value": "300"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "autoSleepProjectEditorIdleMinutes",
-      "title": "Project Auto Sleep",
-      "subtitle": "Choose when inactive Project panes sleep, or turn Auto Sleep off.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "autoSleep",
-      "sectionTitle": "Auto Sleep",
-      "type": "number",
-      "default": 5,
-      "options": [
-        {
-          "label": "Off",
-          "value": "0"
-        },
-        {
-          "label": "5 minutes",
-          "value": "5"
-        },
-        {
-          "label": "10 minutes",
-          "value": "10"
-        },
-        {
-          "label": "15 minutes",
-          "value": "15"
-        },
-        {
-          "label": "30 minutes",
-          "value": "30"
-        },
-        {
-          "label": "1 hour",
-          "value": "60"
-        },
-        {
-          "label": "2 hours",
-          "value": "120"
-        },
-        {
-          "label": "5 hours",
-          "value": "300"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "autoSleepBrowserIdleMinutes",
-      "title": "Browser Auto Sleep",
-      "subtitle": "Choose when inactive browser panes sleep, or turn Auto Sleep off.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "autoSleep",
-      "sectionTitle": "Auto Sleep",
-      "type": "number",
-      "default": 10,
-      "options": [
-        {
-          "label": "Off",
-          "value": "0"
-        },
-        {
-          "label": "5 minutes",
-          "value": "5"
-        },
-        {
-          "label": "10 minutes",
-          "value": "10"
-        },
-        {
-          "label": "15 minutes",
-          "value": "15"
-        },
-        {
-          "label": "30 minutes",
-          "value": "30"
-        },
-        {
-          "label": "1 hour",
-          "value": "60"
-        },
-        {
-          "label": "2 hours",
-          "value": "120"
-        },
-        {
-          "label": "5 hours",
-          "value": "300"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "autoSleepAgentIdleMinutes",
-      "title": "Agent Auto Sleep",
-      "subtitle": "Choose when eligible agent terminals sleep, or turn Auto Sleep off.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "autoSleep",
-      "sectionTitle": "Auto Sleep",
-      "type": "number",
-      "default": 0,
-      "options": [
-        {
-          "label": "Off",
-          "value": "0"
-        },
-        {
-          "label": "5 minutes",
-          "value": "5"
-        },
-        {
-          "label": "10 minutes",
-          "value": "10"
-        },
-        {
-          "label": "15 minutes",
-          "value": "15"
-        },
-        {
-          "label": "30 minutes",
-          "value": "30"
-        },
-        {
-          "label": "1 hour",
-          "value": "60"
-        },
-        {
-          "label": "2 hours",
-          "value": "120"
-        },
-        {
-          "label": "5 hours",
-          "value": "300"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "autoSleepRequireAgentResumeCommand",
-      "title": "Require resume command",
-      "subtitle": "Only auto-sleep agent sessions Ghostex can wake with a resume command.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "autoSleep",
-      "sectionTitle": "Auto Sleep",
-      "type": "boolean",
-      "default": true,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "autoSleepFavoriteAgentSessions",
-      "title": "Include favorite agents",
-      "subtitle": "Allow favorite agent sessions to auto-sleep.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "autoSleep",
-      "sectionTitle": "Auto Sleep",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "hideKeepAwakeTitlebarControl",
-      "title": "Hide Keep Awake",
-      "subtitle": "Hide the Keep Awake entry from the sidebar menu.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "power",
-      "sectionTitle": "Power",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "keepAwakeDefaultDurationMinutes",
-      "title": "Default keep-awake duration",
-      "subtitle": "Choose the duration Keep Awake uses by default.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "power",
-      "sectionTitle": "Power",
-      "type": "number",
-      "default": 0,
-      "options": [
-        {
-          "label": "Until turned off",
-          "value": "0"
-        },
-        {
-          "label": "2 hours",
-          "value": "120"
-        },
-        {
-          "label": "5 hours",
-          "value": "300"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "keepAwakeAllowDisplaySleep",
-      "title": "Allow display sleep",
-      "subtitle": "Keep the computer awake but allow the display to turn off.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "power",
-      "sectionTitle": "Power",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "keepAwakePreventLidSleep",
-      "title": "Prevent lid-close sleep",
-      "subtitle": "Optional. When Keep Awake is on, Ghostex can install a small privileged helper once so closing the lid stays awake only for that active keep-awake session.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "power",
-      "sectionTitle": "Power",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "keepAwakeActivateOnLaunch",
-      "title": "Activate on launch",
-      "subtitle": "Start preventing sleep when Ghostex launches.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "power",
-      "sectionTitle": "Power",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "keepAwakeActivateOnExternalDisplay",
-      "title": "Activate on external display",
-      "subtitle": "Start preventing sleep when an external display is connected.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "power",
-      "sectionTitle": "Power",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "keepAwakeWhileWorkingSessions",
-      "title": "Keep awake for working sessions",
-      "subtitle": "Keep the computer awake while sessions are working and for 20 minutes after.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "power",
-      "sectionTitle": "Power",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "keepAwakeBatteryThresholdPercent",
-      "title": "Battery threshold",
-      "subtitle": "Stop preventing sleep below this battery level, or turn the rule off.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "power",
-      "sectionTitle": "Power",
-      "type": "number",
-      "default": 0,
-      "options": [
-        {
-          "label": "Off",
-          "value": "0"
-        },
-        {
-          "label": "10%",
-          "value": "10"
-        },
-        {
-          "label": "15%",
-          "value": "15"
-        },
-        {
-          "label": "20%",
-          "value": "20"
-        },
-        {
-          "label": "25%",
-          "value": "25"
-        },
-        {
-          "label": "30%",
-          "value": "30"
-        },
-        {
-          "label": "35%",
-          "value": "35"
-        },
-        {
-          "label": "40%",
-          "value": "40"
-        },
-        {
-          "label": "45%",
-          "value": "45"
-        },
-        {
-          "label": "50%",
-          "value": "50"
-        },
-        {
-          "label": "55%",
-          "value": "55"
-        },
-        {
-          "label": "60%",
-          "value": "60"
-        },
-        {
-          "label": "65%",
-          "value": "65"
-        },
-        {
-          "label": "70%",
-          "value": "70"
-        },
-        {
-          "label": "75%",
-          "value": "75"
-        },
-        {
-          "label": "80%",
-          "value": "80"
-        },
-        {
-          "label": "85%",
-          "value": "85"
-        },
-        {
-          "label": "90%",
-          "value": "90"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "keepAwakeDeactivateOnLowPowerMode",
-      "title": "Deactivate in Low Power Mode",
-      "subtitle": "Stop preventing sleep when Low Power Mode is enabled.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "power",
-      "sectionTitle": "Power",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "keepAwakeDeactivateOnUserSwitch",
-      "title": "Deactivate on user switch",
-      "subtitle": "Stop preventing sleep when this user session is no longer active.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "system",
-      "groupTitle": "System",
-      "section": "power",
-      "sectionTitle": "Power",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "completionSound",
-      "title": "Completion Sound",
-      "subtitle": "Sound for terminal completions, or Off.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "notifications",
-      "groupTitle": "Notifications",
-      "section": "sounds",
-      "sectionTitle": "Sounds",
-      "type": "enum",
-      "default": "arcade",
-      "options": [
-        {
-          "label": "Off",
-          "value": "off"
-        },
-        {
-          "label": "Ping",
-          "value": "ping"
-        },
-        {
-          "label": "Ping Double",
-          "value": "pingdouble"
-        },
-        {
-          "label": "Glass",
-          "value": "glass"
-        },
-        {
-          "label": "Glimmer",
-          "value": "glimmer"
-        },
-        {
-          "label": "Shamisen",
-          "value": "shamisen"
-        },
-        {
-          "label": "Shamisen Reverb",
-          "value": "shamisenreverb"
-        },
-        {
-          "label": "Arcade",
-          "value": "arcade"
-        },
-        {
-          "label": "Arcade Boost",
-          "value": "arcadeboost"
-        },
-        {
-          "label": "Confirmation 001",
-          "value": "confirmation-001"
-        },
-        {
-          "label": "Confirmation 002",
-          "value": "confirmation-002"
-        },
-        {
-          "label": "Confirmation 003",
-          "value": "confirmation-003"
-        },
-        {
-          "label": "Confirmation 004",
-          "value": "confirmation-004"
-        },
-        {
-          "label": "Notification Pop",
-          "value": "notification-pop"
-        },
-        {
-          "label": "Success Chime",
-          "value": "success-chime"
-        },
-        {
-          "label": "High Up",
-          "value": "high-up"
-        },
-        {
-          "label": "High Down",
-          "value": "high-down"
-        },
-        {
-          "label": "Low Three Tone",
-          "value": "low-three-tone"
-        },
-        {
-          "label": "Tone 1",
-          "value": "tone-1"
-        },
-        {
-          "label": "Three Tone 1",
-          "value": "three-tone-1"
-        },
-        {
-          "label": "Three Tone 2",
-          "value": "three-tone-2"
-        },
-        {
-          "label": "Two Tone 1",
-          "value": "two-tone-1"
-        },
-        {
-          "label": "Two Tone 2",
-          "value": "two-tone-2"
-        },
-        {
-          "label": "Power Up 5",
-          "value": "power-up-5"
-        },
-        {
-          "label": "Power Up 6",
-          "value": "power-up-6"
-        },
-        {
-          "label": "Power Up 8",
-          "value": "power-up-8"
-        },
-        {
-          "label": "Coin Collect",
-          "value": "coin-collect"
-        },
-        {
-          "label": "Phaser Up 5",
-          "value": "phaser-up-5"
-        },
-        {
-          "label": "Zap Two Tone",
-          "value": "zap-two-tone"
-        },
-        {
-          "label": "Mission Completed (Male)",
-          "value": "voiceover-pack-male-mission-completed"
-        },
-        {
-          "label": "Mission Completed (Female)",
-          "value": "voiceover-pack-female-mission-completed"
-        },
-        {
-          "label": "You Win (Male)",
-          "value": "voiceover-pack-male-you-win"
-        },
-        {
-          "label": "Congratulations (Female)",
-          "value": "voiceover-pack-female-congratulations"
-        },
-        {
-          "label": "Flawless Victory",
-          "value": "flawless-victory"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "showMacOSAttentionNotifications",
-      "title": "Attention Notifications",
-      "subtitle": "Show a system notification when a session needs attention.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "notifications",
-      "groupTitle": "Notifications",
-      "section": "sounds",
-      "sectionTitle": "Sounds",
-      "type": "boolean",
-      "default": true,
-      "agentWritable": true
-    },
-    {
-      "key": "attentionNotificationActions",
-      "title": "Agent Completion Alert Test",
-      "subtitle": "Test the current completion alert settings or open Notification Settings.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "notifications",
-      "groupTitle": "Notifications",
-      "section": "sounds",
-      "sectionTitle": "Sounds",
-      "type": "ui",
-      "advanced": true,
-      "agentWritable": false
-    },
-    {
-      "key": "actionCompletionSound",
-      "title": "Action Completion Sound",
-      "subtitle": "Sound for action completions.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "notifications",
-      "groupTitle": "Notifications",
-      "section": "sounds",
-      "sectionTitle": "Sounds",
-      "type": "enum",
-      "default": "shamisen",
-      "options": [
-        {
-          "label": "Ping",
-          "value": "ping"
-        },
-        {
-          "label": "Ping Double",
-          "value": "pingdouble"
-        },
-        {
-          "label": "Glass",
-          "value": "glass"
-        },
-        {
-          "label": "Glimmer",
-          "value": "glimmer"
-        },
-        {
-          "label": "Shamisen",
-          "value": "shamisen"
-        },
-        {
-          "label": "Shamisen Reverb",
-          "value": "shamisenreverb"
-        },
-        {
-          "label": "Arcade",
-          "value": "arcade"
-        },
-        {
-          "label": "Arcade Boost",
-          "value": "arcadeboost"
-        },
-        {
-          "label": "Confirmation 001",
-          "value": "confirmation-001"
-        },
-        {
-          "label": "Confirmation 002",
-          "value": "confirmation-002"
-        },
-        {
-          "label": "Confirmation 003",
-          "value": "confirmation-003"
-        },
-        {
-          "label": "Confirmation 004",
-          "value": "confirmation-004"
-        },
-        {
-          "label": "Notification Pop",
-          "value": "notification-pop"
-        },
-        {
-          "label": "Success Chime",
-          "value": "success-chime"
-        },
-        {
-          "label": "High Up",
-          "value": "high-up"
-        },
-        {
-          "label": "High Down",
-          "value": "high-down"
-        },
-        {
-          "label": "Low Three Tone",
-          "value": "low-three-tone"
-        },
-        {
-          "label": "Tone 1",
-          "value": "tone-1"
-        },
-        {
-          "label": "Three Tone 1",
-          "value": "three-tone-1"
-        },
-        {
-          "label": "Three Tone 2",
-          "value": "three-tone-2"
-        },
-        {
-          "label": "Two Tone 1",
-          "value": "two-tone-1"
-        },
-        {
-          "label": "Two Tone 2",
-          "value": "two-tone-2"
-        },
-        {
-          "label": "Power Up 5",
-          "value": "power-up-5"
-        },
-        {
-          "label": "Power Up 6",
-          "value": "power-up-6"
-        },
-        {
-          "label": "Power Up 8",
-          "value": "power-up-8"
-        },
-        {
-          "label": "Coin Collect",
-          "value": "coin-collect"
-        },
-        {
-          "label": "Phaser Up 5",
-          "value": "phaser-up-5"
-        },
-        {
-          "label": "Zap Two Tone",
-          "value": "zap-two-tone"
-        },
-        {
-          "label": "Mission Completed (Male)",
-          "value": "voiceover-pack-male-mission-completed"
-        },
-        {
-          "label": "Mission Completed (Female)",
-          "value": "voiceover-pack-female-mission-completed"
-        },
-        {
-          "label": "You Win (Male)",
-          "value": "voiceover-pack-male-you-win"
-        },
-        {
-          "label": "Congratulations (Female)",
-          "value": "voiceover-pack-female-congratulations"
-        },
-        {
-          "label": "Flawless Victory",
-          "value": "flawless-victory"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "copySound",
-      "title": "Copy Sound",
-      "subtitle": "Play a short sound when copying to the clipboard, including text from the chat composer.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "notifications",
-      "groupTitle": "Notifications",
-      "section": "sounds",
-      "sectionTitle": "Sounds",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "showBetaFeatures",
-      "title": "Enable Experimental Features",
-      "subtitle": "Show experimental surfaces: OS Integration settings, Browser color scheme, and Keep Awake.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "advanced",
-      "groupTitle": "Advanced",
-      "section": "beta",
-      "sectionTitle": "Experimental",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "appShotsEnabled",
-      "title": "App Shots",
-      "subtitle": "Enable App Shots: press the App Shots hotkey to capture a window screenshot into the prompt.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "appShots",
-      "sectionTitle": "App Shots (beta)",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "appShotsHotkey",
-      "title": "App Shots hotkey",
-      "subtitle": "Which modifier chord captures an App Shot.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "appShots",
-      "sectionTitle": "App Shots (beta)",
-      "type": "enum",
-      "default": "both-command",
-      "options": [
-        {
-          "label": "Both ⌘ keys",
-          "value": "both-command"
-        },
-        {
-          "label": "Both ⇧ keys",
-          "value": "both-shift"
-        },
-        {
-          "label": "Both ⌥ keys",
-          "value": "both-option"
-        },
-        {
-          "label": "Double-tap Left ⇧",
-          "value": "double-left-shift"
-        },
-        {
-          "label": "Double-tap Left ⌥",
-          "value": "double-left-option"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
-      "key": "appShotsMetadataEnabled",
-      "title": "App Shots metadata",
-      "subtitle": "Also paste window metadata with the App Shot image link.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "appShots",
-      "sectionTitle": "App Shots (beta)",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "showAdvancedSettings",
-      "title": "Show Advanced settings",
-      "subtitle": "Show the rows marked Advanced in Settings.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "settingsModal",
-      "sectionTitle": "Settings window",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "gpuiTitlebarActionCommandByProject",
-      "title": "gpuiTitlebarActionCommandByProject",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": {},
-      "agentWritable": false
-    },
-    {
-      "key": "gpuiTitlebarOpenTargetByProject",
-      "title": "gpuiTitlebarOpenTargetByProject",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": {},
-      "agentWritable": false
-    },
-    {
-      "key": "settingsModalNavigation",
-      "title": "settingsModalNavigation",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": {
-        "activeTab": "settings",
-        "scrollTopByTab": {},
-        "version": 1
-      },
-      "agentWritable": false
-    },
-    {
-      "key": "projectWebsiteViews",
-      "title": "projectWebsiteViews",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": {},
-      "agentWritable": false
-    },
-    {
-      "key": "customSidebarTitlebarLightBackgroundColor",
-      "title": "customSidebarTitlebarLightBackgroundColor",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "string",
-      "default": "#f4f4f5",
-      "agentWritable": false
-    },
-    {
-      "key": "hotkeys",
-      "title": "hotkeys",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": {
-        "scrollChatToBottom": "ctrl+shift+down",
-        "createSession": "cmd+t",
-        "openCommandPalette": "cmd+shift+p",
-        "openSessionSearchPalette": "cmd+p",
-        "openNewThreadPalette": "cmd+shift+t",
-        "openCommandsPanel": "f12",
-        "openSettings": "cmd+,",
-        "openExtensions": "",
-        "openGhostexHelp": "",
-        "openHotkeys": "cmd+.",
-        "toggleSidebarCollapsed": "cmd+b",
-        "toggleViewPanel": "cmd+alt+b",
-        "expandViewPanel": "cmd+ctrl+e",
-        "expandViewPanelFully": "cmd+ctrl+shift+e",
-        "renameActiveSession": "cmd+r",
-        "openBrowserPane": "cmd+n",
-        "switchAgentsView": "",
-        "switchSourceView": "",
-        "switchGitHubView": "",
-        "switchKanbanView": "",
-        "switchManageView": "",
-        "switchAutomateView": "",
-        "switchTerminalView": "",
-        "switchTitlebarView1": "alt+1",
-        "switchTitlebarView2": "alt+2",
-        "switchTitlebarView3": "alt+3",
-        "switchTitlebarView4": "alt+4",
-        "switchTitlebarView5": "alt+5",
-        "switchTitlebarView6": "alt+6",
-        "switchTitlebarView7": "alt+7",
-        "switchTitlebarView8": "alt+8",
-        "switchTitlebarView9": "alt+9",
-        "rotatePanesClockwise": "ctrl+shift+l",
-        "mergeAllTabs": "ctrl+shift+m",
-        "delayedSend": "ctrl+shift+s",
-        "closeAfterDone": "",
-        "openModelPicker": "alt+p",
-        "promptEditor": "ctrl+g",
-        "attachFileOrFolder": "cmd+alt+p",
-        "sessionNote": "cmd+alt+n",
-        "stashPrompt": "alt+s",
-        "stashedPrompts": "cmd+alt+s",
-        "exportTranscript": "cmd+alt+e",
-        "toggleAgentActions": "cmd+alt+a",
-        "toggleChatView": "alt+g",
-        "openFindPrompts": "cmd+shift+f",
-        "scrollTerminalToTop": "",
-        "scrollTerminalToBottom": "",
-        "splitSessionRight": "alt+shift+d",
-        "forkSession": "ctrl+shift+f",
-        "reloadSession": "ctrl+shift+r",
-        "sleepFocusedSession": "",
-        "wakeFocusedSession": "",
-        "closeFocusedSession": "",
-        "popOutPane": "ctrl+shift+o",
-        "focusPreviousGroup": "",
-        "focusNextGroup": "",
-        "navigateHistoryBack": "cmd+[",
-        "navigateHistoryForward": "cmd+]",
-        "openNotifications": "cmd+i",
-        "jumpToLatestUnreadNotification": "cmd+shift+u",
-        "deferNotificationAndJumpNext": "cmd+ctrl+u",
-        "focusPreviousSession": "ctrl+shift+tab",
-        "focusNextSession": "ctrl+tab",
-        "focusPreviousPaneTab": "cmd+alt+[",
-        "focusNextPaneTab": "cmd+alt+]",
-        "focusUp": "cmd+alt+up",
-        "focusRight": "cmd+alt+right",
-        "focusDown": "cmd+alt+down",
-        "focusLeft": "cmd+alt+left",
-        "jumpToProject1": "cmd+ctrl+1",
-        "jumpToProject2": "cmd+ctrl+2",
-        "jumpToProject3": "cmd+ctrl+3",
-        "jumpToProject4": "cmd+ctrl+4",
-        "jumpToProject5": "cmd+ctrl+5",
-        "jumpToProject6": "cmd+ctrl+6",
-        "jumpToProject7": "cmd+ctrl+7",
-        "jumpToProject8": "cmd+ctrl+8",
-        "jumpToProject9": "cmd+ctrl+9",
-        "focusSessionSlot1": "cmd+1",
-        "focusSessionSlot2": "cmd+2",
-        "focusSessionSlot3": "cmd+3",
-        "focusSessionSlot4": "cmd+4",
-        "focusSessionSlot5": "cmd+5",
-        "focusSessionSlot6": "cmd+6",
-        "focusSessionSlot7": "cmd+7",
-        "focusSessionSlot8": "cmd+8",
-        "focusSessionSlot9": "cmd+9",
-        "runActionSlot1": "ctrl+shift+1",
-        "runActionSlot2": "ctrl+shift+2",
-        "runActionSlot3": "ctrl+shift+3",
-        "runActionSlot4": "ctrl+shift+4",
-        "runActionSlot5": "ctrl+shift+5",
-        "splitMore": "cmd+d",
-        "splitMoreDown": "cmd+shift+d"
-      },
-      "agentWritable": false
-    },
-    {
-      "key": "customViewTemplates",
-      "title": "customViewTemplates",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": [],
-      "agentWritable": false
-    },
-    {
-      "key": "viewScopes",
-      "title": "viewScopes",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": {},
-      "agentWritable": false
-    },
-    {
-      "key": "customWorkspaceOpenTargets",
-      "title": "customWorkspaceOpenTargets",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": [],
-      "agentWritable": false
-    },
-    {
-      "key": "workspaceOpenTargetAvailability",
-      "title": "workspaceOpenTargetAvailability",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": {
-        "availableTargetIds": [
-          "finder"
-        ],
-        "checkedAtMs": 0,
-        "resolvedAppNames": {},
-        "resolvedCommands": {}
-      },
-      "agentWritable": false
-    },
-    {
-      "key": "workspaceOpenTargetHiddenIds",
-      "title": "workspaceOpenTargetHiddenIds",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": [],
-      "agentWritable": false
-    },
-    {
-      "key": "remoteMachines",
-      "title": "remoteMachines",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "json",
-      "default": [],
-      "agentWritable": false
-    },
-    {
-      "key": "petOverlayEnabled",
-      "title": "Pet overlay",
-      "subtitle": "Show the draggable animated pet in the sidebar (also Wake Pet / Sleep Pet in Quick Access).",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "statusIndicators",
-      "groupTitle": "Status Indicators",
-      "section": "statusIndicators",
-      "sectionTitle": "Status Indicators",
-      "type": "boolean",
-      "default": false,
-      "agentWritable": true
-    },
-    {
-      "key": "selectedPetId",
-      "title": "Pet",
-      "subtitle": "Which pet sprite the overlay shows.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "statusIndicators",
-      "groupTitle": "Status Indicators",
-      "section": "statusIndicators",
-      "sectionTitle": "Status Indicators",
-      "type": "string",
-      "default": "boo",
-      "agentWritable": true
     },
     {
       "key": "debuggingMode",

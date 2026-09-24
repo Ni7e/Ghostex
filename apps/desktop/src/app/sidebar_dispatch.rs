@@ -88,6 +88,9 @@ impl GhostexGpuiApp {
                 "sidebarTheme",
                 "darkThemePreset",
                 "lightThemePreset",
+                "themeContrast",
+                "themeSidebarContrast",
+                "themeWorkAreaContrast",
                 "customSidebarTitlebarBackgroundDarknessPercent",
                 "customSidebarTitlebarBackgroundTintColor",
                 "customSidebarTitlebarLightBackgroundLightnessPercent",
@@ -1167,6 +1170,47 @@ impl GhostexGpuiApp {
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.pick_image_for_app_modal(
+            |path| {
+                serde_json::json!({
+                    "path": path,
+                    "type": "terminalBackgroundImageFilePicked",
+                })
+            },
+            cx,
+        );
+    }
+
+    /// Settings -> Window glass -> Custom image: the Choose button of the dark or light picture.
+    pub(crate) fn handle_gpui_pick_window_glass_image_message(
+        &mut self,
+        message: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let appearance = if message["appearance"] == "light" {
+            "light"
+        } else {
+            "dark"
+        };
+        self.pick_image_for_app_modal(
+            move |path| {
+                serde_json::json!({
+                    "appearance": appearance,
+                    "path": path,
+                    "type": "windowGlassImageFilePicked",
+                })
+            },
+            cx,
+        );
+    }
+
+    /// A native image dialog whose picked absolute path is posted back to the open app-modal
+    /// window as the message `reply` builds.
+    fn pick_image_for_app_modal(
+        &mut self,
+        reply: impl FnOnce(String) -> serde_json::Value + 'static,
+        cx: &mut gpui::Context<Self>,
+    ) {
         let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
             directories: false,
@@ -1180,14 +1224,9 @@ impl GhostexGpuiApp {
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
+            let message = reply(path.to_string_lossy().into_owned());
             let _ = this.update(cx, |this, cx| {
-                this.dispatch_open_gpui_app_modal_message(
-                    serde_json::json!({
-                        "path": path.to_string_lossy(),
-                        "type": "terminalBackgroundImageFilePicked",
-                    }),
-                    cx,
-                );
+                this.dispatch_open_gpui_app_modal_message(message, cx);
             });
         })
         .detach();
@@ -1997,8 +2036,17 @@ impl GhostexGpuiApp {
             // The body row sits 1px under the titlebar so panes can own
             // their top edge; carry the titlebar hairline across the divider.
             .border_t_1()
-            .border_color(titlebar_button_border_color())
-            .bg(sidebar_divider_line_color())
+            .border_color(glass_divider(titlebar_button_border_color()))
+            // Under glass the divider sits on the sidebar's tint (nothing tints the window beneath
+            // it), with its faint line laid over that.
+            .bg(if window_glass_active() {
+                sidebar_glass_tint()
+            } else {
+                sidebar_divider_line_color()
+            })
+            .when(window_glass_active(), |this| {
+                this.child(div().absolute().inset_0().bg(sidebar_divider_line_color()))
+            })
             // The workspace beside the sidebar is often a CEF page (Browser, Docs), so the
             // whole grab strip lies over the native sidebar.
             .child(resize_rail_deferred_strip(

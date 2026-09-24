@@ -408,7 +408,8 @@ impl GhostexGpuiApp {
                             this.child(crate::app::view_skeletons::render_view_skeleton(
                                 crate::app::view_skeletons::ViewSkeletonKind::Terminal,
                                 format!("terminal-skeleton-{}", session_id.0),
-                                gpui_session_chat_background_color(),
+                                // Under window glass the terminal it stands in for is see-through, so it is too.
+                                glass_clear(gpui_session_chat_background_color()),
                             ))
                         } else if presentation_state == Some(TerminalSessionPresentationState::Sleeping) {
                             this
@@ -434,12 +435,7 @@ impl GhostexGpuiApp {
             )
             .when_some(sleeping_card_title, |this, (title, click_to_wake)| {
                 this.child(crate::app::render::sleeping_card::sleeping_card_layer(
-                    crate::app::render::sleeping_card::sleeping_card(
-                        None,
-                        None,
-                        title,
-                        click_to_wake,
-                    ),
+                    crate::app::render::sleeping_card::sleeping_card(None, title, click_to_wake),
                 ))
             })
             .when_some(gpui_engine_view, |this, view| {

@@ -3,7 +3,6 @@ use crate::app::helpers::*;
 use crate::*;
 use gpui::{AnyElement, Entity, FontWeight, Subscription, Window, div, prelude::*, px};
 use gpui_component::{
-    button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
     radio::Radio,
@@ -237,32 +236,60 @@ impl GhostexGpuiApp {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let background = chrome_color(0x161616, 0xffffff);
-        let border = chrome_color(0x373737, 0xd7d7d7);
-        let muted = chrome_color(0x999999, 0x666666);
-        let foreground = chrome_color(0xe8e8e8, 0x222222);
-        let control = |key: String, label: String| {
-            Button::new(key)
-                .label(label)
-                .w_full()
-                .rounded(px(8.))
-                .text_size(px(13.))
+        /*
+        CDXC:Theming 2026-09-23 DECISION:
+        User: the Linear and Jira "Where should ... open?" page matches the native Automate view's style. It takes the Automate palette: no page fill under window glass, washed inputs and cards with hairline borders, and soft secondary buttons instead of a solid white one.
+        */
+        let p =
+            crate::app::native_automate::AutomatePalette::resolve(window_glass_active_in(window));
+        let background = p.page;
+        let border = p.border;
+        let muted = p.muted;
+        let foreground = p.foreground;
+        let card = p.card;
+        let control = |key: String, label: String, cx: &mut gpui::Context<Self>| {
+            crate::app::native_automate::secondary_button(
+                &p,
+                key,
+                None,
+                label,
+                |_: &mut Self, _, _| {},
+                cx,
+            )
+            .w_full()
+            .justify_center()
         };
+        // The same centred card the sleeping views and startup screens use, with the provider's icon.
         let mut body = v_flex()
             .w_full()
-            .max_w(px(480.))
-            .gap(px(16.))
+            .gap(px(14.))
+            .font_family(p.font.clone())
             .text_color(foreground)
             .child(
-                div()
-                    .text_size(px(25.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(format!("Where should {} open?", provider.title)),
-            )
-            .child(div().text_size(px(13.)).text_color(muted).child(format!(
-                "Choose a starting page for {}. Paste a workspace, project, or board URL.",
-                self.project_name
-            )));
+                v_flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .text_center()
+                    .child(titlebar_svg_icon(
+                        TitlebarMode::Extension(id).tab_icon(),
+                        34.0,
+                        chrome_ink().opacity(0.8).into(),
+                    ))
+                    .child(
+                        div()
+                            .text_size(px(16.))
+                            .line_height(px(22.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(format!("Where should {} open?", provider.title)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.5))
+                            .line_height(px(18.))
+                            .text_color(muted)
+                            .child("Paste a workspace, project, or board URL."),
+                    ),
+            );
         if parent.is_some() {
             body = body.child(
                 v_flex()
@@ -275,6 +302,7 @@ impl GhostexGpuiApp {
                             .p(px(12.))
                             .border_1()
                             .border_color(border)
+                            .bg(card)
                             .rounded(px(8.))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.choose_website_home(None, window, cx)
@@ -288,6 +316,7 @@ impl GhostexGpuiApp {
                             .p(px(12.))
                             .border_1()
                             .border_color(border)
+                            .bg(card)
                             .rounded(px(8.))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 let value = this
@@ -315,11 +344,11 @@ impl GhostexGpuiApp {
                     };
                     let home = url.to_string();
                     choices = choices.child(
-                        control(format!("website-workspace-{index}"), label).on_click(cx.listener(
-                            move |this, _, window, cx| {
+                        control(format!("website-workspace-{index}"), label, cx).on_click(
+                            cx.listener(move |this, _, window, cx| {
                                 this.choose_website_home(Some(home.clone()), window, cx)
-                            },
-                        )),
+                            }),
+                        ),
                     );
                 }
                 body = body.child(choices);
@@ -329,7 +358,26 @@ impl GhostexGpuiApp {
                     v_flex()
                         .gap(px(7.))
                         .child(div().text_size(px(12.)).child("Home URL"))
-                        .child(Input::new(&input).w_full()),
+                        .child(
+                            div()
+                                .h(px(34.))
+                                .px(px(10.))
+                                .flex()
+                                .items_center()
+                                .rounded(px(8.))
+                                .border_1()
+                                .border_color(border)
+                                .bg(card)
+                                .child(
+                                    Input::new(&input)
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .placeholder_color(muted)
+                                        .w_full()
+                                        .text_size(px(13.)),
+                                ),
+                        ),
                 )
                 .child(
                     div().text_size(px(12.)).text_color(muted).child(
@@ -340,35 +388,39 @@ impl GhostexGpuiApp {
                     ),
                 );
         }
-        body = body.child(div().text_size(px(12.)).text_color(muted).child(if parent.is_some() {
-            if following { format!("This worktree will follow {parent_name}, including future home changes.") } else { "Only this worktree changes. Other worktrees keep their homes.".into() }
-        } else { "Worktrees start with this home. Each can choose its own later.".into() }));
+        // User: the "Worktrees start with this home" note is not needed; a worktree's own card keeps
+        // the line that says whether it follows its parent.
+        if parent.is_some() {
+            body = body.child(div().text_size(px(12.)).text_color(muted).child(if following {
+                format!("This worktree will follow {parent_name}, including future home changes.")
+            } else {
+                "Only this worktree changes. Other worktrees keep their homes.".into()
+            }));
+        }
         if let Some(error) = error {
-            body = body.child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(chrome_color(0xffa7a7, 0xb42318))
-                    .child(error),
-            );
+            body = body.child(div().text_size(px(12.)).text_color(p.danger).child(error));
         }
         let mut actions = h_flex().gap(px(8.));
         if can_cancel {
-            actions = actions.child(control("website-cancel".into(), "Cancel".into()).on_click(
-                cx.listener(|this, _, _, cx| {
-                    this.project_views.website_editor = None;
-                    this.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
-                    this.update_project_workarea_runtime_cef_surface_visibility(cx);
-                    cx.notify();
-                }),
-            ));
+            actions = actions.child(
+                control("website-cancel".into(), "Cancel".into(), cx).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        this.project_views.website_editor = None;
+                        this.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
+                        this.update_project_workarea_runtime_cef_surface_visibility(cx);
+                        cx.notify();
+                    },
+                )),
+            );
         }
         body = body.child(
             actions.child(
                 control(
                     "website-save".into(),
                     format!("Save and open {}", provider.title),
+                    cx,
                 )
-                .primary()
+                .bg(p.selected)
                 .on_click(cx.listener(|this, _, window, cx| this.save_website_home(window, cx))),
             ),
         );
@@ -378,8 +430,15 @@ impl GhostexGpuiApp {
             .min_h_0()
             .overflow_y_scroll()
             .bg(background)
-            .p(px(28.))
-            .child(h_flex().w_full().justify_center().child(body))
+            .p(px(16.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                crate::app::render::sleeping_card::view_card_frame()
+                    .w(px(440.))
+                    .child(body),
+            )
             .into_any_element()
     }
 }

@@ -8,6 +8,72 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>10.2.0</title>
+            <pubDate>Wed, 23 Sep 2026 11:09:13 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v10.2.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>100200</sparkle:version>
+            <sparkle:shortVersionString>10.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 10.2.0
+
+## 10.2.0 - 2026-09-23
+
+**Ghostex 10.2.0 is out.** Window glass that shows your desktop, your wallpaper or a picture of your choice through the app, a new Theme page in Settings, panels that slide open and closed, a faster native Kanban board and Automate page, drag panes by their grip, and a round of Windows and Linux improvements.
+
+### ✨ Window glass
+- **See your desktop through Ghostex.** The sidebar, sessions, terminals and chat can show a blurred view of what is behind the window. Glass is on in dark mode by default; turn it on or off with Enable Transparency in Settings > Theme.
+- **Choose what the glass shows.** Desktop and windows shows everything behind Ghostex, Wallpaper only shows just your desktop picture, and Custom image blurs a picture you pick, with a separate picture for dark mode and light mode.
+- **One slider sets how much shows through.** Transparency strength on the Theme page tunes the whole window at once, and Advanced still lets you set the sidebar and work area tints apart.
+- **Menus, popups, toasts, tooltips and suggestions are frosted to match,** as are the scroll-to-bottom button, the floating sidebar and the chat skeleton shown while a session loads.
+- **Tune how much shows through.** Sidebar tint and Work area tint set each area on its own, in dark mode and in light mode, so either can be the darker one. Always glass keeps it on in light mode too.
+
+### 🎨 A Theme page in Settings
+- **Theme has its own page, right below General.** It starts with Appearance, a card for each dark and light theme showing the window in its colours, and Enable Transparency; Advanced holds colours, chat and terminal themes, glass and the app icon.
+- **Background contrast in five steps.** Pick Lowest to Highest on the Theme page, or set Sidebar contrast and Work area contrast apart under Advanced.
+- **Terminals follow your theme.** The terminal background matches the theme by default, and a colour you choose only paints behind the terminal text.
+- **Pick your look while getting started.** The last Get started panel offers the same Appearance, theme, contrast and transparency choices, and they apply right away.
+
+### 🗂 Panes, views and the board
+- **Panels slide open and closed.** The sidebar, side panel, Agents Panel and command pane slide in and out; set Panel animations to Off, Slow, Normal or Fast, and Reduce Motion always opens them instantly.
+- **Kanban and Automate are faster and match your theme.** Both are now drawn by Ghostex itself, so they open instantly, follow your theme colours and take the keyboard like the rest of the app.
+- **Move or close a pane from its grip.** While the screen is split, the focused pane has a small bar along its top: click it to close the pane (its sessions keep running) or merge all panes, or drag it onto another pane.
+- **Drop a session in the middle of a pane to show it there.** Dropping on a pane's edge still opens a new split.
+- **Sleeping panes show a slim pill** with the session's icon, title and Resume, instead of a large card.
+- **Opening a project or restarting Ghostex no longer wakes its sleeping sessions.** They show their Resume bar until you click the pane or press a key, while clicking a sidebar row still wakes them, thanks to @banozz.
+- **Cmd+Option+Arrow moves between session panes and Commands**, skipping the view panel.
+- **Middle-click an empty spot in a command pane's tab bar** to close all of its terminals at once.
+
+### 🧭 Sidebar
+- **Hide sidebar and Toggle Agents Panel sit at the top left of the sidebar on every computer,** and dragging the sidebar's top row moves the window.
+- **A narrow sidebar keeps its buttons.** When the top row runs out of room, Search and Notifications move into the sidebar menu.
+- **Switching Spaces fades the list** as it slides, from the Spaces row and from the menu alike.
+- **Double-click the top of the sidebar or the view tab strip to zoom the window,** like the header beside them.
+- **Hover the window's left edge to float a collapsed sidebar.** The hover zone is now invisible, so nothing is drawn over your work.
+
+### 💬 Chat
+- **Cursor chats get a status line and Context details.** Hover the status line and click the pen after its last item to choose what it shows, for Claude Code, Codex and Cursor.
+- **The chat box collapses while you scroll again by default,** and in a short pane, such as half of a stacked split, it stays collapsed until you click it.
+- **Paste images into question answers.**
+- **Sessions that are still loading show the chat box and status line right away,** and the chat box takes focus as soon as the agent picker closes.
+- **The account switch card uses the compact account tiles.**
+
+### 🪟 Windows and Linux
+- **Close, minimize and maximize stay at the top right on Windows,** even with the sidebar or a view open.
+- **Linux computers can connect to Windows computers over SSH,** and Linux keeps saved SSH passwords in the desktop keyring.
+- **Windows terminals keep their output, interrupts and sessions more reliably,** and file dialogs and popups open correctly.
+
+### 🩹 Fixes
+- **Answering Claude's questions from chat works again.** Multi-select answers with a typed note deliver the note and every pick, questions with previewed options no longer look answered while Claude still waits, and answered preview questions show the option you picked.
+- **Popups and dialogs open on the display the window is on,** instead of behind it on another monitor.
+- **Claude sends go through even when its chat box was partly erased on screen.**
+- **Waking a Claude session never resumes a conversation from another project.**
+- **A new agent started right after a restart appears straight away** instead of being replaced by a woken session.
+- **Custom Claude profiles and projects on different Windows drives are told apart correctly,** thanks to @banozz.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v10.2.0/ghostex-10.2.0-arm64.dmg" length="119536468" type="application/octet-stream" sparkle:edSignature="NAgsK8laiISp6gFtWyRM3G2vVmgqpOaw27BOmroxLaIpeYO66nMmjO2o9oqV7C/1w6hFWfC26TSj73WsEcf/Bg=="/>
+        </item>
+        <item>
             <title>10.1.0</title>
             <pubDate>Tue, 22 Sep 2026 22:48:30 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v10.1.0</sparkle:fullReleaseNotesLink>
@@ -284,52 +350,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v9.8.5/ghostex-9.8.5-arm64.dmg" length="126460102" type="application/octet-stream" sparkle:edSignature="8RNjHu8YEGAA5T7T8i2uerH90/l7+dlMlmi/qctzNAWEwZ+PgcP8sS8Ure08O3LhpnbBpRmmcgNsOhNUSgCOBA=="/>
         </item>
         <item>
-            <title>9.8.0</title>
-            <pubDate>Wed, 16 Sep 2026 17:51:31 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v9.8.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>90800</sparkle:version>
-            <sparkle:shortVersionString>9.8.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 9.8.0
-
-## 9.8.0 - 2026-09-16
-
-**Ghostex 9.8.0 is out.** Continue a Codex conversation that is open in another session, animated session sections with a separate dot for pending questions, one menu style across the app, Search by Prompt filters in the toolbar, and a reliable restart of the background server after an update.
-
-### 💬 Chat and agents
-- **Continue a Codex conversation that is open somewhere else.** When Codex says the conversation is in use by another session, choose Continue here (or press Cmd+Enter) and Ghostex closes the other Ghostex session, retries, and keeps your draft unsent until it succeeds.
-- **Rewind lands on the prompt you picked.** Claude slash commands now appear in the rewind list, so choosing a row no longer rewinds to a different prompt.
-- **Delayed Send waits for the agent to really finish.** A scheduled send no longer goes out while the agent is still writing its last turn.
-- **A session whose agent changed wakes with the right agent.** A session that started with one agent and was taken over by another now resumes with its current agent instead of the old command.
-- **Cursor conversations keep their place.** Late thinking steps from Cursor no longer shift where your next message is sent.
-
-### 🗂 A clearer sidebar
-- **Session sections open and close with an animation.** Status dots stay put while rows slide, and a session waiting on a question shows its own pink dot.
-- **Reveal Session is easy to spot.** After the section expands, the revealed session blinks with an outline, and the titlebar button uses a hollow circle.
-- **Closing a project keeps you in your Space.** Ghostex moves focus to an awake session in the next project of the same Space instead of leaving it.
-- **Light mode reads better.** The active session row and its hover buttons stand out more, and resize handles and agent tab drop targets use a softer gray.
-
-### 🎨 One look for menus and scrollbars
-- **Every menu shares one panel.** Dropdowns, context menus, and titlebar popups have the same rounded panel and shadow, and submenus open on click.
-- **Scrollbars are thin and match your theme everywhere.** Terminals, the code editor, chat, and the menu bar panel all use the same slim scrollbar that appears on hover.
-- **Long pick lists stay inside the window.** Delayed Send and other pickers scroll to the highlighted row instead of running off screen.
-
-### 🔍 Search by Prompt
-- **Agent and project filters sit in the toolbar.** They are dropdowns at the top right, and the list shows placeholders while your history loads.
-- **Open Search by Prompt from Previous Sessions.** A Search by Prompt button floats over the Sessions list.
-
-### 📝 Docs and views
-- **The annotation toolbar sits above your selection.** It moves below the text near the top of the page, and the X marks text for removal with a note.
-- **The Docs header shows Send or Copy with the annotation count.** It shrinks to an icon in narrow windows.
-- **Titlebar view menus offer Configure view and Wake again.** Configure view opens that custom view in Settings, and a sleeping web view can be woken from its menu.
-
-### 🩹 Fixes
-- **The background server starts on the first try after an update.** Ghostex waits for the old server to exit before starting the new one, so "gxserver failed to start" no longer appears until you reload, and the copyable diagnostics explain any start failure.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v9.8.0/ghostex-9.8.0-arm64.dmg" length="126651401" type="application/octet-stream" sparkle:edSignature="ZchIbOrusHlJrCWTq3yPpFnQPe7y7lwjs6by5I9bKmipnn6vazy2XnnGXVUulw2oU7TQo5bPW+2y0wKoMP4+Bg=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -341,6 +361,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: EL8xuNOQwM1Rrx9FQpvjHSGZZKV9pZSKNa/xrCLncGE/My6+NN0Y/udbviUrdMSAv3C3d4zoAEGRXyfrEfB1CQ==
-length: 33441
+edSignature: pys80d+rVZKkmuy5zjBEXcMBDl5RpS/3sUTpLaMLwiFlAMisCDwp499DP62a0oH5oc7Osdu8y7rMP8ESbyzmBA==
+length: 35916
 -->

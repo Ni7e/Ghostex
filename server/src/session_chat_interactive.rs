@@ -37,6 +37,13 @@ pub struct SessionChatQuestion {
     /// on this row (default 0), so arrow-key answer plans start counting here.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recommended: Option<usize>,
+    /// CDXC:SessionChat 2026-09-23 WHY: an AskUserQuestion option with a `preview` makes Claude Code draw the question as an option list beside a preview pane, with no "Type something" row: a digit only moves the highlight, Enter commits it, and typed text can only be a note on the highlighted option (`n`). The answer plan needs this layout before the screen shows it, so it is read from the tool input.
+    #[serde(
+        rename = "previewLayout",
+        default,
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub preview_layout: bool,
     pub options: Vec<SessionChatQuestionOption>,
 }
 
@@ -237,9 +244,18 @@ pub fn parse_session_chat_questions(
                     .map(str::to_string)
             })
             .unwrap_or_default();
-        let mut options = parse_session_chat_question_options(
-            record.get("options").or_else(|| record.get("choices")),
-        );
+        let raw_options = record.get("options").or_else(|| record.get("choices"));
+        let mut options = parse_session_chat_question_options(raw_options);
+        let has_preview = raw_options
+            .and_then(Value::as_array)
+            .is_some_and(|options| {
+                options.iter().any(|option| {
+                    option
+                        .get("preview")
+                        .and_then(Value::as_str)
+                        .is_some_and(|preview| !preview.trim().is_empty())
+                })
+            });
         if is_hermes_clarify {
             options.truncate(HERMES_CLARIFY_MAX_CHOICES);
         }
@@ -268,6 +284,7 @@ pub fn parse_session_chat_questions(
                     .get("recommended")
                     .and_then(Value::as_u64)
                     .map(|index| index as usize),
+                preview_layout: has_preview && !multi_select,
                 options,
             });
         }
@@ -410,6 +427,7 @@ pub fn detect_cursor_question_prompt(
             allow_custom: Some(allow_custom),
             tool_name: Some("AskQuestion".to_string()),
             recommended: None,
+            preview_layout: false,
             options,
         }],
         tool_use_id: None,

@@ -58,7 +58,28 @@ impl GhostexGpuiApp {
         let metrics_view = cx.entity().clone();
         let surface_view = cx.entity().clone();
         if let Some(mode) = mode.filter(|_| self.view_panel_maximized()) {
-            return self.render_maximized_view_panel(mode, window, cx);
+            let panel = self.render_maximized_view_panel(mode, window, cx);
+            // Folding away, the Agents Panel's frame slides shut on the left (panel_motion.rs).
+            let frame = self.panel_motion.agents_column.frame();
+            if !frame.animating {
+                return panel;
+            }
+            return h_flex()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .items_stretch()
+                .overflow_hidden()
+                .child(crate::app::panel_motion::closing_panel_ghost(
+                    frame,
+                    false,
+                    true,
+                    project_editor_companion_divider_background_color(),
+                    WORKSPACE_SPLIT_HANDLE_THICKNESS,
+                    workspace_nested_background(),
+                ))
+                .child(v_flex().flex_1().min_w_0().min_h_0().h_full().child(panel))
+                .into_any_element();
         }
         h_flex()
             .on_children_prepainted(move |child_bounds, _window, cx| {
@@ -73,11 +94,31 @@ impl GhostexGpuiApp {
             .items_start()
             .overflow_hidden()
             .bg(glass_clear(project_editor_shell_background_color()))
-            .child(self.render_agents_workspace(
-                AgentsWorkspaceLayout::Column { split_ratio },
-                window,
-                cx,
-            ))
+            .child({
+                /*
+                CDXC:Workarea 2026-09-23 WHY:
+                Flex grow factors that sum to less than 1 hand out only that fraction of the free space. While the view panel slides it is a fixed-width frame, so the Agents column is the row's only grower, and at its split ratio (0.3 or so) it stopped at its minimum width and left the panel sliding out of it with empty space to the right. It grows by 1 for the slide; the same goes for the panel while the Agents column slides, and for the header band above them.
+                */
+                let split_ratio = if self.panel_motion.view_panel.frame().animating {
+                    1.0
+                } else {
+                    split_ratio
+                };
+                let agents = self.render_agents_workspace(
+                    AgentsWorkspaceLayout::Column { split_ratio },
+                    window,
+                    cx,
+                );
+                // Coming back, the Agents Panel slides in at its settled width, its left edge in
+                // place (panel_motion.rs).
+                let frame = self.panel_motion.agents_column.frame();
+                if frame.animating {
+                    crate::app::panel_motion::clip_panel_horizontally(frame, false, agents)
+                        .into_any_element()
+                } else {
+                    agents
+                }
+            })
             .child(
                 /*
                 CDXC:Titlebar 2026-09-20 WHY:
@@ -94,14 +135,20 @@ impl GhostexGpuiApp {
                     .pt(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
                     .child(self.render_workarea_split_divider("body", cx)),
             )
-            .child(
+            .child({
+                let panel_frame = self.panel_motion.view_panel.frame();
                 // CDXC:Workarea 2026-09-14 WHY:
                 // Browser owns its borders inside its leaves; other views own a surface border.
                 // Keep those borders inside the flex allocation so switching views cannot change the
                 // Agents column's width.
-                v_flex()
+                let panel_grow = if self.panel_motion.agents_column.frame().animating {
+                    1.0
+                } else {
+                    1.0 - split_ratio
+                };
+                let panel = v_flex()
                     .pt(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
-                    .flex_grow(1.0 - split_ratio)
+                    .flex_grow(panel_grow)
                     .flex_shrink_1()
                     .flex_basis(relative(0.0))
                     .h_full()
@@ -133,6 +180,9 @@ impl GhostexGpuiApp {
                             .min_w_0()
                             .min_h_0()
                             .overflow_hidden()
+                            // Opening, the panel's frame slides in empty and its view fades in near
+                            // the end, so it is never seen half revealed (panel_motion.rs).
+                            .opacity(panel_frame.opening_content_opacity())
                             .when(strip_mode != TitlebarMode::Browser, |this| {
                                 rail_aware_pane_border(
                                     this,
@@ -150,8 +200,19 @@ impl GhostexGpuiApp {
                                 None => self.render_view_picker(cx),
                             })
                             .window_corner_pane(),
-                    ),
-            )
+                    );
+                // Opening, the panel slides in at its settled width (panel_motion.rs).
+                if panel_frame.animating {
+                    crate::app::panel_motion::clip_panel_horizontally(
+                        panel_frame,
+                        true,
+                        panel.into_any_element(),
+                    )
+                    .into_any_element()
+                } else {
+                    panel.into_any_element()
+                }
+            })
             .into_any_element()
     }
 

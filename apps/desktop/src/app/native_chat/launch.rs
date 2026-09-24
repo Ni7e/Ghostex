@@ -6,10 +6,18 @@ impl GhostexGpuiApp {
     /// CDXC:AgentLauncher 2026-09-23 WHY:
     /// Closing the picker left the main window's input handoff until its next frame, losing the first characters typed after clicking an agent. The picker has already released its window here, so activate the main window and focus the staged input before returning from the launch command.
     pub(crate) fn focus_staged_chat_after_picker(&mut self, cx: &mut gpui::Context<Self>) {
-        let Some(window) = self.main_window_handle else { return; };
-        let Some(session_id) = self.focused_agents_or_companion_shell_session_id() else { return; };
-        let Some(view) = self.native_chat_views.get(&session_id).cloned() else { return; };
-        if !view.read(cx).config.session_id.is_empty() { return; }
+        let Some(window) = self.main_window_handle else {
+            return;
+        };
+        let Some(session_id) = self.focused_agents_or_companion_shell_session_id() else {
+            return;
+        };
+        let Some(view) = self.native_chat_views.get(&session_id).cloned() else {
+            return;
+        };
+        if !view.read(cx).config.session_id.is_empty() {
+            return;
+        }
         let _ = window.update(cx, |_, window, cx| {
             window.activate_window();
             self.reclaim_gpui_root_for_native_chat_composer(window);

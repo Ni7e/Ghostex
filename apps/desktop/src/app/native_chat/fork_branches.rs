@@ -16,10 +16,29 @@ use gpui::{
     AnyElement, Context, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, canvas, div, px, svg,
 };
+use gpui_component::tooltip::{ManagedTooltipExt as _, ManagedTooltipPlacement};
 use std::{cell::Cell, rc::Rc};
 
 /// The button's toggle key in `menu_toggle.rs`.
-const FORK_BRANCHES_TRIGGER: &str = "chat-fork-branches";
+pub(super) const FORK_BRANCHES_TRIGGER: &str = "chat-fork-branches";
+
+/// The button's corner radius before the chat's zoom, shared with its frosted window.
+pub(super) const BADGE_RADIUS: f32 = 6.0;
+
+/// CDXC:SessionFork 2026-09-23 DECISION:
+/// User: "please make the tooltip for this one appear to the left not to the right (below it) / and show have max width for it's tool tip 220px". The switcher's tooltip opens under the button with its right edge on the button's right edge, so it grows leftward into the pane, and wraps at 220px. React's switcher places it the same way.
+pub(super) const TOOLTIP_PLACEMENT: ManagedTooltipPlacement = ManagedTooltipPlacement::BelowLeft;
+
+/// The switcher's tooltip bubble: the family summary, wrapped at 220px.
+pub(super) fn fork_branches_tooltip(
+    text: String,
+    window: &mut gpui::Window,
+    cx: &mut gpui::App,
+) -> gpui::AnyView {
+    gpui_component::tooltip::Tooltip::new(text)
+        .max_w(px(220.0))
+        .build(window, cx)
+}
 
 /// The lifecycle dot's tint, the tones of `sessionChatForkBranchTone` in React's colours
 /// (`bg-emerald-500`, `bg-muted-foreground/60`, `bg-muted-foreground/35`).
@@ -42,15 +61,47 @@ impl NativeChatView {
     /// above that region (the error banner, the "load earlier turns" row, the search bar) instead
     /// of over it. It carries the chat's own surface and a hairline because it floats over text.
     /// This supersedes the thin right-aligned strip the switcher used to own above the transcript.
+    ///
+    /// CDXC:SessionFork 2026-09-23 DECISION:
+    /// User: "please make this also show like we show the scroll to bottom since it's rare" ("This conversation has X branches that share earlier history"). Under window glass the button wears the composer's wash and border over a real blur of what is behind it, drawn in its own small blurred window like the scroll-to-bottom pill (frosted_overlay_window.rs); this lays out an invisible button of the same size where the in-window one would be. Outside glass the in-pane button is unchanged.
     pub(super) fn render_fork_branch_badge(
         &mut self,
         p: &ChatAppearance,
+        glass: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        use super::frosted_overlay_window::FrostedOverlay;
         let branches = &self.snapshot["forkBranches"];
-        let count = branches["count"].as_u64()?;
+        let Some(count) = branches["count"].as_u64() else {
+            self.hide_frosted_overlay(FrostedOverlay::ForkBranches, cx);
+            return None;
+        };
         let tooltip = branches["tooltip"].as_str().unwrap_or_default().to_owned();
         let s = p.scale;
+        if glass {
+            let shown = !self.frosted_overlay_covered(FrostedOverlay::ForkBranches);
+            let report = self.frosted_overlay_reporter(FrostedOverlay::ForkBranches, shown, cx);
+            return Some(
+                div()
+                    .absolute()
+                    .top(px(6.0 * s))
+                    .right(px(10.0 * s))
+                    .h(px(24.0 * s))
+                    .px(px(6.0 * s))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0 * s))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .text_size(px(11.0 * s))
+                    .text_color(gpui::transparent_black())
+                    .whitespace_nowrap()
+                    .child(div().size(px(14.0 * s)).flex_shrink_0())
+                    .child(count.to_string())
+                    .child(report)
+                    .into_any_element(),
+            );
+        }
         let bounds = Rc::new(Cell::new(gpui::Bounds::default()));
         let measured = bounds.clone();
         let label = tooltip.clone();
@@ -69,7 +120,7 @@ impl NativeChatView {
                 .flex()
                 .items_center()
                 .gap(px(4.0 * s))
-                .rounded(px(6.0 * s))
+                .rounded(px(BADGE_RADIUS * s))
                 .border_1()
                 .border_color(p.control_border)
                 .bg(p.background)
@@ -79,8 +130,8 @@ impl NativeChatView {
                     this.bg(p.border)
                 })
                 .hover(|style| style.bg(p.border))
-                .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
+                .managed_tooltip_with_placement(TOOLTIP_PLACEMENT, move |window, cx| {
+                    fork_branches_tooltip(tooltip.clone(), window, cx)
                 })
                 .child(
                     svg()
@@ -91,14 +142,7 @@ impl NativeChatView {
                 )
                 .child(count.to_string())
                 .on_click(cx.listener(move |chat, _, window, cx| {
-                    let rows = chat.snapshot["forkBranches"]["menu"]
-                        .as_array()
-                        .cloned()
-                        .unwrap_or_default();
-                    if rows.is_empty() || chat.chat_menu_toggled_shut(FORK_BRANCHES_TRIGGER, cx) {
-                        return;
-                    }
-                    chat.show_chat_menu(rows, bounds.get(), 288.0, window, cx);
+                    chat.open_fork_branches_menu(bounds.get(), window, cx);
                 }))
                 .child(
                     canvas(move |rect, _, _| measured.set(rect), |_, _, _, _| {})
@@ -107,5 +151,23 @@ impl NativeChatView {
                 )
                 .into_any_element(),
         )
+    }
+
+    /// Opens the family menu under `trigger` (in the chat window's coordinates), or shuts it when
+    /// the same button's menu is up.
+    pub(super) fn open_fork_branches_menu(
+        &mut self,
+        trigger: gpui::Bounds<gpui::Pixels>,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let rows = self.snapshot["forkBranches"]["menu"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if rows.is_empty() || self.chat_menu_toggled_shut(FORK_BRANCHES_TRIGGER, cx) {
+            return;
+        }
+        self.show_chat_menu(rows, trigger, 288.0, window, cx);
     }
 }

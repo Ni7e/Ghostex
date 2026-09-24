@@ -865,6 +865,19 @@ const CURSOR_EFFORT_LABELS: &[(&str, &str)] = &[
     ("Max", "max"),
 ];
 
+/// `26K`, `1.2M` or `830` as a token count.
+fn cursor_token_count(token: &str) -> Option<u64> {
+    let (number, scale) = match token.strip_suffix('K') {
+        Some(number) => (number, 1_000.0),
+        None => match token.strip_suffix('M') {
+            Some(number) => (number, 1_000_000.0),
+            None => (token, 1.0),
+        },
+    };
+    let value = number.parse::<f64>().ok()?;
+    (value.is_finite() && value >= 0.0).then(|| (value * scale).round() as u64)
+}
+
 fn is_cursor_context_window(token: &str) -> bool {
     let number = token.strip_suffix(['K', 'M']).unwrap_or(token);
     token.len() > number.len()
@@ -928,6 +941,17 @@ pub(crate) fn match_cursor_statusline(line: &str) -> Option<SessionChatDetectedS
         (combined, None)
     };
     let (model_label, context_window, effort) = split_cursor_model_context_and_effort(combined);
+    // CDXC:SessionChatDetectedOptions 2026-09-23 WHY: Cursor reports no context payload, so the
+    // footer's `26K used` and the model's `272K` window are the context meter's and the Context
+    // details rows' only source.
+    let context_usage = SessionChatContextUsage {
+        used_percentage: None,
+        used_tokens: segments
+            .last()
+            .and_then(|usage| usage.strip_suffix(" used"))
+            .and_then(cursor_token_count),
+        window_size: context_window.as_deref().and_then(cursor_token_count),
+    };
     // Known names map to the catalog value the client can dispatch (the live
     // catalog, so a model added to it is recognised without a release; an
     // older spelling is a row's `terminalLabels`); unknown names remain
@@ -949,7 +973,7 @@ pub(crate) fn match_cursor_statusline(line: &str) -> Option<SessionChatDetectedS
         context_window,
         terminal_status_line: Some(line.trim().to_string()),
         fast,
-        context_usage: None,
+        context_usage: (!context_usage.is_empty()).then_some(context_usage),
         claude_status: None,
         codex_status: None,
         ..SessionChatDetectedSelection::default()

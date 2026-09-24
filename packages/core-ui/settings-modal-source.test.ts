@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
 const settingsModalSource = readFileSync(new URL('./settings-modal.tsx', import.meta.url), 'utf8');
+const themeTabSource = readFileSync(new URL('./settings-modal/tabs/theme.tsx', import.meta.url), 'utf8');
 const agentsHubModalSource = readFileSync(new URL('./agents-hub-modal.tsx', import.meta.url), 'utf8');
 const skillsPanelSource = readFileSync(new URL('./bundled-agent-skills-panel.tsx', import.meta.url), 'utf8');
 const settingsModalStylesSource = readFileSync(new URL('./styles/modals.css', import.meta.url), 'utf8');
@@ -726,10 +727,9 @@ describe('settings modal source', () => {
     const appIconSearch = sourceBetween(settingsModalSearchCatalogSource, 'appIcon: {', 'fileOpening: {');
     const appIconField = sourceBetween(settingsModalFieldsSource, 'function AppIconPickerField', 'function SoundField');
 
-    // Section is registered as advanced and grouped under Appearance.
-    expect(settingsNavigation).toContain("id: 'appearance'");
+    // Section is registered as advanced and lives on the Theme page, not General's rail.
+    expect(settingsNavigation).not.toContain("id: 'appearance'");
     expect(settingsNavigation).not.toContain("id: 'appIcon'");
-    expect(settingsNavigation).toContain('mainSettingsGroupSearch.appearance');
     expect(settingsModalSource).toContain('appIcon: appIconSectionRef');
     expect(advancedMainSettings).toContain("'appIconSourceId'");
     expect(appIconSearch).toContain('appIconSourceId');
@@ -764,7 +764,7 @@ describe('settings modal source', () => {
     expect(appIconField).not.toContain('Reveal in Finder');
     expect(appIconField).not.toContain('Reset to default');
     expect(settingsModalSource).not.toContain('function AppIconPickerTile');
-    expect(settingsModalSource).toContain(
+    expect(themeTabSource).toContain(
       "description='Changes the Dock and app-switcher icon. The app file icon may also change when the operating system allows it.'"
     );
   });

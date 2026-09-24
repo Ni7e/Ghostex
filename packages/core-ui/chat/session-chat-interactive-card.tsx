@@ -460,7 +460,7 @@ export function SessionChatInteractiveCard({
             onSelect={selectOption}
             options={question.options}
             readOnly={readOnly || submitting || savingImages}
-            selected={customAnswerActive ? [] : draft.indices}
+            selected={customAnswerActive && !question.multiSelect ? [] : draft.indices}
             showShortcuts={showShortcutLabels}
           />
         </>

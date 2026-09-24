@@ -81,10 +81,11 @@ impl Render for NativeChatView {
         } else {
             self.render_search_bar(&p, window, cx)
         };
+        let glass = crate::app::helpers::window_glass_active_in(window);
         let fork_branch_badge = if maximized {
             None
         } else {
-            self.render_fork_branch_badge(&p, cx)
+            self.render_fork_branch_badge(&p, glass, cx)
         };
         let state = self.snapshot.clone();
         let error = self.error.clone();
@@ -148,6 +149,12 @@ impl Render for NativeChatView {
         let pane_focused = self.pane_focused;
         let composer_ready = self.composer_ready;
         let account_switch_card = self.render_account_switch_card(&p, cx);
+        // The transcript that places the floating controls' own windows is not drawn while
+        // maximized, and outside window glass they are drawn in the pane (scroll_bottom.rs,
+        // fork_branches.rs).
+        if maximized || !glass {
+            self.hide_frosted_overlays(cx);
+        }
         let subagent_viewer = self.render_subagent_viewer(&p, window, cx);
         div()
             .id("native-session-chat")
@@ -170,10 +177,12 @@ impl Render for NativeChatView {
                 p.background
             })
             .text_color(p.primary)
-            .capture_any_mouse_down(cx.listener(|chat, event: &gpui::MouseDownEvent, window, cx| {
-                super::focus::reclaim_keyboard_focus(window);
-                chat.note_short_pane_composer_press(event.position, cx);
-            }))
+            .capture_any_mouse_down(cx.listener(
+                |chat, event: &gpui::MouseDownEvent, window, cx| {
+                    super::focus::reclaim_keyboard_focus(window);
+                    chat.note_short_pane_composer_press(event.position, cx);
+                },
+            ))
             .capture_action(cx.listener(Self::scroll_bottom_action))
             .capture_action(cx.listener(Self::open_search_action))
             .capture_action(cx.listener(Self::chat_zoom_in_action))

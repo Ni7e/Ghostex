@@ -26,7 +26,7 @@ import {
 } from '@/packages/core-ui/chat/session-chat-context-details-agents';
 import { formatSessionChatContextTokens } from './context-usage';
 
-const clientStorage = storageScope(['claudeContext', 'codexContext']);
+const clientStorage = storageScope(['claudeContext', 'codexContext', 'cursorContext']);
 
 export type SessionChatContextDetailGroupId = 'usage' | 'context' | 'session';
 
@@ -88,7 +88,7 @@ export interface SessionChatContextDetailRowDefinition {
   group: SessionChatContextDetailGroupId;
   label: string;
   description: string;
-  /** Shown in the popover on a fresh install. Starred is never a default. */
+  /** Shown in the popover on a fresh install unless the agent's recommended preferences say otherwise. */
   recommended: boolean;
   /** Null when the agent has not reported a value; popovers and the status line omit it. */
   value: (input: SessionChatContextDetailRowInput) => string | null;
@@ -403,14 +403,33 @@ const CODEX_ROWS: readonly SessionChatContextDetailRowDefinition[] = [
   ...CODEX_CONTEXT_DETAIL_ROWS,
 ];
 
+/** Cursor reports only its model, reasoning effort and context use, so its catalog is the rows that read those. */
+const CURSOR_ROW_IDS = new Set<SessionChatContextDetailRowId>([
+  'thinking',
+  'sessionName',
+  'contextUsed',
+  'contextTokens',
+  'model',
+]);
+const CURSOR_ROWS: readonly SessionChatContextDetailRowDefinition[] = CODEX_ROWS.filter((row) =>
+  CURSOR_ROW_IDS.has(row.id)
+);
+
+const ROWS: Record<ContextDetailsAgent, readonly SessionChatContextDetailRowDefinition[]> = {
+  claude: SESSION_CHAT_CONTEXT_DETAIL_ROWS,
+  codex: CODEX_ROWS,
+  cursor: CURSOR_ROWS,
+};
+
 export function sessionChatContextDetailRows(
   agent: ContextDetailsAgent = 'claude'
 ): readonly SessionChatContextDetailRowDefinition[] {
-  return agent === 'codex' ? CODEX_ROWS : SESSION_CHAT_CONTEXT_DETAIL_ROWS;
+  return ROWS[agent];
 }
 const ROWS_BY_AGENT = {
   claude: new Map(SESSION_CHAT_CONTEXT_DETAIL_ROWS.map((row) => [row.id, row])),
   codex: new Map(CODEX_ROWS.map((row) => [row.id, row])),
+  cursor: new Map(CURSOR_ROWS.map((row) => [row.id, row])),
 };
 function isRowId(value: unknown, agent: ContextDetailsAgent = 'claude'): value is SessionChatContextDetailRowId {
   return typeof value === 'string' && ROWS_BY_AGENT[agent].has(value as SessionChatContextDetailRowId);
@@ -469,12 +488,46 @@ export interface SessionChatContextDetailsPreferences {
 export const SESSION_CHAT_CONTEXT_DETAILS_STORAGE_KEY = 'ghostex.chat.context-details.v1';
 const CHANGED_EVENT = 'ghostex-chat-context-details-changed';
 
-export const DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES: SessionChatContextDetailsPreferences = {
-  shown: {},
-  starred: {},
-  order: {},
-  starredOrder: [],
+/** CDXC:SessionChatDetectedOptions 2026-09-23 DECISION:
+ * User: a new install starts with the maintainer's own "More details" and status-line setup for Claude and Codex, and Reset to recommended returns to it.
+ * Claude stars Account, Model limit, 5h limit, 7d limit and Repository; Codex stars Account email, 7d limit, 7d reset and Account resets. This supersedes "starred is never a default".
+ * User: Cursor never shows the model or reasoning effort by default, in the status line or More details, because the chat box already shows both; it stars Context used and Context tokens.
+ */
+const RECOMMENDED_PREFERENCES: Record<ContextDetailsAgent, SessionChatContextDetailsPreferences> = {
+  claude: {
+    shown: { fiveHourReset: false },
+    starred: { accountName: true, modelLimit: true, fiveHourLimit: true, sevenDayLimit: true, repo: true },
+    order: {},
+    starredOrder: ['accountName', 'modelLimit', 'fiveHourLimit', 'sevenDayLimit', 'repo'],
+  },
+  codex: {
+    shown: { fiveHourLimit: false, fiveHourReset: false, sevenDayReset: true, accountEmail: true },
+    starred: { accountEmail: true, sevenDayLimit: true, sevenDayReset: true, accountResets: true },
+    order: {},
+    starredOrder: ['accountEmail', 'sevenDayLimit', 'sevenDayReset', 'accountResets'],
+  },
+  cursor: {
+    shown: { thinking: false, contextUsed: true, contextTokens: true },
+    starred: { contextUsed: true, contextTokens: true },
+    order: {},
+    starredOrder: ['contextUsed', 'contextTokens'],
+  },
 };
+
+/** CDXC:SessionChat 2026-09-23 WHY:
+ * Desktop QuickJS has no structuredClone, so copy the preference records and arrays directly to keep chat initialization working and each caller's defaults independent.
+ */
+export function defaultSessionChatContextDetailsPreferences(
+  agent: ContextDetailsAgent = 'claude'
+): SessionChatContextDetailsPreferences {
+  const preferences = RECOMMENDED_PREFERENCES[agent];
+  return {
+    shown: { ...preferences.shown },
+    starred: { ...preferences.starred },
+    order: Object.fromEntries(Object.entries(preferences.order).map(([group, ids]) => [group, [...ids]])),
+    starredOrder: [...preferences.starredOrder],
+  };
+}
 
 function normalizeFlags(
   candidate: unknown,
@@ -525,7 +578,7 @@ export function normalizeSessionChatContextDetailsPreferences(
   agent: ContextDetailsAgent = 'claude'
 ): SessionChatContextDetailsPreferences {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES;
+    return defaultSessionChatContextDetailsPreferences(agent);
   }
   const record = candidate as Record<string, unknown>;
   return {
@@ -542,10 +595,23 @@ export function normalizeSessionChatContextDetailsPreferences(
  * User: keep the same Claude UI and status line, but save popover and status-line settings independently for Claude and Codex.
  * Claude keeps its existing storage key and configuration; copying to the other agent is a one-time action.
  */
-const preferenceKeys = {
+const preferenceKeys: Record<ContextDetailsAgent, string> = {
   claude: SESSION_CHAT_CONTEXT_DETAILS_STORAGE_KEY,
   codex: 'ghostex.chat.context-details.codex.v1',
+  cursor: 'ghostex.chat.context-details.cursor.v1',
 };
+
+/** The client-storage store each agent's record lives in. */
+export const SESSION_CHAT_CONTEXT_DETAILS_STORES = {
+  claude: 'claudeContext',
+  codex: 'codexContext',
+  cursor: 'cursorContext',
+} as const satisfies Record<ContextDetailsAgent, string>;
+
+/** The agent Copy to and Copy from write, while that action stays hidden. */
+export function otherContextDetailsAgent(agent: ContextDetailsAgent): ContextDetailsAgent {
+  return agent === 'claude' ? 'codex' : 'claude';
+}
 const cachedPreferences: Partial<Record<ContextDetailsAgent, SessionChatContextDetailsPreferences>> = {};
 
 export function readSessionChatContextDetailsPreferences(
@@ -558,7 +624,7 @@ export function readSessionChatContextDetailsPreferences(
         agent
       );
     } catch {
-      cachedPreferences[agent] = DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES;
+      cachedPreferences[agent] = defaultSessionChatContextDetailsPreferences(agent);
     }
   }
   return cachedPreferences[agent];
@@ -581,6 +647,7 @@ export function subscribeSessionChatContextDetailsPreferences(listener: () => vo
   const reread = () => {
     delete cachedPreferences.claude;
     delete cachedPreferences.codex;
+    delete cachedPreferences.cursor;
     listener();
   };
   const onStorage = (event: { key: string; newValue: string | null }) => {
@@ -622,6 +689,7 @@ const SIMILAR_CONTEXT_DETAIL_ROWS: Record<
     lastTurnDuration: 'apiTime',
     firstTokenTime: 'apiTime',
   },
+  cursor: {},
 };
 
 /** CDXC:AgentProviders 2026-09-09 DECISION:
@@ -633,7 +701,7 @@ export function mapSessionChatContextDetailsPreferences(
   from: ContextDetailsAgent,
   currentDestination: SessionChatContextDetailsPreferences
 ): { preferences: SessionChatContextDetailsPreferences; matched: number; skipped: number } {
-  const to = from === 'claude' ? 'codex' : 'claude';
+  const to = otherContextDetailsAgent(from);
   const destination = normalizeSessionChatContextDetailsPreferences(currentDestination, to);
   const sourceRows = sessionChatContextDetailRows(from);
   const mapping = new Map<SessionChatContextDetailRowId, SessionChatContextDetailRowId>();
@@ -679,7 +747,7 @@ export function copySessionChatContextDetailsPreferences(
   source: SessionChatContextDetailsPreferences,
   from: ContextDetailsAgent
 ): { matched: number; skipped: number } {
-  const to = from === 'claude' ? 'codex' : 'claude';
+  const to = otherContextDetailsAgent(from);
   const result = mapSessionChatContextDetailsPreferences(source, from, readSessionChatContextDetailsPreferences(to));
   writeSessionChatContextDetailsPreferences(result.preferences, to);
   return { matched: result.matched, skipped: result.skipped };

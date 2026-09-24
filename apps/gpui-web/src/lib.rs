@@ -34,13 +34,13 @@ mod prelude {
     pub(crate) use std::time::Duration;
     pub(crate) use web_time::{Instant, SystemTime};
 }
-pub(crate) use prelude::*;
 pub(crate) use crate::app::consts::*;
 pub(crate) use crate::app::helpers::*;
 pub(crate) use crate::app::hotkeys::*;
 pub(crate) use crate::app::model::*;
 pub(crate) use crate::app::sidebar_direct_focus::*;
 pub(crate) use crate::app::web_app::GhostexGpuiApp;
+pub(crate) use prelude::*;
 
 mod assets;
 mod cef;
@@ -48,7 +48,19 @@ mod ghostty_kit;
 #[allow(dead_code)]
 mod ghostty_vt;
 mod hotkey_label;
+/// The desktop's notification feed reads a bridge the browser build does not have; the bell stays hidden, so its state is always empty.
+#[allow(dead_code)]
+mod notification_feed {
+    include!(concat!(env!("OUT_DIR"), "/notification_feed.rs"));
+
+    #[derive(Default)]
+    pub(crate) struct GpuiNotificationFeedState {
+        pub(crate) unread_count: usize,
+    }
+}
 mod shared_settings;
+mod shell;
+mod support_logs;
 #[allow(dead_code)]
 mod terminal_element;
 mod terminal_gpui_engine;
@@ -58,9 +70,6 @@ mod terminal_model;
 mod terminal_scrollbar_reveal;
 #[allow(dead_code)]
 mod terminal_wheel;
-mod support_logs;
-mod shell;
-
 
 // Linux-only window identity on the desktop; a canvas has neither.
 fn gpui_platform_window_app_id() -> Option<String> {

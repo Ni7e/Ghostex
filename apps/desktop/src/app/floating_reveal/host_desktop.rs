@@ -145,7 +145,7 @@ impl GhostexGpuiApp {
     fn step_floating_reveal_slide(&mut self, cx: &mut gpui::Context<Self>) {
         let slide = self.floating_reveal.slide;
         let elapsed = slide.started.elapsed().as_secs_f32();
-        let duration = floating_reveal_slide_duration().as_secs_f32();
+        let duration = floating_reveal_slide_duration(cx.reduce_motion()).as_secs_f32();
         let t = if duration <= 0.0 {
             1.0
         } else {

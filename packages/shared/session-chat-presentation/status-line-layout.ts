@@ -8,6 +8,15 @@
 export const SESSION_CHAT_STATUS_LINE_ROW_HEIGHT_PX = 16;
 
 /**
+ * CDXC:SessionChat 2026-09-23 DECISION:
+ * User: a pen floats to the right of the status line's last word and opens Context details, so the line can be edited where it is read.
+ * Both renderers add this width (the pen plus its gap) to the last item's measured width, so the row that ends with the pen never
+ * overflows; `.ghostex-chat-status-line-edit` in packages/core-ui/styles/chat.css and `render_context_status` in
+ * apps/desktop/src/app/native_chat/context_meter.rs draw it.
+ */
+export const SESSION_CHAT_STATUS_LINE_EDIT_RESERVE_PX = 18;
+
+/**
  * Whether the status line keeps its row of space. Configured items reserve it while their values are still
  * loading, so the first paint already has room for the line the session is going to show.
  */

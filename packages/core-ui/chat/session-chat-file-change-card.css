@@ -21,12 +21,29 @@
   border-radius: 10px;
   margin-bottom: calc(0.375rem + 7px);
 }
-/* CDXC:SessionChat 2026-09-22 DECISION: User: hovering each file's card lightens it to show a click collapses or expands it. This supersedes the 2026-09-12 whole-component hover. The fill spreads 6px past the card through a box-shadow so the layout does not move. The card keeps the default cursor. */
-.ghostex-chat-file-change-card.is-expandable:hover {
+/* CDXC:SessionChat 2026-09-23 DECISION: User: "when i hover over this kind of card, you're making the only middle part change color, I want all of it to change color". A file's hover fill reaches the section's edges: its full width, half the gap to each neighbour, and the section's padding and rounded corners for the first and last file, so a single file lights the whole section. The fill is a pseudo-element under the card's content that also takes the pointer, so the lit area is the area a click toggles, and the layout does not move. Supersedes the 2026-09-22 fill that spread 6px past the card. The card keeps the default cursor. Mirrors apps/desktop/src/app/native_chat/file_change_card.rs. */
+.ghostex-chat-file-change-card.is-expandable {
   --file-change-card-hover: color-mix(in srgb, #ffffff 60%, transparent);
+  isolation: isolate;
+}
+.ghostex-chat-file-change-card.is-expandable::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -0.375rem -10px;
+}
+.ghostex-chat-file-change-card.is-expandable:first-child::after {
+  top: -0.5rem;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+}
+.ghostex-chat-file-change-card.is-expandable:last-child::after {
+  bottom: -0.5rem;
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+.ghostex-chat-file-change-card.is-expandable:hover::after {
   background: var(--file-change-card-hover);
-  box-shadow: 0 0 0 6px var(--file-change-card-hover);
-  border-radius: 6px;
 }
 .ghostex-chat-file-changes:has(+ .ghostex-chat-file-changes),
 [data-slot='message-content'] > .ghostex-chat-file-changes:last-child,
@@ -43,7 +60,7 @@
   --file-change-removed: #e5a0a4;
   background: color-mix(in srgb, #ffffff 3%, var(--background));
 }
-[data-chat-theme='dark'] .ghostex-chat-file-change-card.is-expandable:hover {
+[data-chat-theme='dark'] .ghostex-chat-file-change-card.is-expandable {
   --file-change-card-hover: color-mix(in srgb, var(--foreground) 5%, transparent);
 }
 .ghostex-chat-file-change-card {

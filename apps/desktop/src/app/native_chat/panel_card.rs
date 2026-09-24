@@ -32,14 +32,15 @@ impl NativeChatView {
     ) -> AnyElement {
         let s = p.scale;
         let command = header.command;
-        div()
+        let row = div()
             .id(header.id)
             .role(gpui::Role::Button)
             .aria_label(header.toggle_label)
             .flex()
             .items_center()
             .gap(px(8.0 * s))
-            .w_full()
+            // No `w_full`: the press header's negative side margins need the card's
+            // stretch to widen the row to the border; a 100% width stops it short.
             .min_w_0()
             .chat_cursor_pointer()
             .child(
@@ -76,7 +77,8 @@ impl NativeChatView {
                     .text_color(p.muted)
                     .flex_shrink_0(),
             )
-            .on_click(cx.listener(move |this, _, _, cx| this.invoke(command.clone(), cx)))
-            .into_any_element()
+            .on_click(cx.listener(move |this, _, _, cx| this.invoke(command.clone(), cx)));
+        // Both panels show a body exactly while they are open.
+        super::cards::status_card_press_header(row, header.open, false, p).into_any_element()
     }
 }

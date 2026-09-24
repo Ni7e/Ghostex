@@ -92,7 +92,8 @@ focuses its name field.
   the list of sessions, selecting one shows it in the focused pane in place of
   the session that was there, and a session already on screen in another pane
   is focused there instead. To split, drag a session row from the sidebar onto
-  the left, right, top or bottom edge of a pane (terminal or Session Chat), or
+  the left, right, top or bottom edge of a pane (terminal or Session Chat); drop
+  it in the middle of a pane to show it there instead. You can also
   use Advanced > Split Right in the session's menu. While the screen is split,
   the focused pane has a small bar along its top: click it for Close Pane (the
   sessions keep running) and Merge All Panes, or drag it to move that session
@@ -291,17 +292,23 @@ where they are while you open, change and close views.
   state everywhere by default; "Sidebar visibility memory" (`sidebarVisibilityMemory`,
   Advanced) can instead remember it once for a window with no view open and once for
   a window with one open, and then a project switch that hides it leaves it
-  floating while you hover it. While collapsed, hovering the strip at the window's
-  left edge floats the sidebar back over your work, and it slides away when you
+  floating while you hover it. While collapsed, hovering the window's left 10px (an
+  invisible hover zone over whatever is there) floats the sidebar back over your work, and it slides away when you
   move off it; the slide runs at the sidebar's Collapse animation speed
   (`sidebarCollapseAnimationDurationMs`, 0 for no animation), whatever the
-  system's Reduce Motion setting says. If you have also expanded a view to fill the window, the strip
-  splits in two: the top half (sidebar icon) floats the sidebar and the bottom half
-  (chat icon) floats the Agents Panel, so you can glance at your agents without
+  system's Reduce Motion setting says. If you have also expanded a view to fill the window, that edge
+  splits in two: hovering the top half floats the sidebar and the bottom half
+  floats the Agents Panel, so you can glance at your agents without
   leaving the view. With the sidebar open and a view expanded, hover the sidebar's
   left edge, click a session, or start a new agent, and the Agents Panel floats
   to the right of the sidebar. It is always 520px wide and takes your typing right
   away. This works on macOS, Windows and Linux.
+- Panel animations: showing or hiding the sidebar, the side panel, the Agents Panel
+  and the bottom or right command pane slides it open or closed; the side panel and a
+  right-docked pane slide in from the window's right edge, and the command pane's
+  terminals fade in as it finishes opening. "Panel animations" sets the speed: Off,
+  Slow, Normal (the default) or Fast. With Reduce Motion turned on in your computer's
+  settings, panels always open and close instantly (`panelAnimationSpeed`).
 - Pane width: agent panes have a minimum resize width of 388px, and so does the
   Agents Panel when a view is open beside it. In the desktop app, an open Code,
   Browser, Kanban, Automate, or Docs view has a minimum width of 455px.
@@ -425,6 +432,8 @@ an open lock when off and a highlighted closed lock when on. Keep open pauses
 auto-minimize for the current project, useful for watching logs. Click
 it again to allow auto-minimize, or manually minimize to clear Keep open.
 Keep open survives project switches but resets when the app restarts.
+Middle-click a tab to close it, or middle-click an empty spot in the tab bar to
+close all of that bar's terminals at once.
 Related settings: `commandsPanelAutoMinimize`,
 `commandsPanelAutoMinimizeDelaySeconds`, `commandsPanelSide`,
 `commandsPanelDefaultHeightPx`.
@@ -470,8 +479,9 @@ when you open it.
   sleep or wake a session.
 - A sleeping session wakes when you ask for it. Clicking its row in the
   sidebar or Split Right wakes it. Selecting its tab, opening its project, or
-  coming back to a project after restarting Ghostex shows a black "Press Any
-  Key to Wake" pane instead; click it or press a key to wake the session. With
+  coming back to a project after restarting Ghostex shows a small bar with
+  its name and a Resume button instead; click anywhere in the pane or press a key to
+  wake the session. With
   Click to Wake Sleeping Panes turned off, those wake right away
   (`clickToWakeSleepingSessions`).
 - Drag pinned sessions to reorder them within their project. Rows stay in place
@@ -540,7 +550,7 @@ conversations and keep activity in sync. ZCode runs in the same terminal, so
 you can switch to Terminal for its setup, model menus, and permission prompts.
 Scrolling up collapses the composer; returning to the bottom expands it.
 Settings > Chat > Keep chat box expanded while scrolling leaves the desktop
-chat box at full size instead (`sessionChatKeepComposerExpanded`, on by default).
+chat box at full size instead (`sessionChatKeepComposerExpanded`, off by default).
 In a short pane, such as one half of a stacked split, the chat box stays
 collapsed even at the bottom of the conversation until you click it, and
 collapses again when you click elsewhere.
@@ -562,7 +572,14 @@ the conversation's history. Shortcuts: `openSessionSearchPalette`,
 `navigateHistoryBack`, `navigateHistoryForward`.
 
 Star items in Context details to show them in the status line under the chat
-box. Items without a value are hidden until their data is available again;
+box; hover the status line and click the pen after its last item to open
+Context details. Claude
+Code starts with Account, Model limit, 5h limit, 7d limit, and Repository
+starred; Codex starts with Account email, 7d limit, 7d reset, and Account
+resets; Cursor starts with Context used and Context tokens. Reset to
+recommended returns to these. The status line and More details are available
+for Claude Code, Codex, and Cursor chats.
+Items without a value are hidden until their data is available again;
 your starred selections stay saved. Wrapped rows are centered and balanced where
 space allows, with separators only between items on the same row.
 
@@ -658,7 +675,7 @@ agent, or the agent asks for input. Completed searches and commands stay in
 that turn's expandable work details; changing model or effort does not bring
 them back. Background commands that are still running, compaction, and
 requests for approval keep their own status cards.
-Chat follows the app theme by default. In Settings > General > Theme, set Chat theme to Light, Dark, or System for a separate appearance, or choose Follow app to use the main App theme (`sessionChatTheme`, `sidebarTheme`).
+Chat follows the app theme by default. In Settings > Theme > Advanced, set Chat theme to Light, Dark, or System for a separate appearance, or choose Follow app to use the main Appearance (`sessionChatTheme`, `sidebarTheme`).
 
 Set Default Chat Zoom (%) in Settings > Chat to scale the desktop chat interface, including messages, controls, and the prompt composer. Choose 70% to 200% in 5% steps; the initial default is 100%. The saved level applies to open chats and when chats open again (`sessionChatZoomPercent`). With a chat focused, Cmd+= and Cmd+- (Ctrl on Windows and Linux) resize that chat for as long as it is open, and Cmd+0 returns it to the saved level.
 
@@ -854,7 +871,7 @@ line under the chat box. Every row holds one value, for example Cost, Session
 time, and API time, or 5h limit, 7d limit, Model limit (such as Fable), 5h
 reset, and 7d reset, read from the session's saved account, or from the agent
 itself when the session has no account.
-Claude Code and Codex keep separate choices. Copying settings between them
+Claude Code, Codex, and Cursor keep separate choices. Copying settings between them
 is temporarily hidden in this dialog.
 
 Related settings: `hideAccountEmails`, `preferredAgentInterface`, `sessionChatTheme`,
@@ -899,8 +916,8 @@ files. Save your edits, then close the prompt file to return to the agent. To
 cancel, close it without saving and choose Don't Save if asked. Dev Servers detects
 localhost URLs from output and lists them in the ⋯ menu's Dev servers panel.
 
-Terminals follow the app theme by default. Settings > General > Theme groups
-App theme, Chat theme, and Terminal theme together at the top of Settings.
+Terminals follow the app theme by default. The Theme page in Settings holds
+Appearance, and its Advanced part holds Chat theme and Terminal theme.
 Terminal theme can override the app with Light, Dark, or System. The palette
 selectors show your existing Ghostty theme names, including separate light and
 dark selections when configured. A single Ghostty theme is used for both appearances
@@ -1257,36 +1274,50 @@ docs directory), `hideProjectHeaderDiffStats`,
   that installs any other supported agent, the Ghostex helper (agent hooks)
   and Computer Use; which views to show (Browser and Docs are on by default
   on a first run) and the browser skill; phone pairing and notifications;
-  and the first project folder with the default agent and session view.
-  "I already know Ghostex" on the first panel skips the rest. Reopen it any
+  and the first project folder with the default agent and session view,
+  next to the look: Appearance, the dark and light theme, Background contrast,
+  Enable Transparency and Transparency strength (the same choices as Settings >
+  Theme). Turning transparency on there also switches Appearance to Dark. "I already know Ghostex" on the first panel skips the rest. Reopen it any
   time from Tips > Setup or Quick Access > Commands > Setup.
 
 ## Appearance and app
 
-Theme, background contrast and tint, window glass, active pane outline, and
-the app icon live under Settings > General > Theme, the first section.
-App theme offers Dark, Light, and System. System is the app default and follows
-the operating system appearance. Below it, Dark theme and Light theme each pick a
-preset for that appearance: Dark theme offers Dark Gray (the default), Black,
-Blue, Green, Red, Purple, or Custom; Light theme offers Light Gray (the default,
-#f4f4f5), White, Blue, Green, Pink, Orange, or Custom. Choosing Custom reveals
-that appearance's Background contrast slider (85 to 100 for dark, 60 to 100 for
-light; 100 is black for dark, white for light) and Background tint color picker; the other appearance's rows
-stay hidden. A preset never overwrites the custom values, so switching back to
+Theme, background contrast and tint, window glass, and active pane outline
+live on their own Settings page, Theme, right below General
+(`ghostex settings open --tab theme`). The page starts simple: Appearance
+(System, Light, or Dark; System is the default and follows the operating
+system appearance), a row of cards for the dark theme and one for the light theme, each
+card a small picture of the window in that theme's colors, Background contrast (five
+steps from Lowest to Highest, Normal in the middle; higher makes dark backgrounds
+darker and light backgrounds whiter, for both appearances; it sets the Sidebar
+contrast and Work area contrast sliders under Advanced together, which can also be
+set apart, and it moves the Custom contrast sliders too), an Enable Transparency switch, and Transparency strength (a 0 to 100 slider; higher shows more of the desktop, and it sets the four glass tint sliders under Advanced so the work area stays a little more see-through than the sidebar). Everything else is under Advanced, a button below those that opens the
+Colours, Chat and terminal, and Glass groups plus links to related
+settings on General; a search for one of those rows opens it. Dark theme offers
+Dark Gray (the default), Black, Blue, Green, Red, Purple, or Custom; Light theme
+offers Light Gray (the default, #f4f4f5), White, Blue, Green, Pink, Orange, or
+Custom. Choosing Custom opens Advanced, where Colours shows that appearance's
+Background contrast slider (85 to 100 for dark, 60 to 100 for light; 100 is
+black for dark, white for light) and Background tint color picker; the other
+appearance's rows stay hidden. A preset never overwrites the custom values, so switching back to
 Custom restores them. The chosen theme colors the sidebar and window chrome, the
 sidebar's dropdown menus, and the chat view background (chat keeps following its
 own Chat theme setting, so a light chat in a dark app uses the light theme's
 color). Chat and terminal default to Follow app, with optional Light, Dark, or
-System overrides in the same section. Existing saved themes are preserved, and a
+System overrides under Advanced > Chat and terminal. Existing saved themes are preserved, and a
 saved dark contrast or tint that differs from the default starts on Custom. The
 accent color (status highlights, accent text, advanced-setting markers) has no
 setting of its own: it follows the dark theme's tint hue, and a neutral tint
 keeps the sky-blue accent.
 Window glass lets the blurred desktop show through the sidebar, the work area,
-terminals, and chat on macOS. Automatic (the default) uses glass in dark mode and
-stays opaque in light mode; Frosted glass and Opaque force one look in both.
+terminals, and chat on macOS. The Enable Transparency switch turns it on as Glass in
+dark mode (the default), which uses glass in dark mode and stays opaque in light
+mode, or off as Always opaque; Advanced > Glass also offers Always glass, which
+forces glass in both.
 Docs, Kanban, the browser, and the code editor stay opaque. Turning on Reduce
 transparency in the macOS accessibility settings always makes the window opaque.
+Glass shows picks what the glass blurs: Desktop and windows (the default) shows everything behind Ghostex. Wallpaper only shows just your desktop wallpaper, so other windows never show through; built-in wallpapers such as Sequoia or the aerials show as a still picture of that wallpaper, and a solid color wallpaper shows everything behind the window. Custom image shows a picture you choose instead, one for dark mode and one for light mode (Glass image for dark mode and Glass image for light mode, each with a Choose image button); a mode with no picture shows everything behind the window. For Wallpaper only and Custom image, Glass picture position picks Moves with the window (the default: the picture covers the window and moves with it) or Stays with the desktop (the picture stays put while the window moves over it, and can trail the window while you drag it) (`windowGlassSource`, `windowGlassImagePlacement`, `windowGlassImageDark`, `windowGlassImageLight`).
+While glass is on, four sliders tune it, each in dark mode and in light mode: Sidebar tint and Work area tint set how much of the desktop each area hides, independently, so either can be the darker one; lower shows more of your desktop.
 Keep Awake (Power)
 prevents sleep while agents work.
 Advanced holds Enable Experimental Features. The separate Debugging page sits
@@ -1306,7 +1337,8 @@ Only the small chevron on its right expands or collapses its entries.
 Related settings: `sidebarTheme`, `darkThemePreset`, `lightThemePreset`,
 `customSidebarTitlebarBackgroundDarknessPercent`, `customSidebarTitlebarBackgroundTintColor`,
 `customSidebarTitlebarLightBackgroundLightnessPercent`, `customSidebarTitlebarLightBackgroundTintColor`,
-`windowGlass`, `showActivePaneOutline`, `appIconSourceId`, the `keepAwake*` rows,
+`windowGlass`, `windowGlassSidebarOpacityDark`, `windowGlassWorkAreaTintDark`,
+`windowGlassSidebarOpacityLight`, `windowGlassWorkAreaTintLight`, `themeSidebarContrast`, `themeWorkAreaContrast`, `showActivePaneOutline`, the `keepAwake*` rows,
 `showBetaFeatures`, `debuggingMode`.
 
 ## Answering the common questions

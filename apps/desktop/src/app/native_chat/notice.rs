@@ -294,7 +294,7 @@ impl NativeChatView {
                     .pt(px(12.0 * p.scale))
                     .pb(px(6.0 * p.scale))
                     .rounded_t(px(12.0 * p.scale - 1.0))
-                    .hover(|style| style.bg(p.foreground.opacity(0.04)))
+                    .hover(|style| style.bg(super::cards::card_hover_fill(p)))
                     .tab_index(0)
                     .role(gpui::Role::Button)
                     .aria_label(if collapsed {

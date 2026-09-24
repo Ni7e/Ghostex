@@ -36,11 +36,16 @@ import { AppTooltip } from '../app-tooltip';
 import { AccountText, useAccountText } from '../accounts/account-text';
 import { postAppModalHostMessage } from '../app-modal-host-bridge';
 import { createAppToastRequest } from '@/packages/shared/app-toast-contract';
-import type { ContextDetailStatus, ContextDetailsAgent } from './session-chat-context-details-agents';
+import {
+  CONTEXT_DETAILS_AGENT_NAMES,
+  type ContextDetailStatus,
+  type ContextDetailsAgent,
+} from './session-chat-context-details-agents';
 import {
   copySessionChatContextDetailsPreferences,
   mapSessionChatContextDetailsPreferences,
-  DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES,
+  otherContextDetailsAgent,
+  defaultSessionChatContextDetailsPreferences,
   SESSION_CHAT_CONTEXT_DETAIL_GROUPS,
   isSessionChatContextDetailShown,
   isSessionChatContextDetailStarred,
@@ -145,8 +150,8 @@ export function SessionChatContextDetailsDialog({
       .filter(({ row, sample }) => matchesContextDetailFilter(query, row, sample)),
   })).filter(({ rows }) => rows.length > 0);
 
-  const otherAgent = agent === 'claude' ? 'codex' : 'claude';
-  const otherAgentName = otherAgent === 'claude' ? 'Claude Code' : 'Codex';
+  const otherAgent = otherContextDetailsAgent(agent);
+  const otherAgentName = CONTEXT_DETAILS_AGENT_NAMES[otherAgent];
   const transferSettings = (direction: 'to' | 'from') => {
     let message;
     try {
@@ -212,8 +217,8 @@ export function SessionChatContextDetailsDialog({
             )}
           </div>
           <DialogDescription>
-            Pick the rows shown under the context meter in {agent === 'claude' ? 'Claude Code' : 'Codex'} sessions. Drag
-            to reorder within a group. Star a row to show its value under the chat box.
+            Pick the rows shown under the context meter in {CONTEXT_DETAILS_AGENT_NAMES[agent]} sessions. Drag to
+            reorder within a group. Star a row to show its value under the chat box.
           </DialogDescription>
         </DialogHeader>
         {/* User: the filter bar is rounded, unlike the square inputs elsewhere, so it reads as a search field. */}
@@ -328,7 +333,7 @@ export function SessionChatContextDetailsDialog({
         <DialogFooter className='shrink-0 flex-row flex-wrap items-center justify-between'>
           <Button
             className='-ml-3 text-muted-foreground'
-            onClick={() => setDraft(DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES)}
+            onClick={() => setDraft(defaultSessionChatContextDetailsPreferences(agent))}
             size='sm'
             type='button'
             variant='ghost'

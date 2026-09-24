@@ -61,15 +61,12 @@ impl GhostexGpuiApp {
                 self.source_code_server_runtime
                     .runtime_url_for_target(&target)
             }
-            ProjectWorkareaCefSurfaceSlotKey::Kanban => {
-                kanban_workarea_runtime_url_from_project_snapshot(snapshot)
-            }
-            ProjectWorkareaCefSurfaceSlotKey::Automate => {
-                automate_workarea_runtime_url_from_project_snapshot(
-                    snapshot,
-                    &self.sidebar_runtime_settings_snapshot,
-                )
-            }
+            // Kanban renders natively (app/native_kanban/), so its CEF slot never gets a URL
+            // either: no surface is created, and one left from before is pruned.
+            ProjectWorkareaCefSurfaceSlotKey::Kanban => None,
+            // Automate renders natively (app/native_automate/), so its CEF slot never gets a URL:
+            // no surface is created, and one left from before is pruned.
+            ProjectWorkareaCefSurfaceSlotKey::Automate => None,
             ProjectWorkareaCefSurfaceSlotKey::Manage => {
                 manage_workarea_runtime_url_from_project_snapshot(snapshot)
             }

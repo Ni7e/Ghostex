@@ -1486,7 +1486,11 @@ impl GhostexGpuiApp {
             show: true,
             is_resizable: modal.is_resizable(),
             window_min_size: Some(modal.window_min_size(&open_message)),
-            display_id: self.main_window_display_id,
+            display_id: crate::app::window::popup_frame::display_at(
+                self.main_window_bounds.center(),
+                cx,
+            )
+            .or(self.main_window_display_id),
             titlebar: modal.has_titlebar().then(|| gpui::TitlebarOptions {
                 title: Some(window_title.clone().into()),
                 appears_transparent: false,
@@ -2022,6 +2026,8 @@ impl GhostexGpuiApp {
         self.apply_gpui_command_pane_side_from_saved_settings(settings_snapshot);
         refresh_gpui_visual_settings(settings_snapshot);
         apply_gpui_component_theme(cx);
+        self.native_kanban_notify_appearance(cx);
+        self.native_automate_notify_appearance(cx);
         self.refresh_sidebar_runtime_settings_from_shared_settings(settings_snapshot, cx);
         self.coerce_active_mode_to_available_project_context(cx);
         self.prune_project_workarea_runtime_cef_surfaces_for_current_gates(cx);

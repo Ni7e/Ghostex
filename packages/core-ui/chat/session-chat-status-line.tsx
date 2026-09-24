@@ -3,6 +3,7 @@
 // narrows. Hovering a value names the row it came from. A diamond separates
 // items because the middle dot already separates the parts inside one value.
 
+import { IconPencil } from '@tabler/icons-react';
 import { Fragment } from 'react';
 import { AccountText } from '../accounts/account-text';
 import { createAppToastRequest } from '../../shared/app-toast-contract';
@@ -34,12 +35,15 @@ export function SessionChatStatusLine({
   hasConfiguredItems = false,
   loading = false,
   items,
+  onEdit,
 }: {
   hasConfiguredItems?: boolean;
   loading?: boolean;
   items: readonly SessionChatContextDetailItem[];
+  /** Opens Context details; the pen after the last item is drawn only when this is set. */
+  onEdit?: () => void;
 }) {
-  const { ref, rowStarts } = useSessionChatStatusLineLayout(items);
+  const { ref, rowStarts } = useSessionChatStatusLineLayout(items, onEdit !== undefined);
   const showSkeleton = items.length === 0 && (loading || hasConfiguredItems);
   const visible = items.length > 0 || showSkeleton;
   const shouldReserveSpace = loading || sessionChatStatusLineReserved({ hasConfiguredItems, itemCount: items.length });
@@ -86,6 +90,18 @@ export function SessionChatStatusLine({
                 </span>
               </AppTooltip>
             )}
+            {onEdit && index === items.length - 1 ? (
+              <AppTooltip content='Edit status line' side='top'>
+                <button
+                  aria-label='Edit status line'
+                  className='ghostex-chat-status-line-edit'
+                  onClick={onEdit}
+                  type='button'
+                >
+                  <IconPencil size={11} stroke={1.8} />
+                </button>
+              </AppTooltip>
+            ) : null}
           </span>
         </Fragment>
       ))}

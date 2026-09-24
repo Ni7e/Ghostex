@@ -80,8 +80,14 @@ impl GhostexGpuiApp {
                     .min_h_0()
                     .when(!hosts_tab_strip, |region| region.flex_1().min_w_0())
                     .when(hosts_tab_strip, |region| {
+                        // Grows by 1 while the strip slides beside it (render/workarea_split.rs).
+                        let grow = if self.panel_motion.view_panel.frame().animating {
+                            1.0
+                        } else {
+                            split_ratio
+                        };
                         region
-                            .flex_grow(split_ratio)
+                            .flex_grow(grow)
                             .flex_shrink(1.0)
                             .flex_basis(relative(0.0))
                             .min_w(px(WORKAREA_AGENTS_COLUMN_MIN_WIDTH))
@@ -112,8 +118,8 @@ impl GhostexGpuiApp {
                             .into_any_element()
                     },
                 )
-                .child(
-                    div()
+                .child({
+                    let strip = div()
                         .flex()
                         .flex_grow(1.0 - split_ratio)
                         .flex_shrink(1.0)
@@ -134,8 +140,21 @@ impl GhostexGpuiApp {
                             window_controls.take()
                         } else {
                             None
-                        }),
-                )
+                        });
+                    // The strip rides the view panel's tween so it stays over the panel.
+                    let frame = self.panel_motion.view_panel.frame();
+                    if frame.animating {
+                        crate::app::panel_motion::clip_panel_horizontally(
+                            frame,
+                            true,
+                            strip.into_any_element(),
+                        )
+                        .h(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
+                        .into_any_element()
+                    } else {
+                        strip.into_any_element()
+                    }
+                })
             })
             .when(trailing_reserve > 0.0, |band| {
                 // The band paints no fill of its own, so the 1px under the shorter tab strip shows
@@ -167,17 +186,17 @@ impl GhostexGpuiApp {
     /// tab bar. The plan is recomputed from the same inputs `render_workspace_with_command_pane`
     /// uses, in the same frame, rather than read back from a recorded bounds rectangle.
     fn workarea_header_trailing_dock_reserve(&self, window: &Window) -> f32 {
-        let workspace_width =
-            command_pane_workspace_width(window, self.sidebar_width, self.sidebar_collapsed);
-        match command_pane_workspace_layout_plan(
-            self.command_pane.mode,
-            self.command_pane.has_panel_sessions(),
-            command_pane_content_height(window),
-            self.command_pane.height_ratio,
-            self.command_pane_side,
-            workspace_width,
-            self.command_pane.width_ratio,
-        ) {
+        // A right dock opening or closing reserves what is on screen of it this frame.
+        let frame = self.panel_motion.command_pane.frame();
+        if frame.animating && self.command_pane_side == GpuiCommandPaneSide::Right {
+            return frame.extent.max(0.0);
+        }
+        self.workarea_header_trailing_dock_reserve_at_rest(window)
+    }
+
+    /// The reserve with the right dock at its settled size.
+    pub(crate) fn workarea_header_trailing_dock_reserve_at_rest(&self, window: &Window) -> f32 {
+        match self.command_pane_layout_plan(window) {
             CommandPaneWorkspaceLayoutPlan::PinnedRight { panel_width } => {
                 panel_width + COMMAND_PANE_SPLIT_HANDLE_THICKNESS
             }
@@ -190,13 +209,28 @@ impl GhostexGpuiApp {
     /// header drops its labels from this width rather than from the window's, because with a view
     /// open the labels have only the sessions column to fit in.
     pub(crate) fn workarea_header_row_width(&self, window: &Window) -> f32 {
+        self.workarea_header_row_width_with_reserve(
+            window,
+            self.workarea_header_trailing_dock_reserve(window),
+        )
+    }
+
+    /// The header row's width with every panel at its settled size.
+    pub(crate) fn workarea_header_row_width_at_rest(&self, window: &Window) -> f32 {
+        self.workarea_header_row_width_with_reserve(
+            window,
+            self.workarea_header_trailing_dock_reserve_at_rest(window),
+        )
+    }
+
+    fn workarea_header_row_width_with_reserve(&self, window: &Window, reserve: f32) -> f32 {
         let band_width =
             (command_pane_workspace_width(window, self.sidebar_width, self.sidebar_collapsed)
-                - self.workarea_header_trailing_dock_reserve(window))
-            .max(0.0);
+                - reserve)
+                .max(0.0);
         if !self.workarea_header_hosts_view_tab_strip() {
             #[cfg(any(target_os = "windows", target_os = "linux"))]
-            if self.workarea_header_trailing_dock_reserve(window) == 0.0
+            if reserve == 0.0
                 && (cfg!(target_os = "windows")
                     || matches!(
                         window.window_decorations(),

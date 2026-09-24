@@ -226,6 +226,12 @@ impl CefBrowser {
 
     pub fn set_visible(&self, _visible: bool) {}
 
+    pub fn bounds_differ(&self, _bounds: Bounds<Pixels>, _scale_factor: f32) -> bool {
+        false
+    }
+
+    pub fn set_motion_hidden(&self, _hidden: bool, _fade_in: std::time::Duration) {}
+
     pub fn order_front(&self) {}
 
     pub fn identifier(&self) -> i32 {

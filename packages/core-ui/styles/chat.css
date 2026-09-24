@@ -1380,6 +1380,46 @@ the markdown block) rather than pinned to a tier of its own.
   padding: 0;
 }
 
+/* The pen floats just right of the last item so the centred row does not move;
+   the layout hook reserves its width on the last item so it never overflows. */
+.ghostex-chat-status-line-group:last-child {
+  position: relative;
+}
+
+.ghostex-chat-status-line-edit,
+.ghostex-chat-status-line-edit:hover {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  height: 16px;
+  justify-content: center;
+  left: 100%;
+  margin-left: 2px;
+  padding: 0;
+  position: absolute;
+  top: 0;
+  width: 16px;
+}
+
+/* CDXC:SessionChat 2026-09-23 DECISION: User: the pen appears only while the status line is hovered. */
+.ghostex-chat-status-line-edit {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.ghostex-chat-status-line:hover .ghostex-chat-status-line-edit {
+  opacity: 0.55;
+}
+
+.ghostex-chat-status-line .ghostex-chat-status-line-edit:hover,
+.ghostex-chat-status-line-edit:focus-visible {
+  opacity: 1;
+}
+
 .ghostex-chat-fast-mode-icon {
   color: #f6daa0;
 }
@@ -1559,6 +1599,7 @@ the markdown block) rather than pinned to a tier of its own.
     .ghostex-chat-reference-pill
   ):not(.ghostex-chat-markdown-file-chip):not(
     .ghostex-chat-status-line-copy,
+    .ghostex-chat-status-line-edit,
     .ghostex-chat-minimap-rail,
     .ghostex-chat-file-change-card button,
     .ghostex-menu-panel [role^='menuitem']
@@ -1571,6 +1612,7 @@ body[data-session-chat-theme='dark']
     .ghostex-chat-reference-pill
   ):not(.ghostex-chat-markdown-file-chip):not(
     .ghostex-chat-status-line-copy,
+    .ghostex-chat-status-line-edit,
     .ghostex-chat-minimap-rail,
     .ghostex-chat-file-change-card button,
     .ghostex-menu-panel [role^='menuitem']
@@ -1586,6 +1628,7 @@ body[data-session-chat-theme='dark']
     .ghostex-chat-reference-pill
   ):not(.ghostex-chat-markdown-file-chip):not(
     .ghostex-chat-status-line-copy,
+    .ghostex-chat-status-line-edit,
     .ghostex-chat-minimap-rail,
     .ghostex-chat-subagent-link,
     .ghostex-chat-file-change-card button,
@@ -1599,6 +1642,7 @@ body[data-session-chat-theme='dark']
     .ghostex-chat-reference-pill
   ):not(.ghostex-chat-markdown-file-chip):not(
     .ghostex-chat-status-line-copy,
+    .ghostex-chat-status-line-edit,
     .ghostex-chat-minimap-rail,
     .ghostex-chat-subagent-link,
     .ghostex-chat-file-change-card button,

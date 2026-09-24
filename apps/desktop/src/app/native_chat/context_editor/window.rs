@@ -62,17 +62,23 @@ impl NativeChatView {
             let result = main.update(cx,|_,window,cx| {
                 let frame = context_editor_frame(pane, appearance.scale);
                 let bounds = gpui::Bounds::new(window.bounds().origin + frame.origin, frame.size);
-                (bounds,window.display(cx).map(|display|display.id()))
+                (bounds,crate::app::window::popup_frame::display_at(bounds.center(),cx).or_else(||window.display(cx).map(|display|display.id())))
             }).and_then(|(bounds,display_id)| cx.open_window(WindowOptions {
                 kind: crate::app::window::popup_frame::child_window_kind(),
                 window_bounds:Some(WindowBounds::Windowed(bounds)),display_id,
                 app_id:crate::gpui_platform_window_app_id(),icon:crate::gpui_platform_window_icon(),
                 focus:true,show:true,is_resizable:false,is_minimizable:false,is_movable:false,titlebar:None,
-                window_background:gpui::WindowBackgroundAppearance::Transparent,
+                // Under window glass the card's own window blurs what is behind it (the card fills it).
+                window_background:if crate::app::helpers::window_glass_active() {
+                    gpui::WindowBackgroundAppearance::Blurred
+                } else {
+                    gpui::WindowBackgroundAppearance::Transparent
+                },
                 ..Default::default()
             }, {
                 let chat=chat.clone();
                 move |window,cx| {
+                    window.set_background_corner_radius(px(12.0 * appearance.scale));
                     crate::app::window::popup_frame::strip_gpui_popup_window_frame(window);
                     crate::app::window::attach_gpui_app_modal_window_to_main_window(window,parent);
                     let view=cx.new(|cx| {

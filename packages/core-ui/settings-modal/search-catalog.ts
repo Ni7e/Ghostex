@@ -11,6 +11,9 @@ import {
   CHAT_FILE_OPEN_VIEW_OPTIONS,
   COMMANDS_PANEL_SIDE_OPTIONS,
   WINDOW_GLASS_OPTIONS,
+  WINDOW_GLASS_SOURCE_OPTIONS,
+  WINDOW_GLASS_IMAGE_PLACEMENT_OPTIONS,
+  PANEL_ANIMATION_SPEED_OPTIONS,
   COMMANDS_PANEL_AUTO_MINIMIZE_DELAY_OPTIONS,
   GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS,
   GHOSTTY_COPY_ON_SELECT_OPTIONS,
@@ -59,19 +62,29 @@ export type SettingsSearchSectionDefinition = {
  * maintaining a second hand-written list that drifts from Settings.
  * SEE-ALSO: skills/ghostex-help/references/settings-catalog.json, server/src/ghostex_cli/settings.rs.
  */
+/**
+ * CDXC:Theming 2026-09-23 DECISION:
+ * User: "fully hide the custom app icon feature". The App Icon picker, its search row, the Help catalog row and the
+ * `ghostex settings` entry are all off while this is false; the picker code and `appIconSourceId` stay, so an icon
+ * that was already chosen keeps working.
+ */
+export const APP_ICON_CONTROLS_VISIBLE = false;
+
 export function getSettingsSearchSectionDefinitions() {
   const settingsSearchSections = {
     // CDXC:Icons 2026-06-25-21:50: Make the App Icon section findable by Settings search.
     appIcon: {
       title: 'App Icon',
-      settings: [
-        {
-          key: 'appIconSourceId',
-          subtitle:
-            'Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.',
-          title: 'App Icon',
-        },
-      ],
+      settings: APP_ICON_CONTROLS_VISIBLE
+        ? [
+            {
+              key: 'appIconSourceId',
+              subtitle:
+                'Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.',
+              title: 'App Icon',
+            },
+          ]
+        : [],
     },
     /*
      * CDXC:Extensions 2026-08-30:
@@ -407,6 +420,13 @@ export function getSettingsSearchSectionDefinitions() {
           title: 'Collapse animation speed',
         },
         {
+          key: 'panelAnimationSpeed',
+          options: PANEL_ANIMATION_SPEED_OPTIONS,
+          subtitle:
+            'Set how fast the sidebar, the side panel, the Agents Panel and the bottom or right panel slide open and closed: Off, Slow, Normal or Fast. Reduce Motion in your computer settings always turns it off.',
+          title: 'Panel animations',
+        },
+        {
           key: 'sidebarTooltipDelayMs',
           subtitle: 'Set how long sidebar hover labels wait before appearing. Set to 0 to show them immediately.',
           title: 'Tooltip Delay',
@@ -492,7 +512,7 @@ export function getSettingsSearchSectionDefinitions() {
           key: 'sidebarTheme',
           options: SIDEBAR_THEME_SETTING_OPTIONS,
           subtitle: 'Follow the system appearance by default, or choose Light or Dark.',
-          title: 'App theme',
+          title: 'Appearance',
         },
         {
           key: 'darkThemePreset',
@@ -515,6 +535,18 @@ export function getSettingsSearchSectionDefinitions() {
           options: LIGHT_THEME_PRESET_OPTIONS,
           subtitle: 'Preset light chrome for the sidebar and window, or Custom to tune its contrast and tint.',
           title: 'Light theme',
+        },
+        {
+          key: 'themeSidebarContrast',
+          subtitle:
+            "The sidebar's contrast. Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own.",
+          title: 'Sidebar contrast',
+        },
+        {
+          key: 'themeWorkAreaContrast',
+          subtitle:
+            "The work area's contrast (chat, terminals and views). Higher makes dark backgrounds darker and light backgrounds whiter; 0 is the theme's own.",
+          title: 'Work area contrast',
         },
         {
           key: 'customSidebarTitlebarLightBackgroundLightnessPercent',
@@ -555,8 +587,56 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'windowGlass',
           options: WINDOW_GLASS_OPTIONS,
-          subtitle: 'Let the blurred desktop show through the window. Automatic uses glass in dark mode only.',
+          subtitle: 'Let the blurred desktop show through the window. By default, light mode stays opaque.',
           title: 'Window glass',
+        },
+        {
+          key: 'windowGlassSource',
+          options: WINDOW_GLASS_SOURCE_OPTIONS,
+          subtitle:
+            'Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose.',
+          title: 'Glass shows',
+        },
+        {
+          key: 'windowGlassImagePlacement',
+          options: WINDOW_GLASS_IMAGE_PLACEMENT_OPTIONS,
+          subtitle:
+            'Where the wallpaper or custom picture sits behind the glass. Stays with the desktop can trail the window while you drag it.',
+          title: 'Glass picture position',
+        },
+        {
+          key: 'windowGlassImageDark',
+          subtitle: 'The picture the glass blurs in dark mode when Glass shows is Custom image.',
+          title: 'Glass image for dark mode',
+        },
+        {
+          key: 'windowGlassImageLight',
+          subtitle: 'The picture the glass blurs in light mode when Glass shows is Custom image.',
+          title: 'Glass image for light mode',
+        },
+        {
+          key: 'windowGlassSidebarOpacityDark',
+          subtitle:
+            'How much of the desktop the sidebar hides in dark mode. Lower shows more of your desktop through it.',
+          title: 'Sidebar tint in dark mode',
+        },
+        {
+          key: 'windowGlassWorkAreaTintDark',
+          subtitle:
+            'How much of the desktop the work area hides in dark mode, set on its own so either area can be the darker one. Lower shows more of your desktop through it.',
+          title: 'Work area tint in dark mode',
+        },
+        {
+          key: 'windowGlassSidebarOpacityLight',
+          subtitle:
+            'How much of the desktop the sidebar hides in light mode. Lower shows more of your desktop through it.',
+          title: 'Sidebar tint in light mode',
+        },
+        {
+          key: 'windowGlassWorkAreaTintLight',
+          subtitle:
+            'How much of the desktop the work area hides in light mode, set on its own so either area can be the darker one. Lower shows more of your desktop through it.',
+          title: 'Work area tint in light mode',
         },
         {
           key: 'showActivePaneOutline',
@@ -714,8 +794,8 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'workspaceBackgroundColor',
-          subtitle: 'Color shown behind terminal panes.',
-          title: 'Terminal Background',
+          subtitle: 'Only changes the terminal panes. Leave on Follow theme to match your theme.',
+          title: 'Terminal background',
         },
         {
           key: 'terminalBackgroundImage',
@@ -1015,11 +1095,10 @@ export function getMainSettingsSectionNavigation(mainSettingsGroupSearch: MainSe
      * subsections, but clicking down this rail should always move down the
      * Settings page instead of jumping above an earlier-looking destination.
      */
-    {
-      id: 'appearance',
-      searchResult: mainSettingsGroupSearch.appearance,
-      title: 'Theme',
-    },
+    /*
+     * CDXC:Theming 2026-09-23 DECISION:
+     * User: "make theme into it's own page in settings below General". The Theme and App Icon sections render on the Theme page (settings-modal/tabs/theme.tsx), so General's rail starts at Sidebar; their search rows and the `appearance` group stay in this catalog so one query still finds them.
+     */
     { id: 'sidebar', searchResult: mainSettingsGroupSearch.sidebar, title: 'Sidebar' },
     { id: 'chat', searchResult: mainSettingsGroupSearch.chat, title: 'Chat' },
     ...(PET_CONTROLS_VISIBLE

@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 pub(super) struct TerminalDialogInput {
     identity: String,
     server_value: String,
-    input: Entity<InputState>,
+    pub(super) input: Entity<InputState>,
     _subscription: Subscription,
 }
 

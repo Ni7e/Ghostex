@@ -170,6 +170,10 @@ mod input_replace;
 pub use input_replace::clear_session_chat_composer;
 pub(crate) use input_replace::handle_replace_session_chat_draft_http;
 
+#[path = "session_chat_composer_repaint.rs"]
+mod composer_repaint;
+pub(crate) use composer_repaint::claude_composer_needs_redraw;
+
 // Ask-answer keystrokes (upstream chat spec §8.4/§8.5).
 const ASK_ENTER: &str = "\r";
 const ASK_NEXT_TAB: &str = "\u{1b}[C"; // Right arrow → next question / Submit tab
@@ -179,6 +183,7 @@ const ASK_NOTES: &str = "\t"; // Tab → open notes (Codex)
 const ASK_DELETE: &str = "\u{7f}"; // DEL — clear/skip a Codex row
 const ASK_TAB: &str = "\t"; // Tab → next question tab (omp's ask dialog)
 const ASK_SPACE: &str = " "; // Space → toggle a multi-select row (omp)
+const ASK_PREVIEW_NOTES: &str = "n"; // n → notes on the highlighted row (Claude preview layout)
 
 // ---------------------------------------------------------------------------
 // Clear burst (upstream chat spec §7.2) — measured, not derived
@@ -358,16 +363,36 @@ pub fn build_claude_ask_answer_keys(
             .unwrap_or_default();
         if question.multi_select {
             for index in indices {
-                // Each digit TOGGLES a checkbox.
+                // Each digit TOGGLES a checkbox; the highlight stays on row 1.
                 groups.push(AskAnswerKeyGroup::Raw((index + 1).to_string()));
             }
             if !other.is_empty() {
-                groups.push(AskAnswerKeyGroup::Raw(type_something));
+                /*
+                CDXC:SessionChat 2026-09-23 WHY: Claude Code 2.1.280 edits the multi-select "Type something" row in place while it is highlighted: its digit only ticks the box, so text typed after it was dropped, and the Enter that followed toggled the highlighted first option off (Cheese + Peppers + a note arrived as "Peppers"). Typing on the highlighted row ticks it; Right is a caret move there, so the row below it (Next, or Submit on the last question) takes the Enter that moves on.
+                */
+                groups.push(AskAnswerKeyGroup::Raw(
+                    ASK_NEXT_ROW.repeat(question.options.len()),
+                ));
                 groups.push(AskAnswerKeyGroup::Text(other.to_string()));
+                groups.push(AskAnswerKeyGroup::Raw(ASK_NEXT_ROW.to_string()));
                 groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string()));
+            } else {
+                // Multi-select never auto-advances; step to next/Submit tab.
+                groups.push(AskAnswerKeyGroup::Raw(ASK_NEXT_TAB.to_string()));
             }
-            // Multi-select never auto-advances; step to next/Submit tab.
-            groups.push(AskAnswerKeyGroup::Raw(ASK_NEXT_TAB.to_string()));
+        } else if question.preview_layout {
+            // A preview question has no "Type something" row; a digit moves the
+            // highlight and Enter commits it (with its note, when one is typed).
+            if let Some(first) = indices.first() {
+                groups.push(AskAnswerKeyGroup::Raw((first + 1).to_string()));
+                if !other.is_empty() {
+                    groups.push(AskAnswerKeyGroup::Raw(ASK_PREVIEW_NOTES.to_string()));
+                    groups.push(AskAnswerKeyGroup::Text(other.to_string()));
+                }
+                groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string()));
+            } else if multi_question {
+                groups.push(AskAnswerKeyGroup::Raw(ASK_NEXT_TAB.to_string()));
+            }
         } else if !other.is_empty() {
             // Single-select carries one value, so route ANY answer containing
             // free text through "Type something" as one joined string.
@@ -390,6 +415,19 @@ pub fn build_claude_ask_answer_keys(
         groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string()));
     }
     groups
+}
+
+/// A preview question answered with typed text alone: Claude draws no free-text row for it, so there is nothing the text could be typed into.
+pub(crate) fn claude_preview_question_without_option<'a>(
+    questions: &'a [SessionChatQuestion],
+    selections: &[SessionChatQuestionSelection],
+) -> Option<&'a SessionChatQuestion> {
+    questions.iter().enumerate().find_map(|(index, question)| {
+        let selection = selections.get(index);
+        let has_option = selection.is_some_and(|selection| !selection.indices.is_empty());
+        (question.preview_layout && !has_option && !selection_other(selection).is_empty())
+            .then_some(question)
+    })
 }
 
 /*
@@ -1961,8 +1999,11 @@ async fn run_session_chat_send_worker(
                             matches!(*agent, "claude" | "openclaude" | "codex" | "grok")
                         })
                         .map(str::to_string);
-                    let wait = crate::session_chat_composer::wait_for_session_chat_composer(
+                    let wait = composer_repaint::wait_for_send_composer(
+                        &project_id,
+                        &session_id,
                         &zmx_name,
+                        &source,
                         agent.as_deref(),
                         crate::session_chat_composer::SessionChatComposerWaitPolicy {
                             settle_ms,
@@ -1977,6 +2018,13 @@ async fn run_session_chat_send_worker(
                         &|| job_generation != generation.load(Ordering::SeqCst),
                     )
                     .await;
+                    let wait = match wait {
+                        Ok(wait) => wait,
+                        Err(error) => {
+                            outcome = Err(error);
+                            break;
+                        }
+                    };
                     match wait {
                         crate::session_chat_composer::SessionChatComposerWait::Ready
                         | crate::session_chat_composer::SessionChatComposerWait::Unknown => {}
@@ -2605,6 +2653,7 @@ mod tests {
             allow_custom: None,
             tool_name: None,
             recommended: None,
+            preview_layout: false,
             options: options
                 .iter()
                 .map(|label| SessionChatQuestionOption {
@@ -3570,10 +3619,28 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
                             },
                         );
                     };
-                    if crate::session_chat_question_liveness::claude_question_selector_on_screen(
-                        &questions,
-                        &screen_text,
-                    ) {
+                    let selector_on_screen =
+                        crate::session_chat_question_liveness::claude_question_selector_on_screen(
+                            &questions,
+                            &screen_text,
+                        );
+                    let preview_question_without_option = selector_on_screen
+                        .then(|| claude_preview_question_without_option(&questions, &selections))
+                        .flatten();
+                    if let Some(question) = preview_question_without_option {
+                        return domain_error_response(
+                            endpoint_path,
+                            request_id,
+                            DomainStateError {
+                                code: "invalidParams",
+                                message: format!(
+                                    "Pick an option for \"{}\": Claude only takes typed text as a note on the option you pick for this question.",
+                                    question.header.as_deref().unwrap_or(&question.question)
+                                ),
+                            },
+                        );
+                    }
+                    if selector_on_screen {
                         crate::session_chat_send::build_ask_answer_steps(
                             &crate::session_chat_send::build_claude_ask_answer_keys(
                                 &questions,

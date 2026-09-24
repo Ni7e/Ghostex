@@ -41,6 +41,7 @@ import {
   adoptNativeContextPreferences,
   computeNativeChatContext,
 } from "./native-context";
+import { contextDetailsAgentFor } from "@/packages/core-ui/chat/session-chat-context-details-agents";
 import {
   dispatchSessionChatOption,
   queueSessionChatOption,
@@ -1095,9 +1096,8 @@ async function action(command: {
       case "contextSave":
         await nativeContextEditorCommand(
           command,
-          chat.sessionOptions.catalog?.modelIcon === "codex"
-            ? "codex"
-            : "claude",
+          contextDetailsAgentFor(chat.sessionOptions.catalog?.modelIcon) ??
+            "claude",
           (agent, preferences) =>
             composer("contextSave", { agent, preferences }),
           () => publish(controller.current()),

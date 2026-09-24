@@ -68,19 +68,11 @@ impl GhostexGpuiApp {
         which reserves the macOS traffic lights there. Collapsed, this header is what sits in that
         corner, so it draws the sidebar toggles at the Search row's `SIDEBAR_TOGGLE_LEADING_X`.
         Windows and Linux have no lights to clear; their caption buttons are trailing children of
-        this same header.
-        CDXC:Titlebar 2026-09-21 WHY:
-        Collapsed, the reveal's edge strip sits left of this header, so the inset is measured from
-        the window edge minus that strip. Without it the sidebar toggle drew 10px right of where the
-        docked sidebar's Search row draws it.
+        this same header. The reveal's edge zone overlays the workarea and takes no layout, so the
+        inset is measured from the window edge.
         */
         let leading_inset = if self.sidebar_collapsed {
-            let strip = if self.floating_reveal_edge_strip_visible() {
-                crate::app::floating_reveal::model::FLOATING_REVEAL_EDGE_WIDTH
-            } else {
-                0.0
-            };
-            (SIDEBAR_TOGGLE_LEADING_X - strip).max(0.0)
+            SIDEBAR_TOGGLE_LEADING_X
         } else {
             WORKAREA_HEADER_EDGE_PADDING
         };

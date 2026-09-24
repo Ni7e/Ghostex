@@ -951,7 +951,7 @@ impl GhostexGpuiApp {
         terminal_agent_bar_button_base(action, &state, suffix, self.configured_tooltip_delay())
             .size(px(TERMINAL_AGENT_BAR_BUTTON_SIZE))
             .when(enabled, |this| {
-                this.hover(|this| this.bg(terminal_agent_bar_hover_background()))
+                this.hover(|this| this.bg(terminal_agent_bar_button_hover_background()))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -1147,7 +1147,9 @@ fn terminal_agent_bar_session_id(
                 .items_center()
                 .justify_center()
                 .rounded_full()
-                .group_hover(group, |this| this.bg(terminal_agent_bar_hover_background()))
+                .group_hover(group, |this| {
+                    this.bg(terminal_agent_bar_button_hover_background())
+                })
                 .child(
                     svg()
                         .flex_shrink_0()

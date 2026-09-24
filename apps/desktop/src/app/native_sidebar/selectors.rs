@@ -158,7 +158,7 @@ impl GhostexGpuiApp {
         v_flex().id(format!("native-sidebar-space-{id}")).role(gpui::Role::Button).aria_label(format!("Space {name}")).aria_selected(space.selected).relative().size(px(28.0 * scale)).flex_shrink_0().items_center().justify_center().rounded(px(6.0 * scale)).border_1().border_color(appearance.foreground.opacity(0.08)).cursor_pointer()
             .when(self.native_sidebar.is_dragging("space", &id), |row| row.opacity(0.3))
             .when(space.contains_active_session && !space.selected, |row| row.bg(appearance.selected).border_color(appearance.selected_outline))
-            .when(space.selected, |row| row.bg(selected_background).border_color(selected_outline).when(appearance.light, |row| row.shadow_sm()))
+            .when(space.selected, |row| row.bg(selected_background).border_color(selected_outline).when(appearance.light && !appearance.glass, |row| row.shadow_sm()))
             .hover(|row| row.bg(appearance.hover))
             .child(icon)
             .children(drop_position.map(|position| super::space_drag::insertion_line(position, scale)))
@@ -169,7 +169,7 @@ impl GhostexGpuiApp {
             .when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.managed_discrete_tooltip_with_placement(tooltip_span.placement(), appearance.tooltip_delay, move |window, cx| super::tooltips::sidebar_free_width_tooltip(name.to_string(), tooltip_span, scale, window, cx)))
             .when(id != "other", |row| row.sidebar_drag_source(dragged, cx))
             .sidebar_drop_target("space", drag_id, None, cx)
-            .on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_ui(json!({"type": "selectSpace", "spaceId": id}), cx); }))
+            .on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.select_native_space(&id, cx); }))
             .on_mouse_down(MouseButton::Right, cx.listener(move |app, event: &gpui::MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 let mut items = Vec::new();

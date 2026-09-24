@@ -1,6 +1,13 @@
 import { nativeChatSettings, subscribeNativeChatSettings } from './native-chat-settings';
-import { readSessionChatContextDetailsPreferences, subscribeSessionChatContextDetailsPreferences } from '@/packages/shared/session-chat-presentation/context-details';
-import { currentAgentModelCatalog, subscribeAgentModelCatalog, refreshAgentModelCatalog } from '@/packages/shared/agent-model-catalog-state';
+import {
+  readSessionChatContextDetailsPreferences,
+  subscribeSessionChatContextDetailsPreferences,
+} from '@/packages/shared/session-chat-presentation/context-details';
+import {
+  currentAgentModelCatalog,
+  subscribeAgentModelCatalog,
+  refreshAgentModelCatalog,
+} from '@/packages/shared/agent-model-catalog-state';
 import { nativeComposerRequest, type NativeComposerRequest } from './native-composer';
 import type { SessionChatTransport } from '@/packages/core-ui/chat/session-chat-transport';
 import {
@@ -34,7 +41,13 @@ type Request = {
   machineId?: string;
   identity?: SessionChatRuntimeIdentity;
   endpoint?: SessionChatRuntimeEndpoint;
-  params?: { catalog?: boolean; limit?: number; beforeOffset?: number; drafts?: PendingDraft[]; composer?: NativeComposerRequest };
+  params?: {
+    catalog?: boolean;
+    limit?: number;
+    beforeOffset?: number;
+    drafts?: PendingDraft[];
+    composer?: NativeComposerRequest;
+  };
 };
 
 /** The existing sidebar is the single app-wide owner of transcript caches, followers and draft retries. */
@@ -171,7 +184,13 @@ export function installSessionChatRuntimeBroker(): void {
       const sessionKey = `${prefix}${identity.projectId}:${identity.sessionId}`;
       void nativeComposerRequest(sessionKey, request.params.composer).then(
         (result) => post({ kind: 'response', generation: request.generation, requestId: request.requestId, result }),
-        (error: unknown) => post({ kind: 'response', generation: request.generation, requestId: request.requestId, error: error instanceof Error ? error.message : String(error) })
+        (error: unknown) =>
+          post({
+            kind: 'response',
+            generation: request.generation,
+            requestId: request.requestId,
+            error: error instanceof Error ? error.message : String(error),
+          })
       );
       return;
     }
@@ -199,19 +218,40 @@ export function installSessionChatRuntimeBroker(): void {
         onEvent: (event) => postEvent(request.generation, event),
       });
       subscriptions.get(request.generation)?.();
-      const unsubscribeCatalog = request.params?.catalog ? subscribeAgentModelCatalog(() =>
-        post({ kind: 'catalog', generation: request.generation, catalog: currentAgentModelCatalog() })) : undefined;
+      const unsubscribeCatalog = request.params?.catalog
+        ? subscribeAgentModelCatalog(() =>
+            post({ kind: 'catalog', generation: request.generation, catalog: currentAgentModelCatalog() })
+          )
+        : undefined;
       const sessionKey = `${prefix}${identity.projectId}:${identity.sessionId}`;
-      const publishSettings = (settings: ReturnType<typeof nativeChatSettings>) => post({kind:'chatSettings',generation:request.generation,settings});
-      const unsubscribeSettings = request.params?.catalog ? subscribeNativeChatSettings(sessionKey,publishSettings) : undefined;
+      const publishSettings = (settings: ReturnType<typeof nativeChatSettings>) =>
+        post({ kind: 'chatSettings', generation: request.generation, settings });
+      const unsubscribeSettings = request.params?.catalog
+        ? subscribeNativeChatSettings(sessionKey, publishSettings)
+        : undefined;
       if (request.params?.catalog) publishSettings(nativeChatSettings(sessionKey));
-      const publishContext = () => post({ kind: 'contextPreferences', generation: request.generation, preferences: {
-        claude: readSessionChatContextDetailsPreferences('claude'), codex: readSessionChatContextDetailsPreferences('codex'),
-      } });
-      const unsubscribeContext = request.params?.catalog ? subscribeSessionChatContextDetailsPreferences(publishContext) : undefined;
-      subscriptions.set(request.generation, () => { unsubscribe(); unsubscribeCatalog?.(); unsubscribeContext?.(); unsubscribeSettings?.(); });
+      const publishContext = () =>
+        post({
+          kind: 'contextPreferences',
+          generation: request.generation,
+          preferences: {
+            claude: readSessionChatContextDetailsPreferences('claude'),
+            codex: readSessionChatContextDetailsPreferences('codex'),
+            cursor: readSessionChatContextDetailsPreferences('cursor'),
+          },
+        });
+      const unsubscribeContext = request.params?.catalog
+        ? subscribeSessionChatContextDetailsPreferences(publishContext)
+        : undefined;
+      subscriptions.set(request.generation, () => {
+        unsubscribe();
+        unsubscribeCatalog?.();
+        unsubscribeContext?.();
+        unsubscribeSettings?.();
+      });
       if (request.params?.catalog) publishContext();
-      if (request.params?.catalog) post({ kind: 'catalog', generation: request.generation, catalog: currentAgentModelCatalog() });
+      if (request.params?.catalog)
+        post({ kind: 'catalog', generation: request.generation, catalog: currentAgentModelCatalog() });
       return;
     }
     if (request.method === 'reconnect') {

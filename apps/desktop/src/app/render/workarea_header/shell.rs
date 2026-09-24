@@ -6,7 +6,6 @@ use gpui::IntoElement;
 use gpui::MouseButton;
 use gpui::MouseDownEvent;
 use gpui::ParentElement as _;
-use gpui::StatefulInteractiveElement as _;
 use gpui::Styled as _;
 use gpui::Window;
 use gpui::div;
@@ -20,27 +19,6 @@ use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::render::window_drag_region::window_drag_region;
 use crate::*;
-
-/*
-CDXC:Titlebar 2026-08-23:
-GPUI paints the whole header itself, so AppKit's own titlebar view never sees a double click there
-and the standard macOS zoom gesture silently did nothing. Forward it to the platform window, which
-honours the user's NSGlobalDomain AppleActionOnDoubleClick preference (Maximize/Fill/Minimize/
-Do Nothing). Linux compositors leave the same gesture to the client, so zoom directly there;
-Windows already resolves it from the WindowControlArea::Drag hit test in the platform layer.
-*/
-#[cfg(target_os = "macos")]
-fn gpui_header_double_click_window_action(window: &Window) {
-    window.titlebar_double_click();
-}
-
-#[cfg(target_os = "linux")]
-fn gpui_header_double_click_window_action(window: &Window) {
-    window.zoom_window();
-}
-
-#[cfg(target_os = "windows")]
-fn gpui_header_double_click_window_action(_window: &Window) {}
 
 impl GhostexGpuiApp {
     /// True while the header's own half of the band is too narrow for its labels, which is what the
@@ -123,14 +101,68 @@ impl GhostexGpuiApp {
             });
 
         let header = window_drag_region(header);
+        // Diagnostics only (`log_window_drag`): every left press inside the header's rectangle as
+        // the window saw it, before any element handles it. A press logged here with no
+        // `gpui.windowDrag.press` after it means something above the header took it; no line at all
+        // means it never reached this window.
+        let split_panes = self.agents_workspace.rendered_leaf_order().len();
+        let header = header.relative().child(
+            gpui::canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    // The first held-button move the window gets inside the header per press, and
+                    // the release, both before any element handles them.
+                    window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, _, _| {
+                        if phase == gpui::DispatchPhase::Capture
+                            && event.pressed_button == Some(MouseButton::Left)
+                            && bounds.contains(&event.position)
+                            && !HEADER_DRAG_SEEN.swap(true, std::sync::atomic::Ordering::Relaxed)
+                        {
+                            crate::app::render::window_drag_region::log_window_drag(
+                                "headerDragSeen",
+                                event.position,
+                                serde_json::json!({}),
+                            );
+                        }
+                    });
+                    window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, _, _| {
+                        if phase == gpui::DispatchPhase::Capture
+                            && event.button == MouseButton::Left
+                            && bounds.contains(&event.position)
+                        {
+                            crate::app::render::window_drag_region::log_window_drag(
+                                "headerReleaseSeen",
+                                event.position,
+                                serde_json::json!({ "clickCount": event.click_count }),
+                            );
+                        }
+                    });
+                    window.on_mouse_event(move |event: &MouseDownEvent, phase, _, _| {
+                        if phase == gpui::DispatchPhase::Capture {
+                            HEADER_DRAG_SEEN.store(false, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        if phase == gpui::DispatchPhase::Capture
+                            && event.button == MouseButton::Left
+                            && bounds.contains(&event.position)
+                        {
+                            crate::app::render::window_drag_region::log_window_drag(
+                                "headerPressSeen",
+                                event.position,
+                                serde_json::json!({
+                                    "panes": split_panes,
+                                    "clickCount": event.click_count,
+                                    "firstMouse": event.first_mouse,
+                                }),
+                            );
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .inset_0(),
+        );
 
         header
-            .on_click(|event, window, _cx| {
-                if event.click_count() != 2 {
-                    return;
-                }
-                gpui_header_double_click_window_action(window);
-            })
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -167,3 +199,6 @@ impl GhostexGpuiApp {
             )
     }
 }
+
+/// Diagnostics only: whether this press's first held-button move over the header was logged.
+static HEADER_DRAG_SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

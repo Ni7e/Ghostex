@@ -44,14 +44,24 @@ impl Render for FloatingRevealWindow {
             else {
                 return div().into_any_element();
             };
-            // The window itself is what slides: it is resized from nothing to its full width while
-            // the panels stay pinned to its right edge, so the page enters without reflowing once.
-            let offset = window.bounds().size.width.as_f32() - width;
+            // The panels are laid out at the window's full width and pinned to its right edge. While
+            // AppKit slides the window the view's size is held (`ghostexSetContentSizeHeld:`), so
+            // the viewport, unlike the window's live bounds, keeps the full width and nothing
+            // reflows.
+            let offset = window.viewport_size().width.as_f32() - width;
             let sidebar_width = app.sidebar_width;
+            sync_overlay_window_glass(
+                window,
+                app.main_window_bounds.origin - app.floating_reveal_frame(width).origin,
+            );
+            /*
+            CDXC:Sidebar 2026-09-23 DECISION:
+            User: "the sidebar/chat in this case when they're floating should also have the same glass look they had before", then "make the floating sessions area keep the glass look that it should have from before pls". Under window glass the panel's backdrop is the main window's glass picture rather than a blur of the main window (`sync_overlay_window_glass`), and it paints the same tints the docked panels do: the sidebar its own tint (as does the rail beside it) and the sessions column the workspace column's tint, each straight over that picture, with the sessions column clearing its own fills as it does docked (`window_glass_active_for` counts this window). The opaque window keeps its solid fill.
+            */
             div()
                 .size_full()
                 .overflow_hidden()
-                .bg(workspace_background_color())
+                .bg(window_shell_background())
                 .on_action(cx.listener(
                     |app,
                      action: &crate::app::native_sidebar::actions::NativeSidebarAction,
@@ -85,10 +95,19 @@ impl Render for FloatingRevealWindow {
                                 // Painted chrome only: no id and no listener, so GPUI gives it no
                                 // hitbox and the panel is not a place to resize the split.
                                 div()
+                                    .relative()
                                     .w(px(FLOATING_REVEAL_RAIL_WIDTH))
                                     .flex_shrink_0()
                                     .h_full()
-                                    .bg(sidebar_divider_background_color()),
+                                    .when(window_glass_active(), |this| {
+                                        this.bg(sidebar_glass_tint())
+                                    })
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .inset_0()
+                                            .bg(glass_divider(sidebar_divider_background_color())),
+                                    ),
                             )
                         })
                         .when(content.agents_column, |this| {
@@ -100,6 +119,9 @@ impl Render for FloatingRevealWindow {
                                     .h_full()
                                     .min_w_0()
                                     .overflow_hidden()
+                                    .when(window_glass_active(), |this| {
+                                        this.bg(workspace_column_background())
+                                    })
                                     .child(app.render_agents_workspace(
                                         AgentsWorkspaceLayout::Floating,
                                         window,
@@ -167,6 +189,8 @@ impl GhostexGpuiApp {
         window: &Window,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        #[cfg(target_os = "macos")]
+        self.sync_floating_reveal_native_edge();
         if !self.floating_reveal_eligible() {
             self.close_floating_reveal(cx);
             return false;
@@ -312,12 +336,17 @@ impl GhostexGpuiApp {
                 (
                     gpui::WindowOptions {
                         window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
-                        display_id: this.main_window_display_id,
+                        display_id: crate::app::window::popup_frame::display_at(
+                            bounds.center(),
+                            cx,
+                        )
+                        .or(this.main_window_display_id),
                         focus: false,
                         // The AppKit host orders the panel in once it is a child window; elsewhere
                         // the popup is shown by the platform when it is created.
                         show: !cfg!(target_os = "macos"),
                         kind: gpui::WindowKind::PopUp,
+                        window_background: window_glass_background_appearance(),
                         is_movable: false,
                         is_resizable: false,
                         is_minimizable: false,
@@ -369,6 +398,7 @@ impl GhostexGpuiApp {
                 .ok()
                 .and_then(Result::ok);
             let anchor = app.read(cx).floating_reveal_frame(width).origin;
+            set_floating_reveal_glass_window(Some(handle.into()));
             app.update(cx, |app, cx| {
                 if !app.attach_floating_reveal_panel(
                     handle,
@@ -470,6 +500,7 @@ impl GhostexGpuiApp {
             return;
         };
         let hosted_agents_column = panel.content.agents_column;
+        set_floating_reveal_glass_window(None);
         self.dispose_floating_reveal_host(&panel);
         let _ = panel
             .window

@@ -145,8 +145,8 @@ import {
 } from "./session-chat-context-details";
 import { SessionChatContextDetailsDialog } from "./session-chat-context-details-dialog";
 import {
+  contextDetailsAgentFor,
   resolveContextDetailStatus,
-  type ContextDetailsAgent,
 } from "./session-chat-context-details-agents";
 import { SessionChatStatusLine } from "./session-chat-status-line";
 import { sessionChatOptionCommandNames } from "./session-chat-session-options";
@@ -1466,8 +1466,8 @@ export function SessionChatView({
       : chat.prompt;
   const [sessionOptionSwitching, setSessionOptionSwitching] = useState(false);
   const [contextDetailsOpen, setContextDetailsOpen] = useState(false);
-  const contextDetailsAgent: ContextDetailsAgent =
-    accountProvider === "codex" ? "codex" : "claude";
+  const contextDetailsAgent =
+    contextDetailsAgentFor(accountProvider) ?? "claude";
   const contextDetailsPreferences =
     useSessionChatContextDetailsPreferences(contextDetailsAgent);
   const contextDetailsNow = useSessionChatContextDetailsClock();
@@ -2565,6 +2565,7 @@ export function SessionChatView({
                                 chat.view.kind === "starting"
                               }
                               items={starredContextDetails}
+                              onEdit={() => setContextDetailsOpen(true)}
                             />
                           </div>
                           <SessionChatContextDetailsDialog

@@ -75,7 +75,7 @@ pub fn settle(
                 state.menus.model_catalog_generation =
                     state.menus.model_catalog_generation.wrapping_add(1);
             }
-            for agent in [ContextDetailsAgent::Claude, ContextDetailsAgent::Codex] {
+            for agent in ContextDetailsAgent::ALL {
                 let value = read.context_preferences.get(agent.as_str());
                 *state.pickers.context.preferences.get_mut(agent) =
                     crate::menus::context::preferences::normalize_preferences(value, agent);
@@ -108,7 +108,7 @@ pub fn settle(
                 state.pickers.model_favorites = parse_model_favorites(value.as_deref());
                 state.pickers.model_favorites_loaded = true;
             }
-            for agent in [ContextDetailsAgent::Claude, ContextDetailsAgent::Codex] {
+            for agent in ContextDetailsAgent::ALL {
                 if *key == context_preferences_key(agent) {
                     *state.pickers.context.preferences.get_mut(agent) =
                         parse_preferences(value.as_deref(), agent);
@@ -449,7 +449,7 @@ fn bundled_agent_model_catalog() -> Option<crate::menus::catalog::AgentModelCata
 /// The half of the composer boot read that is family e2's: the context preferences for both
 /// agents, and the model-selection outbox records for this session's keys.
 pub fn adopt_boot_read(state: &mut ChatState, read: &crate::event::ComposerBootRead) {
-    for agent in [ContextDetailsAgent::Claude, ContextDetailsAgent::Codex] {
+    for agent in ContextDetailsAgent::ALL {
         let stored = read.context_preferences.get(agent.as_str());
         if stored.is_some() {
             *state.pickers.context.preferences.get_mut(agent) =

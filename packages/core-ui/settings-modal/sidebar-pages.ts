@@ -14,6 +14,7 @@ import {
   IconFolderOpen,
   IconInfoCircle,
   IconKeyboard,
+  IconPalette,
   IconPlayerPlay,
   IconPuzzle,
   IconSettings,
@@ -42,6 +43,7 @@ export function createSettingsSidebarPages({
   activeTab,
   extraSettingsTabSearches,
   hasVisibleMainSettings,
+  hasVisibleThemeSettings,
   isSettingsSearching,
   scrollHotkeySettingsSectionIntoView,
   scrollMainSettingsSectionIntoView,
@@ -60,6 +62,7 @@ export function createSettingsSidebarPages({
   activeTab: SettingsModalTab;
   extraSettingsTabSearches: ExtraSettingsTabSearches;
   hasVisibleMainSettings: boolean;
+  hasVisibleThemeSettings: boolean;
   isSettingsSearching: boolean;
   scrollHotkeySettingsSectionIntoView: (sectionId: HotkeySettingsSectionId) => void;
   scrollMainSettingsSectionIntoView: (sectionId: MainSettingsScrollTargetId) => void;
@@ -89,6 +92,9 @@ export function createSettingsSidebarPages({
     }
     if (pageId === 'settings') {
       return hasVisibleMainSettings || getSettingsSectionSearch(settingsSearchQuery, 'General', []).sectionMatches;
+    }
+    if (pageId === 'theme') {
+      return hasVisibleThemeSettings;
     }
     if (pageId === 'hotkeys') {
       return visibleHotkeySections.length > 0;
@@ -136,6 +142,7 @@ export function createSettingsSidebarPages({
       })),
       title: 'General',
     },
+    { icon: IconPalette, id: 'theme', title: 'Theme' },
     { icon: IconCodeDots, id: 'agents', title: 'Agents' },
     { icon: IconUsers, id: 'accounts', title: 'Accounts' },
     { icon: IconTools, id: 'integrations', title: 'Integrations' },

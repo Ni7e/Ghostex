@@ -271,6 +271,15 @@ pub(super) fn log_resize_diagnostic(
 ) {
 }
 
+/// A panel slide only needs the page out of sight for its few frames; it comes back without a fade.
+pub(super) fn set_native_view_motion_hidden(
+    native_view: *mut c_void,
+    hidden: bool,
+    _fade_in_seconds: f64,
+) {
+    set_native_view_visible(native_view, !hidden);
+}
+
 pub(super) fn set_native_view_visible(native_view: *mut c_void, visible: bool) {
     let hwnd: HWND = native_view.cast();
     if hwnd.is_null() {

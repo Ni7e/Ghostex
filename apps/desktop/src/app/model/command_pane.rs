@@ -500,6 +500,16 @@ impl CommandPaneModel {
         self.insert_created_tab_for_untargeted_creation(tab, session_id);
     }
 
+    /// CDXC:CommandPane 2026-09-23 DECISION:
+    /// User: the bottom command pane and the side panel's Terminal view are separate, so the collapsed bottom strip's + adds to the bottom pane: its focused group when that is docked at the bottom, else its first group. Untargeted, the strip used the last focused group, which could be the side panel's.
+    pub(crate) fn bottom_dock_target_group(&self) -> Option<CommandPaneGroupId> {
+        if command_node_contains_group(&self.root, self.focused_group) {
+            Some(self.focused_group)
+        } else {
+            first_command_leaf_id(&self.root)
+        }
+    }
+
     pub(crate) fn live_group_for_untargeted_creation(&self) -> Option<CommandPaneGroupId> {
         /*
         CDXC:CommandPane 2026-06-26-04:29:

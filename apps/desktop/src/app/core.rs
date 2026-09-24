@@ -554,6 +554,8 @@ pub struct GhostexGpuiApp {
     pub(crate) sidebar_primary_agent_launcher_id: Option<String>,
     /// The open native GPUI app modal, if any; see app/native_app_modal_lifecycle.rs.
     pub(crate) native_app_modal: Option<NativeAppModal>,
+    /// The native Automate view, created the first time the view panel shows Automate; see app/native_automate/.
+    pub(crate) native_automate: Option<Entity<crate::app::native_automate::NativeAutomateView>>,
     pub(crate) new_thread_picker_window: Option<WindowHandle<Root>>,
     pub(crate) new_thread_picker: Option<Entity<GpuiNewThreadPickerWindow>>,
     pub(crate) new_thread_picker_visible: bool,
@@ -965,7 +967,10 @@ pub struct GhostexGpuiApp {
     pub(crate) agent_hook_status_request_in_flight: bool,
     pub(crate) sidebar: Option<Entity<crate::app::native_service::NativeService>>,
     pub(crate) native_sidebar: crate::app::native_sidebar::state::NativeSidebarState,
+    /// The native Kanban board's state; see app/native_kanban/.
+    pub(crate) native_kanban: crate::app::native_kanban::state::NativeKanbanState,
     pub(crate) floating_reveal: crate::app::floating_reveal::model::FloatingRevealState,
+    pub(crate) panel_motion: crate::app::panel_motion::PanelMotions,
     pub(crate) gx_store: crate::app::gx_store::GxStoreHost,
     pub(crate) browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
     pub(crate) browser_address_inputs: HashMap<BrowserPaneId, Entity<InputState>>,

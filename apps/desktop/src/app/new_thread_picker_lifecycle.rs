@@ -269,9 +269,17 @@ impl GhostexGpuiApp {
             show: visible,
             is_resizable: false,
             is_minimizable: false,
-            display_id: self.main_window_display_id,
+            display_id: crate::app::window::popup_frame::display_at(
+                self.main_window_bounds.center(),
+                cx,
+            )
+            .or(self.main_window_display_id),
             titlebar: None,
-            window_background: gpui::WindowBackgroundAppearance::Transparent,
+            window_background: if window_glass_active() {
+                gpui::WindowBackgroundAppearance::Blurred
+            } else {
+                gpui::WindowBackgroundAppearance::Transparent
+            },
             ..Default::default()
         };
         let host = self.native_app_modal_host(cx, Self::handle_new_thread_picker_command);
@@ -286,11 +294,16 @@ impl GhostexGpuiApp {
                 } else {
                     ""
                 });
+                window.set_background_corner_radius(px(10.0));
                 crate::app::window::popup_frame::strip_gpui_popup_window_frame(window);
                 if visible {
                     window.activate_window();
                 }
-                let picker = cx.new(|cx| GpuiNewThreadPickerWindow::new(config, host, window, cx));
+                let picker = cx.new(|cx| {
+                    let mut picker = GpuiNewThreadPickerWindow::new(config, host, window, cx);
+                    picker.glass = window_glass_active();
+                    picker
+                });
                 *picker_out.borrow_mut() = Some(picker.clone());
                 let shell = cx.new(|_cx| GpuiNewThreadPickerShell { picker, main_app });
                 /*

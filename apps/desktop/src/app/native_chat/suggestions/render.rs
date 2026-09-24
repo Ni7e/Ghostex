@@ -17,7 +17,11 @@ impl Render for SuggestionPanel {
             .windowed
             .then(|| self.chat.read(cx).suggestions.card_in_window())
             .flatten();
-        let p = ChatAppearance::current(&state);
+        // Under window glass the child window blurs what is behind it (window.rs), so the card and
+        // its rows take the frosted treatment; the maximized composer's inline panel stays opaque.
+        let glass =
+            self.windowed && crate::app::helpers::window_glass_active_for(Some(self.source));
+        let p = ChatAppearance::current(&state).on_window_glass(glass);
         let s = p.scale;
         let spec = &*SPEC;
         let data = &state["suggestions"];
@@ -29,10 +33,30 @@ impl Render for SuggestionPanel {
                 .scroll_to_item(selected + 1 + usize::from(data["status"].is_string()));
         }
         let files = data["kind"] == "file";
-        // React's `bg-popover` and `bg-accent` in the chat's two themes.
-        let popover = p.menu_surface();
-        let highlight = rgb(if p.light { 0xf4f4f5 } else { 0x333333 });
-        let outline = row_outline(&state);
+        /*
+        CDXC:SessionChat 2026-09-23 DECISION:
+        User: the `$`, `@` and `/` list "looks out of place" above the frosted composer ("can we make this look more fitting please?"): a heavy near-black card whose rows each carried their own outline, so the list read as separate black blocks with thick seams. Under window glass the card is the chat's frosted menu surface in a blurred window, its edge the composer's soft ink border, and the rows are one continuous list: no per-row outline, and the selected row is a wash of the menu's ink. Row corners still follow the 2026-09-19 rule (only the list's outer corners round). The opaque card keeps React's `bg-popover`, `bg-accent` and the legacy row outline.
+        */
+        let popover = if glass {
+            p.menu_surface()
+        } else {
+            p.menu_opaque()
+        };
+        let highlight: Hsla = if glass {
+            Hsla::from(rgb(if p.light { 0x000000 } else { 0xffffff })).opacity(if p.light {
+                0.06
+            } else {
+                0.08
+            })
+        } else {
+            rgb(if p.light { 0xf4f4f5 } else { 0x333333 }).into()
+        };
+        let outline = if glass {
+            gpui::transparent_black()
+        } else {
+            row_outline(&state)
+        };
+        let card_border = if glass { p.border } else { p.input_border };
         let inline = px(spec.padding_inline_px * s);
         let gap = px(spec.row_gap_px * s);
         let row_radius = px(spec.row_radius_px * s);
@@ -110,7 +134,7 @@ impl Render for SuggestionPanel {
                                 .font_weight(gpui::FontWeight::MEDIUM)
                                 .hover(|button| {
                                     button.bg(if p.light {
-                                        Hsla::from(highlight)
+                                        highlight
                                     } else {
                                         Hsla::from(rgb(0xffffff)).opacity(0.024)
                                     })
@@ -198,7 +222,7 @@ impl Render for SuggestionPanel {
         let card = div()
             .rounded(px(spec.radius_px * s))
             .border(px(spec.border_px))
-            .border_color(p.input_border)
+            .border_color(card_border)
             .bg(popover)
             .text_color(p.foreground)
             .font_family(p.font)

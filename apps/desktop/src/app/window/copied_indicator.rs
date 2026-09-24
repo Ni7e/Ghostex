@@ -119,6 +119,7 @@ pub(crate) fn show_copied_indicator(cx: &mut App) {
         let result = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, size))),
+                display_id: crate::app::window::popup_frame::display_at(pointer, cx),
                 titlebar: None,
                 focus: false,
                 show: true,

@@ -51,18 +51,13 @@ import {
   DEFAULT_ghostex_SETTINGS,
   MAX_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
   MAX_SESSION_CHAT_ZOOM_PERCENT,
-  MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
-  MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
   MAX_TERMINAL_PANE_PADDING_PX,
   MAX_TERMINAL_VIEW_WIDTH_PERCENT,
   MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS,
   GHOSTTY_COPY_ON_SELECT_OPTIONS,
   GHOSTTY_SCROLLBAR_OPTIONS,
-  getGhosttyThemeSettingOptions,
   KEEP_AWAKE_DURATION_OPTIONS,
-  MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
-  MIN_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT,
   MIN_TERMINAL_PANE_PADDING_PX,
   MIN_TERMINAL_VIEW_WIDTH_PERCENT,
   MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
@@ -71,15 +66,10 @@ import {
   MIN_SESSION_CHAT_ZOOM_PERCENT,
   PROMPT_EDITOR_BACKEND_OPTIONS,
   type PromptEditorBackend,
-  SIDEBAR_THEME_SETTING_OPTIONS,
-  SESSION_CHAT_THEME_OPTIONS,
-  DARK_THEME_PRESET_OPTIONS,
-  LIGHT_THEME_PRESET_OPTIONS,
   SIDEBAR_SPACE_SWITCH_BEHAVIOR_OPTIONS,
   SIDEBAR_VISIBILITY_MEMORY_OPTIONS,
   WEB_LINK_OPEN_TARGET_OPTIONS,
   COMMANDS_PANEL_SIDE_OPTIONS,
-  WINDOW_GLASS_OPTIONS,
   COMMANDS_PANEL_AUTO_MINIMIZE_DELAY_OPTIONS,
   MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
   MAX_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS,
@@ -103,7 +93,6 @@ import {
   type KeepAwakeDurationMinutes,
   type SettingsModalNavigationState,
   type CommandsPanelSide,
-  type WindowGlassMode,
   type SidebarSpaceSwitchBehavior,
   type SidebarVisibilityMemory,
   type TerminalBackgroundImageFit,
@@ -128,9 +117,9 @@ import { useSidebarStore } from './sidebar-store';
 import { type WebviewApi } from './webview-api';
 import {
   ActionButtonPairField,
-  AppIconPickerField,
   ColorField,
   PetPickerField,
+  PanelAnimationSpeedField,
   PreferredAgentInterfaceField,
   SelectField,
   SettingButton,
@@ -150,7 +139,6 @@ import {
   TerminalViewWidthModeField,
   TextField,
   ToggleField,
-  WebColorPickerField,
 } from './settings-modal/fields';
 import {
   getRememberedSettingsModalScrollTop,
@@ -173,6 +161,7 @@ import { OpenTargetsSettingsTab } from './settings-modal/tabs/open-targets';
 import { OSIntegrationSettingsTab } from './settings-modal/tabs/os-integration';
 import { ProjectsSettingsPanel } from './settings-modal/tabs/projects';
 import { RemoteSettingsTab } from './settings-modal/tabs/remote';
+import { ThemeSettingsTab } from './settings-modal/tabs/theme';
 import { type RemoteSetupRpc } from './remote-setup-modal/gxserver-rpc';
 import {
   HotkeySettingsSectionId,
@@ -201,6 +190,9 @@ import { useAppIconSettings } from './settings-modal/use-app-icon-settings';
 import { createSettingsActions, type GhosttySettingsAction } from './settings-modal/settings-actions';
 import { getActiveSettingsModalScrollViewport } from './settings-modal/scroll-targets';
 
+/** The colour Terminal background starts from when Follow theme is turned off. */
+const TERMINAL_BACKGROUND_STARTING_COLOR = '#111111';
+
 export type { SettingsModalTab } from './settings-modal-tabs';
 /**
  * CDXC:RemotePairing 2026-09-03:
@@ -212,8 +204,6 @@ export {
   gpuiBootstrapRemoteSetupRpc as gpuiBootstrapTailcatRpc,
   type RemoteSetupRpc as TailcatSettingsRpc,
 } from './remote-setup-modal/gxserver-rpc';
-
-const GHOSTTY_THEME_UNMANAGED_VALUE = '__ghostex_ghostty_theme_unmanaged__';
 
 export type MainSettingsInitialSectionId = MainSettingsScrollTargetId;
 
@@ -458,7 +448,7 @@ export function SettingsModal({
    */
   const showAdvancedSettings = draft.showAdvancedSettings;
   const [settingsSearchQuery, setSettingsSearchQuery] = useState('');
-  const [activeMainSettingsSectionId, setActiveMainSettingsSectionId] = useState<MainSettingsScrollTargetId>('theming');
+  const [activeMainSettingsSectionId, setActiveMainSettingsSectionId] = useState<MainSettingsScrollTargetId>('sidebar');
   const [activeHotkeySettingsSectionId, setActiveHotkeySettingsSectionId] =
     useState<HotkeySettingsSectionId>('general');
   const [expandedSettingsSidebarPages, setExpandedSettingsSidebarPages] = useState<
@@ -863,6 +853,9 @@ export function SettingsModal({
     isFirstLaunchSetup,
     settingsSearchQuery,
   });
+  const hasVisibleThemeSettings =
+    mainSubsectionVisible('theming', settingsSearch.theming) ||
+    mainSubsectionVisible('appIcon', settingsSearch.appIcon);
   const { settingsSearchMatchingPages, settingsSidebarPages } = createSettingsSidebarPages({
     activeHotkeySettingsSectionId,
     activeMainSettingsGroupId,
@@ -870,6 +863,7 @@ export function SettingsModal({
     activeTab,
     extraSettingsTabSearches,
     hasVisibleMainSettings,
+    hasVisibleThemeSettings,
     isSettingsSearching,
     scrollHotkeySettingsSectionIntoView,
     scrollMainSettingsSectionIntoView,
@@ -946,19 +940,24 @@ export function SettingsModal({
     rememberActiveScrollPosition,
     setDraft,
   });
-  const { chooseAppIconFile, chooseTerminalBackgroundImageFile, nativeFilePickerAvailable, selectAppIcon } =
-    useAppIconSettings({
-      appIconPickerUnavailable,
-      appIconState,
-      draft,
-      handledAppIconStateRef,
-      isOpen,
-      pendingAppIconSourceIdRef,
-      pendingSettingsRef,
-      setAppIconError,
-      updateDraft,
-      vscode,
-    });
+  const {
+    chooseAppIconFile,
+    chooseTerminalBackgroundImageFile,
+    chooseWindowGlassImageFile,
+    nativeFilePickerAvailable,
+    selectAppIcon,
+  } = useAppIconSettings({
+    appIconPickerUnavailable,
+    appIconState,
+    draft,
+    handledAppIconStateRef,
+    isOpen,
+    pendingAppIconSourceIdRef,
+    pendingSettingsRef,
+    setAppIconError,
+    updateDraft,
+    vscode,
+  });
   const {
     activeSidebarSettingsPresetId,
     applyRecommendedGhosttySettings,
@@ -1150,266 +1149,6 @@ export function SettingsModal({
                          * jump across unrelated content and breaks the visible
                          * hierarchy promised by the navigation.
                          */}
-                        {mainSubsectionVisible('theming', settingsSearch.theming) ? (
-                          <SettingsSection
-                            description='Choose the app appearance and a preset for each of its light and dark themes. Chat and terminal follow it unless you set an override below.'
-                            sectionRef={themingSectionRef}
-                            title='Theme'
-                          >
-                            {/*
-                  CDXC:Theming 2026-06-16-01:35:
-                  Theming remains a distinct section on the General settings
-                  page so theme-related controls scan separately from Sidebar
-                  layout controls.
-
-                  CDXC:Theming 2026-06-15-13:22:
-                  Users should only pick the sidebar/titlebar background. The
-                  foreground is derived automatically from that background so
-                  light and dark custom colors keep readable chrome.
-
-                  CDXC:Theming 2026-06-15-13:45:
-                  Replace the freeform background color picker with a constrained
-                  contrast slider. The slider outputs calibrated dark
-                  backgrounds so sidebar row states remain predictable.
-
-                  CDXC:Theming 2026-06-15-15:01:
-                  Limit the contrast slider to 85-100 because lower values made
-                  custom sidebar chrome too gray.
-
-                  CDXC:Theming 2026-06-15-15:15:
-                  Call the user-facing control Contrast while keeping the stored
-                  background darkness key stable for existing settings and native
-                  startup compatibility.
-
-                  CDXC:Theming 2026-06-15-15:28:
-                  Add Background Tint as a web-only color picker. Do not use
-                  input[type=color], because macOS replaces that with a native
-                  color panel instead of the in-app picker requested here.
-                */}
-                            {mainSettingVisible(settingsSearch.theming, 'sidebarTheme') ? (
-                              <SelectField
-                                label='App theme'
-                                description='Choose Light, Dark, or System to follow your computer’s appearance.'
-                                {...getSettingModificationProps('sidebarTheme')}
-                                onChange={(value) =>
-                                  updateDraft('sidebarTheme', value as ghostexSettings['sidebarTheme'])
-                                }
-                                options={SIDEBAR_THEME_SETTING_OPTIONS}
-                                value={draft.sidebarTheme}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'darkThemePreset') ? (
-                              <SelectField
-                                description='Preset dark chrome for the sidebar and window, or Custom to tune its contrast and tint.'
-                                label='Dark theme'
-                                {...getSettingModificationProps('darkThemePreset')}
-                                onChange={(value) =>
-                                  updateDraft('darkThemePreset', value as ghostexSettings['darkThemePreset'])
-                                }
-                                options={DARK_THEME_PRESET_OPTIONS}
-                                value={draft.darkThemePreset}
-                              />
-                            ) : null}
-                            {draft.darkThemePreset === 'custom' &&
-                            mainSettingVisible(
-                              settingsSearch.theming,
-                              'customSidebarTitlebarBackgroundDarknessPercent'
-                            ) ? (
-                              <SliderNumberField
-                                dependent
-                                description='85 is softer gray; 100 is black. Text and icons adjust automatically.'
-                                label='Dark theme background contrast'
-                                {...getSettingModificationProps('customSidebarTitlebarBackgroundDarknessPercent')}
-                                max={MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
-                                min={MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
-                                onCommit={(value) =>
-                                  updateDraft('customSidebarTitlebarBackgroundDarknessPercent', value)
-                                }
-                                onChange={(value) =>
-                                  updateDraftDebounced('customSidebarTitlebarBackgroundDarknessPercent', value)
-                                }
-                                step={1}
-                                value={draft.customSidebarTitlebarBackgroundDarknessPercent}
-                              />
-                            ) : null}
-                            {draft.darkThemePreset === 'custom' &&
-                            mainSettingVisible(settingsSearch.theming, 'customSidebarTitlebarBackgroundTintColor') ? (
-                              <WebColorPickerField
-                                dependent
-                                description='Applies a subtle hue to the dark sidebar and window chrome background.'
-                                label='Dark theme background tint'
-                                {...getSettingModificationProps('customSidebarTitlebarBackgroundTintColor')}
-                                onChange={(value) =>
-                                  updateDraftDebounced('customSidebarTitlebarBackgroundTintColor', value)
-                                }
-                                onCommit={(value) => updateDraft('customSidebarTitlebarBackgroundTintColor', value)}
-                                value={draft.customSidebarTitlebarBackgroundTintColor}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'lightThemePreset') ? (
-                              <SelectField
-                                description='Preset light chrome for the sidebar and window, or Custom to tune its contrast and tint.'
-                                label='Light theme'
-                                {...getSettingModificationProps('lightThemePreset')}
-                                onChange={(value) =>
-                                  updateDraft('lightThemePreset', value as ghostexSettings['lightThemePreset'])
-                                }
-                                options={LIGHT_THEME_PRESET_OPTIONS}
-                                value={draft.lightThemePreset}
-                              />
-                            ) : null}
-                            {draft.lightThemePreset === 'custom' &&
-                            mainSettingVisible(
-                              settingsSearch.theming,
-                              'customSidebarTitlebarLightBackgroundLightnessPercent'
-                            ) ? (
-                              <SliderNumberField
-                                dependent
-                                description='60 is a deeper gray; 100 is white. Text and icons adjust automatically.'
-                                label='Light theme background contrast'
-                                {...getSettingModificationProps('customSidebarTitlebarLightBackgroundLightnessPercent')}
-                                max={MAX_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT}
-                                min={MIN_CUSTOM_SIDEBAR_TITLEBAR_LIGHT_BACKGROUND_LIGHTNESS_PERCENT}
-                                onCommit={(value) =>
-                                  updateDraft('customSidebarTitlebarLightBackgroundLightnessPercent', value)
-                                }
-                                onChange={(value) =>
-                                  updateDraftDebounced('customSidebarTitlebarLightBackgroundLightnessPercent', value)
-                                }
-                                step={1}
-                                value={draft.customSidebarTitlebarLightBackgroundLightnessPercent}
-                              />
-                            ) : null}
-                            {draft.lightThemePreset === 'custom' &&
-                            mainSettingVisible(
-                              settingsSearch.theming,
-                              'customSidebarTitlebarLightBackgroundTintColor'
-                            ) ? (
-                              <WebColorPickerField
-                                dependent
-                                description='Applies a subtle hue to the light sidebar and window chrome background.'
-                                label='Light theme background tint'
-                                {...getSettingModificationProps('customSidebarTitlebarLightBackgroundTintColor')}
-                                onChange={(value) =>
-                                  updateDraftDebounced('customSidebarTitlebarLightBackgroundTintColor', value)
-                                }
-                                onCommit={(value) =>
-                                  updateDraft('customSidebarTitlebarLightBackgroundTintColor', value)
-                                }
-                                value={draft.customSidebarTitlebarLightBackgroundTintColor}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'sessionChatTheme') ? (
-                              <SelectField
-                                description='Follow the app theme, or choose a separate appearance for chat.'
-                                label='Chat theme'
-                                {...getSettingModificationProps('sessionChatTheme')}
-                                onChange={(value) =>
-                                  updateDraft('sessionChatTheme', value as ghostexSettings['sessionChatTheme'])
-                                }
-                                options={SESSION_CHAT_THEME_OPTIONS}
-                                value={draft.sessionChatTheme}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'terminalColorScheme') ? (
-                              <SelectField
-                                label='Terminal theme'
-                                description='Follow the app theme, or choose a separate appearance for terminals.'
-                                {...getSettingModificationProps('terminalColorScheme')}
-                                onChange={(value) =>
-                                  updateDraft('terminalColorScheme', value as ghostexSettings['terminalColorScheme'])
-                                }
-                                options={SESSION_CHAT_THEME_OPTIONS}
-                                value={draft.terminalColorScheme}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'terminalGhosttyLightTheme') ? (
-                              <SelectField
-                                label='Terminal light palette'
-                                description='Uses your configured Ghostty light theme, or GitHub Light when no theme is configured.'
-                                contentClassName='max-h-80'
-                                {...getSettingModificationProps('terminalGhosttyLightTheme')}
-                                onChange={(value) => updateDraft('terminalGhosttyLightTheme', value)}
-                                options={getGhosttyThemeSettingOptions(draft.terminalGhosttyLightTheme).filter(
-                                  (option) => option.value !== GHOSTTY_THEME_UNMANAGED_VALUE
-                                )}
-                                showScrollButtons={false}
-                                value={draft.terminalGhosttyLightTheme}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'terminalGhosttyTheme') ? (
-                              <SelectField
-                                contentClassName='max-h-80'
-                                description='Uses your configured Ghostty dark theme, or GitHub Dark when no theme is configured.'
-                                label='Terminal dark palette'
-                                {...getSettingModificationProps('terminalGhosttyTheme')}
-                                onChange={(value) =>
-                                  updateDraft(
-                                    'terminalGhosttyTheme',
-                                    value === GHOSTTY_THEME_UNMANAGED_VALUE ? '' : value
-                                  )
-                                }
-                                options={getGhosttyThemeSettingOptions(draft.terminalGhosttyTheme)}
-                                showScrollButtons={false}
-                                value={draft.terminalGhosttyTheme || GHOSTTY_THEME_UNMANAGED_VALUE}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'windowGlass') ? (
-                              <SelectField
-                                description='Let the blurred desktop show through the window. Automatic uses glass in dark mode only.'
-                                label='Window glass'
-                                {...getSettingModificationProps('windowGlass')}
-                                onChange={(value) => updateDraft('windowGlass', value as WindowGlassMode)}
-                                options={WINDOW_GLASS_OPTIONS}
-                                value={draft.windowGlass}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'showActivePaneOutline') ? (
-                              <ToggleField
-                                checked={draft.showActivePaneOutline}
-                                description='Show an outline around the currently focused pane.'
-                                label='Show Active Pane Outline'
-                                {...getSettingModificationProps('showActivePaneOutline')}
-                                onChange={(checked) => updateDraft('showActivePaneOutline', checked)}
-                              />
-                            ) : null}
-                            {draft.showActivePaneOutline &&
-                            mainSettingVisible(settingsSearch.theming, 'workspaceActivePaneBorderColor') ? (
-                              <WebColorPickerField
-                                description='Color of the outline around the currently focused pane.'
-                                dependent
-                                label='Active Pane Border'
-                                {...getSettingModificationProps('workspaceActivePaneBorderColor')}
-                                onChange={(value) => updateDraftDebounced('workspaceActivePaneBorderColor', value)}
-                                onCommit={(value) => updateDraft('workspaceActivePaneBorderColor', value)}
-                                value={draft.workspaceActivePaneBorderColor}
-                              />
-                            ) : null}
-                          </SettingsSection>
-                        ) : null}
-
-                        {/*
-                         * CDXC:Icons 2026-06-28-06:05:
-                         * The advanced App Icon section is a custom-image control, not a bundled preset picker. Show one preview, one Select Image action, and an inline X on the custom preview to restore the default icon; omit separate reset and folder-reveal actions so the flow stays direct.
-                         */}
-                        {mainSubsectionVisible('appIcon', settingsSearch.appIcon) ? (
-                          <SettingsSection
-                            description='Changes the Dock and app-switcher icon. The app file icon may also change when the operating system allows it.'
-                            sectionRef={appIconSectionRef}
-                            title='App Icon'
-                          >
-                            {mainSettingVisible(settingsSearch.appIcon, 'appIconSourceId') ? (
-                              <AppIconPickerField
-                                advanced={isAdvancedMainSetting('appIconSourceId')}
-                                error={appIconError}
-                                onChooseFile={chooseAppIconFile}
-                                onSelect={selectAppIcon}
-                                state={appIconState}
-                              />
-                            ) : null}
-                          </SettingsSection>
-                        ) : null}
-
                         {mainSubsectionVisible('sidebar', settingsSearch.sidebar) ? (
                           <SettingsSection sectionRef={sidebarSectionRef} title='Sidebar'>
                             {/* CDXC:Settings 2026-06-12-07:10: Preset is the first Sidebar setting so users can apply Codex, Minimal, Detailed, or Recommended sidebar UI defaults before tuning individual controlled settings. */}
@@ -1592,6 +1331,15 @@ export function SettingsModal({
                                 onChange={(value) => updateDraftDebounced('sidebarCollapseAnimationDurationMs', value)}
                                 step={SIDEBAR_COLLAPSE_ANIMATION_DURATION_STEP_MS}
                                 value={draft.sidebarCollapseAnimationDurationMs}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.sidebar, 'panelAnimationSpeed') ? (
+                              <PanelAnimationSpeedField
+                                description='How fast the sidebar, the side panel, the Agents Panel and the bottom or right panel slide open and closed. Reduce Motion in your computer settings always turns it off.'
+                                label='Panel Animations'
+                                {...getSettingModificationProps('panelAnimationSpeed')}
+                                onChange={(value) => updateDraft('panelAnimationSpeed', value)}
+                                value={draft.panelAnimationSpeed}
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.sidebar, 'sidebarTooltipDelayMs') ? (
@@ -2156,13 +1904,29 @@ export function SettingsModal({
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.terminal, 'workspaceBackgroundColor') ? (
-                              <ColorField
-                                description='Color shown behind terminal panes.'
-                                label='Terminal Background'
-                                {...getSettingModificationProps('workspaceBackgroundColor')}
-                                onChange={(value) => updateDraft('workspaceBackgroundColor', value)}
-                                value={draft.workspaceBackgroundColor}
-                              />
+                              <>
+                                <ToggleField
+                                  checked={draft.workspaceBackgroundColor === ''}
+                                  description='Only changes the terminal panes. Leave on Follow theme to match your theme.'
+                                  label='Terminal background: Follow theme'
+                                  {...getSettingModificationProps('workspaceBackgroundColor')}
+                                  onChange={(checked) =>
+                                    updateDraft(
+                                      'workspaceBackgroundColor',
+                                      checked ? '' : TERMINAL_BACKGROUND_STARTING_COLOR
+                                    )
+                                  }
+                                />
+                                {draft.workspaceBackgroundColor !== '' ? (
+                                  <ColorField
+                                    dependent
+                                    description='Painted behind terminal text in dark mode. Light mode and window glass keep the theme.'
+                                    label='Terminal background color'
+                                    onChange={(value) => updateDraft('workspaceBackgroundColor', value)}
+                                    value={draft.workspaceBackgroundColor}
+                                  />
+                                ) : null}
+                              </>
                             ) : null}
                             {mainSettingVisible(settingsSearch.terminal, 'terminalBackgroundImage') ? (
                               <TextField
@@ -2960,6 +2724,35 @@ export function SettingsModal({
                     </SettingsNativeScrollArea>
                   </div>
                 </TabsContent>
+                {!isFirstLaunchSetup ? (
+                  <TabsContent className='settings-main-tabs-content mt-0 min-h-0 flex-1 overflow-hidden' value='theme'>
+                    <ThemeSettingsTab
+                      appIconError={appIconError}
+                      appIconSectionRef={appIconSectionRef}
+                      appIconState={appIconState}
+                      chooseAppIconFile={chooseAppIconFile}
+                      chooseWindowGlassImageFile={chooseWindowGlassImageFile}
+                      draft={draft}
+                      getSettingModificationProps={getSettingModificationProps}
+                      nativeFilePickerAvailable={nativeFilePickerAvailable}
+                      onOpenRelatedSetting={(query) => {
+                        setSettingsSearchQuery(query);
+                        setActiveTab('settings');
+                      }}
+                      rowVisible={(result, settingKey) =>
+                        result.isSearching ? mainSettingVisible(result, settingKey) : true
+                      }
+                      searchEmptyState={settingsSearchEmptyState}
+                      searchResults={{ appIcon: settingsSearch.appIcon, theming: settingsSearch.theming }}
+                      selectAppIcon={selectAppIcon}
+                      showAppIcon={!appIconPickerUnavailable}
+                      themingSectionRef={themingSectionRef}
+                      updateDraft={updateDraft}
+                      updateDraftDebounced={updateDraftDebounced}
+                      updateDraftMany={(patch) => applySettingsPatch(patch)}
+                    />
+                  </TabsContent>
+                ) : null}
                 {!isFirstLaunchSetup && showOSIntegrationSettingsTab ? (
                   <TabsContent className='mt-0 min-h-0 flex-1 overflow-hidden' value='osIntegration'>
                     <OSIntegrationSettingsTab

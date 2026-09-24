@@ -11,7 +11,7 @@ pub(crate) struct CefSurface {
     pub(crate) focus_handle: FocusHandle,
     id: String,
     visible: bool,
-    workarea_theme: Option<(bool, u32)>,
+    workarea_theme: Option<(bool, u32, u32, bool)>,
 }
 
 impl CefSurface {
@@ -163,11 +163,15 @@ impl CefSurface {
     pub(crate) fn refresh_workarea_theme(&mut self, light: bool) {
         let chrome = crate::app::consts::GPUI_TITLEBAR_BACKGROUND_RGB
             .load(std::sync::atomic::Ordering::Relaxed) as u32;
-        let content = session_chat_background_for_chrome(chrome);
-        if self.workarea_theme != Some((light, chrome))
-            && self.execute_app_owned_script(&workarea_theme_script(light, chrome, content))
+        let content = crate::app::helpers::work_area_background_for_variant(
+            crate::shared_settings::shared_sidebar_settings_snapshot().object(),
+            light,
+        );
+        let glass = crate::app::helpers::window_glass_active();
+        if self.workarea_theme != Some((light, chrome, content, glass))
+            && self.execute_app_owned_script(&workarea_theme_script(light, chrome, content, glass))
         {
-            self.workarea_theme = Some((light, chrome));
+            self.workarea_theme = Some((light, chrome, content, glass));
             self.background = gpui::rgb(content).into();
         }
     }
@@ -350,6 +354,10 @@ impl CefSurface {
     }
 
     pub(crate) fn set_visible(&mut self, visible: bool) {
+        if visible && !self.visible && crate::app::panel_motion::view_panel_would_slide_open() {
+            self.browser
+                .set_motion_hidden(true, std::time::Duration::ZERO);
+        }
         self.visible = visible;
         self.browser.set_visible(visible);
     }
@@ -419,10 +427,9 @@ impl Render for CefSurface {
                 let view = view.clone();
                 canvas(
                     move |bounds, window, cx| {
-                        let scale_factor = window.scale_factor();
                         view.update(cx, |surface, _| {
                             if surface.visible {
-                                surface.browser.set_bounds(bounds, scale_factor);
+                                place_browser_view(&surface.browser, bounds, window);
                             } else {
                                 surface.browser.set_visible(false);
                             }
@@ -441,6 +448,30 @@ impl Render for CefSurface {
                 window,
                 cx,
             ))
+    }
+}
+
+/// Gives the page's native view its frame. A slide that only pushes the page (app/panel_motion.rs)
+/// resizes it live, the way a divider drag does. While the view panel itself slides, a page whose
+/// frame would change, or which would poke outside the clip GPUI draws it in, keeps its last frame
+/// and goes transparent until the slide settles, because GPUI cannot clip an AppKit child view.
+fn place_browser_view(browser: &CefBrowser, bounds: Bounds<Pixels>, window: &Window) {
+    let scale_factor = window.scale_factor();
+    let hold = crate::app::panel_motion::view_panel_sliding() && {
+        let mask = window.content_mask().bounds;
+        let tolerance = px(0.5);
+        let clipped = bounds.origin.x < mask.origin.x - tolerance
+            || bounds.origin.y < mask.origin.y - tolerance
+            || bounds.right() > mask.right() + tolerance
+            || bounds.bottom() > mask.bottom() + tolerance;
+        clipped || browser.bounds_differ(bounds, scale_factor)
+    };
+    browser.set_motion_hidden(
+        hold,
+        crate::app::panel_motion::panel_content_fade_duration(),
+    );
+    if !hold {
+        browser.set_bounds(bounds, scale_factor);
     }
 }
 
@@ -519,7 +550,7 @@ impl Element for CefElement {
         }
 
         self.browser.set_visible(true);
-        self.browser.set_bounds(bounds, window.scale_factor());
+        place_browser_view(&self.browser, bounds, window);
         #[cfg(target_os = "macos")]
         if self.surface_id != APP_MODAL_HOST_ID
             && let Some(native_view) = self.browser.native_view()

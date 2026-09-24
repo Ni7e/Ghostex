@@ -148,6 +148,9 @@ impl GhostexGpuiApp {
 
     /// The sides of the main workspace area, in any view, that touch a rail owned by something outside
     /// it: the sidebar divider on the left, and the command pane boundary below or to the right when pinned.
+    ///
+    /// CDXC:CommandPane 2026-09-23 WHY:
+    /// The collapsed command strip draws its own top line, so the panes above it count that edge as a rail too. Drawing their bottom border as well stacked two 1px lines into one 2px line above the strip.
     pub(crate) fn main_workspace_outer_rail_edges(&self, window: &Window) -> RailFacingEdges {
         let layout_plan = command_pane_workspace_layout_plan(
             self.command_pane.mode,
@@ -165,7 +168,11 @@ impl GhostexGpuiApp {
                 CommandPaneWorkspaceLayoutPlan::PinnedRight { .. }
             ),
             top: false,
-            bottom: matches!(layout_plan, CommandPaneWorkspaceLayoutPlan::Pinned { .. }),
+            bottom: matches!(
+                layout_plan,
+                CommandPaneWorkspaceLayoutPlan::Pinned { .. }
+                    | CommandPaneWorkspaceLayoutPlan::Collapsed { .. }
+            ),
         }
     }
 

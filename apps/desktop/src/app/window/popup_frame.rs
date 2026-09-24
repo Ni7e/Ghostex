@@ -10,6 +10,20 @@ pub(crate) fn child_window_kind() -> gpui::WindowKind {
     }
 }
 
+/// The display a popup at `point` belongs to, for `WindowOptions::display_id`.
+///
+/// CDXC:PlatformSupport 2026-09-23 WHY:
+/// On Windows a window opened without a display is placed against the primary monitor, and bounds that lie on another monitor fail its on-display check and are replaced by the primary monitor's default spot. With the app on a second monitor, the chat's model, mode and context window menus therefore opened somewhere else, where they looked like they were behind the main window. Every popup names the display its bounds are on.
+pub(crate) fn display_at(
+    point: gpui::Point<gpui::Pixels>,
+    cx: &gpui::App,
+) -> Option<gpui::DisplayId> {
+    cx.displays()
+        .into_iter()
+        .find(|display| display.bounds().contains(&point))
+        .map(|display| display.id())
+}
+
 /// Strips the system frame and shadow from a popup's own window (`GpuiChatDialogWindow.m`).
 /// Only for windows with a transparent background whose content draws its own panel.
 pub(crate) fn strip_gpui_popup_window_frame(window: &mut Window) {

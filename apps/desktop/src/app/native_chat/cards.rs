@@ -1,6 +1,47 @@
 use super::{appearance::ChatAppearance, state::NativeChatView};
 use gpui::prelude::FluentBuilder as _;
-use gpui::{AnyElement, IntoElement, ParentElement as _, Styled as _, div, px};
+use gpui::{
+    AnyElement, Div, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Stateful,
+    Styled as _, div, px,
+};
+
+/// The fill a pressable card, or the pressable header of one, takes under the pointer.
+pub(super) fn card_hover_fill(p: &ChatAppearance) -> Hsla {
+    p.foreground.opacity(0.04)
+}
+
+/// CDXC:SessionChat 2026-09-23 DECISION:
+/// User: "when i hover over this kind of card, you're making the only middle part change color, I want all of it to change color", and the same for "all very similar components in the chat view". A status card's pressable header reaches out to the card's own edges, so its hover lights the whole card while the card is folded to that header, and the card's full width above its body when it is open, never a band inside the padding.
+/// SEE-ALSO: `.ghostex-chat-status-card-header` in packages/core-ui/chat/session-chat-status-card.css, whose 2026-09-16 decision already gives React's collapsible cards this hover and whose spacing this copies.
+///
+/// `has_body` is whether the card shows a body under the header, and `has_actions` whether a footer follows the panel; a header with neither below it is the whole card and rounds every corner.
+pub(super) fn status_card_press_header(
+    header: Stateful<Div>,
+    has_body: bool,
+    has_actions: bool,
+    p: &ChatAppearance,
+) -> Stateful<Div> {
+    let s = p.scale;
+    // The panel's padding, which the header takes back so its fill meets the card's border.
+    let (pad_x, pad_y) = (16.0 * s, 12.0 * s);
+    let radius = px((12.0 * s - 1.0).max(0.0));
+    let hover = card_hover_fill(p);
+    header
+        .mx(px(-pad_x))
+        .mt(px(-pad_y))
+        .px(px(pad_x))
+        .pt(px(pad_y))
+        .when(has_body, |this| this.mb(px(-2.0 * s)).pb(px(6.0 * s)))
+        .when(!has_body, |this| this.mb(px(-pad_y)).pb(px(pad_y)))
+        .map(|this| {
+            if has_body || has_actions {
+                this.rounded_t(radius)
+            } else {
+                this.rounded(radius)
+            }
+        })
+        .hover(move |style| style.bg(hover))
+}
 
 impl NativeChatView {
     pub(crate) fn status_card(

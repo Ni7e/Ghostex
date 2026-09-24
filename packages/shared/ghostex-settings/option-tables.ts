@@ -19,7 +19,10 @@ import {
   type SidebarSpaceSwitchBehavior,
   type SidebarVisibilityMemory,
   type WebLinkOpenTarget,
+  type PanelAnimationSpeed,
   type WindowGlassMode,
+  type WindowGlassSource,
+  type WindowGlassImagePlacement,
 } from './types';
 
 export const WEB_LINK_OPEN_TARGET_OPTIONS: ReadonlyArray<{
@@ -141,9 +144,36 @@ export const WINDOW_GLASS_OPTIONS: ReadonlyArray<{
   label: string;
   value: WindowGlassMode;
 }> = [
-  { label: 'Automatic (glass in dark mode)', value: 'auto' },
-  { label: 'Frosted glass', value: 'frosted' },
-  { label: 'Opaque', value: 'opaque' },
+  { label: 'Glass in dark mode', value: 'auto' },
+  { label: 'Always glass', value: 'frosted' },
+  { label: 'Always opaque', value: 'opaque' },
+];
+
+export const WINDOW_GLASS_SOURCE_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: WindowGlassSource;
+}> = [
+  { label: 'Desktop and windows', value: 'desktopAndWindows' },
+  { label: 'Wallpaper only', value: 'wallpaper' },
+  { label: 'Custom image', value: 'customImage' },
+];
+
+export const WINDOW_GLASS_IMAGE_PLACEMENT_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: WindowGlassImagePlacement;
+}> = [
+  { label: 'Moves with the window', value: 'static' },
+  { label: 'Stays with the desktop', value: 'desktop' },
+];
+
+export const PANEL_ANIMATION_SPEED_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: PanelAnimationSpeed;
+}> = [
+  { label: 'Off', value: 'off' },
+  { label: 'Slow', value: 'slow' },
+  { label: 'Normal', value: 'normal' },
+  { label: 'Fast', value: 'fast' },
 ];
 
 /**

@@ -3295,6 +3295,11 @@ export type SidebarToExtensionMessage =
   | {
       type: 'pickTerminalBackgroundImageFile';
     }
+  /** Settings -> Window glass -> Custom image: same round trip, answered as windowGlassImageFilePicked. */
+  | {
+      appearance: 'dark' | 'light';
+      type: 'pickWindowGlassImageFile';
+    }
   /**
    * CDXC:Onboarding 2026-08-24:
    * The onboarding footer's Add 1st project action opens a native folder dialog

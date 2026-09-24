@@ -37,9 +37,12 @@ export function applyWorkareaTheme(theme: WorkareaTheme, colors?: WorkareaThemeC
   else document.documentElement.style.removeProperty('--app-menu-background');
   if (content) document.documentElement.style.setProperty('--app-background', content);
   else document.documentElement.style.removeProperty('--app-background');
+  if (colors?.glass === true) document.documentElement.dataset.windowGlass = 'true';
+  else delete document.documentElement.dataset.windowGlass;
 }
 
-export type WorkareaThemeColors = { chrome?: string; content?: string };
+/** `glass`: the page is a solid card on the desktop window's glass. */
+export type WorkareaThemeColors = { chrome?: string; content?: string; glass?: boolean };
 
 function normalizeHex(value: unknown): string | undefined {
   return typeof value === 'string' && /^#[0-9a-f]{6}$/iu.test(value) ? value.toLowerCase() : undefined;
@@ -51,12 +54,18 @@ export function getWorkareaTheme(): WorkareaTheme {
 
 export function installWorkareaTheme(): void {
   const target = window as Window & {
-    ghostexGpui?: { workareaTheme?: WorkareaTheme; workareaChrome?: string; workareaContent?: string };
+    ghostexGpui?: {
+      workareaTheme?: WorkareaTheme;
+      workareaChrome?: string;
+      workareaContent?: string;
+      workareaGlass?: boolean;
+    };
   };
   const initial = target.ghostexGpui?.workareaTheme ?? new URLSearchParams(location.search).get('appTheme');
   applyWorkareaTheme(initial === 'light' ? 'light' : 'dark', {
     chrome: target.ghostexGpui?.workareaChrome,
     content: target.ghostexGpui?.workareaContent,
+    glass: target.ghostexGpui?.workareaGlass,
   });
   window.addEventListener(THEME_EVENT, (event) => {
     const detail = (event as CustomEvent<WorkareaTheme | ({ theme: WorkareaTheme } & WorkareaThemeColors)>).detail;

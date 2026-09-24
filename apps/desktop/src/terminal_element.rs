@@ -653,6 +653,9 @@ pub struct TerminalView {
     displayed: bool,
     snapshot_stale: bool,
     last_prepaint: Option<web_time::Instant>,
+    /// While a panel slides: the size this terminal first had in the slide, and whether it has
+    /// changed since (`grid_resize_held`).
+    motion_bounds: Option<(Size<Pixels>, bool)>,
 }
 
 pub(crate) use crate::hotkey_label::terminal_overlay_hotkey_chord_label;
@@ -779,6 +782,7 @@ impl TerminalView {
             displayed: true,
             snapshot_stale: false,
             last_prepaint: None,
+            motion_bounds: None,
         }
     }
 
@@ -2463,7 +2467,26 @@ impl TerminalView {
         let cell_width_px = ((metrics.cell_width.as_f32() * scale).round() as u32).max(1);
         let cell_height_px = ((metrics.line_height.as_f32() * scale).round() as u32).max(1);
 
-        let grid_changed = !self.zmx_grid_claim_held && (cols, rows) != self.model.size();
+        // A terminal whose size has not changed since the slide began (one inside the panel that
+        // is opening, laid out at its settled size and only moving with it) resizes once instead
+        // of waiting it out, so it is at its real size by the time the panel fades it in.
+        let held = if grid_resize_held() {
+            match self.motion_bounds {
+                None => {
+                    self.motion_bounds = Some((bounds.size, false));
+                    true
+                }
+                Some((first, moved)) => {
+                    let moved = moved || first != bounds.size;
+                    self.motion_bounds = Some((first, moved));
+                    moved
+                }
+            }
+        } else {
+            self.motion_bounds = None;
+            false
+        };
+        let grid_changed = !self.zmx_grid_claim_held && !held && (cols, rows) != self.model.size();
         if self.frame.is_none() || grid_changed {
             // Resize reflows the vt grid synchronously, so take the fresh
             // frame now instead of waiting for the SIGWINCH redraw wakeup.
@@ -2475,7 +2498,8 @@ impl TerminalView {
             self.row_cache.clear();
             self.refresh_snapshot();
         }
-        if self.pending_zmx_visible_announce || (self.zmx_visibility_claims_enabled && grid_changed)
+        if (self.pending_zmx_visible_announce && !held)
+            || (self.zmx_visibility_claims_enabled && grid_changed)
         {
             // The grid above is the real one for this displayed slot, so the
             // visibility claim carries it (CDXC:Terminal
@@ -4660,4 +4684,19 @@ fn layout_marked_text(
         caret_x,
         caret_color: fg,
     })
+}
+
+/// Set while a panel of the window slides open or shut. A terminal whose bounds move keeps its
+/// grid (painted clipped or with an empty margin) and resizes once the panel settles, so a slide
+/// sends the PTY and the zmx daemon one resize instead of one per frame; one whose size stays put
+/// resizes once on its second frame. The pending visible claim waits with it, so it
+/// never announces the size the terminal is about to leave.
+static GRID_RESIZE_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_grid_resize_held(held: bool) {
+    GRID_RESIZE_HELD.store(held, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn grid_resize_held() -> bool {
+    GRID_RESIZE_HELD.load(std::sync::atomic::Ordering::Relaxed)
 }

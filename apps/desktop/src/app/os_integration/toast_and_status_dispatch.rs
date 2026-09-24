@@ -113,6 +113,7 @@ impl GhostexGpuiApp {
         let main_window_native_view = self.parent_ns_view;
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
+            display_id: crate::app::window::popup_frame::display_at(anchor, cx),
             focus: false,
             show: true,
             kind: WindowKind::PopUp,
@@ -120,7 +121,11 @@ impl GhostexGpuiApp {
             is_resizable: false,
             is_minimizable: false,
             titlebar: None,
-            window_background: WindowBackgroundAppearance::Transparent,
+            window_background: if window_glass_active() {
+                WindowBackgroundAppearance::Blurred
+            } else {
+                WindowBackgroundAppearance::Transparent
+            },
             ..Default::default()
         };
         self.app_toast_window = cx
@@ -130,6 +135,7 @@ impl GhostexGpuiApp {
                     app,
                     toasts,
                     hovered_toast_id: None,
+                    blur_region: Vec::new(),
                 })
             })
             .ok();
