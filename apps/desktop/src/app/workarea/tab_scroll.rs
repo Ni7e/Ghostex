@@ -85,8 +85,10 @@ impl GhostexGpuiApp {
     /// A newly opened browser tab used to ask the sidebar to expand and scroll to its row, which
     /// meant holding the request until the row had been published. The rows are gone, so the same
     /// call scrolls the view panel's strip to the tab instead: the strip is drawn from the model
-    /// the tab is already in, so there is nothing left to wait for.
+    /// the tab is already in, so there is nothing left to wait for. Every new-tab route ends here,
+    /// so this is also where the tab takes the last place in the strip (`record_open_view_tab`).
     pub(crate) fn reveal_new_browser_tab(&mut self, tab_id: BrowserTabId) {
+        self.append_view_strip_tab(ViewStripTabKey::Browser(tab_id));
         self.ensure_tab_scroll_handles_for_current_layout();
         if let Some(position) = self.view_strip_tab_position(ViewStripTabKey::Browser(tab_id)) {
             self.view_tab_scroll_handle.scroll_to_item(position);

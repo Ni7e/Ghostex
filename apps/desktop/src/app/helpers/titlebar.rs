@@ -3291,25 +3291,6 @@ pub(crate) fn gpui_disabled_project_workarea_copy_noun(mode: TitlebarMode) -> &'
     }
 }
 
-/// CDXC:Titlebar 2026-09-09 SEE-ALSO:
-/// The user's view order from Settings, as mode slugs. `titlebar_mode_switcher_items` sorts the
-/// picker with it and the view panel seeds a new tab's position from it.
-/// packages/shared/ghostex-settings/titlebar-view-order.ts writes the same slugs.
-pub(crate) fn gpui_titlebar_view_order_slugs() -> Vec<String> {
-    shared_settings::shared_sidebar_settings_snapshot()
-        .object()
-        .get("titlebarViewOrder")
-        .and_then(serde_json::Value::as_array)
-        .map(|order| {
-            order
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 pub(crate) fn gpui_titlebar_mode_hidden_from_settings(mode: TitlebarMode) -> bool {
     let Some(settings_key) = titlebar_mode_view_tab_hidden_settings_key(mode) else {
         return false;

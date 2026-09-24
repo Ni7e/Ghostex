@@ -1,6 +1,5 @@
 use gpui::Window;
 
-use crate::app::helpers::*;
 use crate::app::model::*;
 use crate::app::view_strip_order::ViewStripEntry;
 use crate::*;
@@ -145,26 +144,6 @@ impl GhostexGpuiApp {
             .collect()
     }
 
-    /// Where a newly opened view lands in the strip. The user's `titlebarViewOrder` seeds the
-    /// position, so a freshly opened Code tab appears where the user put Code in Settings; a tab the
-    /// user has since dragged keeps whatever place they dragged it to, because the stored list is
-    /// the order and only the insertion point is derived.
-    fn view_tab_insertion_index(&self, mode: TitlebarMode) -> usize {
-        let order = gpui_titlebar_view_order_slugs();
-        let rank = |mode: &TitlebarMode| {
-            let slug = mode.element_slug();
-            order
-                .iter()
-                .position(|id| *id == slug)
-                .unwrap_or(usize::MAX)
-        };
-        let target = rank(&mode);
-        self.open_views
-            .iter()
-            .position(|existing| rank(existing) > target)
-            .unwrap_or(self.open_views.len())
-    }
-
     /// Open a view as a tab and focus it. An already-open view just gets focused, which is what the
     /// `+` menu's checked rows do.
     pub(crate) fn open_view_tab(
@@ -185,12 +164,20 @@ impl GhostexGpuiApp {
 
     /// Fold the open view's list entry in. Every route that changes `active_mode` passes through
     /// `change_active_mode_with_pane_state`, so this is the one place a tab is born.
+    ///
+    /// CDXC:Workarea 2026-09-24 DECISION:
+    /// User: a newly opened view or browser tab opens at the end of the tabs bar. This supersedes
+    /// the 2026-09-20 rule that seeded a new view's place from the Settings view order, which put new
+    /// views to the left of the browser tabs while new browser tabs went to the end.
     pub(crate) fn record_open_view_tab(&mut self, mode: TitlebarMode) {
         if mode == TitlebarMode::Agents || self.open_views.contains(&mode) {
             return;
         }
-        let index = self.view_tab_insertion_index(mode);
-        self.open_views.insert(index, mode);
+        self.open_views.push(mode);
+        // Browser has no tab of its own in the strip; its pages are placed as they open.
+        if mode != TitlebarMode::Browser {
+            self.append_view_strip_tab(ViewStripTabKey::View(mode));
+        }
     }
 
     /// The tab that takes over when `mode` closes: the one to its right, else the one to its left,
