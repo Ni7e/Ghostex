@@ -115,21 +115,13 @@ fn gpui_describe_cli_install_dirs(install_dirs: &[PathBuf]) -> String {
     described.join(", ")
 }
 
-pub(crate) fn gpui_auto_repair_stale_ghostex_cli_wrappers() {
+/// CDXC:Cli 2026-09-24 DECISION:
+/// User: "pls fix root cause here. if we need ghostex cli then lets auto install it". Chat sends and agents need the `ghostex` command, so packaged startup installs the public `ghostex` and `gx` wrappers when either name is missing, and refreshes Ghostex-owned wrappers that point at another or older bundle (Sparkle and DMG updates swap the bundle but never rewrite them). This supersedes the 2026-08-30 rule that startup only refreshed existing wrappers and never did a first install. It runs the same repair as Settings > Integrations, so a command of the same name that Ghostex did not write is never overwritten, and when every wrapper already matches nothing is written.
+/// SEE-ALSO: `session_ghostex_cli_executable` in server/src/zmx/scripts.rs, which pins each session's prompt editor to the bundled CLI without needing PATH.
+pub(crate) fn gpui_auto_install_ghostex_cli_wrappers() {
     if gpui_uses_isolated_storage() {
         return;
     }
-    /*
-    CDXC:Cli 2026-08-30:
-    Sparkle and DMG updates replace the app bundle but never touch the public
-    PATH wrappers, so a wrapper written by an older install keeps exec'ing a
-    path that no longer exists (pre-2026-07-13 wrappers exec a removed Node
-    CLI). Packaged startup therefore refreshes wrappers Ghostex already owns
-    through the same repair the Settings action runs. It is strictly a refresh:
-    when no Ghostex-owned command exists, or every one already matches the
-    canonical wrapper text, nothing is written, so startup never performs a
-    first install for a user who did not opt in.
-    */
     let Ok(cli_dir) = gpui_bundled_ghostex_cli_resource_dir() else {
         return;
     };
@@ -138,11 +130,17 @@ pub(crate) fn gpui_auto_repair_stale_ghostex_cli_wrappers() {
     let path_entries = gpui_cli_path_entries();
     let common_dirs = gpui_common_cli_install_dirs();
 
-    let mut has_stale_wrapper = false;
+    let mut needs_install = false;
     'commands: for command in ["ghostex", "gx"] {
+        let mut command_exists = false;
         for candidate in gpui_cli_command_path_candidates(command, &path_entries, &common_dirs) {
             if !gpui_path_exists_or_is_symlink(&candidate) {
                 continue;
+            }
+            command_exists = true;
+            if gpui_is_broken_symlink(&candidate) {
+                needs_install = true;
+                break 'commands;
             }
             if !gpui_is_ghostex_owned_command_path(command, &candidate, &cli_dir) {
                 continue;
@@ -152,16 +150,20 @@ pub(crate) fn gpui_auto_repair_stale_ghostex_cli_wrappers() {
                     .map(|content| content == wrapper)
                     .unwrap_or(false);
             if !is_current {
-                has_stale_wrapper = true;
+                needs_install = true;
                 break 'commands;
             }
         }
+        if !command_exists {
+            needs_install = true;
+            break;
+        }
     }
-    if !has_stale_wrapper {
+    if !needs_install {
         return;
     }
     if let Err(message) = gpui_repair_ghostex_cli_commands() {
-        eprintln!("ghostex-gpui could not refresh stale Ghostex CLI wrappers: {message}");
+        eprintln!("ghostex-gpui could not install or refresh the Ghostex CLI wrappers: {message}");
     }
 }
 
