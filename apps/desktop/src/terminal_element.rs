@@ -675,6 +675,11 @@ pub struct TerminalView {
     zmx_reflow_hold_seq: u64,
     /// Diagnostic Terminal-focus scenario: sequence number of logged frames.
     diagnostic_frame_seq: u64,
+    /// Mount-gate state: when the first frame landed, when PTY output last
+    /// landed, and whether the gate has opened (sticky open, never re-gates).
+    first_frame_at: Option<web_time::Instant>,
+    last_output_at: Option<web_time::Instant>,
+    mount_gate_open: bool,
     /// CDXC:Zmx 2026-09-24 WHY:
     /// Parking a hidden viewer reflows its local grid to the resting width, and the redisplay reflow anchors at the bottom, so a viewer scrolled up into scrollback redisplayed at the wrong scroll level for a few frames until the next sync caught up — the flicker a session switch shows.
     /// The grid size, viewport offset, and bottom-anchor flag are saved before the park reflow; the redisplay settle restores them once the grid is back at the display size.
@@ -814,6 +819,9 @@ impl TerminalView {
             zmx_reflow_hold: None,
             zmx_reflow_hold_seq: 0,
             diagnostic_frame_seq: 0,
+            first_frame_at: None,
+            last_output_at: None,
+            mount_gate_open: false,
             parked_viewport: None,
             displayed: true,
             snapshot_stale: false,
@@ -1083,6 +1091,7 @@ impl TerminalView {
         }
         match event {
             TerminalEvent::Wakeup => {
+                self.last_output_at = Some(web_time::Instant::now());
                 let drawn_recently = self
                     .last_prepaint
                     .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1));
@@ -1109,6 +1118,10 @@ impl TerminalView {
                 } else {
                     self.snapshot_stale = true;
                     self.sync_title_and_pwd(cx);
+                }
+                if self.frame.is_some() && !self.mount_gate_open {
+                    self.spawn_zmx_gate_check(ZMX_REFLOW_QUIET, cx);
+                    self.spawn_zmx_gate_check(ZMX_REFLOW_CAP, cx);
                 }
             }
             TerminalEvent::Exited(exit) => {
@@ -1145,6 +1158,32 @@ impl TerminalView {
             });
         })
         .detach();
+    }
+
+    /// Schedule a mount-gate check: when due (output quiet or cap), the gate
+    /// opens and the host's next render mounts the viewer.
+    fn spawn_zmx_gate_check(&self, after: Duration, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(after).await;
+            let _ = this.update(cx, |view, cx| view.open_mount_gate_if_due(cx));
+        })
+        .detach();
+    }
+
+    fn open_mount_gate_if_due(&mut self, cx: &mut Context<Self>) {
+        if self.mount_gate_open || self.frame.is_none() {
+            return;
+        }
+        let quiet_due = self
+            .last_output_at
+            .is_none_or(|at| at.elapsed() >= ZMX_REFLOW_QUIET);
+        let cap_due = self
+            .first_frame_at
+            .is_some_and(|at| at.elapsed() >= ZMX_REFLOW_CAP);
+        if quiet_due || cap_due {
+            self.mount_gate_open = true;
+            cx.notify();
+        }
     }
 
     /// End the reflow hold `token` once it has settled: no PTY output for
@@ -1208,8 +1247,32 @@ impl TerminalView {
     /// Whether the viewer holds a complete first frame. A freshly spawned
     /// viewer does not until the daemon's first dump is applied; hosts gate
     /// mounting on this so a respawn never paints an empty or partial grid.
-    pub(crate) fn has_displayable_frame(&self) -> bool {
-        self.frame.is_some()
+    ///
+    /// The gate stays closed past the first frame until PTY output has been
+    /// quiet for `ZMX_REFLOW_QUIET` (or `ZMX_REFLOW_CAP` since the first
+    /// frame): the agent TUI redraws its whole conversation after the
+    /// switch-in resize, and that redraw streams through in chunks whose
+    /// boundaries look like complete older screens. Once the gate has opened
+    /// it stays open, so live streaming never re-gates.
+    pub(crate) fn has_displayable_frame(&mut self) -> bool {
+        if self.mount_gate_open {
+            return self.frame.is_some();
+        }
+        let Some(_) = &self.frame else {
+            return false;
+        };
+        let quiet = self
+            .last_output_at
+            .is_none_or(|at| at.elapsed() >= ZMX_REFLOW_QUIET);
+        let capped = self
+            .first_frame_at
+            .is_some_and(|at| at.elapsed() >= ZMX_REFLOW_CAP);
+        if quiet || capped {
+            self.mount_gate_open = true;
+            true
+        } else {
+            false
+        }
     }
 
     /// Latest OSC 7 pwd read back from the terminal, if any.
@@ -1263,6 +1326,9 @@ impl TerminalView {
                     "contentHash": hasher.finish(),
                 }),
             );
+        }
+        if self.first_frame_at.is_none() {
+            self.first_frame_at = Some(web_time::Instant::now());
         }
         self.frame = Some(frame);
         self.recompute_search_matches();

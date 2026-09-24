@@ -84,7 +84,7 @@ impl GhostexGpuiApp {
         // first frame, then mounts once. Ownership stays with the viewer the whole time.
         let gpui_engine_ready = gpui_engine_view
             .as_ref()
-            .is_none_or(|view| view.read(cx).has_displayable_frame());
+            .is_some_and(|view| view.update(cx, |view, _| view.has_displayable_frame()));
         let gpui_engine_owns_pointer_input = gpui_engine_view.is_some();
         let gpui_engine_slot_id = mount_slot_id.filter(|_| gpui_engine_owns_pointer_input);
         let native_mount_slot_id = mount_slot_id.filter(|_| gpui_engine_view.is_none());
