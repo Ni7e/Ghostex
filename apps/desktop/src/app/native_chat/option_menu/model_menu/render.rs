@@ -48,6 +48,8 @@ impl ChatOptionMenuPanel {
             let active = tab["active"] == true;
             let id = tab["id"].clone();
             let name = tab["name"].as_str().unwrap_or_default().to_owned();
+            // CDXC:SessionChat 2026-09-24 DECISION:
+            // User: show a handoff icon where switching to another agent means another agent CLI, but "don't show the icon for handover so much, just show it on the agent icons up top": another agent's tab carries a small badge and the model rows carry none. A draft switches agents without a handoff, so it shows none.
             let handoff = tab["handoff"] == true;
             let tooltip = if handoff {
                 format!("{name}: picking a model hands off to {name}")
@@ -158,29 +160,7 @@ impl ChatOptionMenuPanel {
                         .size(px(14.0 * scale)),
                 )
             })
-            .child(name)
-            .when(row["handoff"] == true, |body| {
-                let agent = row["agentName"].as_str().unwrap_or_default().to_owned();
-                body.child(
-                    div()
-                        .id(("model-menu-handoff", index))
-                        .aria_label(format!("Hands off to {agent}"))
-                        .flex_shrink_0()
-                        .flex()
-                        .items_center()
-                        .tooltip(move |window, cx| {
-                            gpui_component::tooltip::Tooltip::new(format!("Hands off to {agent}"))
-                                .build(window, cx)
-                        })
-                        .child(
-                            svg()
-                                .path("titlebar/switch-horizontal.svg")
-                                .size(px(13.0 * scale))
-                                .text_color(palette.muted),
-                        ),
-                )
-            });
-        // CDXC:SessionChat 2026-09-24 SEE-ALSO: the handoff marks above follow `.ghostex-chat-model-menu-tab-handoff` and `.ghostex-chat-model-menu-row-handoff` in packages/core-ui/chat/session-chat-model-menu.css, which records the user's decision.
+            .child(name);
         // CDXC:SessionChat 2026-09-24 DECISION:
         // User: a model's description is not written next to it in the picker; an info-circle icon that appears when the row is hovered shows it on hover instead (replaces the eye of 2026-09-22).
         const TOOLTIP_WIDTH: f32 = 220.0;
@@ -359,6 +339,7 @@ impl ChatOptionMenuPanel {
                     Some("account") => Some("titlebar/user.svg"),
                     _ => None,
                 };
+                let letter = setting["icon"].as_str().and_then(super::keys::button_letter);
                 let shaking = setting["id"] == "effort" && shake != 0.0;
                 // Fast mode reads as a switch: lit in the pill's marker tone when on, dimmed when off.
                 let fast = setting["icon"] == "fast";
@@ -380,6 +361,10 @@ impl ChatOptionMenuPanel {
                     label.clone()
                 } else {
                     format!("{label}: {value}")
+                };
+                let tooltip = match letter {
+                    Some(letter) => format!("{tooltip} (⌥{letter})"),
+                    None => tooltip,
                 };
                 let tooltip = match setting["icon"].as_str() {
                     Some("fast") => format!("{tooltip} (F)"),
@@ -455,7 +440,18 @@ impl ChatOptionMenuPanel {
                                     .child(label.clone()),
                             ),
                         })
-                        .child(div().min_w_0().truncate().text_color(tone).child(value)),
+                        .child(div().min_w_0().truncate().text_color(tone).child(value))
+                        .when_some(letter, |button, letter| {
+                            button.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .font_family("Menlo")
+                                    .text_size(px(9.5 * scale))
+                                    .text_color(palette.muted)
+                                    .opacity(0.8)
+                                    .child(letter),
+                            )
+                        }),
                 );
             }
             tray = tray.child(buttons);
@@ -649,7 +645,7 @@ fn render_key_hints(appearance: &ChatAppearance, palette: &Palette) -> AnyElemen
         .border_color(palette.ink(0.08))
         .flex()
         .items_center()
-        .gap(px(10.0 * scale))
+        .justify_between()
         .text_size(px(10.5 * scale))
         .text_color(palette.muted)
         .children(HINTS.map(|(keys, label)| {

@@ -40,7 +40,8 @@ pub(super) fn register(cx: &mut gpui::App) {
     ]
     .into_iter()
     .map(str::to_owned)
-    .chain((1..=9).map(|slot| format!("secondary-{slot}")));
+    .chain((1..=9).map(|slot| format!("secondary-{slot}")))
+    .chain(BUTTON_LETTERS.iter().map(|(_, letter)| format!("alt-{}", letter.to_lowercase())));
     // The card itself holds focus after a side list closes or the window is re-activated, so the same keys are bound there too.
     cx.bind_keys(keys.flat_map(|key| {
         ["ChatModelMenu > Input", "ChatModelMenu"].map(|context| {
@@ -55,6 +56,23 @@ pub(super) fn register(cx: &mut gpui::App) {
         ]
         .map(|context| gpui::KeyBinding::new(key, ModelMenuKey { key: key.into() }, Some(context)))
     }));
+}
+
+/// CDXC:SessionChat 2026-09-24 DECISION:
+/// User: each footer button shows a letter for its hotkey, with A for the Account list. Plain letters belong to the search field, so the letter is pressed with Option; pressing it again closes a side list it opened.
+const BUTTON_LETTERS: [(&str, &str); 4] = [
+    ("reasoning", "R"),
+    ("context", "C"),
+    ("fast", "F"),
+    ("account", "A"),
+];
+
+/// The letter the footer button with this icon answers to with Option held.
+pub(super) fn button_letter(icon: &str) -> Option<&'static str> {
+    BUTTON_LETTERS
+        .iter()
+        .find(|(kind, _)| *kind == icon)
+        .map(|(_, letter)| *letter)
 }
 
 struct KeysBound;
@@ -206,6 +224,19 @@ impl ChatOptionMenuPanel {
                     }
                     None => state.shake_at = Some(std::time::Instant::now()),
                 }
+            }
+            _ if key.starts_with("alt-") => {
+                let letter = key["alt-".len()..].to_uppercase();
+                let Some(index) = state.traits().iter().position(|setting| {
+                    setting["icon"]
+                        .as_str()
+                        .and_then(button_letter)
+                        .is_some_and(|button| button == letter)
+                }) else {
+                    return false;
+                };
+                state.active = rows + index;
+                self.activate_model_button(index, false, window, cx);
             }
             _ => {
                 let Some(Ok(slot)) = key.strip_prefix("secondary-").map(str::parse::<u64>) else {

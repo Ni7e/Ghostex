@@ -798,10 +798,9 @@ window read Default, and Fast mode reads Off. Grok Build's fast model (Grok 4.7
 Fast) is not its own row: pick Grok 4.7 and switch Fast mode on or off. Auto, where an agent offers it,
 always sits at the top of that agent's list. Click a row's star to keep that
 model on the Favorites tab; hover the info icon that appears on a row to read
-what that model is for. In a session that has started, a model from another
-agent shows a handoff icon (and that agent's tab a small badge): picking it
-hands the conversation off to that agent instead of changing this session's
-model. With more than one signed-in Claude or Codex account, an Account
+what that model is for. In a session that has started, another agent's tab
+shows a small handoff badge: picking one of its models hands the conversation
+off to that agent instead of changing this session's model. With more than one signed-in Claude or Codex account, an Account
 button beside Fast mode shows the account in use and opens the list to switch.
 
 The Model & Effort Picker shortcut (Option+P by default on macOS) opens the same
@@ -809,7 +808,8 @@ picker from the keyboard, and pressing it again closes it. Type to filter the
 list; Up and Down move through the models and then the bottom buttons, stopping
 at the top and bottom; Left and
 Right change the highlighted model's reasoning level, which the reasoning button
-shows; Tab and Shift+Tab move through the Favorites and agent tabs. Enter uses the highlighted model and level in
+shows; Option plus the letter on a bottom button uses it (Option+R Reasoning,
+Option+C Context, Option+F Fast mode, Option+A Account); Tab and Shift+Tab move through the Favorites and agent tabs. Enter uses the highlighted model and level in
 this session and closes the picker, Shift+Enter saves them as the agent's default,
 F switches Fast mode and C the context window while the search box is empty, and Cmd+1 to Cmd+9
 jump the highlight to one of the first nine rows without applying it. Escape closes it

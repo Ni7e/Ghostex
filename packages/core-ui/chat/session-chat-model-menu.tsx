@@ -506,13 +506,6 @@ export function SessionChatModelMenu({
               <span className='ghostex-chat-model-menu-row-body'>
                 {row.showAgent ? <AgentLogo icon={row.icon} size={14} /> : null}
                 <span className='ghostex-chat-model-menu-row-label'>{row.label}</span>
-                {row.handoff ? (
-                  <AppTooltip content={`Hands off to ${row.agentName}`}>
-                    <span aria-label={`Hands off to ${row.agentName}`} className='ghostex-chat-model-menu-row-handoff'>
-                      <IconSwitchHorizontal aria-hidden='true' size={13} stroke={1.8} />
-                    </span>
-                  </AppTooltip>
-                ) : null}
               </span>
               {row.description ? (
                 <AppTooltip content={row.description}>
