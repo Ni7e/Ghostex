@@ -276,12 +276,12 @@ fn table_action(
 /// It keeps its row of space and fades in with the pointer, because a two-by-two
 /// table of short cells is the common case and deserves no chrome at all. The
 /// same four things React offers (session-chat-markdown.tsx): open it in the
-/// table modal, fit its columns to the pane or let them keep their width and
-/// scroll, and copy it as Markdown or as CSV.
+/// table modal, expand its cells to wrap or collapse them back to one line, and
+/// copy it as Markdown or as CSV.
 fn table_actions(
     key: String,
     source: String,
-    fitted: bool,
+    expanded: bool,
     chat: &gpui::WeakEntity<NativeChatView>,
     p: &ChatAppearance,
 ) -> AnyElement {
@@ -289,7 +289,7 @@ fn table_actions(
     let markdown = source.clone();
     let csv = source.clone();
     let open_chat = chat.clone();
-    let fit_chat = chat.clone();
+    let expand_chat = chat.clone();
     div()
         .flex()
         .justify_end()
@@ -311,16 +311,18 @@ fn table_actions(
             },
         ))
         .child(table_action(
-            "fit-table",
-            if fitted {
-                "titlebar/arrows-diagonal-expand.svg"
-            } else {
+            "expand-table",
+            if expanded {
                 "titlebar/arrows-diagonal-minimize.svg"
+            } else {
+                "titlebar/arrows-diagonal-expand.svg"
             },
             p,
             move |cx| {
                 let key = key.clone();
-                let _ = fit_chat.update(cx, |chat, cx| chat.set_table_fit(key, !fitted, cx));
+                let _ = expand_chat.update(cx, |chat, cx| {
+                    chat.set_table_expanded(key, !expanded, cx)
+                });
             },
         ))
         .child(table_action(
@@ -366,21 +368,25 @@ impl NativeChatView {
         cx.notify();
     }
 
-    /// The reader asked one table to fit the pane instead of keeping its column widths.
+    /// The reader expanded one table's cells to wrap, or collapsed them back to one line.
     ///
-    /// React's collapsed table caps its cells and ellipsizes them; the native table has the same
-    /// two readings, as the column algorithm that wraps to the pane's width and the one that keeps
-    /// content widths and scrolls sideways.
-    pub(super) fn set_table_fit(
+    /// Both keep the collapsed column widths, as React pins them before it expands, so the columns
+    /// stay where the reader was looking and only the rows grow.
+    ///
+    /// CDXC:SessionChat 2026-09-24 DECISION:
+    /// "In the GPUI chat view for the table, make collapsed cells the default." Every table starts
+    /// collapsed and only the reader expands it; a table wider than the pane scrolls sideways
+    /// either way. Supersedes the fit-to-pane toggle, which wrapped every column into the pane.
+    pub(super) fn set_table_expanded(
         &mut self,
         key: String,
-        fitted: bool,
+        expanded: bool,
         cx: &mut gpui::Context<Self>,
     ) {
-        if fitted {
-            self.table_collapsed.insert(key);
+        if expanded {
+            self.table_expanded.insert(key);
         } else {
-            self.table_collapsed.remove(&key);
+            self.table_expanded.remove(&key);
         }
         self.list.remeasure();
         cx.notify();
@@ -401,11 +407,15 @@ impl NativeChatView {
         let mut style = super::markdown_style::text_style(p);
         style.is_dark = !p.light;
         style.highlight_theme = Some(super::markdown_style::highlight_theme(p.light));
-        // A table the reader asked to fit the pane proportions its columns to
-        // the width it has instead of keeping them and scrolling sideways.
-        if self.table_collapsed.contains(&id) {
-            style.table.overflow.x = None;
+        // React's `--chat-table-cell-max`, min(24rem, 60cqw): one long cell cannot claim the
+        // whole row, and a narrow pane lowers the cap so a collapsed table usually just fits.
+        let pane_width = f32::from(self.bounds.get().size.width);
+        let mut cell_max = 384.0 * p.scale;
+        if pane_width > 0.0 {
+            cell_max = cell_max.min(pane_width * 0.6);
         }
+        style.table_cell_max_width = Some(px(cell_max));
+        style.table_wrap_cells = self.table_expanded.contains(&id);
         let references = super::markdown_links::presentations(references, p);
         let header_id = id.clone();
         let wrap_id = id.clone();
@@ -482,7 +492,7 @@ impl NativeChatView {
                     .child(table_actions(
                         key.clone(),
                         source.clone(),
-                        self.table_collapsed.contains(&key),
+                        self.table_expanded.contains(&key),
                         &cx.weak_entity(),
                         p,
                     ))
