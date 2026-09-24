@@ -362,11 +362,29 @@ impl GhostexGpuiApp {
         if self.agents_chat_mode_sessions.contains(&session_id) {
             return None;
         }
+        // CDXC:Terminal 2026-09-24 DECISION:
+        // User: the terminal body's row count must not churn when switching
+        // sessions. The bar's data (agent name, icon, session id) can lag one
+        // frame behind the selection; rendering no bar for that frame grows
+        // the terminal body by the bar's height, which resizes the session
+        // grid and runs the whole claim-dump-redraw pipeline — the switch
+        // flicker. A session that has rendered the bar once keeps its bar
+        // height reserved (an invisible spacer) whenever the data lags.
+        let known_bar_session = self.terminal_agent_bar_sessions.contains(&session_id);
         if !self.agents_gpui_engine_terminals.contains_key(&session_id) {
+            if known_bar_session {
+                return Some(Self::reserved_terminal_agent_bar(surface, session_id));
+            }
             return None;
         }
-        let presentation_session = self.agents_sidebar_session_for_terminal(session_id)?;
-        let agent_name = terminal_agent_bar_agent_name(presentation_session);
+        let Some(presentation_session) = self.agents_sidebar_session_for_terminal(session_id)
+        else {
+            if known_bar_session {
+                return Some(Self::reserved_terminal_agent_bar(surface, session_id));
+            }
+            return None;
+        };
+        let agent_name = terminal_agent_bar_agent_name(&presentation_session);
         let agent_session_id = presentation_session
             .agent_session_id
             .as_deref()
@@ -376,8 +394,17 @@ impl GhostexGpuiApp {
             && presentation_session.agent_icon.is_none()
             && agent_session_id.is_none()
         {
+            if known_bar_session {
+                return Some(Self::reserved_terminal_agent_bar(surface, session_id));
+            }
             return None;
         }
+        let app = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            let _ = app.update(cx, |app, _| {
+                app.terminal_agent_bar_sessions.insert(session_id);
+            });
+        });
         let has_session_note = presentation_session.has_session_note;
         let stashed_prompt_count = presentation_session.stashed_prompt_count;
         let full_session_id = agent_session_id.map(str::to_string);
@@ -677,6 +704,31 @@ impl GhostexGpuiApp {
         }
 
         menu.into_any_element()
+    }
+
+    /// Invisible spacer with the bar's exact layout height: while the bar's
+    /// data lags behind the selection, the terminal body keeps its row count
+    /// instead of growing for one frame and reflowing the session grid.
+    fn reserved_terminal_agent_bar(
+        surface: TerminalAgentBarSurface,
+        session_id: TerminalSessionId,
+    ) -> AnyElement {
+        let suffix = surface.element_id_suffix(session_id);
+        h_flex()
+            .id(format!("ghostex-gpui-terminal-agent-bar-reserved-{suffix}"))
+            .flex_shrink_0()
+            .w_full()
+            .justify_center()
+            .px(px(TERMINAL_AGENT_BAR_OUTER_PADDING))
+            .pb(px(TERMINAL_AGENT_BAR_BOTTOM_INSET))
+            .child(
+                h_flex()
+                    .w_full()
+                    .max_w(px(TERMINAL_AGENT_BAR_MAX_CONTENT_WIDTH
+                        - 2.0 * TERMINAL_AGENT_BAR_OUTER_PADDING))
+                    .h(px(TERMINAL_AGENT_BAR_HEIGHT)),
+            )
+            .into_any_element()
     }
 
     pub(crate) fn toggle_terminal_agent_action_bar_menu(
