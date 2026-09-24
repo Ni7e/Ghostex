@@ -147,8 +147,8 @@ impl GhostexGpuiApp {
                 .when(focused, |row| row.bg(appearance.session_selected))
                 .when(visible || focused, |row| row.text_color(chrome_color(0xd8d8d8, 0x292929)))
                 .when(selected, |row| row.border_1().border_color(rgb(0x2f8cff)))
-                .when(drop_position == Some("before"), |row| row.border_t_1().border_color(rgb(0x60a5fa)))
-                .when(drop_position == Some("after"), |row| row.border_b_1().border_color(rgb(0x60a5fa)))
+                // CDXC:Sidebar 2026-09-24 DECISION: User: the drop line between session cards is a straight line, not a top or bottom border that bends into the card's rounded corners; it is the same line project and collection rows use, drawn in the gap beside the card.
+                .when_some(drop_position, |row, position| row.child(super::drag::drop_line(position, scale)))
                 .when(!focused, |row| row.hover(|row| row.bg(appearance.session_hover)))
                 .when(focused, |row| row.child(super::decorations::session_outline(appearance)))
                 .child(self.render_native_session_identity(session, icon, appearance, cx))
