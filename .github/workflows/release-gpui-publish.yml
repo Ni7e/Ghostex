@@ -310,9 +310,14 @@ jobs:
       # that stanza from any non-official tap, so the throwaway audit tap drops
       # it from its own copy. The pull request still carries the upstream cask
       # with only version and sha256 changed.
+      # CDXC:Release 2026-09-24 WHY:
+      # `brew audit --online` calls the GitHub API; without a token it shares
+      # the runner IP's 60-per-hour anonymous limit and failed three times in a
+      # row on 10.2.0, so it gets the same token the publish step uses.
       - name: Render the bumped cask and run brew style and brew audit on it
         if: ${{ steps.homebrew_gate.outputs.publish == 'true' }}
         env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
         run: |
