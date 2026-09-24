@@ -87,6 +87,7 @@ use crate::ghostty_vt::{
     VtCellWide, VtDirty, VtKey, VtKeyAction, VtKeyInput, VtMods, VtMouseAction, VtMouseButton,
     VtMouseInput, VtScrollViewport, VtScrollbar, ffi,
 };
+use crate::support_logs::{self, GpuiDiagnosticScenario, GpuiSupportLog};
 use crate::terminal_model::{
     Rgb, SnapshotCell, SnapshotRow, TerminalConfirmCloseBehavior, TerminalEvent, TerminalEventSink,
     TerminalExit, TerminalModel, TerminalPasteDiagnostic, TerminalSnapshot, TerminalSpawnConfig,
@@ -672,6 +673,8 @@ pub struct TerminalView {
     zmx_reflow_hold: Option<ZmxReflowHold>,
     /// Monotonic token distinguishing the hold the current timers armed from a newer one.
     zmx_reflow_hold_seq: u64,
+    /// Diagnostic Terminal-focus scenario: sequence number of logged frames.
+    diagnostic_frame_seq: u64,
     /// CDXC:Zmx 2026-09-24 WHY:
     /// Parking a hidden viewer reflows its local grid to the resting width, and the redisplay reflow anchors at the bottom, so a viewer scrolled up into scrollback redisplayed at the wrong scroll level for a few frames until the next sync caught up — the flicker a session switch shows.
     /// The grid size, viewport offset, and bottom-anchor flag are saved before the park reflow; the redisplay settle restores them once the grid is back at the display size.
@@ -810,6 +813,7 @@ impl TerminalView {
             zmx_grid_claim_held: false,
             zmx_reflow_hold: None,
             zmx_reflow_hold_seq: 0,
+            diagnostic_frame_seq: 0,
             parked_viewport: None,
             displayed: true,
             snapshot_stale: false,
@@ -1170,6 +1174,13 @@ impl TerminalView {
         self.row_cache.clear();
         self.snapshot_stale = false;
         self.refresh_snapshot();
+        if support_logs::scenario_enabled(GpuiDiagnosticScenario::TerminalFocus) {
+            support_logs::append(
+                GpuiSupportLog::TerminalFocus,
+                "reflowHoldSettled",
+                serde_json::json!({"token": token}),
+            );
+        }
         cx.notify();
     }
 
@@ -1220,6 +1231,31 @@ impl TerminalView {
                     }
                 }
             }
+        }
+        // Diagnostic disk logging scenario: Terminal focus. The content hash
+        // identifies which screen state each paint came from without storing
+        // any terminal content.
+        if support_logs::scenario_enabled(GpuiDiagnosticScenario::TerminalFocus) {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::hash::DefaultHasher::new();
+            for row in &frame.rows {
+                for cell in &row.cells {
+                    cell.base.hash(&mut hasher);
+                }
+            }
+            self.diagnostic_frame_seq += 1;
+            support_logs::append(
+                GpuiSupportLog::TerminalFocus,
+                "terminalFrame",
+                serde_json::json!({
+                    "seq": self.diagnostic_frame_seq,
+                    "cols": frame.cols,
+                    "rowCount": frame.rows.len(),
+                    "offset": frame.scrollbar.offset,
+                    "cursorRow": frame.cursor.map(|(_, row)| row),
+                    "contentHash": hasher.finish(),
+                }),
+            );
         }
         self.frame = Some(frame);
         self.recompute_search_matches();
@@ -2658,6 +2694,13 @@ impl TerminalView {
                     deadline: web_time::Instant::now() + ZMX_REFLOW_CAP,
                     last_output: None,
                 });
+                if support_logs::scenario_enabled(GpuiDiagnosticScenario::TerminalFocus) {
+                    support_logs::append(
+                        GpuiSupportLog::TerminalFocus,
+                        "reflowHoldArmed",
+                        serde_json::json!({"token": token, "cols": cols, "rows": rows}),
+                    );
+                }
                 self.spawn_zmx_reflow_check(token, ZMX_REFLOW_QUIET, cx);
                 self.spawn_zmx_reflow_check(token, ZMX_REFLOW_CAP, cx);
             }
