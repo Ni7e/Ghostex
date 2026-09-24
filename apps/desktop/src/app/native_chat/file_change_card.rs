@@ -111,13 +111,21 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let files = item["files"].as_array().cloned().unwrap_or_default();
-        if files.is_empty() {
+        // An older turn arrives collapsed with only the paths its unread work changed; the row
+        // stays and reads that work on open, as React's list does (`list.tsx`).
+        let unread = files.is_empty()
+            && item["deferred"]["filePaths"]
+                .as_array()
+                .is_some_and(|paths| !paths.is_empty());
+        if files.is_empty() && !unread {
             return None;
         }
         let id = text(item, "id");
         let key = format!("work-files:{id}");
         let expanded = self.is_expanded(&key, false);
         let motion = self.disclosure_frame(&key, expanded, cx);
+        let load =
+            unread.then(|| json!({"type":"loadWork","id":item["id"],"work":item["deferred"]}));
         let label = text(
             item,
             if p.simple {
@@ -132,10 +140,16 @@ impl NativeChatView {
             .w_full()
             .min_w_0()
             .gap(px(8.0 * p.scale))
-            .child(self.disclosure(key.clone(), label, expanded, None, p, cx));
+            .child(self.disclosure(key.clone(), label, expanded, load, p, cx));
         if expanded || motion.is_some() {
-            let stack = self.file_change_stack(&format!("work:{id}"), &files, p, cx);
-            group = group.child(self.disclosure_body_motion(&key, motion, 8.0 * p.scale, stack));
+            let body = if unread {
+                self.deferred_work_notice(item, p, cx)
+            } else {
+                Some(self.file_change_stack(&format!("work:{id}"), &files, p, cx))
+            };
+            if let Some(body) = body {
+                group = group.child(self.disclosure_body_motion(&key, motion, 8.0 * p.scale, body));
+            }
         }
         Some(group.into_any_element())
     }
