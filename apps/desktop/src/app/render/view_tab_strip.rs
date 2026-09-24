@@ -603,15 +603,12 @@ impl GhostexGpuiApp {
         };
         let expand_tooltip = tooltip_for("Expand side panel", "expandViewPanel");
         let fully_tooltip = tooltip_for("Expand side panel fully", "expandViewPanelFully");
-        h_flex()
+        let segment_radius = titlebar_split_button_segment_radius(WORKAREA_VIEW_TAB_HEIGHT);
+        titlebar_split_button_frame(h_flex(), WORKAREA_VIEW_TAB_HEIGHT)
             .flex_shrink_0()
-            .h(px(WORKAREA_VIEW_TAB_HEIGHT))
             .ml(px(2.0))
             .items_center()
             .overflow_hidden()
-            .rounded(px(WORKAREA_VIEW_TAB_RADIUS))
-            .border_1()
-            .border_color(titlebar_split_button_border_color())
             .child(
                 cell(
                     "ghostex-gpui-view-tab-expand",
@@ -622,6 +619,7 @@ impl GhostexGpuiApp {
                     },
                     maximized && !fully,
                 )
+                .rounded_l(segment_radius)
                 .when(enabled, |this| {
                     this.on_mouse_down(
                         MouseButton::Left,
@@ -637,19 +635,14 @@ impl GhostexGpuiApp {
                     move |window, cx| titlebar_tooltip(expand_tooltip.clone(), window, cx),
                 ),
             )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .w(px(1.0))
-                    .h_full()
-                    .bg(titlebar_split_button_border_color()),
-            )
+            .child(titlebar_split_button_divider(WORKAREA_VIEW_TAB_HEIGHT))
             .child(
                 cell(
                     "ghostex-gpui-view-tab-expand-fully",
                     TITLEBAR_ICON_MAXIMIZE,
                     fully,
                 )
+                .rounded_r(segment_radius)
                 .when(enabled, |this| {
                     this.on_mouse_down(
                         MouseButton::Left,

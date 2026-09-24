@@ -28,18 +28,6 @@ use crate::app::helpers::*;
 use crate::app::window::*;
 use crate::*;
 
-/// CDXC:Theming 2026-09-20 WHY:
-/// The 2026-09-19 light screens draw Start, Open and Commit as raised white controls, because a
-/// bordered outline alone disappears into a light header the way it does not into a dark one. In
-/// dark mode they keep the header's own surface, which is what those screens draw there.
-fn workarea_header_split_button_background() -> gpui::Hsla {
-    if chrome_uses_light_appearance() {
-        gpui::rgb(0xffffff).into()
-    } else {
-        gpui::transparent_black()
-    }
-}
-
 /// What a press on one half of a split button runs. A plain `fn` pointer so the two halves and the
 /// diagnostics wrapper can share it without boxing.
 type WorkareaHeaderPress = fn(
@@ -201,7 +189,11 @@ impl GhostexGpuiApp {
             .items_center()
             .justify_center()
             .gap(px(6.0))
-            .px(px(if compact { 7.0 } else { 9.0 }))
+            .pl(px(if compact { 9.0 } else { 10.0 }))
+            .pr(px(if compact { 7.0 } else { 9.0 }))
+            .rounded_l(titlebar_split_button_segment_radius(
+                TITLEBAR_CONTROL_HEIGHT,
+            ))
             .when(cfg!(target_os = "windows"), |this| this.occlude())
             .text_color(icon_color)
             .text_size(px(12.5))
@@ -267,7 +259,11 @@ impl GhostexGpuiApp {
             .h_full()
             .items_center()
             .justify_center()
-            .px(px(4.0))
+            .pl(px(5.0))
+            .pr(px(6.0))
+            .rounded_r(titlebar_split_button_segment_radius(
+                TITLEBAR_CONTROL_HEIGHT,
+            ))
             .when(cfg!(target_os = "windows"), |this| this.occlude())
             .cursor_default()
             .when(open, |this| this.bg(titlebar_active_segment_color()))
@@ -313,26 +309,15 @@ impl GhostexGpuiApp {
             ));
 
         let tooltip = spec.tooltip;
-        h_flex()
-            .id(spec.id)
+        titlebar_split_button_frame(h_flex().id(spec.id), TITLEBAR_CONTROL_HEIGHT)
             .relative()
             .flex_shrink_0()
-            .h(px(TITLEBAR_CONTROL_HEIGHT))
             .ml(px(4.0))
             .items_center()
             .overflow_hidden()
-            .rounded(px(TITLEBAR_BUTTON_RADIUS))
-            .border_1()
-            .border_color(titlebar_split_button_border_color())
-            .bg(workarea_header_split_button_background())
             .when(spec.dimmed, |this| this.opacity(0.5))
             .child(main)
-            .child(
-                div()
-                    .w(px(1.0))
-                    .h(px(TITLEBAR_CONTROL_HEIGHT))
-                    .bg(titlebar_split_button_border_color()),
-            )
+            .child(titlebar_split_button_divider(TITLEBAR_CONTROL_HEIGHT))
             .child(caret)
             .when(!open, |this| {
                 this.managed_discrete_tooltip_with_placement(

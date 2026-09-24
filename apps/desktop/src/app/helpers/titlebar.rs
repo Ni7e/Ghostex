@@ -1511,19 +1511,6 @@ pub(crate) fn titlebar_button_border_color() -> Hsla {
     .into()
 }
 
-/// CDXC:Titlebar 2026-09-23 DECISION:
-/// User: the four split buttons (Start, Open, Commit, and the view panel's expand pair) take a
-/// lighter #787779 outline and divider in dark mode, because the near-black outline vanishes in
-/// transparent mode. This is the interim look while a new split-button style is chosen.
-pub(crate) fn titlebar_split_button_border_color() -> Hsla {
-    rgb(if titlebar_uses_light_theme() {
-        0xd4d4d4
-    } else {
-        0x787779
-    })
-    .into()
-}
-
 pub(crate) fn titlebar_button_hover_color() -> Hsla {
     titlebar_overlay_base().opacity(0.08).into()
 }
@@ -3331,7 +3318,10 @@ pub(crate) fn gpui_titlebar_mode_hidden_from_settings(mode: TitlebarMode) -> boo
         .object()
         .get(settings_key)
         .and_then(serde_json::Value::as_bool)
-        .unwrap_or_else(|| mode.website_provider().is_some_and(|provider| provider.hidden_by_default))
+        .unwrap_or_else(|| {
+            mode.website_provider()
+                .is_some_and(|provider| provider.hidden_by_default)
+        })
 }
 
 pub(crate) fn gpui_titlebar_git_action_script(message: &serde_json::Value) -> String {
