@@ -1337,6 +1337,12 @@ impl TerminalView {
                 }
             }
             self.diagnostic_frame_seq += 1;
+            let pane_px = self
+                .terminal_bounds
+                .map(|bounds| (bounds.size.width.as_f32(), bounds.size.height.as_f32()));
+            let cell_px = self
+                .cached_metrics
+                .map(|metrics| (metrics.cell_width.as_f32(), metrics.line_height.as_f32()));
             support_logs::append(
                 GpuiSupportLog::TerminalFocus,
                 "terminalFrame",
@@ -1347,6 +1353,8 @@ impl TerminalView {
                     "offset": frame.scrollbar.offset,
                     "cursorRow": frame.cursor.map(|(_, row)| row),
                     "contentHash": hasher.finish(),
+                    "panePx": pane_px,
+                    "cellPx": cell_px,
                 }),
             );
         }
