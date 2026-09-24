@@ -93,29 +93,33 @@ impl NativeChatView {
             self.take_down_maximized_window(!self.pane_hidden, cx);
             return;
         }
-        if self.maximized_window.is_some() {
+        if self.maximized_window.is_some() || self.maximized_opening {
             return;
         }
         let Some(main) = self.main_window else {
             return;
         };
+        self.maximized_opening = true;
         let pane = self.bounds.get();
-        let Ok((bounds, display_id)) = main.update(cx, |_, window, cx| {
-            (
-                gpui::Bounds::new(
-                    super::child_window::content_bounds(window).origin + pane.origin,
-                    pane.size,
-                ),
-                window.display(cx).map(|display| display.id()),
-            )
-        }) else {
-            return;
-        };
         let parent_native_view = self.config.parent_native_view;
-        let display_id =
-            crate::app::window::popup_frame::display_at(bounds.center(), cx).or(display_id);
         let chat = cx.entity();
+        // WHY: the Maximize click arrives while the main window is mid-update, so reading its
+        // frame has to wait for the deferred pass; updating it re-entrantly fails and nothing opens.
         cx.defer(move |cx| {
+            let Ok((bounds, display_id)) = main.update(cx, |_, window, cx| {
+                (
+                    gpui::Bounds::new(
+                        super::child_window::content_bounds(window).origin + pane.origin,
+                        pane.size,
+                    ),
+                    window.display(cx).map(|display| display.id()),
+                )
+            }) else {
+                chat.update(cx, |this, _| this.maximized_opening = false);
+                return;
+            };
+            let display_id =
+                crate::app::window::popup_frame::display_at(bounds.center(), cx).or(display_id);
             let result = cx.open_window(
                 WindowOptions {
                     kind: crate::app::window::popup_frame::child_window_kind(),
@@ -151,32 +155,35 @@ impl NativeChatView {
                     }
                 },
             );
-            chat.update(cx, |this, cx| match result {
-                // The pane left the screen while the window was opening.
-                Ok(handle) if !this.maximized_wanted || this.pane_hidden => {
-                    cx.defer(move |cx| {
-                        let _ = handle.update(cx, |_, window, _| window.remove_window());
-                    });
-                }
-                Ok(handle) => {
-                    this.maximized_window = Some(handle);
-                    let chat = cx.weak_entity();
-                    this.window_subscription = Some(cx.on_window_closed(move |cx, id| {
-                        let _ = chat.update(cx, |chat, cx| {
-                            if chat
-                                .maximized_window
-                                .is_some_and(|handle| handle.window_id() == id)
-                            {
-                                chat.close_maximized(cx);
-                            }
+            chat.update(cx, |this, cx| {
+                this.maximized_opening = false;
+                match result {
+                    // The pane left the screen while the window was opening.
+                    Ok(handle) if !this.maximized_wanted || this.pane_hidden => {
+                        cx.defer(move |cx| {
+                            let _ = handle.update(cx, |_, window, _| window.remove_window());
                         });
-                    }));
-                    this.focus_requested = true;
-                    cx.notify();
-                }
-                Err(error) => {
-                    this.error = Some(error.to_string());
-                    cx.notify();
+                    }
+                    Ok(handle) => {
+                        this.maximized_window = Some(handle);
+                        let chat = cx.weak_entity();
+                        this.window_subscription = Some(cx.on_window_closed(move |cx, id| {
+                            let _ = chat.update(cx, |chat, cx| {
+                                if chat
+                                    .maximized_window
+                                    .is_some_and(|handle| handle.window_id() == id)
+                                {
+                                    chat.close_maximized(cx);
+                                }
+                            });
+                        }));
+                        this.focus_requested = true;
+                        cx.notify();
+                    }
+                    Err(error) => {
+                        this.error = Some(error.to_string());
+                        cx.notify();
+                    }
                 }
             });
         });
