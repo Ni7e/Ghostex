@@ -18,11 +18,13 @@
 import { IconChevronDown } from '@tabler/icons-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '@/packages/components/utils';
+import { useSessionChatHeightTransition } from './session-chat-height-transition';
 
 export function SessionChatScrollCap({ children, className }: { children: ReactNode; className?: string }) {
   const capRef = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  useSessionChatHeightTransition(capRef, expanded);
 
   const measure = useCallback(() => {
     const cap = capRef.current;

@@ -13,9 +13,11 @@ import {
   type MouseEvent,
   type ReactNode,
   type Ref,
+  useRef,
 } from 'react';
 import { cn } from '@/packages/components/utils';
 import { SessionChatDisclosureBody } from './session-chat-disclosure-body';
+import { useSessionChatHeightTransition } from './session-chat-height-transition';
 
 export type SessionChatStatusCardSeverity = 'info' | 'warning' | 'error';
 
@@ -49,6 +51,8 @@ export interface SessionChatStatusCardProps extends Omit<HTMLAttributes<HTMLDivE
   compact?: boolean;
   /** Actions band under the panel. Use `SessionChatStatusCardActions` for the right-aligned group. */
   footer?: ReactNode;
+  /** A value whose change eases the body between its old and new height (a preview swapping for the full text, rows folding). */
+  bodyTransitionKey?: unknown;
   bodyClassName?: string;
   children?: ReactNode;
 }
@@ -70,11 +74,14 @@ export function SessionChatStatusCard({
   compact = false,
   footer,
   bodyClassName,
+  bodyTransitionKey,
   className,
   children,
   ...rest
 }: SessionChatStatusCardProps) {
   const bodyId = useId();
+  const plainBodyRef = useRef<HTMLDivElement>(null);
+  useSessionChatHeightTransition(plainBodyRef, bodyTransitionKey);
   const collapsible = open !== undefined && onOpenChange !== undefined;
   const clickable = collapsible || onHeaderActivate !== undefined;
   const activate = (): void => {
@@ -129,11 +136,18 @@ export function SessionChatStatusCard({
           ) : null}
         </div>
         {children === undefined || children === null || children === false ? null : collapsible ? (
-          <SessionChatDisclosureBody className={bodyClassName} id={bodyId} open={open}>
+          <SessionChatDisclosureBody
+            className={bodyClassName}
+            id={bodyId}
+            open={open}
+            transitionKey={bodyTransitionKey}
+          >
             {children}
           </SessionChatDisclosureBody>
         ) : (
-          <div className={cn('ghostex-chat-status-card-body', bodyClassName)}>{children}</div>
+          <div className={cn('ghostex-chat-status-card-body', bodyClassName)} ref={plainBodyRef}>
+            {children}
+          </div>
         )}
       </div>
       {footer === undefined || footer === null || footer === false ? null : (

@@ -185,6 +185,10 @@ impl NativeChatView {
         );
         let collapse_key = format!("question:{}", prompt);
         let collapsed = self.collapsed.contains(&collapse_key);
+        let collapse_key_name = collapse_key.clone();
+        let motion = self.disclosure_frame(&collapse_key_name, !collapsed, cx);
+        // The header keeps its open spacing until the body has eased away.
+        let shut = collapsed && motion.is_none();
         let header = div()
             .id("question-header")
             .role(gpui::Role::Button)
@@ -199,10 +203,10 @@ impl NativeChatView {
             .chat_cursor_pointer()
             .mx(px(-16.0 * s))
             .mt(px(-12.0 * s))
-            .mb(px(if collapsed { -12.0 } else { -2.0 } * s))
+            .mb(px(if shut { -12.0 } else { -2.0 } * s))
             .px(px(16.0 * s))
             .pt(px(12.0 * s))
-            .pb(px(if collapsed { 12.0 } else { 6.0 } * s))
+            .pb(px(if shut { 12.0 } else { 6.0 } * s))
             // The footer's buttons always follow, so only the top corners meet the card's rounding.
             .rounded_t(px((12.0 * s - 1.0).max(0.0)))
             .hover(|style| style.bg(super::cards::card_hover_fill(p)))
@@ -264,9 +268,15 @@ impl NativeChatView {
                 cx.notify();
             }))
             .into_any_element();
-        Some(self.status_card_with_header(
+        Some(self.status_card_with_header_motion(
+            super::cards::CardBodyMotion {
+                key: &collapse_key_name,
+                frame: motion,
+                shut_body: false,
+                shut: collapsed,
+            },
             header,
-            if collapsed { vec![] } else { body },
+            if shut { vec![] } else { body },
             actions,
             p,
         ))

@@ -79,7 +79,7 @@ mod toolbar;
 mod transcript_host;
 mod transcript_layout;
 mod transcript_menu;
-mod transcript_skeleton;
+mod transcript_reveal;
 
 mod terminal_dialog;
 
@@ -95,10 +95,12 @@ mod suggestions;
 
 mod clipboard;
 
-mod worked_fold_motion;
+mod disclosure_motion;
 mod working_spark;
 mod working_strip;
 
 mod zoom;
 
 mod save_markdown;
+
+mod table_preview;

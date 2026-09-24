@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
 import { useSessionChatDisclosureState } from './session-chat-interaction-state';
+import { useSessionChatHeightTransition } from './session-chat-height-transition';
 import { cn } from '@/packages/components/utils';
 import { AppTooltip } from '../app-tooltip';
 import type { SessionChatFileChange } from './session-chat-file-changes';
@@ -54,6 +55,8 @@ function FileChangeCard({
   const openFile = hostLinks?.openFile;
   const bodyId = useId();
   const headerRef = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  useSessionChatHeightTransition(sectionRef, expanded);
   // React shortens the folder half with CSS, which is width-aware, so it opts out of the shared character budget.
   const { filename, parent: parentPath } = sessionChatFileChangePathParts(
     change.path,
@@ -101,6 +104,7 @@ function FileChangeCard({
         if (!(event.target instanceof Element) || event.target.closest('button')) return;
         toggle();
       }}
+      ref={sectionRef}
     >
       <div className='ghostex-chat-file-change-header' ref={headerRef}>
         <button

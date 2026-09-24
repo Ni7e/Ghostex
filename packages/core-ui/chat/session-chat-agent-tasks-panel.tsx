@@ -99,6 +99,7 @@ export function SessionChatAgentTasksPanel({ tasks }: SessionChatAgentTasksPanel
       // Only the collapsed header carries the running task: expanded, the
       // rows below say it, and saying it twice reads as a glitch.
       meta={panel.meta}
+      bodyTransitionKey={showCompleted}
       onOpenChange={setOpen}
       open={!collapsed}
       title='Tasks'

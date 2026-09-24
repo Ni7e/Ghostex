@@ -133,7 +133,8 @@ impl NativeChatView {
             .text_size(px(13.0 * s))
             .line_height(relative(1.4))
             .child(header);
-        if collapsed {
+        let motion = self.disclosure_frame("async-questions", !collapsed, cx);
+        if collapsed && motion.is_none() {
             return Some(card.into_any_element());
         }
         let pane_height = f32::from(self.bounds.get().size.height);
@@ -427,7 +428,13 @@ impl NativeChatView {
                 .line_height(px(20.0 * s)),
             );
         body = body.child(actions);
-        card = card.child(body);
+        // The header carries its own padding, so the body eases from nothing with no gap to carry.
+        card = card.child(self.disclosure_body_motion(
+            "async-questions",
+            motion,
+            0.0,
+            body.into_any_element(),
+        ));
         Some(card.into_any_element())
     }
 }

@@ -225,13 +225,14 @@ impl NativeChatView {
         if !options.is_empty() {
             let options_key = format!("question-exchange:{key}");
             let expanded = self.expanded.contains(&options_key);
+            let motion = self.disclosure_frame(&options_key, expanded, cx);
             section = section.child(
                 div()
                     .pt(px(4.0 * s))
                     .text_size(px(12.0 * s))
                     .text_color(p.muted)
                     .child(self.disclosure(
-                        options_key,
+                        options_key.clone(),
                         if expanded {
                             "Hide options".to_string()
                         } else {
@@ -243,7 +244,7 @@ impl NativeChatView {
                         cx,
                     )),
             );
-            if expanded {
+            if expanded || motion.is_some() {
                 let mut rows = div().flex().flex_col().gap(px(6.0 * s)).pt(px(6.0 * s));
                 for (option_index, option) in options.iter().enumerate() {
                     rows = rows.child(self.choice_row(
@@ -260,7 +261,12 @@ impl NativeChatView {
                         cx,
                     ));
                 }
-                section = section.child(rows);
+                section = section.child(self.disclosure_body_motion(
+                    &options_key,
+                    motion,
+                    0.0,
+                    rows.into_any_element(),
+                ));
             }
         }
         section.into_any_element()

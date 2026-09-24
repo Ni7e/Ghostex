@@ -7,6 +7,7 @@
 //! `packages/shared/session-chat-presentation/file-change-rows.ts`, which the
 //! React card reads too; this file only lays them out.
 
+use super::disclosure_motion::measured;
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
 use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
@@ -80,17 +81,21 @@ impl NativeChatView {
         let simple_key = format!("files:{id}");
         let simple_expanded = self.expanded.contains(&simple_key);
         if p.simple {
+            let motion = self.disclosure_frame(&simple_key, simple_expanded, cx);
             rows.push(self.disclosure(
-                simple_key,
+                simple_key.clone(),
                 text(message, "simpleFileLabel"),
                 simple_expanded,
                 None,
                 p,
                 cx,
             ));
-            if !simple_expanded {
+            if !simple_expanded && motion.is_none() {
                 return rows;
             }
+            let stack = self.file_change_stack(&id, &files, p, cx);
+            rows.push(self.disclosure_body_motion(&simple_key, motion, 8.0 * p.scale, stack));
+            return rows;
         }
         rows.push(self.file_change_stack(&id, &files, p, cx));
         rows
@@ -112,6 +117,7 @@ impl NativeChatView {
         let id = text(item, "id");
         let key = format!("work-files:{id}");
         let expanded = self.is_expanded(&key, false);
+        let motion = self.disclosure_frame(&key, expanded, cx);
         let label = text(
             item,
             if p.simple {
@@ -126,9 +132,10 @@ impl NativeChatView {
             .w_full()
             .min_w_0()
             .gap(px(8.0 * p.scale))
-            .child(self.disclosure(key, label, expanded, None, p, cx));
-        if expanded {
-            group = group.child(self.file_change_stack(&format!("work:{id}"), &files, p, cx));
+            .child(self.disclosure(key.clone(), label, expanded, None, p, cx));
+        if expanded || motion.is_some() {
+            let stack = self.file_change_stack(&format!("work:{id}"), &files, p, cx);
+            group = group.child(self.disclosure_body_motion(&key, motion, 8.0 * p.scale, stack));
         }
         Some(group.into_any_element())
     }
@@ -174,7 +181,11 @@ impl NativeChatView {
         let failed = file["failed"] == true;
         // React's rule with the half GPUI owns: previews already show everything a short change has.
         let can_expand = !p.file_previews || file["expandableWithPreviews"] == true;
-        let show_body = expanded || p.file_previews;
+        let motion = self.disclosure_frame(&key, expanded && can_expand, cx);
+        // While the diff opens or closes it is drawn whole and clipped to the frame; with previews
+        // on, the clip runs between the preview's height and the full diff's.
+        let moving = motion.is_some();
+        let show_body = expanded || p.file_previews || moving;
         let added = file["added"].as_u64().unwrap_or(0);
         let removed = file["removed"].as_u64().unwrap_or(0);
         let parent = text(file, "parent");
@@ -376,8 +387,8 @@ impl NativeChatView {
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|line| expanded || line["kind"] != "meta")
-            .take(if expanded { usize::MAX } else { 7 })
+            .filter(|line| expanded || moving || line["kind"] != "meta")
+            .take(if expanded || moving { usize::MAX } else { 7 })
             .collect();
         if lines.is_empty() {
             code = code.child(div().px(px(12.0 * s)).text_color(p.muted).child(
@@ -449,7 +460,7 @@ impl NativeChatView {
             );
         }
         let rail_group = format!("rail:{key}");
-        card = card.child(
+        let body =
             div()
                 .flex()
                 .w_full()
@@ -476,8 +487,16 @@ impl NativeChatView {
                             ))
                         }),
                 )
-                .child(detail_column),
-        );
+                .child(detail_column)
+                .into_any_element();
+        card = card.child(match motion {
+            Some(frame) if p.file_previews => self.capped_body_motion(&key, frame, 0.0, body),
+            Some(_) => self.disclosure_body_motion(&key, motion, 0.0, body),
+            None if p.file_previews && !expanded && can_expand => {
+                measured(self.disclosure_floor(&key), body)
+            }
+            None => body,
+        });
         card.into_any_element()
     }
 }

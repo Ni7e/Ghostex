@@ -2,14 +2,14 @@
 //! fold, the artifacts and answered questions it keeps in view, and the final reply.
 //!
 //! At rest the row is one column with an 8px gap, React's `.ghostex-chat-completed-turn`. While the
-//! turn is folding, or its log is opening or closing, `worked_fold_motion.rs` reports a frame and
+//! turn is folding, or its log is opening or closing, `disclosure_motion.rs` reports a frame and
 //! the row is built from the same parts with each gap carried inside the part that owns it, so a
 //! part whose height eases to nothing takes its gap with it and the first and last frames match
 //! the live rows and the settled row exactly.
 
 use super::disclosure_body::{DisclosureRail, disclosure_body};
+use super::disclosure_motion::{FoldFrame, FoldMotionKind, motion_clip};
 use super::transcript::text;
-use super::worked_fold_motion::{FoldFrame, FoldMotionKind};
 use super::{appearance::ChatAppearance, state::NativeChatView};
 use gpui::{
     AnyElement, Context, FontWeight, IntoElement, ParentElement as _, Styled as _, Window, div, px,
@@ -24,33 +24,22 @@ const PART_GAP: f32 = 8.0;
 /// live rows had between them before they folded.
 const LIVE_ROW_GAP: f32 = 16.0;
 
-/// A part whose height eases between nothing and its natural height. The content lays out at its
-/// natural height inside a clip, a canvas records that height for the next frame, and until the
-/// first measurement a part that is mostly open paints unclipped and one that is mostly shut paints
-/// nothing.
+/// A part whose height eases between nothing and its natural height; the fold applies its own
+/// opacity to the rows, so the clip carries none.
 fn eased_part(height: Rc<Cell<f32>>, factor: f32, content: AnyElement) -> AnyElement {
-    let natural = height.get();
-    let measure = gpui::canvas(
-        move |bounds, _, _| height.set(bounds.size.height.as_f32()),
-        |_, _, _, _| {},
+    motion_clip(
+        height,
+        FoldFrame {
+            kind: FoldMotionKind::Fold,
+            heading: 1.0,
+            heading_offset: 0.0,
+            log: factor,
+            rows_opacity: 1.0,
+        },
+        0.0,
+        0.0,
+        content,
     )
-    .absolute()
-    .size_full();
-    let clip = div().w_full().overflow_hidden();
-    let clip = if factor >= 1.0 || (natural <= 0.0 && factor >= 0.5) {
-        clip
-    } else {
-        clip.h(px(natural * factor.max(0.0)))
-    };
-    clip.child(
-        div()
-            .relative()
-            .w_full()
-            .flex_shrink_0()
-            .child(content)
-            .child(measure),
-    )
-    .into_any_element()
 }
 
 impl NativeChatView {
@@ -66,11 +55,10 @@ impl NativeChatView {
         work_appearance.primary = p.muted;
         let id = format!("work:{}", text(item, "id"));
         let expanded = self.is_expanded(&id, p.verbose);
-        self.worked_fold.arrived(&id, !expanded, cx.reduce_motion());
-        let motion = self.worked_fold.frame(&id);
-        if motion.is_some() {
-            window.request_animation_frame();
-        }
+        self.disclosure_motion
+            .borrow_mut()
+            .arrived(&id, !expanded, cx.reduce_motion());
+        let motion = self.disclosure_frame(&id, expanded, cx);
         let heading_opacity = motion.map_or(1.0, |frame| frame.heading);
         let heading = if item["expandable"] == true {
             let disclosure = self.disclosure(
@@ -203,13 +191,13 @@ impl NativeChatView {
             // The heading did not exist while the turn was live, so it grows in; the rows it
             // replaces keep the spacing they had as separate transcript rows until they are gone.
             row = row.child(eased_part(
-                self.worked_fold.height(id, "heading"),
+                self.disclosure_motion.borrow_mut().height(id, "heading"),
                 frame.heading,
                 top,
             ));
             if let Some(rows) = log {
                 row = row.child(eased_part(
-                    self.worked_fold.height(id, "log"),
+                    self.disclosure_motion.borrow_mut().height(id, "log"),
                     frame.log,
                     div()
                         .flex()
@@ -223,7 +211,7 @@ impl NativeChatView {
             }
             if let Some(files) = files {
                 row = row.child(eased_part(
-                    self.worked_fold.height(id, "files"),
+                    self.disclosure_motion.borrow_mut().height(id, "files"),
                     frame.heading,
                     spaced(files),
                 ));
@@ -232,7 +220,7 @@ impl NativeChatView {
             row = row.child(top);
             if let Some(log) = log {
                 row = row.child(eased_part(
-                    self.worked_fold.height(id, "log"),
+                    self.disclosure_motion.borrow_mut().height(id, "log"),
                     frame.log,
                     div()
                         .pt(px(PART_GAP * s))

@@ -28,7 +28,6 @@ impl NativeChatView {
         expanded: bool,
         cx: &mut Context<Self>,
     ) {
-        self.worked_fold.toggled(&id, !expanded, cx.reduce_motion());
         if expanded {
             self.expanded.remove(&id);
             self.collapsed.insert(id);
@@ -89,6 +88,7 @@ impl NativeChatView {
         let content = if item["kind"] == "summary" {
             let id = format!("summary:{}", text(&item, "id"));
             let expanded = self.expanded.contains(&id);
+            let motion = self.disclosure_frame(&id, expanded, cx);
             let mut row = div()
                 .flex()
                 .flex_col()
@@ -98,7 +98,7 @@ impl NativeChatView {
             if item["final"].is_object() || item["active"] == true {
                 row = row.child(
                     self.disclosure(
-                        id,
+                        id.clone(),
                         if item["final"].is_object() {
                             "Agent reply"
                         } else {
@@ -111,14 +111,21 @@ impl NativeChatView {
                         cx,
                     ),
                 );
-                if expanded {
+                if expanded || motion.is_some() {
+                    let mut body = div().flex().flex_col().w_full().gap(px(8.0 * s));
                     if item["final"].is_object() {
-                        row = row.child(self.message_row(&item["final"], &p, window, cx));
+                        body = body.child(self.message_row(&item["final"], &p, window, cx));
                     } else {
                         for message in item["work"].as_array().into_iter().flatten() {
-                            row = row.child(self.message_row(message, &p, window, cx));
+                            body = body.child(self.message_row(message, &p, window, cx));
                         }
                     }
+                    row = row.child(self.disclosure_body_motion(
+                        &id,
+                        motion,
+                        8.0 * s,
+                        body.into_any_element(),
+                    ));
                 }
             }
             row.into_any_element()
@@ -126,17 +133,21 @@ impl NativeChatView {
             self.completed_work_row(item, &p, window, cx)
         } else {
             // A prompt drawn with its turn's rows still open below it; when the same turn comes
-            // back folded, `worked_fold_motion.rs` folds those rows away instead of swapping them.
+            // back folded, `disclosure_motion.rs` folds those rows away instead of swapping them.
             if item["message"]["role"] == "user"
                 && !items.get(index + 1).is_some_and(|next| {
                     next["kind"] == "completed-work" && next["id"] == item["message"]["id"]
                 })
             {
-                self.worked_fold
+                self.disclosure_motion
+                    .borrow_mut()
                     .saw_live(&format!("work:{}", text(&item["message"], "id")));
             }
             self.message_row(&item["message"], &p, window, cx)
         };
+        if self.disclosure_motion.borrow().running() {
+            window.request_animation_frame();
+        }
         div()
             .w_full()
             .flex()
@@ -263,7 +274,6 @@ impl NativeChatView {
             )
             .child(div().flex_1().min_w_0().child(label))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.worked_fold.toggled(&id, !expanded, cx.reduce_motion());
                 if expanded {
                     this.expanded.remove(&id);
                     this.collapsed.insert(id.clone());
@@ -405,6 +415,7 @@ impl NativeChatView {
             if reasoning && tools {
                 let key = format!("reasoning:{id}");
                 let expanded = self.is_expanded(&key, p.verbose);
+                let motion = self.disclosure_frame(&key, expanded, cx);
                 row = row.child(self.disclosure(
                     key.clone(),
                     text(&message["reasoning"], "headline"),
@@ -413,7 +424,7 @@ impl NativeChatView {
                     p,
                     cx,
                 ));
-                if expanded {
+                if expanded || motion.is_some() {
                     // React's ReasoningRow puts the thought's tail and the tool run it owns in one
                     // expansion, so both hang off the rail the headline opened.
                     let mut detail_rows: Vec<AnyElement> = Vec::new();
@@ -429,15 +440,16 @@ impl NativeChatView {
                     }
                     detail_rows.extend(self.tool_rows(message, p, cx));
                     if !detail_rows.is_empty() {
-                        row = row.child(disclosure_body(
+                        let body = disclosure_body(
                             p,
                             DisclosureRail::Marker,
                             8.0,
-                            key,
+                            key.clone(),
                             "Collapse thinking",
                             detail_rows,
                             cx,
-                        ));
+                        );
+                        row = row.child(self.disclosure_body_motion(&key, motion, 8.0 * s, body));
                     }
                 }
                 tools_rendered = true;
@@ -456,6 +468,7 @@ impl NativeChatView {
                 // (CDXC:SessionChat 2026-09-13 DECISION in rows.tsx).
                 let key = format!("tools:{id}");
                 let expanded = tools && self.is_expanded(&key, p.verbose);
+                let motion = self.disclosure_frame(&key, expanded, cx);
                 let heading = div()
                     .flex()
                     .items_start()
@@ -496,18 +509,20 @@ impl NativeChatView {
                     heading.into_any_element()
                 });
                 if tools {
-                    if expanded {
+                    if expanded || motion.is_some() {
                         let work = self.tool_rows(message, p, cx);
                         if !work.is_empty() {
-                            row = row.child(disclosure_body(
+                            let body = disclosure_body(
                                 p,
                                 DisclosureRail::Marker,
                                 8.0,
-                                key,
+                                key.clone(),
                                 "Collapse tool calls",
                                 work,
                                 cx,
-                            ));
+                            );
+                            row =
+                                row.child(self.disclosure_body_motion(&key, motion, 8.0 * s, body));
                         }
                     }
                     tools_rendered = true;

@@ -25,7 +25,7 @@ impl NativeChatView {
         }
         self.error.is_some()
             || (self.snapshot["hasMore"] == true && self.list.item_count() == 0)
-            || self.snapshot["transcriptSearch"]["open"] == true
+            || self.search_open()
             || self.snapshot["forkBranches"]["count"].as_u64().is_some()
     }
 
@@ -67,6 +67,11 @@ impl Render for NativeChatView {
         );
         let s = p.scale;
         self.sync_search_scroll();
+        // A card above the composer that is opening or closing needs the next frame; the
+        // transcript's rows ask for theirs as they are drawn.
+        if self.disclosure_motion.borrow().running() {
+            window.request_animation_frame();
+        }
         /*
         CDXC:SessionChat 2026-09-18 WHY:
         React's maximized composer is a fixed overlay across the whole chat pane, so nothing of the

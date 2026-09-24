@@ -61,20 +61,25 @@ pub(crate) struct NativeChatView {
     pub(super) save_markdown_window: super::save_markdown::SaveMarkdownWindowState,
     pub(super) rewind_window: super::rewind::RewindWindowState,
     pub(super) image_viewer: super::image_viewer::ImageViewerState,
+    /// The larger preview of one transcript table (table_preview/).
+    pub(super) table_preview: super::table_preview::TablePreviewState,
     /// Bytes for the transcript's pictures, read once and shared by the thumbnails and the viewer.
     pub(super) images: super::images::ChatImageCache,
     /// True while a completed turn's work rows render, which is where answered question cards are suppressed.
     pub(super) in_work_fold: bool,
     /// True while any row of a completed turn renders: its writes belong to that turn's "N files changed" fold.
     pub(super) hide_file_changes: bool,
-    /// Finished turns whose "Worked for Xs" fold is moving, and the turns last drawn live.
-    pub(super) worked_fold: super::worked_fold_motion::WorkedFoldMotions,
+    /// Every disclosure that is opening, closing or folding, and the state each was last drawn in.
+    /// A cell because rows drawn through `&self` report their state too.
+    pub(super) disclosure_motion: std::cell::RefCell<super::disclosure_motion::DisclosureMotions>,
     /// True while a row of the subagent viewer's transcript renders, where a rewind would act on the wrong conversation.
     pub(super) in_subagent: bool,
     pub(super) context_editor_window: super::context_editor::ContextEditorWindowState,
     pub(crate) maximized_window: Option<gpui::WindowHandle<gpui_component::Root>>,
     /// Whether this session's composer is maximized, which outlives the window while the pane is off screen.
     pub(super) maximized_wanted: bool,
+    /// True between asking for the maximized window and GPUI handing back its handle.
+    pub(super) maximized_opening: bool,
     /// True while this session's pane is off screen: its modal windows stay closed, and the state behind them waits for the pane to come back.
     pub(super) pane_hidden: bool,
     pub(crate) main_window: Option<gpui::AnyWindowHandle>,
@@ -131,6 +136,8 @@ pub(crate) struct NativeChatView {
     pub(super) search_input: Option<Entity<InputState>>,
     pub(super) search_subscription: Option<Subscription>,
     pub(super) search_scrolled_revision: i64,
+    /// Open or closed as this pane last asked the shared runtime, held until its snapshot agrees.
+    pub(super) search_pending_open: Option<bool>,
     /// Keyboard zoom (Cmd+= / Cmd+- / Cmd+0): this pane's temporary size (zoom.rs).
     pub(super) zoom: super::zoom::ChatZoomState,
     pub(crate) draft: String,
@@ -155,12 +162,13 @@ pub(crate) struct NativeChatView {
     /// React's remembered last choice (session-chat-code-wrap.ts): the blocks that
     /// scroll into view after a toggle start the way the reader last asked for.
     pub(super) code_wrap_default: bool,
-    /// The tables whose cells the reader expanded to wrap (React's expanded table); the rest keep
-    /// their cells on one line.
-    pub(super) table_expanded: HashSet<String>,
+    /// The tables whose cells the reader collapsed to one line; the rest wrap their cells.
+    pub(super) table_collapsed: HashSet<String>,
     pub(crate) list: gpui::ListState,
     /// The transcript's own cached view, created on the first draw (transcript_host.rs).
     pub(super) transcript_host: Option<Entity<super::transcript_host::TranscriptHost>>,
+    /// The loading hold and the fade that ends it (transcript_reveal.rs).
+    pub(super) transcript_reveal: super::transcript_reveal::TranscriptReveal,
     /// The composer tween's bottom inset for the row list, computed once per chat render.
     pub(super) transcript_inset: f32,
     /// The transcript minimap's dashes, hover and measured column (minimap.rs).
@@ -289,13 +297,15 @@ impl NativeChatView {
             save_markdown_window: Default::default(),
             rewind_window: Default::default(),
             image_viewer: Default::default(),
+            table_preview: Default::default(),
             images: Default::default(),
             in_work_fold: false,
             hide_file_changes: false,
-            worked_fold: Default::default(),
+            disclosure_motion: Default::default(),
             in_subagent: false,
             maximized_window: None,
             maximized_wanted: false,
+            maximized_opening: false,
             pane_hidden: false,
             main_window: None,
             model_pill_bounds: Default::default(),
@@ -335,6 +345,7 @@ impl NativeChatView {
             search_input: None,
             search_subscription: None,
             search_scrolled_revision: -1,
+            search_pending_open: None,
             zoom: Default::default(),
             draft: String::new(),
             draft_revision: 0,
@@ -350,9 +361,10 @@ impl NativeChatView {
             collapsed: HashSet::new(),
             code_wrap: HashMap::new(),
             code_wrap_default: false,
-            table_expanded: HashSet::new(),
+            table_collapsed: HashSet::new(),
             list,
             transcript_host: None,
+            transcript_reveal: Default::default(),
             transcript_inset: 0.0,
             minimap: Default::default(),
             subagent_list,

@@ -221,6 +221,7 @@ impl NativeChatView {
         let key = format!("suppressed:{id}");
         let expanded = self.expanded.contains(&key);
         let body = text(suppressed, "text");
+        let motion = self.disclosure_frame(&key, expanded, cx);
         div()
             .flex()
             .flex_col()
@@ -229,26 +230,38 @@ impl NativeChatView {
             .gap(px(6.0 * s))
             .pb(px(8.0 * s))
             .text_color(p.muted)
-            .child(self.disclosure(key, text(suppressed, "label"), expanded, None, p, cx))
-            .when(expanded && !body.is_empty(), |row| {
+            .child(self.disclosure(
+                key.clone(),
+                text(suppressed, "label"),
+                expanded,
+                None,
+                p,
+                cx,
+            ))
+            .when((expanded || motion.is_some()) && !body.is_empty(), |row| {
                 row.child(
-                    self.nested_scroll(
-                        format!("suppressed-detail:{id}"),
-                        div()
-                            .min_w_0()
-                            .max_h(px(400.0 * s))
-                            .p(px(10.0 * s))
-                            .rounded(px(8.0 * s))
-                            .border_1()
-                            .border_color(p.border)
-                            .bg(p.input)
-                            .child(self.markdown(
-                                format!("suppressed-body:{id}"),
-                                format!("```\n{body}\n```"),
-                                &Value::Null,
-                                p,
-                                cx,
-                            )),
+                    self.disclosure_body_motion(
+                        &key,
+                        motion,
+                        6.0 * s,
+                        self.nested_scroll(
+                            format!("suppressed-detail:{id}"),
+                            div()
+                                .min_w_0()
+                                .max_h(px(400.0 * s))
+                                .p(px(10.0 * s))
+                                .rounded(px(8.0 * s))
+                                .border_1()
+                                .border_color(p.border)
+                                .bg(p.input)
+                                .child(self.markdown(
+                                    format!("suppressed-body:{id}"),
+                                    format!("```\n{body}\n```"),
+                                    &Value::Null,
+                                    p,
+                                    cx,
+                                )),
+                        ),
                     ),
                 )
             })
