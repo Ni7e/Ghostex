@@ -142,7 +142,13 @@ impl GhostexGpuiApp {
             );
         view.update(cx, |view, _| view.subscriptions.push(subscription));
         self.agents_chat_page_states.insert(session_id, state);
-        self.native_chat_views.insert(session_id, view.clone());
+        if let Some(previous) = self.native_chat_views.insert(session_id, view.clone())
+            && previous != view
+        {
+            previous.update(cx, |previous, cx| {
+                previous.dismiss_windows_for_hidden_pane(cx)
+            });
+        }
         view
     }
 

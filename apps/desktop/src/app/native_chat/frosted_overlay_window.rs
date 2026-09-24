@@ -296,7 +296,7 @@ impl Render for FrostedOverlayView {
             gpui::white().opacity(0.11)
         };
         match self.overlay {
-            FrostedOverlay::ScrollBottom => scroll_bottom_pill(chat, &p, hover),
+            FrostedOverlay::ScrollBottom => scroll_bottom_pill(self.chat.clone(), &p, hover),
             FrostedOverlay::ForkBranches => {
                 fork_branches_badge(chat, &p, hover, self.tooltip_epoch.clone(), cx)
             }
@@ -304,8 +304,13 @@ impl Render for FrostedOverlayView {
     }
 }
 
+/// CDXC:SessionChat 2026-09-24 WHY:
+/// The control's handlers hold the chat weakly. A strong handle kept in the window's drawn frame kept
+/// a chat view alive after the app dropped it (a session's chat removed, evicted or rebuilt), so the
+/// release hook that closes the control never ran and a stale "Scroll to bottom" pill stayed over the
+/// pane, where a click scrolled the dropped view and did nothing visible.
 fn scroll_bottom_pill(
-    chat: gpui::Entity<NativeChatView>,
+    chat: WeakEntity<NativeChatView>,
     p: &ChatAppearance,
     hover: gpui::Hsla,
 ) -> AnyElement {
@@ -338,10 +343,12 @@ fn scroll_bottom_pill(
         .on_click(move |_, _, cx| {
             let chat = chat.clone();
             cx.defer(move |cx| {
-                let main = chat.update(cx, |chat, cx| {
+                let Ok(main) = chat.update(cx, |chat, cx| {
                     chat.jump_to_bottom(cx);
                     chat.main_window
-                });
+                }) else {
+                    return;
+                };
                 activate_main_window(main, cx);
             });
         })
@@ -367,8 +374,8 @@ fn fork_branches_badge(
         )
     };
     let s = p.scale;
-    let hover_chat = chat.clone();
-    let click_chat = chat.clone();
+    let hover_chat = chat.downgrade();
+    let click_chat = chat.downgrade();
     div()
         .id("chat-fork-branches-window")
         .role(gpui::Role::Button)
@@ -407,7 +414,7 @@ fn fork_branches_badge(
             tooltip_epoch.set(epoch);
             let chat = hover_chat.clone();
             if !*hovered {
-                let main = chat.read(cx).main_window;
+                let main = chat.upgrade().and_then(|chat| chat.read(cx).main_window);
                 if let Some(main) = main {
                     let _ = main.update(cx, |_, window, cx| Root::hide_tooltip(window, cx));
                 }
@@ -424,8 +431,11 @@ fn fork_branches_badge(
                         if tooltip_epoch.get() != epoch {
                             return;
                         }
+                        let Some(view) = chat.upgrade() else {
+                            return;
+                        };
                         let (main, anchor) = {
-                            let view = chat.read(cx);
+                            let view = view.read(cx);
                             (
                                 view.main_window,
                                 view.frosted_overlays
@@ -457,6 +467,9 @@ fn fork_branches_badge(
         .on_click(move |_, _, cx| {
             let chat = click_chat.clone();
             cx.defer(move |cx| {
+                let Some(chat) = chat.upgrade() else {
+                    return;
+                };
                 let (main, anchor) = {
                     let view = chat.read(cx);
                     (

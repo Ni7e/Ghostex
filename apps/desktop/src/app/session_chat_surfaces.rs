@@ -834,7 +834,9 @@ impl GhostexGpuiApp {
         session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.native_chat_views.remove(&session_id);
+        if let Some(view) = self.native_chat_views.remove(&session_id) {
+            view.update(cx, |view, cx| view.dismiss_windows_for_hidden_pane(cx));
+        }
         let caller = std::panic::Location::caller();
         let file = std::path::Path::new(caller.file())
             .file_name()
