@@ -683,6 +683,7 @@ pub struct TerminalView {
     first_frame_at: Option<web_time::Instant>,
     last_output_at: Option<web_time::Instant>,
     mount_gate_open: bool,
+    mount_gate_check_scheduled: bool,
     /// When deferral of a mid-synchronized-output refresh began (DECSET 2026),
     /// with a 300ms bound so a lost closing marker cannot freeze the view.
     sync_defer_started_at: Option<web_time::Instant>,
@@ -828,6 +829,7 @@ impl TerminalView {
             first_frame_at: None,
             last_output_at: None,
             mount_gate_open: false,
+            mount_gate_check_scheduled: false,
             sync_defer_started_at: None,
             parked_viewport: None,
             displayed: true,
@@ -1145,7 +1147,9 @@ impl TerminalView {
                     self.snapshot_stale = true;
                     self.sync_title_and_pwd(cx);
                 }
-                if self.frame.is_some() && !self.mount_gate_open {
+                if self.frame.is_some() && !self.mount_gate_open && !self.mount_gate_check_scheduled
+                {
+                    self.mount_gate_check_scheduled = true;
                     self.spawn_zmx_gate_check(ZMX_REFLOW_QUIET, cx);
                     self.spawn_zmx_gate_check(ZMX_REFLOW_CAP, cx);
                 }
@@ -1197,6 +1201,7 @@ impl TerminalView {
     }
 
     fn open_mount_gate_if_due(&mut self, cx: &mut Context<Self>) {
+        self.mount_gate_check_scheduled = false;
         if self.mount_gate_open || self.frame.is_none() {
             return;
         }
@@ -1332,34 +1337,7 @@ impl TerminalView {
         // identifies which screen state each paint came from without storing
         // any terminal content.
         if support_logs::scenario_enabled(GpuiDiagnosticScenario::TerminalFocus) {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = std::hash::DefaultHasher::new();
-            for row in &frame.rows {
-                for cell in &row.cells {
-                    cell.base.hash(&mut hasher);
-                }
-            }
-            self.diagnostic_frame_seq += 1;
-            let pane_px = self
-                .terminal_bounds
-                .map(|bounds| (bounds.size.width.as_f32(), bounds.size.height.as_f32()));
-            let cell_px = self
-                .cached_metrics
-                .map(|metrics| (metrics.cell_width.as_f32(), metrics.line_height.as_f32()));
-            support_logs::append(
-                GpuiSupportLog::TerminalFocus,
-                "terminalFrame",
-                serde_json::json!({
-                    "seq": self.diagnostic_frame_seq,
-                    "cols": frame.cols,
-                    "rowCount": frame.rows.len(),
-                    "offset": frame.scrollbar.offset,
-                    "cursorRow": frame.cursor.map(|(_, row)| row),
-                    "contentHash": hasher.finish(),
-                    "panePx": pane_px,
-                    "cellPx": cell_px,
-                }),
-            );
+            self.log_diagnostic_frame(&frame);
         }
         if self.first_frame_at.is_none() {
             self.first_frame_at = Some(web_time::Instant::now());
@@ -1367,6 +1345,40 @@ impl TerminalView {
         self.frame = Some(frame);
         self.recompute_search_matches();
         self.update_scroll_button_visibility();
+    }
+
+    /// Terminal-focus scenario: log a bounded fingerprint of this frame
+    /// (sizes, scroll offset, cursor row, content hash — never the content)
+    /// so a trace ties each painted state to its source.
+    fn log_diagnostic_frame(&mut self, frame: &TerminalSnapshot) {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        for row in &frame.rows {
+            for cell in &row.cells {
+                cell.base.hash(&mut hasher);
+            }
+        }
+        self.diagnostic_frame_seq += 1;
+        let pane_px = self
+            .terminal_bounds
+            .map(|bounds| (bounds.size.width.as_f32(), bounds.size.height.as_f32()));
+        let cell_px = self
+            .cached_metrics
+            .map(|metrics| (metrics.cell_width.as_f32(), metrics.line_height.as_f32()));
+        support_logs::append(
+            GpuiSupportLog::TerminalFocus,
+            "terminalFrame",
+            serde_json::json!({
+                "seq": self.diagnostic_frame_seq,
+                "cols": frame.cols,
+                "rowCount": frame.rows.len(),
+                "offset": frame.scrollbar.offset,
+                "cursorRow": frame.cursor.map(|(_, row)| row),
+                "contentHash": hasher.finish(),
+                "panePx": pane_px,
+                "cellPx": cell_px,
+            }),
+        );
     }
 
     fn update_scroll_button_visibility(&mut self) -> bool {
