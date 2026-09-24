@@ -1890,24 +1890,31 @@ impl GhostexGpuiApp {
         }
     }
 
+    /// CDXC:Browser 2026-09-24 DECISION:
+    /// User: Cmd+N with the side panel closed must not open two tabs. A project whose Browser holds
+    /// only the empty "New Tab" placeholder gets that placeholder loaded as its new tab instead of
+    /// a second tab beside it; the placeholder used to survive next to the new page with no way
+    /// to close it.
     pub(crate) fn add_browser_tab(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
         if !self.titlebar_mode_available(TitlebarMode::Browser) {
             return;
         }
-        let default_url = browser_shell_default_url(
-            self.latest_sidebar_project_snapshot
-                .as_ref()
-                .and_then(|snapshot| snapshot.browser_home_url.as_deref()),
-        );
-        let created_tab_id = self.browser_tabs.add_loaded_popup_tab(
-            default_url.clone(),
-            self.browser_profiles.active_profile_id(),
-            cef::BrowserPopupPlacement::Selected,
-        );
-        if let Some(created_tab_id) = created_tab_id {
-            self.reveal_new_browser_tab(created_tab_id);
+        if !self.seed_current_project_browser_tab_if_empty() {
+            let default_url = browser_shell_default_url(
+                self.latest_sidebar_project_snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.browser_home_url.as_deref()),
+            );
+            let created_tab_id = self.browser_tabs.add_loaded_popup_tab(
+                default_url.clone(),
+                self.browser_profiles.active_profile_id(),
+                cef::BrowserPopupPlacement::Selected,
+            );
+            if let Some(created_tab_id) = created_tab_id {
+                self.reveal_new_browser_tab(created_tab_id);
+            }
+            self.browser_url = default_url;
         }
-        self.browser_url = default_url;
         let pane_id = self.browser_tabs.focused_pane;
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
         self.focus_shell_target(ShellFocusTarget::BrowserPane(pane_id), cx);
@@ -2109,7 +2116,7 @@ impl GhostexGpuiApp {
         if !self.titlebar_mode_available(TitlebarMode::Browser) {
             return;
         }
-        let popup_tab_id = self.browser_tabs.add_loaded_popup_tab(
+        let popup_tab_id = self.browser_tabs.open_loaded_popup_tab(
             requested_url,
             self.browser_profiles.active_profile_id(),
             placement,

@@ -952,6 +952,29 @@ impl BrowserTabModel {
         changed
     }
 
+    /// CDXC:Browser 2026-09-24 WHY:
+    /// A link opened from Linear or another website view used to append beside the Browser's unused empty placeholder. That placeholder stayed hidden until selecting the link, when an extra New Tab appeared. Reuse the sole empty placeholder for page popups; explicit tab and split creation still append through add_loaded_popup_tab.
+    pub(crate) fn open_loaded_popup_tab(
+        &mut self,
+        requested_url: String,
+        profile_id: BrowserProfileId,
+        placement: cef::BrowserPopupPlacement,
+    ) -> Option<BrowserTabId> {
+        let requested_url = browser_loaded_popup_target_url(&requested_url)?;
+        if self.tabs.len() == 1
+            && let Some(tab) = self.active_tab()
+            && tab.state == BrowserTabState::AddressOnly
+            && tab.url.is_empty()
+        {
+            let tab_id = tab.id;
+            self.set_tab_profile(tab_id, profile_id);
+            return self
+                .load_pane_active_tab_url(self.focused_pane, requested_url)
+                .map(|(tab_id, _)| tab_id);
+        }
+        self.add_loaded_popup_tab(requested_url, profile_id, placement)
+    }
+
     pub(crate) fn add_loaded_popup_tab(
         &mut self,
         requested_url: String,

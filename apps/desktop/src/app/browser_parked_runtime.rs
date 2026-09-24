@@ -220,7 +220,7 @@ impl GhostexGpuiApp {
             return;
         };
         let Some(popup_tab_id) =
-            parked_tabs.add_loaded_popup_tab(requested_url, active_profile_id, placement)
+            parked_tabs.open_loaded_popup_tab(requested_url, active_profile_id, placement)
         else {
             return;
         };
