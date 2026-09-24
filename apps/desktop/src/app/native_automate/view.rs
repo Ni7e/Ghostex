@@ -42,6 +42,8 @@ impl AutomateTab {
 /// window in the app modals' palette.
 #[derive(Clone)]
 pub(crate) struct AutomateHostInfo {
+    #[cfg(target_os = "linux")]
+    pub(crate) window: gpui::AnyWindowHandle,
     pub(crate) main_window_bounds: Bounds<Pixels>,
     pub(crate) display_id: Option<gpui::DisplayId>,
     pub(crate) palette: ModalPalette,

@@ -33,6 +33,8 @@ impl GhostexGpuiApp {
         refresh_gpui_visual_settings(&shared_settings::shared_sidebar_settings_snapshot());
         apply_gpui_component_theme(cx);
         let parent = cef_parent_native_view(window)?;
+        let main_window_handle =
+            cfg!(target_os = "linux").then(|| gpui::Window::window_handle(window));
         let project_name = titlebar_project_label_from_latest_sidebar_snapshot(None);
         let shared_settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let sidebar_runtime_settings_snapshot =
@@ -151,7 +153,7 @@ impl GhostexGpuiApp {
                 command_pane_project_id: shell_layout_state.command_pane_project_id,
                 parked_command_panes_by_project: shell_layout_state.parked_command_panes_by_project,
                 command_pane_project_epoch: 0,
-                main_window_handle: None,
+                main_window_handle,
                 project_editor_shell: shell_layout_state.project_editor_shell,
                 project_editor_auto_sleep_epochs: ProjectEditorAutoSleepEpochs::default(),
                 project_editor_auto_sleep_policy,

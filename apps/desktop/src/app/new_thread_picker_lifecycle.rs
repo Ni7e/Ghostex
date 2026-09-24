@@ -259,6 +259,8 @@ impl GhostexGpuiApp {
         );
         let options = WindowOptions {
             kind: crate::app::window::popup_frame::child_window_kind(),
+            #[cfg(target_os = "linux")]
+            x11_parent: self.main_window_handle,
             window_bounds: Some(WindowBounds::Windowed(gpui::Bounds::centered_at(
                 self.main_window_bounds.center(),
                 window_size,
