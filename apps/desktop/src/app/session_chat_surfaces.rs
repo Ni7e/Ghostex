@@ -822,6 +822,7 @@ impl GhostexGpuiApp {
             self.ensure_native_chat(*session_id, cx);
         }
         self.dismiss_native_chat_windows_leaving_view(&visible_session_ids, cx);
+        self.restore_native_chat_windows_entering_view(&visible_session_ids, cx);
         self.native_chat_visible_sessions = visible_session_ids.clone();
         self.resume_visible_native_chat_runtimes(cx);
         self.schedule_native_chat_prewarm(cx);

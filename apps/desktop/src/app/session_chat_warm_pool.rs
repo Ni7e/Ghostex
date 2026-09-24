@@ -199,19 +199,50 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// Takes down the preview and picker windows of views whose pane just stopped being shown.
+    /// Takes down the child windows of every view whose pane is not on screen, which is also what
+    /// keeps a warmed-up view that was never shown from opening one.
     pub(crate) fn dismiss_native_chat_windows_leaving_view(
         &mut self,
         visible: &HashSet<TerminalSessionId>,
         cx: &mut gpui::Context<Self>,
     ) {
         let hidden = self
-            .native_chat_visible_sessions
-            .difference(visible)
-            .filter_map(|session_id| self.native_chat_views.get(session_id).cloned())
+            .native_chat_views
+            .iter()
+            .filter(|(session_id, _)| !visible.contains(*session_id))
+            .map(|(_, view)| view.clone())
             .collect::<Vec<_>>();
         for view in hidden {
             view.update(cx, |view, cx| view.dismiss_windows_for_hidden_pane(cx));
+        }
+    }
+
+    /// Reopens the modals of views whose pane is on screen again, on its current frame. Views that
+    /// never lost their pane answer this with nothing to do.
+    pub(crate) fn restore_native_chat_windows_entering_view(
+        &mut self,
+        visible: &HashSet<TerminalSessionId>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let shown = visible
+            .iter()
+            .filter_map(|session_id| self.native_chat_views.get(session_id).cloned())
+            .collect::<Vec<_>>();
+        for view in shown {
+            view.update(cx, |view, cx| view.restore_windows_for_shown_pane(cx));
+        }
+    }
+
+    /// A painted pane is on screen by definition: resume its runtime and give it back the modals it
+    /// was holding, even if no reconcile ran since it was selected.
+    pub(crate) fn note_native_chat_pane_painted(
+        &mut self,
+        session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.resume_native_chat_runtime_for_session(session_id, cx);
+        if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
+            view.update(cx, |view, cx| view.restore_windows_for_shown_pane(cx));
         }
     }
 

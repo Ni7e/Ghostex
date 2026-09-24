@@ -132,10 +132,9 @@ impl Render for NativeChatView {
             div().h(px(148.0 * s)).into_any_element()
         };
         let bounds = self.bounds.clone();
-        // The picker window is a sibling frame sized to this pane, so the pane's painted size is what tells it the pane was resized.
-        let model_picker_open = self.model_picker_window.is_open();
         let picker_chat = cx.weak_entity();
-        let pane_windows_open = self.pane_windows_open();
+        // Whatever a pane-frame change has to act on: the windows that cover the pane, and any open menu.
+        let pane_frame_watched = self.pane_windows_open() || self.option_menu.is_some();
         let suggestion_shadow = self.render_suggestion_shadow(&p);
         let content_ready = self.error.is_none()
             && (rows > 0
@@ -192,6 +191,8 @@ impl Render for NativeChatView {
             .composer_input_actions(cx)
             .capture_key_up(cx.listener(|chat, _, _, _| chat.composer_held_key = None))
             .capture_action(cx.listener(Self::paste_attachments))
+            .capture_action(cx.listener(Self::composer_copy))
+            .capture_action(cx.listener(Self::composer_cut))
             .on_drop(cx.listener(|chat, paths: &gpui::ExternalPaths, _, cx| {
                 let paths = paths
                     .0
@@ -242,18 +243,11 @@ impl Render for NativeChatView {
             .child(
                 gpui::canvas(
                     move |rect, window, cx| {
-                        if bounds.replace(rect) != rect && pane_windows_open {
+                        if bounds.replace(rect) != rect && pane_frame_watched {
                             let chat = picker_chat.clone();
                             window.defer(cx, move |_, cx| {
                                 let _ = chat.update(cx, |chat, cx| {
-                                    chat.follow_pane_windows(cx);
-                                });
-                            });
-                        }
-                        if model_picker_open {
-                            window.defer(cx, move |_, cx| {
-                                let _ = picker_chat.update(cx, |chat, cx| {
-                                    chat.report_model_picker_pane_size(rect.size, cx);
+                                    chat.pane_frame_changed(cx);
                                 });
                             });
                         }

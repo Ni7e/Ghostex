@@ -115,8 +115,8 @@ impl NativeChatView {
     pub(super) fn frosted_overlay_covered(&self, overlay: FrostedOverlay) -> bool {
         let own_menu = overlay == FrostedOverlay::ForkBranches
             && self.chat_menu_is_open(super::fork_branches::FORK_BRANCHES_TRIGGER);
-        self.pane_windows_open()
-            || self.model_picker_window.is_open()
+        self.pane_hidden
+            || self.pane_windows_open()
             || (self.option_menu.is_some() && !own_menu)
             || self.suggestions.is_open()
             || self.snapshot["accountSwitchCard"].is_object()
@@ -177,13 +177,20 @@ fn apply_frosted_overlay(
         return;
     }
     if let Some(handle) = handle {
-        let _ = handle.update(cx, |_, window, _| window.remove_window());
         // The fork switcher's tooltip is drawn in the chat's window; it goes with its control.
         if overlay == FrostedOverlay::ForkBranches
             && let Some(main) = main
         {
             let _ = main.update(cx, |_, window, cx| Root::hide_tooltip(window, cx));
         }
+        /*
+        CDXC:SessionChat 2026-09-24 WHY:
+        The handle was taken out of the chat's state above, so a window not moved in place has to
+        be closed here: forgetting it left it on screen with nothing to move or close it, which is
+        how hiding a pill (a space or session switch) or a failed move stacked extra "Scroll to
+        bottom" pills in one chat.
+        */
+        let _ = handle.update(cx, |_, window, _| window.remove_window());
     }
     let placement = wanted.and_then(|frame| {
         main?

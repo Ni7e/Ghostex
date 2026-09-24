@@ -29,9 +29,9 @@ impl NativeChatView {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.snapshot["saveMarkdown"].is_null() {
+        if self.pane_hidden || self.snapshot["saveMarkdown"].is_null() {
             if let Some(handle) = self.save_markdown_window.handle.take() {
-                let main = self.main_window;
+                let main = self.main_window.filter(|_| !self.pane_hidden);
                 cx.defer(move |cx| {
                     let _ = handle.update(cx, |_, window, _| window.remove_window());
                     if let Some(main) = main {

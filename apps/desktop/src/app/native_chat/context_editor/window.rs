@@ -28,9 +28,9 @@ impl NativeChatView {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.snapshot["contextEditor"].is_null() {
+        if self.pane_hidden || self.snapshot["contextEditor"].is_null() {
             if let Some(handle) = self.context_editor_window.handle.take() {
-                let main = self.main_window;
+                let main = self.main_window.filter(|_| !self.pane_hidden);
                 let chat = cx.weak_entity();
                 cx.defer(move |cx| {
                     let _ = handle.update(cx, |_, window, _| window.remove_window());

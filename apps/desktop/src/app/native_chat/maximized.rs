@@ -49,6 +49,8 @@ impl Render for MaximizedComposer {
                 .composer_input_actions(cx)
                 .capture_key_up(cx.listener(|chat, _, _, _| chat.composer_held_key = None))
                 .capture_action(cx.listener(NativeChatView::paste_attachments))
+                .capture_action(cx.listener(NativeChatView::composer_copy))
+                .capture_action(cx.listener(NativeChatView::composer_cut))
                 .on_drop(cx.listener(|chat, paths: &gpui::ExternalPaths, _, cx| {
                     let paths = paths
                         .0
@@ -71,20 +73,47 @@ impl Render for MaximizedComposer {
 }
 
 impl NativeChatView {
-    pub(crate) fn toggle_maximized(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.maximized_window.is_some() {
+    pub(crate) fn toggle_maximized(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.maximized_wanted {
             self.close_maximized(cx);
             return;
         }
+        self.maximized_wanted = true;
         self.invoke(
             serde_json::json!({"type":"composerExpand","editor":true}),
             cx,
         );
+        self.sync_maximized_window(cx);
+    }
+
+    /// CDXC:SessionChat 2026-09-24 DECISION:
+    /// User: the chat's modals must not stay on screen over the session shown next, and they come back sized to the pane when the user returns to their own session. Maximize is therefore a per-session state: its window closes with the pane and reopens on the pane's current frame.
+    pub(in crate::app::native_chat) fn sync_maximized_window(&mut self, cx: &mut Context<Self>) {
+        if !self.maximized_wanted || self.pane_hidden {
+            self.take_down_maximized_window(!self.pane_hidden, cx);
+            return;
+        }
+        if self.maximized_window.is_some() {
+            return;
+        }
+        let Some(main) = self.main_window else {
+            return;
+        };
         let pane = self.bounds.get();
-        let bounds = gpui::Bounds::new(window.bounds().origin + pane.origin, pane.size);
+        let Ok((bounds, display_id)) = main.update(cx, |_, window, cx| {
+            (
+                gpui::Bounds::new(
+                    super::child_window::content_bounds(window).origin + pane.origin,
+                    pane.size,
+                ),
+                window.display(cx).map(|display| display.id()),
+            )
+        }) else {
+            return;
+        };
         let parent_native_view = self.config.parent_native_view;
-        let display_id = crate::app::window::popup_frame::display_at(bounds.center(), cx)
-            .or_else(|| window.display(cx).map(|display| display.id()));
+        let display_id =
+            crate::app::window::popup_frame::display_at(bounds.center(), cx).or(display_id);
         let chat = cx.entity();
         cx.defer(move |cx| {
             let result = cx.open_window(
@@ -123,6 +152,12 @@ impl NativeChatView {
                 },
             );
             chat.update(cx, |this, cx| match result {
+                // The pane left the screen while the window was opening.
+                Ok(handle) if !this.maximized_wanted || this.pane_hidden => {
+                    cx.defer(move |cx| {
+                        let _ = handle.update(cx, |_, window, _| window.remove_window());
+                    });
+                }
                 Ok(handle) => {
                     this.maximized_window = Some(handle);
                     let chat = cx.weak_entity();
@@ -148,10 +183,17 @@ impl NativeChatView {
     }
 
     pub(crate) fn close_maximized(&mut self, cx: &mut Context<Self>) {
+        self.maximized_wanted = false;
+        self.take_down_maximized_window(true, cx);
+    }
+
+    /// Removes the window itself. The composer takes the keyboard back only when the pane is still
+    /// on screen; a pane that is going away would be taking focus from the session shown next.
+    fn take_down_maximized_window(&mut self, focus_composer: bool, cx: &mut Context<Self>) {
         let Some(handle) = self.maximized_window.take() else {
             return;
         };
-        let main_window = self.main_window;
+        let main_window = self.main_window.filter(|_| focus_composer);
         let chat = cx.weak_entity();
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, _| window.remove_window());
