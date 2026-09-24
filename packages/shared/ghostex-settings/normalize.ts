@@ -1,5 +1,5 @@
 import { normalizeProjectViewTemplates } from './project-views';
-import { normalizeProjectWebsiteSettings } from './project-websites';
+import { normalizeProjectWebsiteSettings, normalizeProjectWebsiteVisibility } from './project-websites';
 import { normalizeContentThemeSetting } from '../appearance';
 import { clampAgentManagerZoomPercent, clampSidebarThemeSetting } from '../session-grid-contract-session';
 import { normalizeSessionChatTheme } from '../session-chat';
@@ -288,9 +288,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     automateViewTabHidden: readBoolean(source, 'automateViewTabHidden', DEFAULT_ghostex_SETTINGS.automateViewTabHidden),
     docsViewTabHidden: readBoolean(source, 'docsViewTabHidden', DEFAULT_ghostex_SETTINGS.docsViewTabHidden),
     terminalViewTabHidden: readBoolean(source, 'terminalViewTabHidden', DEFAULT_ghostex_SETTINGS.terminalViewTabHidden),
-    linearViewTabHidden: readBoolean(source, 'linearViewTabHidden', DEFAULT_ghostex_SETTINGS.linearViewTabHidden),
-    jiraViewTabHidden: readBoolean(source, 'jiraViewTabHidden', DEFAULT_ghostex_SETTINGS.jiraViewTabHidden),
-    githubViewTabHidden: readBoolean(source, 'githubViewTabHidden', DEFAULT_ghostex_SETTINGS.githubViewTabHidden),
+    ...normalizeProjectWebsiteVisibility(source),
     projectWebsiteViews: normalizeProjectWebsiteSettings(source.projectWebsiteViews),
     storybookViewTabHidden: readBoolean(
       source,
@@ -958,7 +956,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
      * read so older settings files gain configurable native hotkeys without a
      * migration or fallback execution path.
      */
-    hotkeys: normalizeghostexHotkeySettings(source.hotkeys),
+    hotkeys: normalizeghostexHotkeySettings(source.hotkeys, {
+      preferredAgentInterface: normalizePreferredAgentInterface(
+        readString(source, 'preferredAgentInterface', DEFAULT_ghostex_SETTINGS.preferredAgentInterface)
+      ),
+    }),
     showActivePaneOutline: readBoolean(source, 'showActivePaneOutline', DEFAULT_ghostex_SETTINGS.showActivePaneOutline),
     windowGlass: normalizeWindowGlassMode(readString(source, 'windowGlass', DEFAULT_ghostex_SETTINGS.windowGlass)),
     windowGlassSource: normalizeWindowGlassSource(

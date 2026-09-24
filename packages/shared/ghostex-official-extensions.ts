@@ -9,10 +9,10 @@
  *
  * Every settings key here is inverted: the settings schema stores "hidden",
  * while the Extensions page shows "enabled". An entry is enabled when its key
- * is `false` or unset.
+ * is `false`; missing values use the settings defaults.
  */
 import type { ghostexSettings } from './ghostex-settings';
-import { PROJECT_WEBSITE_PROVIDERS, type ProjectWebsiteId } from './ghostex-settings/project-websites';
+import { PROJECT_WEBSITE_PROVIDERS, type ProjectWebsiteId, type ProjectWebsiteHiddenKey } from './ghostex-settings/project-websites';
 
 type BooleanGhostexSettingsKey = {
   [Key in keyof ghostexSettings]-?: boolean extends ghostexSettings[Key] ? Key : never;
@@ -39,9 +39,7 @@ export type GhostexOfficialExtensionSettingsKey = Extract<
   | 'quickActionsTitlebarButtonHidden'
   | 'resourcesTitlebarButtonHidden'
   | 'storybookViewTabHidden'
-  | 'linearViewTabHidden'
-  | 'jiraViewTabHidden'
-  | 'githubViewTabHidden'
+  | ProjectWebsiteHiddenKey
   | 'terminalViewTabHidden'
   | 'tipsAndTricksTitlebarButtonHidden'
 >;

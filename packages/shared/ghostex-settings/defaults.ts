@@ -1,3 +1,4 @@
+import { DEFAULT_PROJECT_WEBSITE_VISIBILITY } from './project-websites';
 import { DEFAULT_AGENT_MANAGER_ZOOM_PERCENT } from '../session-grid-contract-core';
 import { DEFAULT_COMMANDS_PANEL_HEIGHT_PX } from '../session-grid-contract-session';
 import { DEFAULT_COMPLETION_SOUND } from '../completion-sound';
@@ -127,9 +128,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   docsViewTabHidden: false,
   terminalViewTabHidden: false,
   storybookViewTabHidden: false,
-  linearViewTabHidden: false,
-  jiraViewTabHidden: false,
-  githubViewTabHidden: false,
+  ...DEFAULT_PROJECT_WEBSITE_VISIBILITY,
   projectWebsiteViews: {},
   tipsAndTricksTitlebarButtonHidden: false,
   notificationsTitlebarButtonHidden: false,

@@ -351,6 +351,13 @@ export type ghostexSettings = {
   linearViewTabHidden: boolean;
   jiraViewTabHidden: boolean;
   githubViewTabHidden: boolean;
+  sentryViewTabHidden: boolean;
+  figmaViewTabHidden: boolean;
+  vercelViewTabHidden: boolean;
+  supabaseViewTabHidden: boolean;
+  githubActionsViewTabHidden: boolean;
+  posthogViewTabHidden: boolean;
+  customWebsiteViewTabHidden: boolean;
   projectWebsiteViews: ProjectWebsiteSettings;
   /**
    * Quick-access switches affect only the matching right-side titlebar button.

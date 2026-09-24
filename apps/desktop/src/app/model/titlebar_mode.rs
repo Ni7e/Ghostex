@@ -114,6 +114,12 @@ impl TitlebarMode {
                 match mode.website_provider().map(|provider| provider.id.as_str()) {
                     Some("linear") => "titlebar/brand-linear.svg",
                     Some("jira") => "titlebar/brand-jira.svg",
+                    Some("sentry") => "titlebar/bug.svg",
+                    Some("figma") => "titlebar/palette.svg",
+                    Some("vercel") => "titlebar/cloud.svg",
+                    Some("supabase") => "titlebar/database.svg",
+                    Some("github-actions") => "titlebar/player-play.svg",
+                    Some("posthog") => "titlebar/chart-bar.svg",
                     _ => TITLEBAR_ICON_WORLD,
                 }
             }

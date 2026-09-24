@@ -104,7 +104,7 @@ How to use this file:
 - **Cursor Style** `terminalCursorStyle` (one of bar | block | underline; default bar): Choose the cursor shape. Option labels: bar = Line, block = Block, underline = Underline.
 - **Cursor blink** `terminalCursorStyleBlink` (boolean, default true) [advanced]: Blink the terminal cursor.
 - **Click to Wake Sleeping Panes** `clickToWakeSleepingSessions` (boolean, default true) [advanced]: Select sleeping pane tabs without waking them until the empty pane is clicked.
-- **Show quick model & effort picker for Claude and Codex in terminal view** `showQuickModelPickerInTerminal` (boolean, default true): Use the model picker shortcut (⌥P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.
+- **Model picker in terminal view** `showQuickModelPickerInTerminal` (boolean, default true): Show a model button in the terminal bar and open the model picker with its shortcut (⌥P by default) in agent terminal sessions. Turn off to use terminal bindings.
 - **Show session id in terminal panes** `showSessionIdInTerminalPanes` (boolean, default false) [advanced]: Show the provider session id in the top-right corner of terminal panes.
 - **Show notification on terminal bell** `showNotificationOnTerminalBell` (boolean, default false): Treat terminal bell events as session attention.
 - **⌃G prompt editor** `promptEditorBackend` (one of monaco | inherit; default monaco) [advanced]: Choose which editor ⌃G uses when a terminal prompt asks for $EDITOR. Option labels: monaco = Ghostex editor, inherit = Use default from this machine.
@@ -302,6 +302,13 @@ How to use this file:
 - **Hide Linear view** `linearViewTabHidden` (boolean, default false): Hide the Linear view from the view picker and tab menus.
 - **Hide Jira view** `jiraViewTabHidden` (boolean, default false): Hide the Jira view from the view picker and tab menus.
 - **Hide GitHub view** `githubViewTabHidden` (boolean, default false): Hide the automatic repository view from the view picker and tab menus.
+- **Hide Sentry view** `sentryViewTabHidden` (boolean, default true): Enable Sentry in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.
+- **Hide Figma view** `figmaViewTabHidden` (boolean, default true): Enable Figma in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.
+- **Hide Vercel view** `vercelViewTabHidden` (boolean, default true): Enable Vercel in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.
+- **Hide Supabase view** `supabaseViewTabHidden` (boolean, default true): Enable Supabase in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.
+- **Hide GitHub Actions view** `githubActionsViewTabHidden` (boolean, default true): Enable GitHub Actions in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.
+- **Hide PostHog view** `posthogViewTabHidden` (boolean, default true): Enable PostHog in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.
+- **Hide Custom Website view** `customWebsiteViewTabHidden` (boolean, default true): Enable Custom Website in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.
 - **Hide Storybook view** `storybookViewTabHidden` (boolean, default false): Hide the built-in component workshop. When enabled, it appears only in projects with Storybook.
 - **Hide Terminal view** `terminalViewTabHidden` (boolean, default false): Stop offering the Terminal view, so it is missing from the view panel tab strip, its + menu and the view picker.
 - **Hide Tips button** `tipsAndTricksTitlebarButtonHidden` (boolean, default false): Stop offering the Tips & Tricks page, so it is missing from the header ⋯ menu and the view picker.
@@ -317,6 +324,13 @@ How to use this file:
 
 - **Linear** `linear` (Settings UI row without a settings key; use `ghostex settings open`): Open your team's issues and projects. Choose a home URL for each project or worktree.
 - **Jira** `jira` (Settings UI row without a settings key; use `ghostex settings open`): Keep your team's board beside your work. Choose a home URL for each project or worktree.
+- **Sentry** `sentry` (Settings UI row without a settings key; use `ghostex settings open`): Investigate errors and stack traces beside your code. Choose a home URL for each project or worktree.
+- **Figma** `figma` (Settings UI row without a settings key; use `ghostex settings open`): Keep designs and component specs beside your implementation. Choose a home URL for each project or worktree.
+- **Vercel** `vercel` (Settings UI row without a settings key; use `ghostex settings open`): Check deployments and preview your changes. Choose a home URL for each project or worktree.
+- **Supabase** `supabase` (Settings UI row without a settings key; use `ghostex settings open`): Browse your database, authentication, and project logs. Choose a home URL for each project or worktree.
+- **GitHub Actions** `github-actions` (Settings UI row without a settings key; use `ghostex settings open`): Follow workflow runs, build results, and job logs. Choose a home URL for each project or worktree.
+- **PostHog** `posthog` (Settings UI row without a settings key; use `ghostex settings open`): Explore product analytics and session replays. Choose a home URL for each project or worktree.
+- **Custom Website** `custom-website` (Settings UI row without a settings key; use `ghostex settings open`): Keep any website beside your work. Choose a home URL for each project or worktree.
 - **Storybook** `storybook` (Settings UI row without a settings key; use `ghostex settings open`): Build, browse, and annotate your project’s components without a persistent development server. Appears only in projects with Storybook.
 - **Code editor** `code` (Settings UI row without a settings key; use `ghostex settings open`): Explore, edit, and search your project in a familiar, full-featured workspace without ever leaving Ghostex.
 - **Browser** `browser` (Settings UI row without a settings key; use `ghostex settings open`): Open websites alongside your project and keep useful pages organized without leaving Ghostex.

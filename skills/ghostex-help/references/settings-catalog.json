@@ -1454,8 +1454,8 @@
     },
     {
       "key": "showQuickModelPickerInTerminal",
-      "title": "Show quick model & effort picker for Claude and Codex in terminal view",
-      "subtitle": "Use the model picker shortcut (⌥P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.",
+      "title": "Model picker in terminal view",
+      "subtitle": "Show a model button in the terminal bar and open the model picker with its shortcut (⌥P by default) in agent terminal sessions. Turn off to use terminal bindings.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "terminal",
@@ -2789,10 +2789,11 @@
       "type": "json",
       "default": {
         "scrollChatToBottom": "ctrl+shift+down",
-        "createSession": "cmd+t",
+        "createAgentSession": "cmd+t",
+        "createSession": "cmd+shift+t",
         "openCommandPalette": "cmd+shift+p",
         "openSessionSearchPalette": "cmd+p",
-        "openNewThreadPalette": "cmd+shift+t",
+        "openNewThreadPalette": "cmd+alt+t",
         "openCommandsPanel": "f12",
         "openSettings": "cmd+,",
         "openExtensions": "",
@@ -8391,8 +8392,8 @@
           "value": "ghostex-embedded-browser-use"
         },
         {
-          "label": "Ghostex Agents Orchestration",
-          "value": "ghostex-agents-orchestration"
+          "label": "Ghostex Agents",
+          "value": "ghostex-agents"
         },
         {
           "label": "Ghostex Auto Rename Session",
@@ -8562,6 +8563,90 @@
       "agentWritable": true
     },
     {
+      "key": "sentryViewTabHidden",
+      "title": "Hide Sentry view",
+      "subtitle": "Enable Sentry in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "figmaViewTabHidden",
+      "title": "Hide Figma view",
+      "subtitle": "Enable Figma in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "vercelViewTabHidden",
+      "title": "Hide Vercel view",
+      "subtitle": "Enable Vercel in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "supabaseViewTabHidden",
+      "title": "Hide Supabase view",
+      "subtitle": "Enable Supabase in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "githubActionsViewTabHidden",
+      "title": "Hide GitHub Actions view",
+      "subtitle": "Enable GitHub Actions in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "posthogViewTabHidden",
+      "title": "Hide PostHog view",
+      "subtitle": "Enable PostHog in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "customWebsiteViewTabHidden",
+      "title": "Hide Custom Website view",
+      "subtitle": "Enable Custom Website in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
       "key": "storybookViewTabHidden",
       "title": "Hide Storybook view",
       "subtitle": "Hide the built-in component workshop. When enabled, it appears only in projects with Storybook.",
@@ -8708,6 +8793,83 @@
       "key": "jira",
       "title": "Jira",
       "subtitle": "Keep your team's board beside your work. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "sentry",
+      "title": "Sentry",
+      "subtitle": "Investigate errors and stack traces beside your code. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "figma",
+      "title": "Figma",
+      "subtitle": "Keep designs and component specs beside your implementation. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "vercel",
+      "title": "Vercel",
+      "subtitle": "Check deployments and preview your changes. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "supabase",
+      "title": "Supabase",
+      "subtitle": "Browse your database, authentication, and project logs. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "github-actions",
+      "title": "GitHub Actions",
+      "subtitle": "Follow workflow runs, build results, and job logs. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "posthog",
+      "title": "PostHog",
+      "subtitle": "Explore product analytics and session replays. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Official Extensions",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "custom-website",
+      "title": "Custom Website",
+      "subtitle": "Keep any website beside your work. Choose a home URL for each project or worktree.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -9755,10 +9917,16 @@
       "windowsLinuxDefaultKey": "cmd+shift+down"
     },
     {
-      "id": "createSession",
-      "title": "Create Session",
-      "description": "Create a terminal session.",
+      "id": "createAgentSession",
+      "title": "New Agent Session",
+      "description": "Start your last-used agent in the active project, in your default interface.",
       "defaultKey": "cmd+t"
+    },
+    {
+      "id": "createSession",
+      "title": "New Terminal",
+      "description": "Create a terminal session.",
+      "defaultKey": "cmd+shift+t"
     },
     {
       "id": "openCommandPalette",
@@ -9776,7 +9944,7 @@
       "id": "openNewThreadPalette",
       "title": "New Thread in Active Project",
       "description": "Pick an agent, Browser, or Terminal to start in the active project.",
-      "defaultKey": "cmd+shift+t"
+      "defaultKey": "cmd+alt+t"
     },
     {
       "id": "openCommandsPanel",
@@ -9970,7 +10138,7 @@
     {
       "id": "openModelPicker",
       "title": "Model & Effort Picker",
-      "description": "Choose the chat model and effort with arrow keys, then Enter to save.",
+      "description": "Open the model picker: arrows choose a model and its reasoning, Enter uses it here, Shift+Enter saves it as the default.",
       "defaultKey": "alt+p"
     },
     {

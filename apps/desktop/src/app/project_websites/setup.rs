@@ -287,7 +287,7 @@ impl GhostexGpuiApp {
                             .text_size(px(12.5))
                             .line_height(px(18.))
                             .text_color(muted)
-                            .child("Paste a workspace, project, or board URL."),
+                            .child("Paste the URL you want this view to open."),
                     ),
             );
         if parent.is_some() {
@@ -336,7 +336,7 @@ impl GhostexGpuiApp {
                     div()
                         .text_size(px(12.))
                         .text_color(muted)
-                        .child("Use a saved workspace, or paste another URL"),
+                        .child("Use a saved URL, or paste another"),
                 );
                 for (index, url) in saved.iter().filter_map(Value::as_str).enumerate() {
                     let Ok((_, label)) = provider.workspace(url) else {
