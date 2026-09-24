@@ -573,8 +573,8 @@ impl DelayedSendRuntime {
                         publisher();
                         runtime.finish_record(&db, &record, "completed", None)
                     }
-                    Err(message) => {
-                        runtime.finish_record(&db, &record, "failed", Some(message.as_str()))
+                    Err(error) => {
+                        runtime.finish_record(&db, &record, "failed", Some(error.message.as_str()))
                     }
                 };
             });

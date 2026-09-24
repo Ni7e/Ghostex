@@ -189,9 +189,9 @@ function SessionChatQueueRow({
         {sessionChatQueueRowPreview(prompt.text)}
       </span>
       {failed ? (
-        <span className='ghostex-chat-queue-row-error' title={prompt.errorMessage ?? 'Delivery failed.'}>
+        <span className='ghostex-chat-queue-row-error' title={failedRowLabel(prompt)}>
           <IconAlertTriangle aria-hidden='true' size={13} stroke={2} />
-          {prompt.errorMessage ?? 'Delivery failed.'}
+          <span className='ghostex-chat-queue-row-error-text'>{failedRowLabel(prompt)}</span>
         </span>
       ) : null}
       <span className='ghostex-chat-queue-row-actions'>
@@ -231,6 +231,15 @@ function SessionChatQueueRow({
       </span>
     </div>
   );
+}
+
+/**
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: a queued message that could not be delivered must read as such. The row says "Not delivered" with the reason and keeps Retry, Edit, Send now and Delete on screen instead of behind hover, because the queue waits on this row until someone acts.
+ * SEE-ALSO: apps/desktop/src/app/native_chat/queue.rs renders the same row natively.
+ */
+function failedRowLabel(prompt: SessionChatQueuedPrompt): string {
+  return `Not delivered: ${prompt.errorMessage ?? 'the send failed.'}`;
 }
 
 function QueueRowButton({

@@ -107,15 +107,18 @@ impl NativeChatView {
                 appearance: p.clone(),
             };
             // CDXC:SessionChat 2026-09-22 WHY: the id is load-bearing. GPUI applies a group-hover refinement at LAYOUT time only from per-element hover state, which exists only for a div with an id; without one the `w_auto` never reaches layout and the buttons stay clipped at width 0 while the row is hovered.
+            // CDXC:SessionChat 2026-09-24 DECISION: a row that could not be delivered keeps its controls on screen; see failedRowLabel in packages/core-ui/chat/session-chat-queue-rows.tsx.
             let mut actions = div()
                 .id(format!("queue-actions:{id}"))
                 .flex()
                 .flex_shrink_0()
                 .items_center()
-                .w_0()
-                .overflow_hidden()
-                .opacity(0.0)
-                .group_hover("native-chat-queue-row", |style| style.w_auto().opacity(1.0));
+                .when(!failed, |this| {
+                    this.w_0()
+                        .overflow_hidden()
+                        .opacity(0.0)
+                        .group_hover("native-chat-queue-row", |style| style.w_auto().opacity(1.0))
+                });
             for (capability, label, icon, command) in [
                 (
                     "canRetry",
@@ -218,18 +221,35 @@ impl NativeChatView {
                         .child(preview),
                 )
                 .when(failed, |this| {
+                    let label = format!(
+                        "Not delivered: {}",
+                        prompt["errorMessage"]
+                            .as_str()
+                            .unwrap_or("the send failed.")
+                    );
+                    let tooltip = label.clone();
                     this.child(
                         div()
+                            .id(format!("queue-error:{}", text(prompt, "id")))
                             .max_w(gpui::relative(0.45))
-                            .text_ellipsis()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap(px(3.0 * s))
                             .text_size(px(11.0 * s))
                             .text_color(gpui::rgb(0xef9999))
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(tooltip.clone())
+                                    .build(window, cx)
+                            })
                             .child(
-                                prompt["errorMessage"]
-                                    .as_str()
-                                    .unwrap_or("Delivery failed.")
-                                    .to_owned(),
-                            ),
+                                gpui::svg()
+                                    .path("titlebar/alert-triangle.svg")
+                                    .flex_shrink_0()
+                                    .size(px(13.0 * s))
+                                    .text_color(gpui::rgb(0xef9999)),
+                            )
+                            .child(div().min_w_0().text_ellipsis().child(label)),
                     )
                 })
                 .child(actions)

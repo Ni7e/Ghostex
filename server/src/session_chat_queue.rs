@@ -209,8 +209,11 @@ the per-session send mutex and cannot interleave with a Delayed Send or a
 message the user typed. The queue module (and the scheduler) therefore never
 learns about AppState, zmx names, or the send watchdog.
 */
-pub type SessionChatQueueSender =
-    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync>;
+pub type SessionChatQueueSender = Arc<
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<(), DomainStateError>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Builds a sender for one `(projectId, sessionId)`. The scheduler holds the
 /// factory because it delivers for whichever session becomes ready.
@@ -236,8 +239,12 @@ pub struct SessionChatQueueEndpointResult {
 /// Outcome of one delivery attempt, shared by "Send now" and the scheduler.
 pub struct SessionChatQueueDelivery {
     /// True ⇒ the prompt reached the agent and its row is gone. False ⇒ the
-    /// send failed and the row is now `failed` with `error_message`.
+    /// send failed and the row is now `failed` with `error_message`, unless
+    /// `held` put it back to `queued`.
     pub sent: bool,
+    /// The input box was missing and the caller allowed a hold: the row is
+    /// `queued` again, untouched, for the scheduler's next attempt.
+    pub held: bool,
     pub error_message: Option<String>,
     pub snapshot: SessionChatQueueSnapshot,
 }
@@ -437,6 +444,7 @@ pub async fn deliver_session_chat_queued_prompt(
     session_id: &str,
     prompt_id: &str,
     send: &SessionChatQueueSender,
+    hold_when_composer_missing: bool,
 ) -> Result<SessionChatQueueDelivery, DomainStateError> {
     let text = {
         let db = open_gxserver_database(paths).map_err(internal_error)?;
@@ -445,7 +453,21 @@ pub async fn deliver_session_chat_queued_prompt(
     };
     let outcome = send(text).await;
     let db = open_gxserver_database(paths).map_err(internal_error)?;
+    let mut held = false;
     let error_message = match outcome {
+        Err(error) if hold_when_composer_missing && error.code == "composerNotReady" => {
+            db.execute(
+                r#"
+                UPDATE session_chat_queued_prompts
+                SET state = 'queued', errorMessage = NULL
+                WHERE promptId = ?1 AND projectId = ?2 AND sessionId = ?3 AND state = 'sending'
+                "#,
+                params![prompt_id, project_id, session_id],
+            )
+            .map_err(sql_error)?;
+            held = true;
+            None
+        }
         Ok(()) => {
             db.execute(
                 r#"
@@ -457,14 +479,15 @@ pub async fn deliver_session_chat_queued_prompt(
             .map_err(sql_error)?;
             None
         }
-        Err(message) => {
-            let message = bounded_reason(&message);
+        Err(error) => {
+            let message = bounded_reason(&error.message);
             fail_prompt(&db, project_id, session_id, prompt_id, &message)?;
             Some(message)
         }
     };
     Ok(SessionChatQueueDelivery {
-        sent: error_message.is_none(),
+        sent: error_message.is_none() && !held,
+        held,
         error_message,
         snapshot: read_snapshot(&db, project_id, session_id)?,
     })
@@ -703,6 +726,16 @@ fn append_prompt(
     )
     .map_err(sql_error)?;
     Ok(prompt)
+}
+
+/// Appends a plain queued prompt outside the endpoint, for gxserver's own notes.
+pub(crate) fn enqueue_session_chat_prompt(
+    db: &Connection,
+    project_id: &str,
+    session_id: &str,
+    text: &str,
+) -> Result<SessionChatQueuedPrompt, DomainStateError> {
+    append_prompt(db, project_id, session_id, text, false)
 }
 
 fn update_prompt(

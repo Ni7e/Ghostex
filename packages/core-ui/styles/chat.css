@@ -3653,6 +3653,12 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   white-space: nowrap;
 }
 
+.ghostex-chat-queue-row-error-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Controls stay quiet until the row is hovered or something in it has focus,
    so a queue of five rows does not read as a wall of buttons. Focus-visible is
    included so keyboard users never lose them. */
@@ -3668,7 +3674,8 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 }
 
 .ghostex-chat-queue-row:hover .ghostex-chat-queue-row-actions,
-.ghostex-chat-queue-row:focus-within .ghostex-chat-queue-row-actions {
+.ghostex-chat-queue-row:focus-within .ghostex-chat-queue-row-actions,
+.ghostex-chat-queue-row-failed .ghostex-chat-queue-row-actions {
   opacity: 1;
   width: auto;
 }

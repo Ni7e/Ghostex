@@ -208,6 +208,7 @@ pub struct SessionChatQueueRuntime {
     composer_reader: SessionChatQueueComposerReader,
     compacting_refresher: SessionChatQueueCompactingRefresher,
     gates: Arc<Mutex<HashMap<String, SessionQueueGate>>>,
+    composer_holds: crate::session_chat_queue_undelivered::SessionChatQueueComposerHolds,
     /// Sessions with a delivery in flight. The claim in
     /// `deliver_session_chat_queued_prompt` is the real guard; this only keeps
     /// the scheduler from stacking tasks for the same session every second
@@ -236,6 +237,7 @@ impl SessionChatQueueRuntime {
             composer_reader,
             compacting_refresher,
             gates: Arc::new(Mutex::new(HashMap::new())),
+            composer_holds: Default::default(),
             delivering: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -411,6 +413,9 @@ impl SessionChatQueueRuntime {
             let Some(head) = snapshot.deliverable_head() else {
                 continue;
             };
+            if self.composer_holds.waiting(&key, &head.id, now) {
+                continue;
+            }
             /*
             A trust dialog, a first-run setup screen, an update modal, a usage
             limit waiting on a keypress, an expired login, the agent process
@@ -473,16 +478,17 @@ impl SessionChatQueueRuntime {
         drop(db);
 
         for (project_id, session_id, prompt_id, reason) in blocked {
-            if fail_session_chat_queued_prompt(
+            if let Ok(snapshot) = fail_session_chat_queued_prompt(
                 &self.paths,
                 &project_id,
                 &session_id,
                 &prompt_id,
                 &reason,
-            )
-            .is_ok()
-            {
+            ) {
                 (self.publisher_factory)(&project_id, &session_id)();
+                if let Some(prompt) = snapshot.queue.iter().find(|prompt| prompt.id == prompt_id) {
+                    self.notify_sender(&project_id, &session_id, &prompt.text, &reason);
+                }
             }
             self.reset_gate(&session_queue_key(&project_id, &session_id));
         }
@@ -502,6 +508,9 @@ impl SessionChatQueueRuntime {
         marks it `failed` with the reason on error, so "Send now" and the
         scheduler can never both deliver the same row.
         */
+        let may_hold = self
+            .composer_holds
+            .may_hold(&key, &ready.prompt_id, Utc::now());
         let delivered = deliver_session_chat_queued_prompt(
             &self.paths,
             &self.server_id,
@@ -509,10 +518,27 @@ impl SessionChatQueueRuntime {
             &ready.session_id,
             &ready.prompt_id,
             &sender,
+            may_hold,
         )
         .await;
-        if delivered.is_ok() {
+        if let Ok(delivery) = &delivered {
             (self.publisher_factory)(&ready.project_id, &ready.session_id)();
+            if delivery.held {
+                self.composer_holds
+                    .record(&key, &ready.prompt_id, Utc::now());
+            } else {
+                self.composer_holds.clear(&key);
+            }
+            if let Some(reason) = delivery.error_message.as_deref() {
+                if let Some(prompt) = delivery
+                    .snapshot
+                    .queue
+                    .iter()
+                    .find(|prompt| prompt.id == ready.prompt_id)
+                {
+                    self.notify_sender(&ready.project_id, &ready.session_id, &prompt.text, reason);
+                }
+            }
         }
         /*
         ONE prompt per idle window, whatever happened: a fresh stability window
@@ -573,6 +599,22 @@ impl SessionChatQueueRuntime {
             .map(|(project_id, session_id)| session_queue_key(project_id, session_id))
             .collect();
         gates.retain(|key, _| live.contains(key));
+        self.composer_holds.retain(|key| live.contains(key));
+    }
+
+    fn notify_sender(&self, project_id: &str, session_id: &str, text: &str, reason: &str) {
+        if let Some((sender_project, sender_session)) =
+            crate::session_chat_queue_undelivered::notify_sender_of_undelivered_agent_message(
+                &self.paths,
+                &self.server_id,
+                project_id,
+                session_id,
+                text,
+                reason,
+            )
+        {
+            (self.publisher_factory)(&sender_project, &sender_session)();
+        }
     }
 
     fn is_delivering(&self, key: &str) -> bool {
@@ -1251,6 +1293,7 @@ pub(crate) async fn handle_send_session_chat_queued_prompt_http(
         &session_id,
         &prompt_id,
         &sender,
+        false,
     )
     .await
     {
@@ -1485,7 +1528,6 @@ pub(crate) fn session_chat_queue_sender(
             send_session_chat_message_internal(&state, &project_id, &session_id, &text, &[], source)
                 .await
                 .map(|_| ())
-                .map_err(|error| error.message)
         })
     })
 }
