@@ -207,7 +207,21 @@ pub(super) fn move_child_window(
     true
 }
 
-#[cfg(not(target_os = "macos"))]
+/// CDXC:PlatformSupport 2026-09-24 WHY:
+/// Floating X11 windows are still independent frames; owner-relative placement keeps previews and editors aligned when their chat pane moves. The backend uses the explicit creation-time owner rather than keyboard focus.
+#[cfg(target_os = "linux")]
+pub(super) fn move_child_window(
+    handle: gpui::AnyWindowHandle,
+    _: *mut std::ffi::c_void,
+    frame: Bounds<Pixels>,
+    cx: &mut gpui::App,
+) -> bool {
+    handle
+        .update(cx, |_, window, _| window.set_x11_frame_in_parent(frame))
+        .unwrap_or(false)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(super) fn move_child_window(
     _: gpui::AnyWindowHandle,
     _: *mut std::ffi::c_void,

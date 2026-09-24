@@ -103,6 +103,8 @@ impl NativeChatView {
         let pane = self.bounds.get();
         let parent_native_view = self.config.parent_native_view;
         let chat = cx.entity();
+        #[cfg(target_os = "linux")]
+        let owner = main;
         // WHY: the Maximize click arrives while the main window is mid-update, so reading its
         // frame has to wait for the deferred pass; updating it re-entrantly fails and nothing opens.
         cx.defer(move |cx| {
@@ -123,6 +125,8 @@ impl NativeChatView {
             let result = cx.open_window(
                 WindowOptions {
                     kind: crate::app::window::popup_frame::child_window_kind(),
+                    #[cfg(target_os = "linux")]
+                    x11_parent: Some(owner),
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     display_id,
                     app_id: crate::gpui_platform_window_app_id(),

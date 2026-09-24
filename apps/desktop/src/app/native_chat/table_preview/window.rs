@@ -90,6 +90,8 @@ impl NativeChatView {
                     cx.open_window(
                         WindowOptions {
                             kind: crate::app::window::popup_frame::child_window_kind(),
+                            #[cfg(target_os = "linux")]
+                            x11_parent: Some(main),
                             window_bounds: Some(WindowBounds::Windowed(bounds)),
                             display_id,
                             app_id: crate::gpui_platform_window_app_id(),

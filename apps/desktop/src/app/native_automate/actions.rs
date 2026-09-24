@@ -174,6 +174,10 @@ impl NativeAutomateView {
         };
         let view = cx.weak_entity();
         let options = WindowOptions {
+            #[cfg(target_os = "linux")]
+            kind: crate::app::window::popup_frame::child_window_kind(),
+            #[cfg(target_os = "linux")]
+            x11_parent: Some(host.window),
             window_bounds: Some(WindowBounds::Windowed(gpui::Bounds::centered_at(
                 host.main_window_bounds.center(),
                 size(px(DIALOG_WIDTH), px(DIALOG_INITIAL_HEIGHT)),
