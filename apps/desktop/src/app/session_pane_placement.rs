@@ -52,10 +52,12 @@ impl GhostexGpuiApp {
 
     /// The local session a sidebar row drag can land on a pane: a terminal row of the project the
     /// Agents tree belongs to that already has a tab. Anything else shows no drop zone.
+    /// `None` when the dragged row cannot land on a pane at all; `Some(None)` for a session of the
+    /// active project that has no tab in any pane yet, which only the middle of a pane takes.
     fn sidebar_drag_pane_session(
         &self,
         drag: &SidebarDrag,
-    ) -> Option<(TerminalSessionId, WorkspacePaneId)> {
+    ) -> Option<Option<(TerminalSessionId, WorkspacePaneId)>> {
         if drag.kind != "session" {
             return None;
         }
@@ -74,26 +76,30 @@ impl GhostexGpuiApp {
         {
             return None;
         }
-        let shell_session_id = self
-            .local_workspace_session_mappings
-            .get(&GpuiLocalWorkspaceSessionKey {
-                project_id: key.project_id,
-                session_id: key.session_id,
-            })
-            .copied()?;
-        let pane_id = self
-            .agents_workspace
-            .pane_id_for_session(shell_session_id)?;
-        Some((shell_session_id, pane_id))
+        Some(
+            self.local_workspace_session_mappings
+                .get(&GpuiLocalWorkspaceSessionKey {
+                    project_id: key.project_id,
+                    session_id: key.session_id,
+                })
+                .copied()
+                .and_then(|shell_session_id| {
+                    self.agents_workspace
+                        .pane_id_for_session(shell_session_id)
+                        .map(|pane_id| (shell_session_id, pane_id))
+                }),
+        )
     }
 
     /// CDXC:Workarea 2026-09-23 DECISION:
     /// User: a session row dragged from the sidebar onto a terminal or chat pane splits that pane
     /// the way a dragged tab did, so the tab bar is not needed to split, and "allow dragging to the
     /// center": the middle of a pane shows the dragged session in that pane, replacing what it
-    /// showed. This supersedes the 2026-09-22 edges-only rule. Only local sessions of the active
-    /// project drop; other rows show no zone, and neither does the middle of the pane already
-    /// showing the session. The pane hides its surfaces for the zones the moment the drag enters a
+    /// showed, including with no split and for a session no pane holds yet. This supersedes the
+    /// 2026-09-22 edges-only rule. Only local sessions of the active project drop; other rows show
+    /// no zone, a session with no tab yet shows only the middle (an edge would split a pane off a
+    /// session that has none), and the middle of the pane already showing the session shows
+    /// nothing. The pane hides its surfaces for the zones the moment the drag enters a
     /// pane rather than when it starts, so reordering rows in the sidebar leaves the terminals
     /// alone.
     pub(crate) fn update_sidebar_session_pane_drag_feedback(
@@ -103,8 +109,7 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         let over_pane = event.bounds.contains(&event.event.position);
-        let Some((session_id, source_pane_id)) = self.sidebar_drag_pane_session(event.drag(cx))
-        else {
+        let Some(tab) = self.sidebar_drag_pane_session(event.drag(cx)) else {
             return;
         };
         if !over_pane {
@@ -118,13 +123,25 @@ impl GhostexGpuiApp {
         }
         self.begin_workspace_tab_drag(cx);
         let zone = workspace_pane_body_drop_zone(event.bounds, event.event.position);
-        let already_shown_here = source_pane_id == pane_id
-            && self.agents_workspace.active_session_in_pane(pane_id) == Some(session_id);
-        if (matches!(zone, WorkspaceDropZone::Center) && already_shown_here)
-            || self
-                .agents_workspace
-                .workspace_tab_edge_drop_is_single_tab_own_pane_noop(source_pane_id, pane_id, zone)
-        {
+        let center = matches!(zone, WorkspaceDropZone::Center);
+        // A session with no tab yet can only be shown, not split off; the middle of the pane
+        // already showing a session has nothing to do.
+        let refused = match tab {
+            None => !center,
+            Some((session_id, source_pane_id)) => {
+                (center
+                    && source_pane_id == pane_id
+                    && self.agents_workspace.active_session_in_pane(pane_id) == Some(session_id))
+                    || self
+                        .agents_workspace
+                        .workspace_tab_edge_drop_is_single_tab_own_pane_noop(
+                            source_pane_id,
+                            pane_id,
+                            zone,
+                        )
+            }
+        };
+        if refused {
             self.clear_workspace_drop_feedback(cx);
             return;
         }
@@ -153,12 +170,24 @@ impl GhostexGpuiApp {
             _ => None,
         };
         self.finish_workspace_tab_drag_state(cx);
-        let (Some((session_id, source_pane_id)), Some(zone)) = (session, zone) else {
+        let (Some(tab), Some(zone)) = (session, zone) else {
             cx.notify();
             return;
         };
         window.prevent_default();
         cx.stop_propagation();
+        let Some((session_id, source_pane_id)) = tab else {
+            // No tab yet: the middle of a pane shows the session there exactly as clicking its row
+            // shows it in the focused pane, wake and attach included.
+            self.focus_agents_pane(target_pane_id, cx);
+            self.dispatch_native_sidebar_ui(
+                serde_json::json!({"type": "selectSession", "sessionId": drag.id, "mode": "focus"}),
+                cx,
+            );
+            let _ = self.react_to_native_sidebar_session_click(&drag.id, cx);
+            cx.notify();
+            return;
+        };
         let was_on_screen = self
             .agents_workspace
             .rendered_leaf_order()
