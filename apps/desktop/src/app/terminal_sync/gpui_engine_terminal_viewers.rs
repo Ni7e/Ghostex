@@ -419,7 +419,7 @@ impl GhostexGpuiApp {
         {
             return;
         }
-        let remove = self
+        let mut remove = self
             .agents_gpui_engine_terminals
             .iter()
             .filter_map(|(id, record)| {
@@ -448,6 +448,22 @@ impl GhostexGpuiApp {
                 .then_some(*id)
             })
             .collect::<Vec<_>>();
+        // CDXC:Terminal 2026-09-24 DECISION:
+        // User: the default is that the reader comes back to a session, so a plain session switch
+        // must not retire the viewer they just left — a respawn rebuilds the mirror from scratch
+        // (empty pane, daemon dump, scroll restore), which is the switch flicker. Keep the most
+        // recently painted non-visible viewers alive up to the cap; only the overflow retires.
+        // Project switches (`parking`) keep their aggressive semantics.
+        const AGENTS_TERMINAL_VIEWER_KEEP_ALIVE: usize = 6;
+        if !parking && remove.len() > AGENTS_TERMINAL_VIEWER_KEEP_ALIVE {
+            remove.sort_by_key(|id| {
+                self.agents_gpui_engine_terminals
+                    .get(id)
+                    .and_then(|record| record.view.read(cx).last_painted_at())
+            });
+            let excess = remove.len() - AGENTS_TERMINAL_VIEWER_KEEP_ALIVE;
+            remove.truncate(excess);
+        }
         for id in remove {
             if let Some(record) = self.agents_gpui_engine_terminals.remove(&id) {
                 if crate::support_logs::scenario_enabled(

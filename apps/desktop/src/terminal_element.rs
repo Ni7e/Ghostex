@@ -1205,6 +1205,11 @@ impl TerminalView {
         self.title.as_deref()
     }
 
+    /// When this viewer last painted, for keep-alive recency decisions.
+    pub(crate) fn last_painted_at(&self) -> Option<web_time::Instant> {
+        self.last_prepaint
+    }
+
     /// Latest OSC 7 pwd read back from the terminal, if any.
     #[allow(dead_code)] // public TerminalView API kept complete: the app drives this element through terminal_gpui_engine
     pub fn pwd(&self) -> Option<&str> {
