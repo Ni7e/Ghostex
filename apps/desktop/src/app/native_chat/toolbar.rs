@@ -66,6 +66,10 @@ impl NativeChatView {
             "moreActions" => self.show_actions(position,window,cx),
             "maximizeComposer" => self.toggle_maximized(window,cx),
             "summaryMode" => self.invoke(json!({"type":"toggleSummary"}),cx),
+            "attachPath" if cfg!(target_os = "linux") => self.show_chat_menu_at(vec![
+                json!({"label":"Images or files…","command":{"type":"host","action":"pickAttachments","requestId":"native-chat-attachments","selection":"files"}}),
+                json!({"label":"Folders…","command":{"type":"host","action":"pickAttachments","requestId":"native-chat-attachments","selection":"folders"}}),
+            ], position, 200.0, window, cx),
             "attachPath" => self.host("pickAttachments",json!({"requestId":"native-chat-attachments"}),cx),
             "stashPrompt" if !self.draft.trim().is_empty() => self.invoke(json!({"type":"stash","text":self.draft,"draftVersion":{"draftId":self.draft_id,"revision":self.draft_revision}}),cx),
             "stashPrompt" => self.host("stashedPrompts",json!({}),cx),
@@ -143,8 +147,11 @@ impl NativeChatView {
                         // Geometry is available before the session is. Use the same fit rules as
                         // React immediately, including while the controller is still booting.
                         if let Ok(measured) = serde_json::from_value(measurements.clone()) {
-                            let fit = ghostex_gx_chat_core::composer::layout::fit_composer_controls(&measured);
-                            std::sync::Arc::make_mut(&mut chat.snapshot)["composerOverflow"] = json!(fit);
+                            let fit = ghostex_gx_chat_core::composer::layout::fit_composer_controls(
+                                &measured,
+                            );
+                            std::sync::Arc::make_mut(&mut chat.snapshot)["composerOverflow"] =
+                                json!(fit);
                             cx.notify();
                         }
                         if chat.composer_ready {

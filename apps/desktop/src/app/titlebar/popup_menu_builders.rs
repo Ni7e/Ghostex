@@ -167,13 +167,24 @@ impl GhostexGpuiApp {
             titlebar_popup_menu_with_scroll_behavior(menu, width, max_height, scrollable)
                 .check_side(Side::Right);
 
-        let Some(state) = self.titlebar_git_menu_state.as_ref() else {
+        let Some(state) = self
+            .titlebar_git_menu_state
+            .as_ref()
+            .filter(|state| !state.is_busy)
+        else {
             return menu.menu_element_with_disabled(
                 Box::new(CopyGpuiTitlebarGitBranch),
                 true,
                 move |_, _| titlebar_popup_empty_menu_row("Loading Git state...".to_string()),
             );
         };
+        if !state.is_repo {
+            return menu.menu_element_with_disabled(
+                Box::new(CopyGpuiTitlebarGitBranch),
+                true,
+                move |_, _| titlebar_popup_empty_menu_row("Not a Git repository".to_string()),
+            );
+        }
 
         menu = titlebar_popup_git_section(menu, "Status");
 

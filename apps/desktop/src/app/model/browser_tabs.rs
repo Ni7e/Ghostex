@@ -738,6 +738,7 @@ impl BrowserTabModel {
         &self,
         url: &str,
         reuse: GpuiBrowserRendererOpenReuse,
+        remote_machine_id: Option<&str>,
     ) -> Option<(BrowserPaneId, BrowserTabId)> {
         /*
         macOS `findBrowserSessionInProjectForReuse` parity: `none` never reuses,
@@ -751,7 +752,7 @@ impl BrowserTabModel {
         let exact = self
             .tabs
             .iter()
-            .find(|tab| tab.url == url)
+            .find(|tab| tab.remote_machine_id.as_deref() == remote_machine_id && tab.url == url)
             .map(|tab| tab.id);
         let tab_id = match exact {
             Some(tab_id) => Some(tab_id),
@@ -760,7 +761,10 @@ impl BrowserTabModel {
                 let origin = browser_url_origin_key(url)?;
                 self.tabs
                     .iter()
-                    .find(|tab| browser_url_origin_key(&tab.url).as_deref() == Some(&origin))
+                    .find(|tab| {
+                        tab.remote_machine_id.as_deref() == remote_machine_id
+                            && browser_url_origin_key(&tab.url).as_deref() == Some(&origin)
+                    })
                     .map(|tab| tab.id)
             }
         }?;

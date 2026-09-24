@@ -31,7 +31,11 @@ pub(crate) mod tunnel_and_auth;
 pub(crate) mod types;
 pub(crate) mod websocket_presentation;
 pub(crate) mod windows;
+#[cfg(windows)]
+pub(crate) mod windows_client;
 pub(crate) mod windows_code;
+#[cfg(windows)]
+pub(crate) mod windows_terminal;
 
 pub(crate) use attach::*;
 pub(crate) use attach_terminal_process::*;
@@ -58,4 +62,8 @@ pub(crate) use tunnel_and_auth::*;
 pub(crate) use types::*;
 pub(crate) use websocket_presentation::*;
 pub(crate) use windows::*;
+#[cfg(windows)]
+pub(crate) use windows_client::*;
 pub(crate) use windows_code::*;
+#[cfg(windows)]
+pub(crate) use windows_terminal::*;

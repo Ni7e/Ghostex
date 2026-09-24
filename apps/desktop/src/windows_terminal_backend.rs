@@ -159,6 +159,14 @@ pub(crate) fn terminal_invocation(
     platform::terminal_invocation(command, working_directory)
 }
 
+#[cfg(windows)]
+pub(crate) fn native_terminal_invocation(
+    command: Option<String>,
+    working_directory: Option<&std::path::Path>,
+) -> (String, Vec<String>) {
+    native::invocation(command, working_directory)
+}
+
 #[cfg(target_os = "windows")]
 pub(crate) fn spawn_zmx_refresh(
     distribution: &str,

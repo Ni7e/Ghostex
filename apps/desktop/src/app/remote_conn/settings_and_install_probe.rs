@@ -314,7 +314,7 @@ impl GhostexGpuiApp {
             self.dispatch_gpui_app_modal_toast(
                 "warning",
                 gpui_remote_machine_password_failure_title(has_password),
-                "GPUI could not update Settings after the Keychain operation.",
+                "Could not update Settings after changing the saved SSH password.",
                 cx,
             );
             return;
@@ -330,7 +330,7 @@ impl GhostexGpuiApp {
             if has_password {
                 "The password is stored in secure system storage."
             } else {
-                "The Keychain password was removed."
+                "The SSH password was removed from secure system storage."
             },
             cx,
         );

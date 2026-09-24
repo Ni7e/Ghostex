@@ -329,9 +329,11 @@ pub(crate) fn gpui_remote_repository_clone_toast_id(request_id: &str) -> String 
 }
 
 pub(crate) fn gpui_remote_project_name_from_path(path: &str) -> String {
-    path.trim()
-        .trim_end_matches('/')
-        .split('/')
+    let path = path.trim();
+    let windows_path = gpui_is_windows_remote_path(path);
+    let is_separator = |character| character == '/' || (windows_path && character == '\\');
+    path.trim_end_matches(is_separator)
+        .split(is_separator)
         .filter(|part| !part.trim().is_empty())
         .next_back()
         .map(str::trim)

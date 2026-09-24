@@ -1,8 +1,8 @@
-import { invalidateDeferredSessionChatWork } from '@/packages/shared/session-chat-presentation/deferred-work';
-import type { AccountSwitchProgress } from '@/packages/shared/agent-accounts';
-import type { SessionChatPendingModelSelection } from '@/packages/shared/session-chat';
-import type { SessionChatDraftVersion } from '@/packages/shared/session-chat-queue';
-import type { ChatLifecycle } from './lifecycle';
+import { invalidateDeferredSessionChatWork } from "@/packages/shared/session-chat-presentation/deferred-work";
+import type { AccountSwitchProgress } from "@/packages/shared/agent-accounts";
+import type { SessionChatPendingModelSelection } from "@/packages/shared/session-chat";
+import type { SessionChatDraftVersion } from "@/packages/shared/session-chat-queue";
+import type { ChatLifecycle } from "./lifecycle";
 import type {
   GxserverAnswerSessionChatPromptParams,
   GxserverReadSessionChatResult,
@@ -22,7 +22,7 @@ import type {
   SessionChatTerminalActivity,
   SessionChatTerminalNotice,
   SessionChatTurnLifecycle,
-} from '@/packages/shared/session-chat';
+} from "@/packages/shared/session-chat";
 import {
   applySessionChatAppends,
   createIncrementalSessionChatAssembler,
@@ -30,24 +30,24 @@ import {
   sessionChatIdCollides,
   sessionChatSharesPrefix,
   stampSessionChatArrivalOrder,
-} from '@/packages/core-ui/chat/session-chat-assembler';
-import { surfaceSkillInvocationUserTurns } from '@/packages/core-ui/chat/session-chat-command-envelope';
-import { sameSessionChatValue } from '@/packages/core-ui/chat/session-chat-message-equality';
+} from "@/packages/core-ui/chat/session-chat-assembler";
+import { surfaceSkillInvocationUserTurns } from "@/packages/core-ui/chat/session-chat-command-envelope";
+import { sameSessionChatValue } from "@/packages/core-ui/chat/session-chat-message-equality";
 import {
   applySessionChatMergerAppend,
   createSessionChatMerger,
   removeSessionChatMergerIds,
   replaceSessionChatMergerList,
   type SessionChatMerger,
-} from '@/packages/core-ui/chat/session-chat-merge';
-import { countSessionChatCompactionRecords } from '@/packages/core-ui/chat/session-chat-noise';
+} from "@/packages/core-ui/chat/session-chat-merge";
+import { countSessionChatCompactionRecords } from "@/packages/core-ui/chat/session-chat-noise";
 import {
   SESSION_CHAT_INITIAL_LIMIT,
   SESSION_CHAT_MAX_LIMIT,
   SESSION_CHAT_PAGE,
   sessionChatPageHasMore,
-} from '@/packages/core-ui/chat/session-chat-pagination';
-import type { SessionChatPresentationState } from '@/packages/core-ui/chat/session-chat-presentation-cache';
+} from "@/packages/core-ui/chat/session-chat-pagination";
+import type { SessionChatPresentationState } from "@/packages/core-ui/chat/session-chat-presentation-cache";
 import {
   SESSION_CHAT_PENDING_SEND_LIMIT,
   appendSessionChatCommandMarker,
@@ -65,21 +65,30 @@ import {
   visibleSessionChatPendingSends,
   type SessionChatCommandMarker,
   type SessionChatPendingSend,
-} from '@/packages/core-ui/chat/session-chat-pending';
+} from "@/packages/core-ui/chat/session-chat-pending";
 import {
   mergeSessionChatDraftState,
   moveSessionChatQueueRow,
   sessionChatQueueCapabilities,
-} from '@/packages/shared/session-chat-controller/queue';
+} from "@/packages/shared/session-chat-controller/queue";
 import {
   SESSION_CHAT_INTERRUPT_MARKER_COMMAND,
   SESSION_CHAT_INTERRUPT_MARKER_LABEL,
   retireSessionChatInterruptMarkers,
-} from '@/packages/core-ui/chat/session-chat-returned-prompt';
-import { SESSION_CHAT_DEFAULT_COMMAND_CATALOG, classifySessionChatSend } from '@/packages/core-ui/chat/session-chat-send-classification';
-import { sessionChatOptionEvidencePriority } from '@/packages/core-ui/chat/session-chat-session-options';
-import { sessionChatFullQueueOrder, sessionChatPendingWithStartupSends } from '@/packages/core-ui/chat/session-chat-startup-sends';
-import { deriveSessionChatStreamingText, sessionChatStreamingMessage } from '@/packages/core-ui/chat/session-chat-streaming';
+} from "@/packages/core-ui/chat/session-chat-returned-prompt";
+import {
+  SESSION_CHAT_DEFAULT_COMMAND_CATALOG,
+  classifySessionChatSend,
+} from "@/packages/core-ui/chat/session-chat-send-classification";
+import { sessionChatOptionEvidencePriority } from "@/packages/core-ui/chat/session-chat-session-options";
+import {
+  sessionChatFullQueueOrder,
+  sessionChatPendingWithStartupSends,
+} from "@/packages/core-ui/chat/session-chat-startup-sends";
+import {
+  deriveSessionChatStreamingText,
+  sessionChatStreamingMessage,
+} from "@/packages/core-ui/chat/session-chat-streaming";
 import {
   SESSION_CHAT_TERMINAL_TOOL_HOLD_MS,
   isSessionChatCompletedToolSummary,
@@ -91,16 +100,19 @@ import {
   unreconciledSessionChatTerminalStatuses,
   withSessionChatTerminalToolDetail,
   withoutSessionChatTerminalStatus,
-} from '@/packages/core-ui/chat/session-chat-terminal-status';
+} from "@/packages/core-ui/chat/session-chat-terminal-status";
 import {
   sessionChatTerminalStreamFromActivity,
   sessionChatTerminalStreamIsTool,
   sessionChatTerminalStreamRetired,
   type SessionChatTerminalStream,
-} from '@/packages/core-ui/chat/session-chat-terminal-stream';
-import type { SessionChatTransport } from '@/packages/core-ui/chat/session-chat-transport';
-import { selectSessionChatViewState, sessionChatTranscriptStatusAfterState } from '@/packages/core-ui/chat/session-chat-view-state';
-import { deriveSessionChatWorkingOverride } from '@/packages/core-ui/chat/session-chat-working-status';
+} from "@/packages/core-ui/chat/session-chat-terminal-stream";
+import type { SessionChatTransport } from "@/packages/core-ui/chat/session-chat-transport";
+import {
+  selectSessionChatViewState,
+  sessionChatTranscriptStatusAfterState,
+} from "@/packages/core-ui/chat/session-chat-view-state";
+import { deriveSessionChatWorkingOverride } from "@/packages/core-ui/chat/session-chat-working-status";
 import {
   FrameState,
   INITIAL_STALL_THRESHOLD_MS,
@@ -120,15 +132,18 @@ import {
   notFoundRetryDelayMs,
   resyncRetryDelayMs,
   withReadTimeout,
-} from '@/packages/core-ui/chat/use-session-chat/state';
+} from "@/packages/core-ui/chat/use-session-chat/state";
 export function computeSessionChat(
   options: UseSessionChatOptions & {
     clientId: string;
-    onDeliveredDrafts: (deliveries: readonly import('../session-chat-queue').SessionChatDeliveredDraft[]) => void;
+    onDeliveredDrafts: (
+      deliveries: readonly import("../session-chat-queue").SessionChatDeliveredDraft[],
+    ) => void;
   },
-  hostLifecycle: ChatLifecycle
+  hostLifecycle: ChatLifecycle,
 ): UseSessionChatResult {
-  const { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } = hostLifecycle;
+  const { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } =
+    hostLifecycle;
   const {
     commandCatalog = SESSION_CHAT_DEFAULT_COMMAND_CATALOG,
     diagnosticLog,
@@ -139,30 +154,44 @@ export function computeSessionChat(
   } = options;
   const diagnosticLogRef = useRef(diagnosticLog);
   diagnosticLogRef.current = diagnosticLog;
-  const retainedPresentation = useMemo(() => transport.presentation?.getSnapshot(), [transport]);
-  const identityRef = useRef<Pick<SessionChatPresentationState, 'agent' | 'agentSessionId' | 'sessionAgentId'>>({
+  const retainedPresentation = useMemo(
+    () => transport.presentation?.getSnapshot(),
+    [transport],
+  );
+  const identityRef = useRef<
+    Pick<
+      SessionChatPresentationState,
+      "agent" | "agentSessionId" | "sessionAgentId"
+    >
+  >({
     agent: retainedPresentation?.agent,
     agentSessionId: retainedPresentation?.agentSessionId,
     sessionAgentId: retainedPresentation?.sessionAgentId,
   });
 
   const [transcript, setTranscript] = useState<readonly SessionChatMessage[]>(
-    () => transport.getCachedSnapshot?.()?.messages ?? []
+    () => transport.getCachedSnapshot?.()?.messages ?? [],
   );
   const [serverStatus, setServerStatus] = useState<SessionChatStatus>(
-    () => transport.getCachedSnapshot?.()?.status ?? 'loading'
+    () => transport.getCachedSnapshot?.()?.status ?? "loading",
   );
-  const [lifecycle, setLifecycle] = useState<SessionChatTurnLifecycle | null>(null);
-  const [prompt, setPrompt] = useState<SessionChatInteractivePrompt | null>(null);
-  const [retiredAsyncQuestionIds, setRetiredAsyncQuestionIds] = useState<readonly string[]>(
-    () => transport.getCachedSnapshot?.()?.retiredAsyncQuestionIds ?? []
+  const [lifecycle, setLifecycle] = useState<SessionChatTurnLifecycle | null>(
+    null,
   );
+  const [prompt, setPrompt] = useState<SessionChatInteractivePrompt | null>(
+    null,
+  );
+  const [retiredAsyncQuestionIds, setRetiredAsyncQuestionIds] = useState<
+    readonly string[]
+  >(() => transport.getCachedSnapshot?.()?.retiredAsyncQuestionIds ?? []);
   const [asyncQuestionsSince, setAsyncQuestionsSince] = useState<number | null>(
-    () => transport.getCachedSnapshot?.()?.asyncQuestionsSince ?? null
+    () => transport.getCachedSnapshot?.()?.asyncQuestionsSince ?? null,
   );
-  const [agent, setAgent] = useState<string | null>(() => retainedPresentation?.agent ?? null);
+  const [agent, setAgent] = useState<string | null>(
+    () => retainedPresentation?.agent ?? null,
+  );
   const [agentSessionId, setAgentSessionId] = useState<string | null>(
-    () => retainedPresentation?.agentSessionId ?? null
+    () => retainedPresentation?.agentSessionId ?? null,
   );
   /*
   CDXC:Drafts 2026-08-28: read-result-only state (see the doc on
@@ -170,16 +199,22 @@ export function computeSessionChat(
   nothing else, so an omission on a read is authoritative: the session is not
   (or is no longer) a draft.
   */
-  const [availableAgents, setAvailableAgents] = useState<readonly SessionChatAvailableAgent[] | null>(null);
-  const [switchableAgents, setSwitchableAgents] = useState<readonly SessionChatAvailableAgent[] | null>(null);
+  const [availableAgents, setAvailableAgents] = useState<
+    readonly SessionChatAvailableAgent[] | null
+  >(null);
+  const [switchableAgents, setSwitchableAgents] = useState<
+    readonly SessionChatAvailableAgent[] | null
+  >(null);
   const [sessionAgentId, setSessionAgentId] = useState<string | null>(
-    () => retainedPresentation?.sessionAgentId ?? null
+    () => retainedPresentation?.sessionAgentId ?? null,
   );
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [pending, setPending] = useState<readonly SessionChatPendingSend[]>([]);
-  const [markers, setMarkers] = useState<readonly SessionChatCommandMarker[]>([]);
+  const [markers, setMarkers] = useState<readonly SessionChatCommandMarker[]>(
+    [],
+  );
   const [interrupted, setInterrupted] = useState(false);
   // Live work as reported by the chat channel itself: the `working` flag on
   // read results/snapshots plus the server's activity-transition state frames.
@@ -190,9 +225,10 @@ export function computeSessionChat(
   const [sessionActivityWorking, setSessionActivityWorking] = useState(false);
   // Detected model/effort: carried by read results and by
   // snapshot/replaced/state frames. Absent ⇒ unchanged (older daemons omit it).
-  const [selectedOptions, setSelectedOptions] = useState<SessionChatDetectedOptions | null>(
-    () => retainedPresentation?.selectedOptions ?? null
-  );
+  const [selectedOptions, setSelectedOptions] =
+    useState<SessionChatDetectedOptions | null>(
+      () => retainedPresentation?.selectedOptions ?? null,
+    );
   const selectedOptionsRef = useRef(selectedOptions);
   /**
    * CDXC:AgentScreenDetection 2026-09-08 WHY:
@@ -203,21 +239,30 @@ export function computeSessionChat(
     (detected: SessionChatDetectedOptions | undefined): void => {
       if (!detected) return;
       const current = selectedOptionsRef.current;
-      const strongerEvidence = (['model', 'effort', 'mode'] as const).some(
+      const strongerEvidence = (["model", "effort", "mode"] as const).some(
         (field) =>
           sessionChatOptionEvidencePriority(detected[field]?.source) >
-          sessionChatOptionEvidencePriority(current?.[field]?.source)
+          sessionChatOptionEvidencePriority(current?.[field]?.source),
       );
       const nextOptions =
-        current && !strongerEvidence && Date.parse(current.detectedAt) > Date.parse(detected.detectedAt)
+        current &&
+        !strongerEvidence &&
+        Date.parse(current.detectedAt) > Date.parse(detected.detectedAt)
           ? current
           : detected;
       // CDXC:AgentProviders 2026-09-09 WHY:
       // Terminal option captures, Claude statusline payloads, and Codex transcript stats arrive independently; an options-only reply does not clear reported usage.
       // Keep the chosen options' evidence ordering, but allow the seed read to fill stats omitted by a newer terminal capture.
-      const codexStatus = nextOptions.codexStatus ?? detected.codexStatus ?? current?.codexStatus;
-      const claudeStatus = nextOptions.claudeStatus ?? detected.claudeStatus ?? current?.claudeStatus;
-      const contextUsage = nextOptions.contextUsage ?? detected.contextUsage ?? current?.contextUsage;
+      const codexStatus =
+        nextOptions.codexStatus ?? detected.codexStatus ?? current?.codexStatus;
+      const claudeStatus =
+        nextOptions.claudeStatus ??
+        detected.claudeStatus ??
+        current?.claudeStatus;
+      const contextUsage =
+        nextOptions.contextUsage ??
+        detected.contextUsage ??
+        current?.contextUsage;
       const next =
         !codexStatus && !claudeStatus && !contextUsage
           ? nextOptions
@@ -226,12 +271,15 @@ export function computeSessionChat(
       setSelectedOptions(next);
       transport.presentation?.update({ selectedOptions: next });
     },
-    [transport]
+    [transport],
   );
   const selectedOptionsDetectedAt = selectedOptions?.detectedAt ?? null;
   const selectedOptionsFast = selectedOptions?.fast === true;
   useEffect(() => {
-    if (agent?.toLowerCase() !== 'codex' || selectedOptionsDetectedAt === null) {
+    if (
+      agent?.toLowerCase() !== "codex" ||
+      selectedOptionsDetectedAt === null
+    ) {
       return;
     }
     const detectedAt = Date.parse(selectedOptionsDetectedAt);
@@ -246,7 +294,7 @@ export function computeSessionChat(
           marker &&
           marker.label === undefined &&
           marker.sentAt <= detectedAt &&
-          marker.command.trim().toLowerCase() === '/fast'
+          marker.command.trim().toLowerCase() === "/fast"
         ) {
           confirmedIndex = index;
           break;
@@ -263,38 +311,52 @@ export function computeSessionChat(
       gxserver's post-command footer probe confirms whether `fast` is present.
       */
       return current.map((marker, index) =>
-        index === confirmedIndex ? { ...marker, label: `Fast mode ${selectedOptionsFast ? 'ON' : 'OFF'}` } : marker
+        index === confirmedIndex
+          ? {
+              ...marker,
+              label: `Fast mode ${selectedOptionsFast ? "ON" : "OFF"}`,
+            }
+          : marker,
       );
     });
   }, [agent, selectedOptionsDetectedAt, selectedOptionsFast]);
   // Terminal-state notice: carried by read results and by
   // snapshot/replaced/state frames. Omitted ⇒ CLEARED (prompt semantics, unlike
   // selectedOptions) — the server only stops sending it once the state is gone.
-  const [terminalNotice, setTerminalNotice] = useState<SessionChatTerminalNotice | null>(null);
+  const [terminalNotice, setTerminalNotice] =
+    useState<SessionChatTerminalNotice | null>(null);
   /*
   CDXC:AgentScreenDetection 2026-08-22: structured on-screen progress
   (compaction), carried and cleared exactly like the notice above. Claude's
   current `⏺` line is split into transient reasoning history below instead.
   */
-  const [terminalActivity, setTerminalActivity] = useState<SessionChatTerminalActivity | null>(null);
+  const [terminalActivity, setTerminalActivity] =
+    useState<SessionChatTerminalActivity | null>(null);
   // CDXC:AgentScreenDetection 2026-08-23: carried and cleared exactly like the
   // activity row above; the strip's clocks tick locally off `detectedAt`.
-  const [agentFleet, setAgentFleet] = useState<SessionChatAgentFleet | null>(null);
+  const [agentFleet, setAgentFleet] = useState<SessionChatAgentFleet | null>(
+    null,
+  );
   // CDXC:SessionChat 2026-09-03: carried and cleared like the fleet.
-  const [agentTasks, setAgentTasks] = useState<SessionChatAgentTasks | null>(null);
+  const [agentTasks, setAgentTasks] = useState<SessionChatAgentTasks | null>(
+    null,
+  );
   /*
   CDXC:SessionChat 2026-08-23: commands Ghostex typed into the agent
   itself. NOT prompt semantics — a frame that omits them leaves what we have,
   because the server retires them on its own TTL and an omission is far more
   often "this frame had nothing to add" than "that rename never happened".
   */
-  const [appCommands, setAppCommands] = useState<readonly SessionChatAppCommand[]>([]);
+  const [appCommands, setAppCommands] = useState<
+    readonly SessionChatAppCommand[]
+  >([]);
   /*
   CDXC:SessionChat 2026-09-04: the prompt Claude handed back to its composer
   after an Escape (session-chat-returned-prompt.ts). Set from reads and frames,
   never cleared by omission; the view applies each id once.
   */
-  const [returnedPrompt, setReturnedPrompt] = useState<SessionChatReturnedPrompt | null>(null);
+  const [returnedPrompt, setReturnedPrompt] =
+    useState<SessionChatReturnedPrompt | null>(null);
   /*
   CDXC:SessionChat 2026-09-04 DECISION:
   User: the optimistic echo of a prompt Claude handed back must leave the
@@ -303,26 +365,39 @@ export function computeSessionChat(
   reached this client's own interrupt, so the returned prompt is what retires
   it.
   */
-  const applyReturnedPrompt = useCallback((prompt: SessionChatReturnedPrompt): void => {
-    setReturnedPrompt(prompt);
-    const returnedText = normalizeSessionChatPendingText(prompt.text);
-    setPending((current) => {
-      const next = current.filter((entry) => normalizeSessionChatPendingText(entry.text) !== returnedText);
-      return next.length === current.length ? current : next;
-    });
-  }, []);
+  const applyReturnedPrompt = useCallback(
+    (prompt: SessionChatReturnedPrompt): void => {
+      setReturnedPrompt(prompt);
+      const returnedText = normalizeSessionChatPendingText(prompt.text);
+      setPending((current) => {
+        const next = current.filter(
+          (entry) =>
+            normalizeSessionChatPendingText(entry.text) !== returnedText,
+        );
+        return next.length === current.length ? current : next;
+      });
+    },
+    [],
+  );
   // Claude replaces its current `⏺ …` terminal line in place. Keep each
   // DISTINCT value only for this mounted chat; matching transcript text removes
   // it from composition as soon as JSONL catches up. Distinct rather than
   // merely non-repeating: the line cycles back to an earlier phrase between
   // lines that the transcript later swallows, so a "differs from the previous
   // one" rule leaves the same phrase standing several times in a row.
-  const [terminalStatusMessages, setTerminalStatusMessages] = useState<readonly SessionChatMessage[]>([]);
+  const [terminalStatusMessages, setTerminalStatusMessages] = useState<
+    readonly SessionChatMessage[]
+  >([]);
   /** The message Claude is painting right now (see session-chat-terminal-stream.ts). */
-  const [terminalStream, setTerminalStream] = useState<SessionChatTerminalStream | null>(null);
+  const [terminalStream, setTerminalStream] =
+    useState<SessionChatTerminalStream | null>(null);
   /** The pending tool row (see session-chat-terminal-status.ts) and its off-screen hold. */
-  const [terminalTool, setTerminalTool] = useState<SessionChatMessage | null>(null);
-  const terminalToolHoldRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [terminalTool, setTerminalTool] = useState<SessionChatMessage | null>(
+    null,
+  );
+  const terminalToolHoldRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const clearTerminalToolHold = useCallback((): void => {
     if (terminalToolHoldRef.current !== null) {
       clearTimeout(terminalToolHoldRef.current);
@@ -344,10 +419,18 @@ export function computeSessionChat(
    * Learning an identity for the first time does not invalidate evidence already received from that same conversation.
    */
   const applyAgentIdentity = useCallback(
-    (patch: Pick<SessionChatPresentationState, 'agent' | 'agentSessionId' | 'sessionAgentId'>): void => {
+    (
+      patch: Pick<
+        SessionChatPresentationState,
+        "agent" | "agentSessionId" | "sessionAgentId"
+      >,
+    ): void => {
       const previous = identityRef.current;
-      const accountChanged = (['agent', 'sessionAgentId'] as const).some(
-        (field) => previous[field] != null && patch[field] != null && previous[field] !== patch[field]
+      const accountChanged = (["agent", "sessionAgentId"] as const).some(
+        (field) =>
+          previous[field] != null &&
+          patch[field] != null &&
+          previous[field] !== patch[field],
       );
       const changed =
         accountChanged ||
@@ -381,7 +464,7 @@ export function computeSessionChat(
         ...(accountChanged ? { accounts: undefined } : {}),
       });
     },
-    [transport]
+    [transport],
   );
   /*
   Ghostex prompt queue. `null` means NO frame has carried a `queue` field yet,
@@ -389,11 +472,14 @@ export function computeSessionChat(
   control. An empty array means supported-and-empty. Once present it is
   authoritative and replaces the list wholesale.
   */
-  const [accountSwitch, setAccountSwitch] = useState<AccountSwitchProgress | null>(null);
+  const [accountSwitch, setAccountSwitch] =
+    useState<AccountSwitchProgress | null>(null);
   const [pendingModelSelection, setPendingModelSelection] = useState<
     SessionChatPendingModelSelection | null | undefined
   >(undefined);
-  const [queuePrompts, setQueuePrompts] = useState<readonly SessionChatQueuedPrompt[] | null>(null);
+  const [queuePrompts, setQueuePrompts] = useState<
+    readonly SessionChatQueuedPrompt[] | null
+  >(null);
   /*
   Latest synced composer draft. An OMITTED draft means unchanged, NOT cleared
   (see CDXC:SessionChat) — so this only ever moves forward, and a
@@ -413,7 +499,11 @@ export function computeSessionChat(
   const mergerRef = useRef<SessionChatMerger>(createSessionChatMerger());
   const assemblerRef = useRef(createIncrementalSessionChatAssembler());
   const appliedRef = useRef<readonly SessionChatMessage[]>([]);
-  const frameStateRef = useRef<FrameState>({ epoch: null, frameArrived: false, seq: 0 });
+  const frameStateRef = useRef<FrameState>({
+    epoch: null,
+    frameArrived: false,
+    seq: 0,
+  });
   const limitRef = useRef(initialLimit);
   const beforeOffsetRef = useRef(0);
   const historyEpochRef = useRef<number | null>(null);
@@ -430,15 +520,22 @@ export function computeSessionChat(
   /** Newest frame position observed while a resync read was in flight. */
   const resyncSeenInFlightRef = useRef<SessionChatStreamPosition | null>(null);
   const resyncFollowUpsRef = useRef(0);
-  const resyncFollowUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resyncFollowUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   /**
    * Failure retry, kept strictly apart from the follow-up above: a follow-up
    * chases bytes a SUCCESSFUL read outran, this one re-attempts a read that
    * never landed. Sharing a counter would let one exhaust the other's budget.
    */
   const resyncFailuresRef = useRef(0);
-  const resyncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadEarlierRequestRef = useRef<{ epoch: number | null; beforeOffset: number } | null>(null);
+  const resyncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const loadEarlierRequestRef = useRef<{
+    epoch: number | null;
+    beforeOffset: number;
+  } | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const workingRef = useRef(false);
   const workingStartedAtRef = useRef<number | null>(null);
@@ -460,7 +557,7 @@ export function computeSessionChat(
   /** Transport that last seeded the view state; gates the session-identity wipe. */
   const seededTransportRef = useRef<SessionChatTransport | null>(null);
   const reconnect = useCallback((): void => {
-    diagnosticLogRef.current?.('sessionChat.reconnect');
+    diagnosticLogRef.current?.("sessionChat.reconnect");
     transport.reconnect?.();
     setReconnectNonce((nonce) => nonce + 1);
   }, [transport]);
@@ -475,22 +572,30 @@ export function computeSessionChat(
     (activity: SessionChatTerminalActivity | undefined): void => {
       if (
         activity &&
-        ['claude-tool', 'claude-status', 'agent-stream'].includes(activity.kind) &&
+        ["claude-tool", "claude-status", "agent-stream"].includes(
+          activity.kind,
+        ) &&
         isSessionChatCompletedToolSummary(activity.text ?? activity.label)
       ) {
         clearTerminalToolHold();
         setTerminalTool(null);
-        setTerminalStream((current) => (current?.live ? { ...current, live: false } : current));
+        setTerminalStream((current) =>
+          current?.live ? { ...current, live: false } : current,
+        );
         setTerminalActivity(null);
         return;
       }
-      const stream = activity ? sessionChatTerminalStreamFromActivity(activity) : null;
+      const stream = activity
+        ? sessionChatTerminalStreamFromActivity(activity)
+        : null;
       if (stream) {
         setTerminalStream(stream);
       } else {
         // The stream is no longer the newest thing on screen: hold it for the
         // transcript to retire (session-chat-terminal-stream.ts).
-        setTerminalStream((current) => (current?.live ? { ...current, live: false } : current));
+        setTerminalStream((current) =>
+          current?.live ? { ...current, live: false } : current,
+        );
       }
       const tool = activity ? sessionChatTerminalToolMessage(activity) : null;
       if (tool) {
@@ -498,10 +603,16 @@ export function computeSessionChat(
         setTerminalTool((current) =>
           current && sameSessionChatTerminalTool(current, tool)
             ? withSessionChatTerminalToolDetail(current, tool)
-            : tool
+            : tool,
         );
-        setTerminalStatusMessages((current) => withoutSessionChatTerminalStatus(current, tool));
-        setTerminalStream((current) => (current && sessionChatTerminalStreamIsTool(current, tool) ? null : current));
+        setTerminalStatusMessages((current) =>
+          withoutSessionChatTerminalStatus(current, tool),
+        );
+        setTerminalStream((current) =>
+          current && sessionChatTerminalStreamIsTool(current, tool)
+            ? null
+            : current,
+        );
         setTerminalActivity(null);
         return;
       }
@@ -512,7 +623,9 @@ export function computeSessionChat(
         // Claude can repaint the same tool without its gutter. That is still
         // this tool, not a newer prose status replacing it.
         setTerminalTool((current) =>
-          current && stream && sessionChatTerminalStreamIsTool(stream, current) ? current : null
+          current && stream && sessionChatTerminalStreamIsTool(stream, current)
+            ? current
+            : null,
         );
       } else if (terminalToolHoldRef.current === null) {
         terminalToolHoldRef.current = setTimeout(() => {
@@ -525,15 +638,19 @@ export function computeSessionChat(
         setTerminalActivity(null);
         return;
       }
-      const transient = activity ? sessionChatTerminalStatusMessage(activity) : null;
+      const transient = activity
+        ? sessionChatTerminalStatusMessage(activity)
+        : null;
       if (!transient) {
         setTerminalActivity(activity ?? null);
         return;
       }
       setTerminalActivity(null);
-      setTerminalStatusMessages((current) => mergeSessionChatTerminalStatus(current, transient));
+      setTerminalStatusMessages((current) =>
+        mergeSessionChatTerminalStatus(current, transient),
+      );
     },
-    [clearTerminalToolHold]
+    [clearTerminalToolHold],
   );
 
   /**
@@ -549,18 +666,26 @@ export function computeSessionChat(
       accountSwitch?: AccountSwitchProgress | null;
       pendingModelSelection?: SessionChatPendingModelSelection | null;
     }): void => {
-      if (carrier.accountSwitch !== undefined) setAccountSwitch(carrier.accountSwitch);
-      if (carrier.pendingModelSelection !== undefined) setPendingModelSelection(carrier.pendingModelSelection);
+      if (carrier.accountSwitch !== undefined)
+        setAccountSwitch(carrier.accountSwitch);
+      if (carrier.pendingModelSelection !== undefined)
+        setPendingModelSelection(carrier.pendingModelSelection);
       if (carrier.queue !== undefined) {
         const queue = carrier.queue;
         // Every state frame repeats the (usually empty) queue as a fresh array; a new identity for the same rows would dirty every memo that lists it, down to the transcript projection.
-        setQueuePrompts((current) => (current !== null && sameSessionChatValue(current, queue) ? current : queue));
+        setQueuePrompts((current) =>
+          current !== null && sameSessionChatValue(current, queue)
+            ? current
+            : queue,
+        );
       }
       if (carrier.draft !== undefined) {
-        setSyncedDraft((current) => mergeSessionChatDraftState(current, carrier.draft!));
+        setSyncedDraft((current) =>
+          mergeSessionChatDraftState(current, carrier.draft!),
+        );
       }
     },
-    []
+    [],
   );
 
   const applyAuthoritative = useCallback(
@@ -606,13 +731,13 @@ export function computeSessionChat(
         draft?: SessionChatDraft;
       },
       source: string,
-      restorePresentation = true
+      restorePresentation = true,
     ): void => {
-      diagnosticLogRef.current?.('sessionChat.authoritative', {
+      diagnosticLogRef.current?.("sessionChat.authoritative", {
         epoch: result.epoch,
         seq: result.seq,
         previousMessageCount: mergerRef.current.list.length,
-        hasDraftMetadata: 'availableAgents' in result,
+        hasDraftMetadata: "availableAgents" in result,
         hasAgentSessionId: result.agentSessionId !== undefined,
         hasMore: result.hasMore,
         messageCount: result.messages.length,
@@ -621,15 +746,21 @@ export function computeSessionChat(
         working: result.working === true,
       });
       const previous = mergerRef.current;
-      const overlap = result.messages[0] && previous.indexById.get(result.messages[0].id);
+      const overlap =
+        result.messages[0] && previous.indexById.get(result.messages[0].id);
       const keepHistory =
-        historyEpochRef.current !== null && historyEpochRef.current === result.epoch && overlap !== undefined;
+        historyEpochRef.current !== null &&
+        historyEpochRef.current === result.epoch &&
+        overlap !== undefined;
       const nextMessages = keepHistory
         ? [
             ...previous.list.slice(0, overlap),
             ...result.messages.map((message) => {
-              const old = previous.list[previous.indexById.get(message.id) ?? -1];
-              return old?.deferredWork ? { ...message, deferredWork: old.deferredWork } : message;
+              const old =
+                previous.list[previous.indexById.get(message.id) ?? -1];
+              return old?.deferredWork
+                ? { ...message, deferredWork: old.deferredWork }
+                : message;
             }),
           ]
         : result.messages;
@@ -647,17 +778,22 @@ export function computeSessionChat(
         beforeOffsetRef.current = result.beforeOffset;
       }
       setServerStatus(result.status);
-      setServerWorking(result.working === true || result.status === 'working');
-      if (typeof result.working === 'boolean') {
+      setServerWorking(result.working === true || result.status === "working");
+      if (typeof result.working === "boolean") {
         setSessionActivityWorking(result.working);
       }
       setPrompt(result.prompt ?? null);
       if (restorePresentation) {
-        applyAgentIdentity({ agent: result.agent, agentSessionId: result.agentSessionId });
+        applyAgentIdentity({
+          agent: result.agent,
+          agentSessionId: result.agentSessionId,
+        });
         applySelectedOptions(result.selectedOptions);
       }
-      if (result.asyncQuestionsSince !== undefined) setAsyncQuestionsSince(result.asyncQuestionsSince);
-      if (result.retiredAsyncQuestionIds !== undefined) setRetiredAsyncQuestionIds(result.retiredAsyncQuestionIds);
+      if (result.asyncQuestionsSince !== undefined)
+        setAsyncQuestionsSince(result.asyncQuestionsSince);
+      if (result.retiredAsyncQuestionIds !== undefined)
+        setRetiredAsyncQuestionIds(result.retiredAsyncQuestionIds);
       setTerminalNotice(result.terminalNotice ?? null);
       applyTerminalActivity(result.terminalActivity);
       setAgentFleet(result.agentFleet ?? null);
@@ -672,7 +808,11 @@ export function computeSessionChat(
         setScreenProbed(true);
       }
       applyQueueCarriage(result);
-      setError(result.status === 'error' ? (result.error ?? 'Conversation could not be loaded.') : null);
+      setError(
+        result.status === "error"
+          ? (result.error ?? "Conversation could not be loaded.")
+          : null,
+      );
       /** CDXC:SessionChat 2026-09-15 WHY:
        * A seed read and its socket snapshot can overlap the request for a long turn's prompt. Cancelling that request on every snapshot left the partial turn hidden behind "Load earlier turns".
        * Preserve requests for the same epoch and history boundary; request identity prevents a cancelled response from completing a newer request in the same epoch.
@@ -680,14 +820,21 @@ export function computeSessionChat(
       const earlierRequest = loadEarlierRequestRef.current;
       if (
         earlierRequest &&
-        (earlierRequest.epoch !== result.epoch || earlierRequest.beforeOffset !== beforeOffsetRef.current)
+        (earlierRequest.epoch !== result.epoch ||
+          earlierRequest.beforeOffset !== beforeOffsetRef.current)
       ) {
         loadEarlierRequestRef.current = null;
         boundaryAttemptRef.current = null;
         setLoadingEarlier(false);
       }
     },
-    [applyAgentIdentity, applyQueueCarriage, applySelectedOptions, applyTerminalActivity, transport.readHistory]
+    [
+      applyAgentIdentity,
+      applyQueueCarriage,
+      applySelectedOptions,
+      applyTerminalActivity,
+      transport.readHistory,
+    ],
   );
 
   /*
@@ -711,9 +858,11 @@ export function computeSessionChat(
         sessionAgentId: result.sessionAgentId ?? null,
       });
       setAvailableAgents(result.availableAgents ?? null);
-      setSwitchableAgents(result.switchableAgents?.length ? result.switchableAgents : null);
+      setSwitchableAgents(
+        result.switchableAgents?.length ? result.switchableAgents : null,
+      );
     },
-    [applyAgentIdentity]
+    [applyAgentIdentity],
   );
 
   const requestResync = useCallback((): void => {
@@ -724,7 +873,7 @@ export function computeSessionChat(
     }
     resyncInFlightRef.current = true;
     resyncSeenInFlightRef.current = null;
-    diagnosticLogRef.current?.('sessionChat.resyncRequested');
+    diagnosticLogRef.current?.("sessionChat.resyncRequested");
     const generation = generationRef.current;
     void withReadTimeout(transport.read({ limit: limitRef.current }))
       .then((result) => {
@@ -758,7 +907,7 @@ export function computeSessionChat(
         // append look like a gap and resync forever.
         frameState.seq = outrun ? observed.seq : result.seq;
         applyDraftAgentCarriage(result);
-        applyAuthoritative(result, 'resyncRead');
+        applyAuthoritative(result, "resyncRead");
         if (outrun) {
           scheduleResyncFollowUp();
         } else {
@@ -767,8 +916,8 @@ export function computeSessionChat(
       })
       .catch(() => {
         if (!closedRef.current && generationRef.current === generation) {
-          setError('Conversation could not be loaded.');
-          setServerStatus('error');
+          setError("Conversation could not be loaded.");
+          setServerStatus("error");
           scheduleResyncRetry();
         }
       })
@@ -781,7 +930,11 @@ export function computeSessionChat(
     // Backoff, never giving up while mounted: the next read is the only thing
     // that can clear the error state (applyAuthoritative does it on success).
     function scheduleResyncRetry(): void {
-      if (closedRef.current || generationRef.current !== generation || resyncRetryTimerRef.current !== null) {
+      if (
+        closedRef.current ||
+        generationRef.current !== generation ||
+        resyncRetryTimerRef.current !== null
+      ) {
         return;
       }
       const delay = resyncRetryDelayMs(resyncFailuresRef.current);
@@ -845,7 +998,7 @@ export function computeSessionChat(
     */
     const sessionChanged = seededTransportRef.current !== transport;
     seededTransportRef.current = transport;
-    diagnosticLogRef.current?.('sessionChat.subscribeStarted', {
+    diagnosticLogRef.current?.("sessionChat.subscribeStarted", {
       generation,
       sessionChanged,
     });
@@ -859,7 +1012,7 @@ export function computeSessionChat(
       limitRef.current = initialLimit;
       setServerWorking(false);
       setTranscript([]);
-      setServerStatus('loading');
+      setServerStatus("loading");
       setLifecycle(null);
       setPrompt(null);
       setAsyncQuestionsSince(null);
@@ -907,33 +1060,44 @@ export function computeSessionChat(
       frameState.seq = cachedSnapshot.seq;
       limitRef.current = Math.max(initialLimit, cachedSnapshot.messages.length);
       const presentationIdentity = identityRef.current;
-      const matchingIdentity = (['agent', 'agentSessionId', 'sessionAgentId'] as const).every(
+      const matchingIdentity = (
+        ["agent", "agentSessionId", "sessionAgentId"] as const
+      ).every(
         (field) =>
           presentationIdentity[field] == null ||
           cachedSnapshot[field] == null ||
-          presentationIdentity[field] === cachedSnapshot[field]
+          presentationIdentity[field] === cachedSnapshot[field],
       );
       if (matchingIdentity) {
         applyDraftAgentCarriage({
           ...cachedSnapshot,
-          agentSessionId: cachedSnapshot.agentSessionId ?? presentationIdentity.agentSessionId ?? undefined,
-          sessionAgentId: cachedSnapshot.sessionAgentId ?? presentationIdentity.sessionAgentId ?? undefined,
+          agentSessionId:
+            cachedSnapshot.agentSessionId ??
+            presentationIdentity.agentSessionId ??
+            undefined,
+          sessionAgentId:
+            cachedSnapshot.sessionAgentId ??
+            presentationIdentity.sessionAgentId ??
+            undefined,
         });
       }
-      applyAuthoritative(cachedSnapshot, 'cachedSnapshot', matchingIdentity);
+      applyAuthoritative(cachedSnapshot, "cachedSnapshot", matchingIdentity);
     }
 
-    const acceptSequencedFrame = (event: { epoch: number; seq: number }): 'apply' | 'drop' | 'resync' => {
+    const acceptSequencedFrame = (event: {
+      epoch: number;
+      seq: number;
+    }): "apply" | "drop" | "resync" => {
       if (frameState.epoch !== null && event.epoch === frameState.epoch) {
         if (event.seq <= frameState.seq) {
-          return 'drop';
+          return "drop";
         }
         if (event.seq === frameState.seq + 1) {
           frameState.seq = event.seq;
-          return 'apply';
+          return "apply";
         }
       }
-      return 'resync';
+      return "resync";
     };
 
     const onEvent = (event: GxserverSessionChatEvent): void => {
@@ -952,7 +1116,10 @@ export function computeSessionChat(
           resyncSeenInFlightRef.current = position;
         }
       }
-      if (event.type === 'sessionChatSnapshot' || event.type === 'sessionChatReplaced') {
+      if (
+        event.type === "sessionChatSnapshot" ||
+        event.type === "sessionChatReplaced"
+      ) {
         frameState.epoch = event.epoch;
         frameState.seq = event.seq;
         frameState.frameArrived = true;
@@ -961,18 +1128,22 @@ export function computeSessionChat(
         SSH host synthesizes snapshots from reads and deliberately owns them,
         including `undefined` on promotion so stale draft controls are cleared.
         */
-        if ('availableAgents' in event || 'sessionAgentId' in event || 'switchableAgents' in event) {
+        if (
+          "availableAgents" in event ||
+          "sessionAgentId" in event ||
+          "switchableAgents" in event
+        ) {
           applyDraftAgentCarriage(event);
         }
         applyAuthoritative(event, event.type);
         return;
       }
       const verdict = acceptSequencedFrame(event);
-      if (verdict === 'drop') {
+      if (verdict === "drop") {
         return;
       }
-      if (verdict === 'resync') {
-        diagnosticLogRef.current?.('sessionChat.sequenceGap', {
+      if (verdict === "resync") {
+        diagnosticLogRef.current?.("sessionChat.sequenceGap", {
           generation,
           eventType: event.type,
           epoch: event.epoch,
@@ -983,22 +1154,28 @@ export function computeSessionChat(
         requestResync();
         return;
       }
-      if (event.type === 'sessionChatAppended') {
+      if (event.type === "sessionChatAppended") {
         // Retract first: the rows that replace an abandoned prompt can ride
         // the very same frame.
-        const retracted = removeSessionChatMergerIds(mergerRef.current, event.supersededMessageIds ?? []);
+        const retracted = removeSessionChatMergerIds(
+          mergerRef.current,
+          event.supersededMessageIds ?? [],
+        );
         if (retracted) {
           setTranscript(mergerRef.current.list);
         }
         if (event.messages.length > 0) {
-          setServerStatus('ready');
+          setServerStatus("ready");
           applySessionChatMergerAppend(mergerRef.current, event.messages);
           // Keep the read window at least as large as what is on screen so a
           // later resync/pagination read cannot answer with less than the
           // live list already holds.
           limitRef.current = Math.min(
             SESSION_CHAT_MAX_LIMIT,
-            Math.max(limitRef.current, mergerRef.current.list.length - historyPrefixCountRef.current)
+            Math.max(
+              limitRef.current,
+              mergerRef.current.list.length - historyPrefixCountRef.current,
+            ),
           );
           setTranscript(mergerRef.current.list);
         }
@@ -1009,16 +1186,18 @@ export function computeSessionChat(
       }
       // sessionChatState — also how hook activity transitions (working ↔ idle)
       // reach every host.
-      diagnosticLogRef.current?.('sessionChat.stateFrame', {
+      diagnosticLogRef.current?.("sessionChat.stateFrame", {
         epoch: event.epoch,
         hasAgentSessionId: event.agentSessionId !== undefined,
         seq: event.seq,
         status: event.status,
         working: event.working === true,
       });
-      setServerStatus((current) => sessionChatTranscriptStatusAfterState(current, event.status));
-      setServerWorking(event.working === true || event.status === 'working');
-      if (typeof event.working === 'boolean') {
+      setServerStatus((current) =>
+        sessionChatTranscriptStatusAfterState(current, event.status),
+      );
+      setServerWorking(event.working === true || event.status === "working");
+      if (typeof event.working === "boolean") {
         setSessionActivityWorking(event.working);
       }
       if (event.lifecycle) {
@@ -1026,8 +1205,10 @@ export function computeSessionChat(
       }
       setPrompt(event.prompt ?? null);
       applyAgentIdentity({ agentSessionId: event.agentSessionId });
-      if (event.asyncQuestionsSince !== undefined) setAsyncQuestionsSince(event.asyncQuestionsSince);
-      if (event.retiredAsyncQuestionIds !== undefined) setRetiredAsyncQuestionIds(event.retiredAsyncQuestionIds);
+      if (event.asyncQuestionsSince !== undefined)
+        setAsyncQuestionsSince(event.asyncQuestionsSince);
+      if (event.retiredAsyncQuestionIds !== undefined)
+        setRetiredAsyncQuestionIds(event.retiredAsyncQuestionIds);
       applySelectedOptions(event.selectedOptions);
       setTerminalNotice(event.terminalNotice ?? null);
       applyTerminalActivity(event.terminalActivity);
@@ -1063,12 +1244,17 @@ export function computeSessionChat(
     };
     const seedRead = (): void => {
       const readStartedAt = Date.now();
-      diagnosticLogRef.current?.('sessionChat.seedReadStarted', { generation, attempt });
+      diagnosticLogRef.current?.("sessionChat.seedReadStarted", {
+        generation,
+        attempt,
+      });
       void withReadTimeout(
-        transport.seed ? transport.seed({ limit: limitRef.current }) : transport.read({ limit: limitRef.current })
+        transport.seed
+          ? transport.seed({ limit: limitRef.current })
+          : transport.read({ limit: limitRef.current }),
       )
         .then((result: GxserverReadSessionChatResult) => {
-          diagnosticLogRef.current?.('sessionChat.seedReadCompleted', {
+          diagnosticLogRef.current?.("sessionChat.seedReadCompleted", {
             generation,
             attempt,
             durationMs: Date.now() - readStartedAt,
@@ -1103,23 +1289,33 @@ export function computeSessionChat(
           frameState.epoch = result.epoch;
           frameState.seq = result.seq;
           applyDraftAgentCarriage(result);
-          applyAuthoritative(result, 'seedRead');
-          if (result.status === 'starting' && Date.now() - startedAt < NOTFOUND_RETRY_WINDOW_MS) {
+          applyAuthoritative(result, "seedRead");
+          if (
+            result.status === "starting" &&
+            Date.now() - startedAt < NOTFOUND_RETRY_WINDOW_MS
+          ) {
             scheduleRetry(seedRead);
           }
         })
         .catch(() => {
-          if (closedRef.current || generationRef.current !== generation || frameState.frameArrived) {
+          if (
+            closedRef.current ||
+            generationRef.current !== generation ||
+            frameState.frameArrived
+          ) {
             return;
           }
-          const retryScheduled = Date.now() - startedAt < NOTFOUND_RETRY_WINDOW_MS;
-          diagnosticLogRef.current?.('sessionChat.seedReadRejected', { retryScheduled });
+          const retryScheduled =
+            Date.now() - startedAt < NOTFOUND_RETRY_WINDOW_MS;
+          diagnosticLogRef.current?.("sessionChat.seedReadRejected", {
+            retryScheduled,
+          });
           if (retryScheduled) {
             scheduleRetry(seedRead);
             return;
           }
-          setError('Conversation could not be loaded.');
-          setServerStatus('error');
+          setError("Conversation could not be loaded.");
+          setServerStatus("error");
         });
     };
     seedRead();
@@ -1145,7 +1341,7 @@ export function computeSessionChat(
         now - lastFrameAtRef.current > INITIAL_STALL_THRESHOLD_MS
       ) {
         autoReconnectsRef.current += 1;
-        diagnosticLogRef.current?.('sessionChat.initialStallRecycle', {
+        diagnosticLogRef.current?.("sessionChat.initialStallRecycle", {
           attempt: autoReconnectsRef.current,
         });
         reconnect();
@@ -1169,7 +1365,7 @@ export function computeSessionChat(
 
     return () => {
       closedRef.current = true;
-      diagnosticLogRef.current?.('sessionChat.subscribeStopped', {
+      diagnosticLogRef.current?.("sessionChat.subscribeStopped", {
         generation,
         epoch: frameState.epoch,
         seq: frameState.seq,
@@ -1211,7 +1407,8 @@ export function computeSessionChat(
     // same-millisecond rows keep that order through the sort.
     stampSessionChatArrivalOrder(transcript);
     const isSuffixExtension =
-      transcript.length >= applied.length && sessionChatSharesPrefix(transcript, applied, applied.length);
+      transcript.length >= applied.length &&
+      sessionChatSharesPrefix(transcript, applied, applied.length);
     if (isSuffixExtension && transcript.length > applied.length) {
       applySessionChatAppends(assembler, transcript.slice(applied.length));
     } else if (!isSuffixExtension) {
@@ -1223,9 +1420,15 @@ export function computeSessionChat(
 
   const catalogSet = useMemo(() => new Set(commandCatalog), [commandCatalog]);
 
-  const surfaced = useMemo(() => surfaceSkillInvocationUserTurns(assembled, catalogSet), [assembled, catalogSet]);
+  const surfaced = useMemo(
+    () => surfaceSkillInvocationUserTurns(assembled, catalogSet),
+    [assembled, catalogSet],
+  );
 
-  const boundaried = useMemo(() => applySessionChatCommandMarkerBoundaries(surfaced, markers), [markers, surfaced]);
+  const boundaried = useMemo(
+    () => applySessionChatCommandMarkerBoundaries(surfaced, markers),
+    [markers, surfaced],
+  );
 
   /**
    * CDXC:SessionChat 2026-09-15 WHY:
@@ -1234,9 +1437,12 @@ export function computeSessionChat(
   const pendingTranscript = useMemo(
     () => [
       ...boundaried,
-      ...sessionChatAppCommandsAsMessages(appCommands.filter((command) => command.localCommand), boundaried),
+      ...sessionChatAppCommandsAsMessages(
+        appCommands.filter((command) => command.localCommand),
+        boundaried,
+      ),
     ],
-    [appCommands, boundaried]
+    [appCommands, boundaried],
   );
 
   /*
@@ -1245,7 +1451,10 @@ export function computeSessionChat(
    * outright, so counting the two ends of the comparison on different lists
    * could leave a `/compact` marker either retired on sight or stranded.
    */
-  const compactionRecords = useMemo(() => countSessionChatCompactionRecords(transcript), [transcript]);
+  const compactionRecords = useMemo(
+    () => countSessionChatCompactionRecords(transcript),
+    [transcript],
+  );
 
   // --- Pending prune against the authoritative list --------------------------
   useEffect(() => {
@@ -1263,8 +1472,14 @@ export function computeSessionChat(
   useEffect(() => {
     if (queuePrompts === null) return;
     setPending((current) => {
-      const next = pruneSessionChatPendingSends(sessionChatPendingWithStartupSends(current, queuePrompts), pendingTranscript);
-      return next.length === current.length && next.every((entry, index) => entry === current[index]) ? current : next;
+      const next = pruneSessionChatPendingSends(
+        sessionChatPendingWithStartupSends(current, queuePrompts),
+        pendingTranscript,
+      );
+      return next.length === current.length &&
+        next.every((entry, index) => entry === current[index])
+        ? current
+        : next;
     });
   }, [queuePrompts, pendingTranscript]);
 
@@ -1274,9 +1489,13 @@ export function computeSessionChat(
   // signal. Settling is owned by an idle transition, a terminal turn
   // lifecycle, or a local interrupt.
   const optimisticWorking = pending.some((entry) => !entry.queuedPromptId);
-  const compacting = terminalActivity?.kind === 'compacting';
+  const compacting = terminalActivity?.kind === "compacting";
   const workingSignal =
-    optimisticWorking || compacting || serverWorking || serverStatus === 'working' || externalWorking === true;
+    optimisticWorking ||
+    compacting ||
+    serverWorking ||
+    serverStatus === "working" ||
+    externalWorking === true;
   workingSignalRef.current = workingSignal;
   if (workingSignal) {
     workingStartedAtRef.current ??= Date.now();
@@ -1294,11 +1513,16 @@ export function computeSessionChat(
   // A locally accepted send owns the working presentation immediately. It
   // remains pending until the authoritative transcript advances past that
   // user turn, bridging the gap before host/server activity arrives.
-  const working = (optimisticWorking || workingOverride === 'working') && !interrupted;
+  const working =
+    (optimisticWorking || workingOverride === "working") && !interrupted;
   workingRef.current = working;
 
   const visibleTerminalTool =
-    terminalTool && working && !prompt && !error && !sessionChatTerminalToolRetired(terminalTool, transcript)
+    terminalTool &&
+    working &&
+    !prompt &&
+    !error &&
+    !sessionChatTerminalToolRetired(terminalTool, transcript)
       ? terminalTool
       : null;
   useEffect(() => {
@@ -1318,38 +1542,51 @@ export function computeSessionChat(
   // Live work can arrive before the seed read. Keep unresolved transcript
   // states authoritative so they cannot be mistaken for confirmed emptiness.
   const status: SessionChatStatus = error
-    ? 'error'
-    : serverStatus === 'loading' || serverStatus === 'starting'
+    ? "error"
+    : serverStatus === "loading" || serverStatus === "starting"
       ? serverStatus
       : working
-        ? 'working'
-        : serverStatus === 'working'
-          ? 'ready'
+        ? "working"
+        : serverStatus === "working"
+          ? "ready"
           : serverStatus;
 
   // --- Composition (§11.1 order: markers → streaming → pending) --------------
   const messages = useMemo(() => {
-    const transcript = reconcileSessionChatLocalCommandOutput(boundaried, appCommands);
-    const startupPending = sessionChatPendingWithStartupSends(pending, queuePrompts ?? []);
+    const transcript = reconcileSessionChatLocalCommandOutput(
+      boundaried,
+      appCommands,
+    );
+    const startupPending = sessionChatPendingWithStartupSends(
+      pending,
+      queuePrompts ?? [],
+    );
     const pendingMessages = sessionChatPendingSendsAsMessages(
-      visibleSessionChatPendingSends(startupPending, pendingTranscript)
+      visibleSessionChatPendingSends(startupPending, pendingTranscript),
     );
     const authoritativeText = new Set(
       boundaried
-        .filter((message) => message.source === 'transcript')
+        .filter((message) => message.source === "transcript")
         .map(normalizedSessionChatText)
-        .filter(Boolean)
+        .filter(Boolean),
     );
     const markerMessages = retireSessionChatMarkersCoveredByLocalCommands(
       sessionChatCommandMarkersAsMessages(
         retireSessionChatInterruptMarkers(markers, boundaried),
-        compactionRecords
-      ).filter((message) => message.role !== 'user' || !authoritativeText.has(normalizedSessionChatText(message))),
+        compactionRecords,
+      ).filter(
+        (message) =>
+          message.role !== "user" ||
+          !authoritativeText.has(normalizedSessionChatText(message)),
+      ),
       appCommands,
       transcript,
-      markers
+      markers,
     );
-    const visibleTerminalStatuses = unreconciledSessionChatTerminalStatuses(terminalStatusMessages, boundaried);
+    const visibleTerminalStatuses = unreconciledSessionChatTerminalStatuses(
+      terminalStatusMessages,
+      boundaried,
+    );
     const tail: SessionChatMessage[] = [
       ...visibleTerminalStatuses,
       ...sessionChatAppCommandsAsMessages(appCommands, transcript),
@@ -1360,7 +1597,10 @@ export function computeSessionChat(
     const terminalStreamText =
       terminalStream &&
       (terminalStream.live || working) &&
-      !(visibleTerminalTool && sessionChatTerminalStreamIsTool(terminalStream, visibleTerminalTool)) &&
+      !(
+        visibleTerminalTool &&
+        sessionChatTerminalStreamIsTool(terminalStream, visibleTerminalTool)
+      ) &&
       !sessionChatTerminalStreamRetired(terminalStream, boundaried)
         ? terminalStream.text
         : null;
@@ -1413,27 +1653,40 @@ export function computeSessionChat(
   });
   // 'loading' awaits the initial transcript read; 'starting' keeps the welcome
   // and composer visible while the follower waits for the first transcript.
-  loadingHoldRef.current = view.kind === 'loading' || view.kind === 'starting';
+  loadingHoldRef.current = view.kind === "loading" || view.kind === "starting";
 
   // --- Actions ----------------------------------------------------------------
   const loadEarlier = useCallback((): void => {
-    if (loadingEarlier || loadEarlierRequestRef.current !== null || !hasMore || closedRef.current) {
+    if (
+      loadingEarlier ||
+      loadEarlierRequestRef.current !== null ||
+      !hasMore ||
+      closedRef.current
+    ) {
       return;
     }
     setLoadingEarlier(true);
     const requestEpoch = frameStateRef.current.epoch;
     const requestGeneration = generationRef.current;
     const requestedBeforeOffset = beforeOffsetRef.current;
-    const request = { epoch: requestEpoch, beforeOffset: requestedBeforeOffset };
+    const request = {
+      epoch: requestEpoch,
+      beforeOffset: requestedBeforeOffset,
+    };
     loadEarlierRequestRef.current = request;
     const historyRead = transport.readHistory;
     const read = historyRead
       ? historyRead({
           beforeOffset: requestedBeforeOffset,
           limit: SESSION_CHAT_PAGE,
-          preserveNewest: workingRef.current && !mergerRef.current.list.some((message) => message.role === 'user'),
+          preserveNewest:
+            workingRef.current &&
+            !mergerRef.current.list.some((message) => message.role === "user"),
         })
-      : transport.read({ beforeOffset: requestedBeforeOffset, limit: SESSION_CHAT_PAGE });
+      : transport.read({
+          beforeOffset: requestedBeforeOffset,
+          limit: SESSION_CHAT_PAGE,
+        });
     void withReadTimeout(read)
       .then((result) => {
         if (
@@ -1447,7 +1700,8 @@ export function computeSessionChat(
           // A replacement rebuilt the tail while this page was in flight.
           return;
         }
-        if (result.status === 'error') throw new Error(result.error ?? 'History could not be loaded.');
+        if (result.status === "error")
+          throw new Error(result.error ?? "History could not be loaded.");
         const merger = mergerRef.current;
         const older = result.messages.filter((message) => {
           const at = merger.indexById.get(message.id);
@@ -1457,7 +1711,9 @@ export function computeSessionChat(
           // Same id but a different row (shared response id) is real history,
           // not a duplicate — the merger re-keys it on the way in.
           const existing = merger.list[at];
-          return existing !== undefined && sessionChatIdCollides(existing, message);
+          return (
+            existing !== undefined && sessionChatIdCollides(existing, message)
+          );
         });
         replaceSessionChatMergerList(merger, [...older, ...merger.list]);
         // Grow the read window so a later resync answers with at least the
@@ -1468,7 +1724,7 @@ export function computeSessionChat(
         } else {
           limitRef.current = Math.min(
             SESSION_CHAT_MAX_LIMIT,
-            Math.max(limitRef.current + SESSION_CHAT_PAGE, merger.list.length)
+            Math.max(limitRef.current + SESSION_CHAT_PAGE, merger.list.length),
           );
         }
         setTranscript(merger.list);
@@ -1495,7 +1751,14 @@ export function computeSessionChat(
 
   useEffect(() => {
     const first = transcript[0];
-    if (!transport.readHistory || !first || first.role === 'user' || !hasMore || loadingEarlier) return;
+    if (
+      !transport.readHistory ||
+      !first ||
+      first.role === "user" ||
+      !hasMore ||
+      loadingEarlier
+    )
+      return;
     const cursor = beforeOffsetRef.current;
     if (boundaryAttemptRef.current === cursor) return;
     boundaryAttemptRef.current = cursor;
@@ -1503,16 +1766,25 @@ export function computeSessionChat(
   }, [hasMore, loadEarlier, loadingEarlier, transcript, transport]);
 
   const send = useCallback(
-    async (text: string, imagePaths?: string[], draftVersion?: SessionChatDraftVersion): Promise<void> => {
+    async (
+      text: string,
+      imagePaths?: string[],
+      draftVersion?: SessionChatDraftVersion,
+    ): Promise<void> => {
       const classification = classifySessionChatSend(text, commandCatalog);
       let pendingId: string | null = null;
       let commandMarkerSentAt: number | null = null;
-      if (classification === 'chat' && (text.trim().length > 0 || (imagePaths?.length ?? 0) > 0)) {
+      if (
+        classification === "chat" &&
+        (text.trim().length > 0 || (imagePaths?.length ?? 0) > 0)
+      ) {
         const last = mergerRef.current.list.at(-1);
         const id = nextSessionChatPendingSendId();
         pendingId = id;
         const baseEntry: SessionChatPendingSend = {
-          afterMessageId: last?.id ?? null,
+          // CDXC:SessionChat 2026-09-23 WHY:
+          // An empty transcript has no earlier turn to exclude. Using the client's send time as its boundary strands the first echo when a remote host's clock is behind the client, so leave that boundary unrestricted; existing transcripts retain their message identity and host timestamp.
+          afterMessageId: last?.id,
           afterMessageTimestamp: last?.timestamp ?? null,
           id,
           imagePaths,
@@ -1530,13 +1802,16 @@ export function computeSessionChat(
             ? next.slice(next.length - SESSION_CHAT_PENDING_SEND_LIMIT)
             : next;
         });
-      } else if (classification === 'command') {
+      } else if (classification === "command") {
         // Snapshot the compactions already on record, so a `/compact` marker
         // retires against ITS OWN compaction rather than an earlier one.
-        const compactionRecordsBefore = countSessionChatCompactionRecords(mergerRef.current.list);
-        const localCommandIdsBefore = sessionChatLocalCommandIdentities(appCommands, mergerRef.current.list).map(
-          (entry) => entry.id
+        const compactionRecordsBefore = countSessionChatCompactionRecords(
+          mergerRef.current.list,
         );
+        const localCommandIdsBefore = sessionChatLocalCommandIdentities(
+          appCommands,
+          mergerRef.current.list,
+        ).map((entry) => entry.id);
         commandMarkerSentAt = Date.now();
         setMarkers((current) =>
           appendSessionChatCommandMarker(
@@ -1545,8 +1820,8 @@ export function computeSessionChat(
             commandMarkerSentAt ?? Date.now(),
             undefined,
             compactionRecordsBefore,
-            localCommandIdsBefore
-          )
+            localCommandIdsBefore,
+          ),
         );
       }
       try {
@@ -1554,25 +1829,35 @@ export function computeSessionChat(
         if (receipt?.queuedPromptId && pendingId !== null) {
           const id = pendingId;
           setPending((current) =>
-            current.map((entry) => (entry.id === id ? { ...entry, queuedPromptId: receipt.queuedPromptId } : entry))
+            current.map((entry) =>
+              entry.id === id
+                ? { ...entry, queuedPromptId: receipt.queuedPromptId }
+                : entry,
+            ),
           );
         }
       } catch (sendError) {
         if (pendingId !== null) {
           const dropId = pendingId;
-          setPending((current) => current.filter((entry) => entry.id !== dropId));
+          setPending((current) =>
+            current.filter((entry) => entry.id !== dropId),
+          );
         }
         if (commandMarkerSentAt !== null) {
           const failedCommand = text.trim();
           const failedSentAt = commandMarkerSentAt;
           setMarkers((current) =>
-            current.filter((marker) => marker.sentAt !== failedSentAt || marker.command !== failedCommand)
+            current.filter(
+              (marker) =>
+                marker.sentAt !== failedSentAt ||
+                marker.command !== failedCommand,
+            ),
           );
         }
         throw sendError;
       }
     },
-    [appCommands, commandCatalog, transport]
+    [appCommands, commandCatalog, transport],
   );
 
   /**
@@ -1587,18 +1872,25 @@ export function computeSessionChat(
         return;
       }
       await transportSendKey.call(transport, key);
-      if (marker.trim() !== '') {
-        setMarkers((current) => appendSessionChatCommandMarker(current, key, Date.now(), marker));
+      if (marker.trim() !== "") {
+        setMarkers((current) =>
+          appendSessionChatCommandMarker(current, key, Date.now(), marker),
+        );
       }
     },
-    [transport, transportSendKey]
+    [transport, transportSendKey],
   );
 
   const answerPrompt = useCallback(
-    async (params: Omit<GxserverAnswerSessionChatPromptParams, 'projectId' | 'sessionId'>): Promise<void> => {
+    async (
+      params: Omit<
+        GxserverAnswerSessionChatPromptParams,
+        "projectId" | "sessionId"
+      >,
+    ): Promise<void> => {
       await transport.answerPrompt(params);
     },
-    [transport]
+    [transport],
   );
 
   // --- Ghostex prompt queue + synced draft ------------------------------------
@@ -1608,14 +1900,16 @@ export function computeSessionChat(
         daemonSupportsQueue: queuePrompts !== null,
         transport,
       }),
-    [queuePrompts, transport]
+    [queuePrompts, transport],
   );
   const clientId = useMemo(() => options.clientId, []);
   // Every mutation answers with the whole authoritative queue, so an optimistic
   // step that lost a race self-corrects on the next line instead of needing a
   // rollback path.
   const queueMutation = useCallback(
-    async (run: (() => Promise<{ queue: SessionChatQueuedPrompt[] }>) | undefined): Promise<void> => {
+    async (
+      run: (() => Promise<{ queue: SessionChatQueuedPrompt[] }>) | undefined,
+    ): Promise<void> => {
       if (!run) {
         return;
       }
@@ -1624,17 +1918,20 @@ export function computeSessionChat(
         setQueuePrompts(result.queue);
       }
     },
-    []
+    [],
   );
   const queuePrompt = useCallback(
-    async (text: string, draftVersion?: SessionChatDraftVersion): Promise<void> => {
+    async (
+      text: string,
+      draftVersion?: SessionChatDraftVersion,
+    ): Promise<void> => {
       const call = transport.queuePrompt?.bind(transport);
       if (!queueCapabilities.canQueue || !call) {
         return;
       }
       await queueMutation(() => call({ text, draftVersion }));
     },
-    [queueCapabilities.canQueue, queueMutation, transport]
+    [queueCapabilities.canQueue, queueMutation, transport],
   );
   const retryPrompt = useCallback(
     async (promptId: string): Promise<void> => {
@@ -1644,7 +1941,7 @@ export function computeSessionChat(
       }
       await queueMutation(() => call({ promptId, retry: true }));
     },
-    [queueCapabilities.canRetry, queueMutation, transport]
+    [queueCapabilities.canRetry, queueMutation, transport],
   );
   const removePrompt = useCallback(
     async (promptId: string): Promise<SessionChatQueuedPrompt | null> => {
@@ -1655,13 +1952,15 @@ export function computeSessionChat(
       const result = await call({ promptId });
       if (!closedRef.current) {
         setQueuePrompts(result.queue);
-        setPending((current) => current.filter((entry) => entry.queuedPromptId !== promptId));
+        setPending((current) =>
+          current.filter((entry) => entry.queuedPromptId !== promptId),
+        );
       }
       // The removed row rides back on the answer so Edit can pull its text into
       // the composer without having cached it across the round trip.
       return result.prompt;
     },
-    [queueCapabilities.canRemove, transport]
+    [queueCapabilities.canRemove, transport],
   );
   const reorder = useCallback(
     async (promptIds: string[]): Promise<void> => {
@@ -1669,7 +1968,10 @@ export function computeSessionChat(
       if (!queueCapabilities.canReorder || !call) {
         return;
       }
-      const fullOrder = sessionChatFullQueueOrder(queuePrompts ?? [], promptIds);
+      const fullOrder = sessionChatFullQueueOrder(
+        queuePrompts ?? [],
+        promptIds,
+      );
       // Optimistic: the strip must settle into the dropped order immediately.
       setQueuePrompts((current) => {
         if (current === null) {
@@ -1686,7 +1988,7 @@ export function computeSessionChat(
       });
       await queueMutation(() => call({ promptIds: fullOrder }));
     },
-    [queueCapabilities.canReorder, queueMutation, queuePrompts, transport]
+    [queueCapabilities.canReorder, queueMutation, queuePrompts, transport],
   );
   const sendNow = useCallback(
     async (promptId: string): Promise<void> => {
@@ -1696,33 +1998,46 @@ export function computeSessionChat(
       }
       await queueMutation(() => call({ promptId }));
     },
-    [queueCapabilities.canSendNow, queueMutation, transport]
+    [queueCapabilities.canSendNow, queueMutation, transport],
   );
   // Keep writes ordered across composer remounts, which share this hook.
   // Otherwise a slow typing save can arrive after the successful-send clear.
   const draftWrites = useMemo(() => ({ tail: Promise.resolve() }), [transport]);
   const pushDraft = useCallback(
-    async (content: string, draftVersion?: SessionChatDraftVersion): Promise<void> => {
+    async (
+      content: string,
+      draftVersion?: SessionChatDraftVersion,
+    ): Promise<void> => {
       const call = transport.setDraft?.bind(transport);
       if (!call) {
         return;
       }
-      const write = draftWrites.tail.then(() => call({ clientId, content, draftVersion }));
+      const write = draftWrites.tail.then(() =>
+        call({ clientId, content, draftVersion }),
+      );
       draftWrites.tail = write.then(
         () => {},
-        () => {}
+        () => {},
       );
       const result = await write;
-      if (result?.draft && !closedRef.current && seededTransportRef.current === transport)
-        setSyncedDraft((current) => mergeSessionChatDraftState(current, result.draft));
+      if (
+        result?.draft &&
+        !closedRef.current &&
+        seededTransportRef.current === transport
+      )
+        setSyncedDraft((current) =>
+          mergeSessionChatDraftState(current, result.draft),
+        );
     },
-    [clientId, draftWrites, transport]
+    [clientId, draftWrites, transport],
   );
   const queue = useMemo<SessionChatQueueController>(
     () => ({
       capabilities: queueCapabilities,
       prompts: (queuePrompts ?? []).filter(
-        (prompt) => !prompt.startupSend && !pending.some((entry) => entry.queuedPromptId === prompt.id)
+        (prompt) =>
+          !prompt.startupSend &&
+          !pending.some((entry) => entry.queuedPromptId === prompt.id),
       ),
       queuePrompt,
       removePrompt,
@@ -1730,7 +2045,16 @@ export function computeSessionChat(
       retryPrompt,
       sendNow,
     }),
-    [queueCapabilities, queuePrompt, queuePrompts, pending, removePrompt, reorder, retryPrompt, sendNow]
+    [
+      queueCapabilities,
+      queuePrompt,
+      queuePrompts,
+      pending,
+      removePrompt,
+      reorder,
+      retryPrompt,
+      sendNow,
+    ],
   );
   const draft = useMemo<SessionChatDraftController>(
     () => ({
@@ -1739,7 +2063,7 @@ export function computeSessionChat(
       push: pushDraft,
       synced: syncedDraft,
     }),
-    [clientId, pushDraft, queueCapabilities.canSyncDraft, syncedDraft]
+    [clientId, pushDraft, queueCapabilities.canSyncDraft, syncedDraft],
   );
 
   const interrupt = useCallback(async (): Promise<void> => {
@@ -1749,8 +2073,12 @@ export function computeSessionChat(
      * User: Escape closing /usage or a similar dialog must not report "Interrupted the agent" when no turn was interrupted.
      * The dialog's cancel lane verifies the live screen and avoids the stop lane's queue cancellation and activity reset.
      */
-    if (dialog?.actions.includes('cancel')) {
-      await transport.answerPrompt({ kind: 'terminalDialog', dialogId: dialog.id, dialogAction: 'cancel' });
+    if (dialog?.actions.includes("cancel")) {
+      await transport.answerPrompt({
+        kind: "terminalDialog",
+        dialogId: dialog.id,
+        dialogAction: "cancel",
+      });
       return;
     }
     if (workingRef.current) {
@@ -1770,8 +2098,8 @@ export function computeSessionChat(
           current,
           SESSION_CHAT_INTERRUPT_MARKER_COMMAND,
           Date.now(),
-          SESSION_CHAT_INTERRUPT_MARKER_LABEL
-        )
+          SESSION_CHAT_INTERRUPT_MARKER_LABEL,
+        ),
       );
     }
     await transport.interrupt();

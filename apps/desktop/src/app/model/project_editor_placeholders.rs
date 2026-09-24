@@ -145,4 +145,6 @@ pub(crate) struct PendingSourceFileOpen {
     pub(crate) line: Option<u32>,
     pub(crate) origin: PendingSourceFileOpenOrigin,
     pub(crate) project_path: PathBuf,
+    pub(crate) remote_target: Option<SourceCodeServerRuntimeTarget>,
+    pub(crate) remote_working_directory: Option<String>,
 }

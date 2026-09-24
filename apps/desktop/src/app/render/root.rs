@@ -228,6 +228,9 @@ impl Render for GhostexGpuiApp {
             self.titlebar_popup_menu.is_some() || self.titlebar_extension_popup.is_some();
 
         let content = v_flex()
+            .on_action(cx.listener(|this, action: &crate::app::terminal_sync::gpui_engine_terminal_attachment::PickTerminalAttachmentKind, _, cx| {
+                this.request_gpui_engine_terminal_attachment_paths_for_kind(action.target.clone(), action.runtime_session_id, Some(action.directories_only), cx);
+            }))
             .on_action(cx.listener(|this, action: &crate::app::native_sidebar::actions::NativeSidebarAction, window, cx| {
                 this.handle_native_sidebar_action(action, window, cx);
             }))

@@ -523,7 +523,7 @@ impl GhostexGpuiApp {
                 self.receive_sidebar_global_actions_payload(&payload, cx);
             }
             cef::SidebarBridgeEvent::TitlebarGitMenuState(payload) => {
-                self.receive_sidebar_titlebar_git_menu_state_payload(&payload, cx);
+                self.receive_sidebar_titlebar_git_menu_state_payload(&payload, window, cx);
             }
             cef::SidebarBridgeEvent::OpenBrowserUrl(payload) => {
                 self.receive_sidebar_open_browser_url_payload(&payload, window, cx);
@@ -539,7 +539,7 @@ impl GhostexGpuiApp {
                 // while "Open links in embedded browser" is on, else the
                 // system browser (CDXC:SessionChat 2026-09-09 in
                 // cef/shell/request_handling.rs).
-                self.open_session_chat_link(&url, false, false, window, cx);
+                self.open_session_chat_link(&url, None, false, false, window, cx);
             }
         }
     }
@@ -733,6 +733,27 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        let remote_machine_id = match message.project_id.as_deref() {
+            Some(project_id) => gpui_remote_project_reference_from_project_id(project_id)
+                .map(|reference| reference.remote_machine_id),
+            None if !message.from_quick_header => self.browser_project_remote_machine_id(),
+            None => None,
+        };
+        self.open_browser_url_from_renderer_command_with_machine(
+            message,
+            remote_machine_id,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn open_browser_url_from_renderer_command_with_machine(
+        &mut self,
+        message: GpuiSidebarOpenBrowserUrlMessage,
+        remote_machine_id: Option<String>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
         /*
         macOS `openNativeBrowserPaneFromCli` parity for `ghostex browser open` /
         `openBrowser(Pane)` renderer commands: reuse an exact or same-origin tab
@@ -773,10 +794,11 @@ impl GhostexGpuiApp {
         let Some(url) = normalize_address(&message.url) else {
             return;
         };
-        if let Some((pane_id, tab_id)) = self
-            .browser_tabs
-            .find_renderer_open_reuse_tab(&url, message.reuse)
-        {
+        if let Some((pane_id, tab_id)) = self.browser_tabs.find_renderer_open_reuse_tab(
+            &url,
+            message.reuse,
+            remote_machine_id.as_deref(),
+        ) {
             self.browser_tabs.select_tab_in_pane(pane_id, tab_id);
             self.change_active_mode_with_pane_state(TitlebarMode::Browser, cx);
             self.focus_shell_target(
@@ -796,6 +818,14 @@ impl GhostexGpuiApp {
         let Some(created_tab_id) = created_tab_id else {
             return;
         };
+        if let Some(tab) = self
+            .browser_tabs
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.id == created_tab_id)
+        {
+            tab.remote_machine_id = remote_machine_id;
+        }
         self.reveal_new_browser_tab(created_tab_id);
         self.change_active_mode_with_pane_state(TitlebarMode::Browser, cx);
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
@@ -812,6 +842,7 @@ impl GhostexGpuiApp {
     pub(crate) fn receive_sidebar_titlebar_git_menu_state_payload(
         &mut self,
         payload: &str,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(state) = gpui_titlebar_git_menu_state_from_payload(payload) else {
@@ -821,6 +852,7 @@ impl GhostexGpuiApp {
             return;
         }
         self.titlebar_git_menu_state = Some(state);
+        self.refresh_open_git_popup(window, cx);
         cx.notify();
     }
 

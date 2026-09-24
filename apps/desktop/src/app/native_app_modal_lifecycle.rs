@@ -68,7 +68,7 @@ impl GhostexGpuiApp {
         let view_out = view_slot.clone();
         let window = cx
             .open_window(options, move |window, cx| {
-                window.set_window_title(if cfg!(target_os = "windows") {
+                window.set_window_title(if cfg!(any(target_os = "windows", target_os = "linux")) {
                     kind.window_title()
                 } else {
                     ""

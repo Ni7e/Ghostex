@@ -752,6 +752,8 @@ impl GhostexGpuiApp {
         focus, change the titlebar mode, or publish presentation focus: the
         restored layout already says what is surfaced, and a split's other
         panes must re-arm without fighting each other for focus.
+        Parked projects reuse shell ids, so both plan lookup and completion must
+        resolve the complete remote key in the currently active project.
         */
         let Some(active_project_id) = self.agents_workspace_project_id.clone() else {
             return;
@@ -786,10 +788,7 @@ impl GhostexGpuiApp {
                 self.agents_tab_selected_local_runtime_missing(*pane_id, *session_id)
             })
             .filter_map(|(pane_id, session_id)| {
-                self.remote_attach_sessions
-                    .iter()
-                    .find_map(|(key, mapped)| (*mapped == session_id).then(|| key.clone()))
-                    .filter(|key| key.remote_machine_id == remote_machine_id)
+                self.agents_chat_remote_key_for_session(session_id)
                     .map(|key| (pane_id, session_id, key))
             })
             .collect::<Vec<_>>();
@@ -828,32 +827,16 @@ impl GhostexGpuiApp {
         still hold, otherwise this payload belongs to a slot that no longer
         exists.
         */
-        if self.remote_attach_sessions.get(key).copied() != Some(session_id)
+        if self.agents_chat_remote_key_for_session(session_id).as_ref() != Some(key)
             || self.agents_workspace.pane_id_for_session(session_id) != Some(pane_id)
             || self.agents_workspace.active_session_in_pane(pane_id) != Some(session_id)
             || !self.agents_tab_selected_local_runtime_missing(pane_id, session_id)
         {
             return;
         }
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        let env_vars = plan
-            .askpass
-            .as_ref()
-            .map(|askpass| {
-                vec![
-                    (
-                        "DISPLAY".to_string(),
-                        env::var("DISPLAY").unwrap_or_else(|_| "localhost:0".to_string()),
-                    ),
-                    (
-                        "SSH_ASKPASS".to_string(),
-                        gpui_path_string(askpass.script.as_path()),
-                    ),
-                    ("SSH_ASKPASS_REQUIRE".to_string(), "force".to_string()),
-                ]
-            })
-            .unwrap_or_default();
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+        let env_vars = gpui_remote_ssh_terminal_environment(plan.askpass.as_ref());
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
         let env_vars = Vec::new();
         let payload = AgentsTerminalExplicitLaunchPayload {
             working_directory: None,
@@ -877,7 +860,7 @@ impl GhostexGpuiApp {
                 },
                 payload,
             );
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         if let Some(askpass) = plan.askpass {
             self.remote_attach_askpass_scripts
                 .insert(key.clone(), askpass);

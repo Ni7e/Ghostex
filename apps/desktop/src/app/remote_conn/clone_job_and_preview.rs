@@ -122,10 +122,15 @@ impl GhostexGpuiApp {
                     "label": label,
                     "machineId": machine_id,
                 });
-                if self
-                    .gpui_remote_gxserver_request_target(&machine_id)
-                    .is_none()
-                {
+                if let Some(target) = self.gpui_remote_gxserver_request_target(&machine_id) {
+                    // The picker validates the host filesystem, not the client OS.
+                    option["platform"] = serde_json::json!(match target.execution_target {
+                        GpuiRemoteExecutionTarget::WindowsPowerShell => "Win32",
+                        GpuiRemoteExecutionTarget::WindowsWsl { .. } => "Linux",
+                        GpuiRemoteExecutionTarget::PosixHost => "POSIX",
+                    });
+                } else {
+                    option["platform"] = serde_json::json!("unknown");
                     option["description"] = serde_json::json!("Not connected");
                 }
                 machines.push(option);

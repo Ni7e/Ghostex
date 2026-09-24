@@ -73,7 +73,13 @@ fn configure_proxy(context: &RequestContext, port: u16) -> Result<()> {
     Ok(())
 }
 
+/// CDXC:CefRuntime 2026-09-23 WHY:
+/// A restored remote tab prepares its proxy before browser creation reaches the deferred-init gate. Creating its request-context handler then aborts CEF with API version -1; context preparation must request the runtime and wait for initialization too.
 pub(crate) fn prepare_remote_browser_context(profile: &str, port: u16) -> Result<bool> {
+    if !super::context_initialized() {
+        super::request_runtime();
+        return Ok(false);
+    }
     if let Some(status) = REMOTE_CONTEXTS.with(|contexts| {
         contexts
             .borrow()
@@ -109,4 +115,8 @@ pub(crate) fn remote_browser_request_context(profile: &str) -> Result<RequestCon
         );
         Ok(entry.context.clone())
     })
+}
+
+pub(super) fn clear_remote_browser_contexts() {
+    REMOTE_CONTEXTS.with(|contexts| contexts.borrow_mut().clear());
 }

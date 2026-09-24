@@ -12,6 +12,47 @@ use futures::channel::mpsc;
 use std::time::Instant;
 
 impl GhostexGpuiApp {
+    fn trace_source_runtime_state(&self, phase: &str) {
+        let snapshot = self.latest_sidebar_project_snapshot.as_ref();
+        let remote = snapshot
+            .and_then(|snapshot| snapshot.active_project_id.as_ref())
+            .and_then(|id| gpui_remote_project_reference_from_project_id(&id.0));
+        let connection = remote.as_ref().and_then(|remote| {
+            self.remote_gxserver_connections
+                .get(&remote.remote_machine_id)
+        });
+        let surface = self
+            .project_workarea_runtime_cef_surfaces
+            .get(&ProjectWorkareaCefSurfaceSlotKey::Source);
+        support_logs::append_for_scenario(
+            support_logs::GpuiSupportLog::SidebarRefresh,
+            "native.sidebar.refresh",
+            "gpui.codeRuntime.state",
+            serde_json::json!({
+                "phase": phase,
+                "activeMode": format!("{:?}", self.active_mode),
+                "awake": self.project_editor_shell.is_mode_awake(TitlebarMode::Source),
+                "mayBeVisible": self.project_workarea_runtime_cef_surface_may_be_visible(ProjectWorkareaCefSurfaceSlotKey::Source),
+                "hasSnapshot": snapshot.is_some(),
+                "hasProject": snapshot.is_some_and(|snapshot| snapshot.active_project_id.is_some()),
+                "hasSourceIdentity": snapshot.is_some_and(|snapshot| snapshot.surface_ids.source_workarea_id.is_some()),
+                "hasProjectPath": snapshot.is_some_and(|snapshot| snapshot.in_memory_project_path.is_some()),
+                "sourceAvailable": snapshot.is_some_and(|snapshot| snapshot.feature_availability.source),
+                "quickProjectless": snapshot.is_some_and(|snapshot| snapshot.is_quick_projectless),
+                "remote": remote.is_some(),
+                "connected": connection.is_some(),
+                "hasComponentPlatform": connection.is_some_and(|connection| connection.code_server_component_platform.is_some()),
+                "hasTarget": snapshot.and_then(|snapshot| self.source_code_server_runtime_target(snapshot)).is_some(),
+                "runtimeState": format!("{:?}", self.source_code_server_runtime.state),
+                "generation": self.source_code_server_runtime.generation,
+                "hasChild": self.source_code_server_runtime.child.is_some(),
+                "hasSidebar": self.sidebar.is_some(),
+                "hasSurface": surface.is_some(),
+                "pageReady": surface.is_some_and(|surface| surface.page_ready()),
+            }),
+        );
+    }
+
     pub(crate) fn ensure_source_code_server_runtime_for_current_context(
         &mut self,
         cx: &mut gpui::Context<Self>,
@@ -20,6 +61,9 @@ impl GhostexGpuiApp {
         CDXC:CodeEditor 2026-06-24-23:17:
         Source startup is lazy and visible-workarea scoped. Selecting or focusing awake Source may launch the shared code-server process in the background, but CEF creation still waits for the runtime readiness result and an authorized folder URL; no hidden Source CEF prewarm, fallback localhost adoption, persistent URL storage, or renderer-provided path is allowed.
         */
+        if self.active_mode == TitlebarMode::Source {
+            self.trace_source_runtime_state("ensure");
+        }
         if self.source_code_server_runtime.state == SourceCodeServerRuntimeLaunchState::Installing {
             return false;
         }
@@ -38,26 +82,15 @@ impl GhostexGpuiApp {
         let settings = SourceCodeServerRuntimeSettings::from_sidebar_runtime_settings(
             &self.sidebar_runtime_settings_snapshot,
         );
-        let mut changed = self.source_code_server_runtime.refresh_child_exit();
-        match source_code_server_runtime_availability(&target) {
-            SourceCodeServerRuntimeAvailability::Available => {}
-            SourceCodeServerRuntimeAvailability::InstallRequired => {
-                let was_current = self.source_code_server_runtime.state
-                    == SourceCodeServerRuntimeLaunchState::InstallRequired
-                    && self.source_code_server_runtime.target.as_ref() == Some(&target)
-                    && self.source_code_server_runtime.settings.as_ref() == Some(&settings);
-                if !was_current {
-                    self.source_code_server_runtime
-                        .set_install_required(target, settings);
-                    changed = true;
-                }
-                return changed;
-            }
-            SourceCodeServerRuntimeAvailability::Failed(failure) => {
-                self.source_code_server_runtime
-                    .set_failed(target, settings, None, None, failure);
-                return true;
-            }
+        let mut changed = self.refresh_source_code_server_runtime_child(cx);
+        if matches!(
+            self.source_code_server_runtime.state,
+            SourceCodeServerRuntimeLaunchState::InstallRequired
+                | SourceCodeServerRuntimeLaunchState::Failed
+        ) && self.source_code_server_runtime.target.as_ref() == Some(&target)
+            && self.source_code_server_runtime.settings.as_ref() == Some(&settings)
+        {
+            return changed;
         }
         if self
             .source_code_server_runtime
@@ -104,9 +137,9 @@ impl GhostexGpuiApp {
 
         let generation = self.source_code_server_runtime.next_generation();
         let started_at = Instant::now();
-        let startup_deadline = started_at + SOURCE_CODE_SERVER_STARTUP_TIMEOUT;
         self.source_code_server_runtime
             .set_launching(target.clone(), settings.clone(), started_at);
+        self.trace_source_runtime_state("launchStarted");
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(SOURCE_CODE_SERVER_LOADING_PLACEHOLDER_DELAY)
@@ -123,13 +156,51 @@ impl GhostexGpuiApp {
         .detach();
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
+            // Availability verifies the installed component and walks its files; it belongs
+            // to the same background launch as SSH, not Code focus or the render loop.
+            // Start the readiness budget afterward: verifying a large archive can outlast it.
             let result = background
                 .spawn(async move {
-                    source_code_server_start_runtime_for_target(target, settings, startup_deadline)
+                    match source_code_server_runtime_availability(&target) {
+                        SourceCodeServerRuntimeAvailability::Available => {
+                            let startup_deadline =
+                                Instant::now() + SOURCE_CODE_SERVER_STARTUP_TIMEOUT;
+                            Ok(source_code_server_start_runtime_for_target(
+                                target,
+                                settings,
+                                startup_deadline,
+                            ))
+                        }
+                        unavailable => Err((target, settings, unavailable)),
+                    }
                 })
                 .await;
-            let _ = this.update(cx, |this, cx| {
-                this.finish_source_code_server_runtime_start(generation, result, cx);
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(result) => this.finish_source_code_server_runtime_start(generation, result, cx),
+                Err((target, settings, availability)) => {
+                    if this.source_code_server_runtime.generation != generation {
+                        return;
+                    }
+                    let target = this
+                        .source_code_server_runtime
+                        .target
+                        .clone()
+                        .filter(|current| current.can_share_runtime_with(&target))
+                        .unwrap_or(target);
+                    match availability {
+                        SourceCodeServerRuntimeAvailability::InstallRequired => {
+                            this.source_code_server_runtime
+                                .set_install_required(target, settings);
+                        }
+                        SourceCodeServerRuntimeAvailability::Failed(failure) => {
+                            this.source_code_server_runtime
+                                .set_failed(target, settings, None, None, failure);
+                        }
+                        SourceCodeServerRuntimeAvailability::Available => unreachable!(),
+                    }
+                    this.trace_source_runtime_state("availabilityFinished");
+                    cx.notify();
+                }
             });
         })
         .detach();
@@ -188,6 +259,7 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         if self.source_code_server_runtime.generation != generation {
+            self.trace_source_runtime_state("staleLaunchFinished");
             if let Ok((_, _, mut output)) = result {
                 let _ = output.child.kill();
                 let _ = output.child.wait();
@@ -213,6 +285,7 @@ impl GhostexGpuiApp {
                     output.runtime_origin,
                     output.prompt_editor_ipc_ready,
                 );
+                self.watch_source_code_server_runtime_child(generation, cx);
                 self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
                 self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
             }
@@ -247,10 +320,57 @@ impl GhostexGpuiApp {
         }
         self.deliver_pending_remote_prompt_editor_request_if_ready(cx);
         self.update_project_workarea_runtime_cef_surface_visibility(cx);
+        self.trace_source_runtime_state("launchFinished");
         cx.notify();
     }
 
+    /// CDXC:CodeEditor 2026-09-23 WHY:
+    /// A matching CEF URL does not prove its owned Code process is alive. Reconnect can lose the new SSH child after readiness; retire that dead page and show Retry instead of leaving a permanently blank view.
+    pub(crate) fn refresh_source_code_server_runtime_child(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if !self.source_code_server_runtime.refresh_child_exit() {
+            return false;
+        }
+        self.remove_project_workarea_runtime_cef_surface(
+            ProjectWorkareaCefSurfaceSlotKey::Source,
+            cx,
+        );
+        self.trace_source_runtime_state("childExited");
+        cx.notify();
+        true
+    }
+
+    fn watch_source_code_server_runtime_child(
+        &self,
+        generation: u64,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let keep_watching = this
+                    .update(cx, |this, cx| {
+                        if this.source_code_server_runtime.generation != generation
+                            || this.source_code_server_runtime.state
+                                != SourceCodeServerRuntimeLaunchState::Ready
+                        {
+                            return false;
+                        }
+                        !this.refresh_source_code_server_runtime_child(cx)
+                    })
+                    .unwrap_or(false);
+                if !keep_watching {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     pub(crate) fn stop_source_code_server_runtime(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        self.trace_source_runtime_state("stop");
         let changed = self.source_code_server_runtime.stop();
         let removed = self.remove_project_workarea_runtime_cef_surface(
             ProjectWorkareaCefSurfaceSlotKey::Source,

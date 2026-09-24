@@ -1404,7 +1404,9 @@ impl GhostexGpuiApp {
                     );
                     modal_window.resize(window_size);
                     modal_window.set_window_title(
-                        if cfg!(target_os = "windows") || modal.has_titlebar() {
+                        if cfg!(any(target_os = "windows", target_os = "linux"))
+                            || modal.has_titlebar()
+                        {
                             &window_title
                         } else {
                             ""
@@ -1524,11 +1526,13 @@ impl GhostexGpuiApp {
         self.app_modal_window = cx
             .open_window(options, |modal_window, cx| {
                 if !modal.has_titlebar() {
-                    modal_window.set_window_title(if cfg!(target_os = "windows") {
-                        &window_title
-                    } else {
-                        ""
-                    });
+                    modal_window.set_window_title(
+                        if cfg!(any(target_os = "windows", target_os = "linux")) {
+                            &window_title
+                        } else {
+                            ""
+                        },
+                    );
                 }
                 modal_window.activate_window();
                 /*
@@ -1936,6 +1940,7 @@ impl GhostexGpuiApp {
         &self,
         mut message: serde_json::Value,
     ) -> serde_json::Value {
+        message = self.with_remote_project_action_rows(message);
         /*
         CDXC:CommandPane 2026-06-25-10:50:
         App-modal sidebar hydrates must carry the same command-session indicators as the live GPUI sidebar HUD. Reuse the sanitized command-pane summary and gxserver command rows; never compute from command text, paths, status-file paths, terminal output, logs, or persisted shell-state JSON.
@@ -2149,7 +2154,8 @@ impl GhostexGpuiApp {
         let Some(handle) = self.app_modal_window.clone() else {
             return;
         };
-        let sidebar_state_message = self.with_project_view_scope_options(sidebar_state_message);
+        let sidebar_state_message =
+            self.with_gpui_command_pane_sidebar_indicators(sidebar_state_message);
         let update_result = handle.update(cx, |host, modal_window, cx| {
             host.refresh_sidebar_state_message(sidebar_state_message.clone(), cx);
             modal_window.refresh();

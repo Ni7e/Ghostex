@@ -206,21 +206,16 @@ impl GhostexGpuiApp {
         native_view: *mut std::ffi::c_void,
         cx: &mut gpui::Context<Self>,
     ) {
-        let remote_shell_session_id =
-            self.agents_terminal_session_id_containing_responder(native_view);
-        let remote_context = remote_shell_session_id.and_then(|shell_session_id| {
-            self.remote_prompt_editor_context_for_shell_session(shell_session_id)
-                .map(|(key, connection_generation)| (shell_session_id, key, connection_generation))
-        });
-        if let Some((shell_session_id, key, connection_generation)) = remote_context {
-            let native_view = native_view as usize;
+        let delivery_target = RemotePromptEditorDeliveryTarget::NativeView(native_view as usize);
+        if let Some((key, connection_generation)) =
+            self.remote_prompt_editor_context_for_delivery_target(delivery_target)
+        {
             cx.spawn(async move |this, cx| {
                 let _ = this.update_in(cx, |this, window, cx| {
                     this.queue_remote_prompt_editor_request(
-                        shell_session_id,
                         &key,
                         connection_generation,
-                        RemotePromptEditorDeliveryTarget::NativeView(native_view),
+                        delivery_target,
                         window,
                         cx,
                     );

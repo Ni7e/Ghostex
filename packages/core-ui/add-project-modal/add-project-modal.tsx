@@ -1,5 +1,5 @@
-import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
-import { detectghostexHotkeyPlatform } from '@/packages/shared/ghostex-hotkeys';
+import { formatSidebarHotkeyLabel } from "@/packages/core-ui/hotkey-label";
+import { detectghostexHotkeyPlatform } from "@/packages/shared/ghostex-hotkeys";
 import {
   IconAlertTriangle,
   IconArrowLeft,
@@ -17,7 +17,7 @@ import {
   IconLink,
   IconSearch,
   IconServer,
-} from '@tabler/icons-react';
+} from "@tabler/icons-react";
 import {
   useCallback,
   useEffect,
@@ -26,16 +26,19 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
-} from 'react';
-import { Button } from '@/packages/components/ui/button';
-import { Checkbox } from '@/packages/components/ui/checkbox';
-import { CommandDialog } from '@/packages/components/ui/command';
-import { Input } from '@/packages/components/ui/input';
-import { InputGroup, InputGroupAddon, InputGroupInput } from '@/packages/components/ui/input-group';
-import { cn } from '@/packages/components/utils';
-import { AppTooltip } from '../app-tooltip';
+} from "react";
+import { Button } from "@/packages/components/ui/button";
+import { Checkbox } from "@/packages/components/ui/checkbox";
+import { CommandDialog } from "@/packages/components/ui/command";
+import { Input } from "@/packages/components/ui/input";
 import {
-  appendBrowsePathSegment,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/packages/components/ui/input-group";
+import { cn } from "@/packages/components/utils";
+import { AppTooltip } from "../app-tooltip";
+import {
   canNavigateUp,
   ensureBrowseDirectoryPath,
   getBrowseDirectoryPath,
@@ -46,9 +49,9 @@ import {
   isFilesystemBrowseQuery,
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
-} from '../remote-project-picker/remote-project-paths';
-import { filterBrowseEntries } from '../remote-project-picker/remote-command-palette-logic';
-import { isRepositoryCloneBranchNameInputValid } from '../../shared/repository-clone';
+} from "../remote-project-picker/remote-project-paths";
+import { filterBrowseEntries } from "../remote-project-picker/remote-command-palette-logic";
+import { isRepositoryCloneBranchNameInputValid } from "../../shared/repository-clone";
 import {
   ADD_PROJECT_ROOT_BROWSE_PATH,
   addProjectEmptyStateMessage,
@@ -63,14 +66,14 @@ import {
   buildAddProjectSourceReadiness,
   matchesAddProjectFilter,
   orderedAddProjectSources,
-} from './add-project-modal-logic';
+} from "./add-project-modal-logic";
 import {
   classifyAddProjectInput,
   normalizePastedProjectPath,
   parseAddProjectCloneInput,
   type DetectedCloneInput,
-} from './add-project-input';
-import { MiddleEllipsisText } from './middle-ellipsis-text';
+} from "./add-project-input";
+import { MiddleEllipsisText } from "./middle-ellipsis-text";
 import type {
   AddProjectBrowseEntry,
   AddProjectBrowseResult,
@@ -82,7 +85,7 @@ import type {
   AddProjectRepositoryInfo,
   AddProjectSourceControlDiscovery,
   AddProjectSourceId,
-} from './types';
+} from "./types";
 
 /*
  * CDXC:AddProject 2026-07-30:
@@ -105,8 +108,8 @@ import type {
  */
 
 const EMPTY_BROWSE_ENTRIES: readonly AddProjectBrowseEntry[] = [];
-const BROWSE_UP_VALUE = 'browse:up';
-const ADD_PROJECT_ROW_ICON_CLASS = 'size-4 text-muted-foreground/80';
+const BROWSE_UP_VALUE = "browse:up";
+const ADD_PROJECT_ROW_ICON_CLASS = "size-4 text-muted-foreground/80";
 
 /*
  * CDXC:AddProject 2026-08-18:
@@ -116,9 +119,10 @@ const ADD_PROJECT_ROW_ICON_CLASS = 'size-4 text-muted-foreground/80';
  * reads as one connected strip the way the titlebar Tips actions do, instead of
  * as floating pills with gaps around them.
  */
-const ADD_PROJECT_ACTION_ADDON_CLASS = 'h-full gap-0 self-stretch p-0 has-[>button]:ml-0 has-[>button]:mr-0';
+const ADD_PROJECT_ACTION_ADDON_CLASS =
+  "h-full gap-0 self-stretch p-0 has-[>button]:ml-0 has-[>button]:mr-0";
 const ADD_PROJECT_ACTION_BUTTON_CLASS =
-  'h-full self-stretch border-y-0 border-r-0 border-l border-l-border/70 px-3 text-sm';
+  "h-full self-stretch border-y-0 border-r-0 border-l border-l-border/70 px-3 text-sm";
 
 /*
  * CDXC:AddProject 2026-08-19:
@@ -129,16 +133,17 @@ const ADD_PROJECT_ACTION_BUTTON_CLASS =
  * where typing lands.
  */
 const ADD_PROJECT_PATH_BAR_CLASS =
-  'h-10 bg-input/30 has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-0';
+  "h-10 bg-input/30 has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-0";
 
-type AddProjectBusyKind = 'add' | 'clone' | 'createFolder' | 'lookup' | 'preview';
+type AddProjectBusyKind =
+  "add" | "clone" | "createFolder" | "lookup" | "preview";
 
 interface AddProjectCloneFlow {
   readonly remoteUrl: string;
   readonly repository: AddProjectRepositoryInfo | null;
   readonly repositoryInput: string;
   readonly source: AddProjectSourceId;
-  readonly step: 'destination' | 'repository' | 'review';
+  readonly step: "destination" | "repository" | "review";
 }
 
 interface AddProjectCloneOptions {
@@ -148,16 +153,20 @@ interface AddProjectCloneOptions {
 }
 
 const DEFAULT_CLONE_OPTIONS: AddProjectCloneOptions = {
-  branchName: '',
+  branchName: "",
   cloneMainOnly: false,
   shallowClone: false,
 };
 
 type AddProjectView =
-  | { readonly kind: 'machines' }
-  | { readonly kind: 'sources'; readonly machineId: string }
-  | { readonly initialQuery: string; readonly kind: 'browse'; readonly machineId: string }
-  | { readonly kind: 'clone'; readonly machineId: string };
+  | { readonly kind: "machines" }
+  | { readonly kind: "sources"; readonly machineId: string }
+  | {
+      readonly initialQuery: string;
+      readonly kind: "browse";
+      readonly machineId: string;
+    }
+  | { readonly kind: "clone"; readonly machineId: string };
 
 interface AddProjectRow {
   readonly dataAttributes?: Readonly<Record<string, string>>;
@@ -193,15 +202,15 @@ export function AddProjectModal(props: AddProjectModalProps) {
      * shortcut footer at the bottom edge rather than floating mid-frame.
      */
     <CommandDialog
-      className='add-project-modal top-1/2 max-h-[min(32rem,calc(100vh-6rem))] min-h-[22rem] max-w-xl -translate-y-1/2 sm:max-w-xl'
-      description='Browse a folder or clone a repository, then add it as a project.'
+      className="add-project-modal top-1/2 max-h-[min(32rem,calc(100vh-6rem))] min-h-[22rem] max-w-xl -translate-y-1/2 sm:max-w-xl"
+      description="Browse a folder or clone a repository, then add it as a project."
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
           props.onClose();
         }
       }}
       open
-      title='Add project'
+      title="Add project"
     >
       <AddProjectModalBody {...props} />
     </CommandDialog>
@@ -220,17 +229,25 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     slowOperationNoticeMs = 8000,
   } = props;
 
-  const [machines, setMachines] = useState<readonly AddProjectMachineOption[]>([]);
+  const [machines, setMachines] = useState<readonly AddProjectMachineOption[]>(
+    [],
+  );
   const [isLoadingMachines, setIsLoadingMachines] = useState(true);
   const [viewStack, setViewStack] = useState<readonly AddProjectView[]>([]);
   const [cloneFlow, setCloneFlow] = useState<AddProjectCloneFlow | null>(null);
-  const [cloneOptions, setCloneOptions] = useState<AddProjectCloneOptions>(DEFAULT_CLONE_OPTIONS);
-  const [clonePreview, setClonePreview] = useState<AddProjectClonePreview | null>(null);
-  const [cloneDestinationPath, setCloneDestinationPath] = useState('');
-  const [query, setQuery] = useState('');
-  const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
+  const [cloneOptions, setCloneOptions] = useState<AddProjectCloneOptions>(
+    DEFAULT_CLONE_OPTIONS,
+  );
+  const [clonePreview, setClonePreview] =
+    useState<AddProjectClonePreview | null>(null);
+  const [cloneDestinationPath, setCloneDestinationPath] = useState("");
+  const [query, setQuery] = useState("");
+  const [highlightedItemValue, setHighlightedItemValue] = useState<
+    string | null
+  >(null);
   const [browseGeneration, setBrowseGeneration] = useState(0);
-  const [browseResult, setBrowseResult] = useState<AddProjectBrowseResult | null>(null);
+  const [browseResult, setBrowseResult] =
+    useState<AddProjectBrowseResult | null>(null);
   const [isBrowsePending, setIsBrowsePending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<AddProjectBusyKind | null>(null);
@@ -238,7 +255,9 @@ function AddProjectModalBody(props: AddProjectModalProps) {
   const [discoveryByMachineId, setDiscoveryByMachineId] = useState<
     Readonly<Record<string, AddProjectSourceControlDiscovery | null>>
   >({});
-  const [pendingDiscoveryMachineId, setPendingDiscoveryMachineId] = useState<string | null>(null);
+  const [pendingDiscoveryMachineId, setPendingDiscoveryMachineId] = useState<
+    string | null
+  >(null);
   /*
    * `null` means "not naming a folder". The browse query is deliberately left
    * untouched while this step is open, so the listing behind it keeps showing
@@ -270,11 +289,11 @@ function AddProjectModalBody(props: AddProjectModalProps) {
         setMachines(options);
         setViewStack(buildInitialViewStack(options, initialMachineId));
         if (options.length === 0) {
-          setErrorMessage('No machine is available.');
+          setErrorMessage("No machine is available.");
         }
       } catch (error) {
         if (!cancelled) {
-          setErrorMessage(describeError(error, 'Unable to list machines.'));
+          setErrorMessage(describeError(error, "Unable to list machines."));
         }
       } finally {
         if (!cancelled) {
@@ -288,36 +307,54 @@ function AddProjectModalBody(props: AddProjectModalProps) {
   }, [initialMachineId]);
 
   const currentView = viewStack.at(-1) ?? null;
-  const machineId = currentView && 'machineId' in currentView ? currentView.machineId : null;
+  const machineId =
+    currentView && "machineId" in currentView ? currentView.machineId : null;
   const machine = useMemo(
     () => machines.find((option) => option.machineId === machineId) ?? null,
-    [machineId, machines]
+    [machineId, machines],
   );
-  const platform = machine?.platform ?? platformProp ?? (typeof navigator === 'undefined' ? '' : navigator.platform);
+  // A connected host with unknown platform must be validated by that host, not by the client's OS.
+  const platform = machine
+    ? (machine.platform ?? "")
+    : (platformProp ??
+      (typeof navigator === "undefined" ? "" : navigator.platform));
   const canPopView = viewStack.length > 1;
-  const isRepositoryStep = cloneFlow?.step === 'repository';
-  const isCloneDestinationStep = cloneFlow?.step === 'destination';
-  const isCloneReviewStep = cloneFlow?.step === 'review';
-  const isBrowsing = !isRepositoryStep && !isCloneReviewStep && isFilesystemBrowseQuery(query, platform);
+  const isRepositoryStep = cloneFlow?.step === "repository";
+  const isCloneDestinationStep = cloneFlow?.step === "destination";
+  const isCloneReviewStep = cloneFlow?.step === "review";
+  const isBrowsing =
+    !isRepositoryStep &&
+    !isCloneReviewStep &&
+    isFilesystemBrowseQuery(query, platform || "Win32");
   const isNewFolderStep = newFolderName !== null;
 
-  const browseDirectoryPath = isBrowsing ? getBrowseDirectoryPath(query) : '';
-  const browseFilterQuery = isBrowsing && !hasTrailingPathSeparator(query) ? getBrowseLeafPathSegment(query) : '';
-  const unsupportedWindowsPath = isUnsupportedWindowsProjectPath(query.trim(), platform);
-  const relativePathNeedsActiveProject = isExplicitRelativeProjectPath(query.trim()) && !activeProjectCwd;
-  const detectedInput = useMemo(() => classifyAddProjectInput(query, machines), [query, machines]);
+  const browseDirectoryPath = isBrowsing ? getBrowseDirectoryPath(query) : "";
+  const isWindowsDriveRoot = /^[a-z]:[/\\]$/iu.test(browseDirectoryPath);
+  const browseFilterQuery =
+    isBrowsing && !hasTrailingPathSeparator(query)
+      ? getBrowseLeafPathSegment(query)
+      : "";
+  const unsupportedWindowsPath =
+    platform !== "" && isUnsupportedWindowsProjectPath(query.trim(), platform);
+  const relativePathNeedsActiveProject =
+    isExplicitRelativeProjectPath(query.trim()) && !activeProjectCwd;
+  const detectedInput = useMemo(
+    () => classifyAddProjectInput(query, machines),
+    [query, machines],
+  );
   const detectionMachine =
-    detectedInput?.kind === 'browse' && detectedInput.machineId
+    detectedInput?.kind === "browse" && detectedInput.machineId
       ? machines.find((option) => option.machineId === detectedInput.machineId)
-      : (machine ?? machines.find((option) => option.machineId === 'local'));
+      : (machine ?? machines.find((option) => option.machineId === "local"));
   const ambiguousInput =
-    (currentView?.kind === 'machines' || currentView?.kind === 'sources') && detectedInput?.kind === 'ambiguous'
+    (currentView?.kind === "machines" || currentView?.kind === "sources") &&
+    detectedInput?.kind === "ambiguous"
       ? detectedInput
       : null;
 
   /* Source-control readiness is probed once per machine when its Sources step opens. */
   useEffect(() => {
-    if (!machineId || currentView?.kind !== 'sources') {
+    if (!machineId || currentView?.kind !== "sources") {
       return;
     }
     if (machineId in discoveryByMachineId) {
@@ -327,14 +364,22 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     setPendingDiscoveryMachineId(machineId);
     void (async () => {
       try {
-        const discovery = await propsRef.current.discoverSourceControl({ machineId });
+        const discovery = await propsRef.current.discoverSourceControl({
+          machineId,
+        });
         if (cancelled) {
           return;
         }
-        setDiscoveryByMachineId((current) => ({ ...current, [machineId]: discovery ?? null }));
+        setDiscoveryByMachineId((current) => ({
+          ...current,
+          [machineId]: discovery ?? null,
+        }));
       } catch {
         if (!cancelled) {
-          setDiscoveryByMachineId((current) => ({ ...current, [machineId]: null }));
+          setDiscoveryByMachineId((current) => ({
+            ...current,
+            [machineId]: null,
+          }));
         }
       } finally {
         if (!cancelled) {
@@ -383,7 +428,9 @@ function AddProjectModalBody(props: AddProjectModalProps) {
           return;
         }
         setBrowseResult(null);
-        setErrorMessage(describeError(error, 'Unable to browse that directory.'));
+        setErrorMessage(
+          describeError(error, "Unable to browse that directory."),
+        );
       })
       .finally(() => {
         if (browseRequestRef.current === requestId && isMountedRef.current) {
@@ -410,7 +457,10 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       setIsSlow(false);
       return;
     }
-    const timer = window.setTimeout(() => setIsSlow(true), slowOperationNoticeMs);
+    const timer = window.setTimeout(
+      () => setIsSlow(true),
+      slowOperationNoticeMs,
+    );
     return () => {
       window.clearTimeout(timer);
     };
@@ -418,13 +468,22 @@ function AddProjectModalBody(props: AddProjectModalProps) {
 
   const browseEntries = browseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
   const { exactEntry, filteredEntries, highlightedEntry } = useMemo(
-    () => filterBrowseEntries({ browseEntries, browseFilterQuery, highlightedItemValue }),
-    [browseEntries, browseFilterQuery, highlightedItemValue]
+    () =>
+      filterBrowseEntries({
+        browseEntries,
+        browseFilterQuery,
+        highlightedItemValue,
+      }),
+    [browseEntries, browseFilterQuery, highlightedItemValue],
   );
 
-  const hasHighlightedBrowseItem = highlightedEntry !== null || highlightedItemValue === BROWSE_UP_VALUE;
-  const pathInspection = !isBrowsePending ? browseResult?.inspection : undefined;
-  const suggestedProjectPath = pathInspection?.projectPath ?? pathInspection?.gitRoot;
+  const hasHighlightedBrowseItem =
+    highlightedEntry !== null || highlightedItemValue === BROWSE_UP_VALUE;
+  const pathInspection = !isBrowsePending
+    ? browseResult?.inspection
+    : undefined;
+  const suggestedProjectPath =
+    pathInspection?.projectPath ?? pathInspection?.gitRoot;
   const resolvedAddProjectPath =
     suggestedProjectPath ??
     (hasTrailingPathSeparator(query)
@@ -432,17 +491,18 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       : (exactEntry?.fullPath ?? query.trim()));
   const canSubmitBrowsePath =
     isBrowsing &&
+    !browseResult?.isDriveList &&
     !isBrowsePending &&
     !relativePathNeedsActiveProject &&
     !unsupportedWindowsPath &&
-    !(pathInspection?.kind === 'file' && !suggestedProjectPath);
+    !(pathInspection?.kind === "file" && !suggestedProjectPath);
   const willCreateProjectPath =
     canSubmitBrowsePath &&
     !isBrowsePending &&
     query.trim().length > 0 &&
     !hasHighlightedBrowseItem &&
     !suggestedProjectPath &&
-    pathInspection?.kind !== 'directory' &&
+    pathInspection?.kind !== "directory" &&
     (hasTrailingPathSeparator(query) ? !browseResult : exactEntry === null);
 
   /*
@@ -452,9 +512,10 @@ function AddProjectModalBody(props: AddProjectModalProps) {
    * filter narrows that listing but never changes which directory it belongs
    * to, so the affordance stays available while the user is filtering.
    */
-  const newFolderParentPath = browseResult?.parentPath ?? '';
+  const newFolderParentPath = browseResult?.parentPath ?? "";
   const canCreateNewFolder =
     isBrowsing &&
+    !browseResult?.isDriveList &&
     machineId !== null &&
     !isBrowsePending &&
     newFolderParentPath.length > 0 &&
@@ -462,31 +523,36 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     !relativePathNeedsActiveProject;
 
   const submitActionLabel = isCloneDestinationStep
-    ? 'Continue'
+    ? "Continue"
     : pathInspection?.projectId
-      ? 'Open existing project'
+      ? "Open existing project"
       : pathInspection?.gitRoot
-        ? 'Add repository root'
+        ? "Add repository root"
         : willCreateProjectPath
-          ? 'Create & Add'
-          : 'Add';
-  const addShortcutLabel = hasHighlightedBrowseItem ? formatSidebarHotkeyLabel('cmd+enter') : 'Enter';
+          ? "Create & Add"
+          : "Add";
+  const addShortcutLabel = hasHighlightedBrowseItem
+    ? formatSidebarHotkeyLabel("cmd+enter")
+    : "Enter";
   const readiness = useMemo(
-    () => buildAddProjectSourceReadiness(machineId ? discoveryByMachineId[machineId] : null),
-    [discoveryByMachineId, machineId]
+    () =>
+      buildAddProjectSourceReadiness(
+        machineId ? discoveryByMachineId[machineId] : null,
+      ),
+    [discoveryByMachineId, machineId],
   );
 
   const pushView = useCallback((view: AddProjectView) => {
     setViewStack((stack) => [...stack, view]);
     setHighlightedItemValue(null);
-    setQuery('initialQuery' in view ? view.initialQuery : '');
+    setQuery("initialQuery" in view ? view.initialQuery : "");
     setBrowseResult(null);
     setErrorMessage(null);
     setBrowseGeneration((generation) => generation + 1);
   }, []);
 
   useEffect(() => {
-    if (currentView?.kind !== 'machines' && currentView?.kind !== 'sources') {
+    if (currentView?.kind !== "machines" && currentView?.kind !== "sources") {
       return;
     }
     const targetMachine = detectionMachine;
@@ -494,26 +560,30 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     if (!targetMachine || !input) {
       return;
     }
-    if (input.kind === 'error') {
+    if (input.kind === "error") {
       setErrorMessage(input.message);
       return;
     }
-    if (input.kind === 'ambiguous') return;
-    if (input.kind === 'browse') {
-      pushView({ kind: 'browse', machineId: targetMachine.machineId, initialQuery: input.query });
+    if (input.kind === "ambiguous") return;
+    if (input.kind === "browse") {
+      pushView({
+        kind: "browse",
+        machineId: targetMachine.machineId,
+        initialQuery: input.query,
+      });
       return;
     }
     setCloneOptions(input);
     setClonePreview(null);
-    setCloneDestinationPath('');
+    setCloneDestinationPath("");
     setCloneFlow({
       remoteUrl: input.remoteUrl,
       repository: null,
-      repositoryInput: '',
+      repositoryInput: "",
       source: input.source,
-      step: 'repository',
+      step: "repository",
     });
-    pushView({ kind: 'clone', machineId: targetMachine.machineId });
+    pushView({ kind: "clone", machineId: targetMachine.machineId });
     setQuery(input.query);
   }, [currentView?.kind, detectedInput, detectionMachine, pushView]);
 
@@ -521,10 +591,10 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     setCloneFlow(null);
     setCloneOptions(DEFAULT_CLONE_OPTIONS);
     setClonePreview(null);
-    setCloneDestinationPath('');
+    setCloneDestinationPath("");
     setViewStack((stack) => (stack.length <= 1 ? stack : stack.slice(0, -1)));
     setHighlightedItemValue(null);
-    setQuery('');
+    setQuery("");
     setBrowseResult(null);
     setErrorMessage(null);
     setBrowseGeneration((generation) => generation + 1);
@@ -535,24 +605,26 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     setQuery(nextQuery);
     setErrorMessage(null);
     if (
-      nextQuery === '' &&
+      nextQuery === "" &&
       canPopView &&
       currentView &&
-      'initialQuery' in currentView &&
+      "initialQuery" in currentView &&
       currentView.initialQuery.length > 0
     ) {
       popView();
     }
   }
 
-  function browseTo(name: string): void {
+  function browseTo(fullPath: string): void {
     setHighlightedItemValue(null);
-    setQuery(appendBrowsePathSegment(query, name));
+    setQuery(ensureBrowseDirectoryPath(fullPath));
     setBrowseGeneration((generation) => generation + 1);
   }
 
   function browseUp(): void {
-    const parentPath = getBrowseParentPath(query);
+    const parentPath = isWindowsDriveRoot
+      ? ADD_PROJECT_ROOT_BROWSE_PATH
+      : getBrowseParentPath(query);
     if (parentPath === null) {
       return;
     }
@@ -561,47 +633,62 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     setBrowseGeneration((generation) => generation + 1);
   }
 
-  function startLocalBrowse(targetMachineId: string, startDirectory?: string): void {
-    const targetMachine = machines.find((option) => option.machineId === targetMachineId) ?? null;
+  function startLocalBrowse(
+    targetMachineId: string,
+    startDirectory?: string,
+  ): void {
+    const targetMachine =
+      machines.find((option) => option.machineId === targetMachineId) ?? null;
     setCloneFlow(null);
     setCloneOptions(DEFAULT_CLONE_OPTIONS);
     setClonePreview(null);
-    setCloneDestinationPath('');
+    setCloneDestinationPath("");
     pushView({
-      initialQuery: ensureBrowseDirectoryPath(startDirectory ?? addProjectInitialBrowseQuery(targetMachine)),
-      kind: 'browse',
+      initialQuery: ensureBrowseDirectoryPath(
+        startDirectory ?? addProjectInitialBrowseQuery(targetMachine),
+      ),
+      kind: "browse",
       machineId: targetMachineId,
     });
   }
 
-  function startCloneFlow(targetMachineId: string, source: AddProjectSourceId): void {
+  function startCloneFlow(
+    targetMachineId: string,
+    source: AddProjectSourceId,
+  ): void {
     setCloneOptions(DEFAULT_CLONE_OPTIONS);
     setClonePreview(null);
-    setCloneDestinationPath('');
+    setCloneDestinationPath("");
     setCloneFlow({
-      remoteUrl: '',
+      remoteUrl: "",
       repository: null,
-      repositoryInput: '',
+      repositoryInput: "",
       source,
-      step: 'repository',
+      step: "repository",
     });
-    pushView({ kind: 'clone', machineId: targetMachineId });
+    pushView({ kind: "clone", machineId: targetMachineId });
   }
 
-  function chooseDetectedClone(targetMachineId: string, input: DetectedCloneInput): void {
+  function chooseDetectedClone(
+    targetMachineId: string,
+    input: DetectedCloneInput,
+  ): void {
     startCloneFlow(targetMachineId, input.source);
     setCloneOptions(input);
     setQuery(input.query);
   }
 
-  function resolveInputDestination(path: string, targetMachine = machine): string {
+  function resolveInputDestination(
+    path: string,
+    targetMachine = machine,
+  ): string {
     const explicit = normalizePastedProjectPath(path);
     if (explicit && !isExplicitRelativeProjectPath(explicit)) return explicit;
     const base =
       targetMachine?.machineId === machineId && activeProjectCwd
         ? activeProjectCwd
         : addProjectInitialBrowseQuery(targetMachine ?? null);
-    return `${ensureBrowseDirectoryPath(base)}${path.replace(/^\.\//u, '')}`;
+    return `${ensureBrowseDirectoryPath(base)}${path.replace(/^\.\//u, "")}`;
   }
 
   function enterCloneDestinationStep(next: {
@@ -611,37 +698,40 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     readonly source: AddProjectSourceId;
     readonly destination?: string;
   }): void {
-    setCloneFlow({ ...next, step: 'destination' });
+    setCloneFlow({ ...next, step: "destination" });
     setHighlightedItemValue(null);
     setBrowseResult(null);
     setQuery(
       next.destination
         ? resolveInputDestination(next.destination)
-        : ensureBrowseDirectoryPath(addProjectInitialBrowseQuery(machine))
+        : ensureBrowseDirectoryPath(addProjectInitialBrowseQuery(machine)),
     );
     setBrowseGeneration((generation) => generation + 1);
   }
 
   async function submitRepositoryStep(): Promise<void> {
     const repositoryInput = query.trim();
-    if (!cloneFlow || cloneFlow.step !== 'repository' || !machineId) {
+    if (!cloneFlow || cloneFlow.step !== "repository" || !machineId) {
       return;
     }
     if (repositoryInput.length === 0 || busy) {
       return;
     }
     const parsed = parseAddProjectCloneInput(repositoryInput, cloneFlow.source);
-    if (parsed?.kind === 'error') {
+    if (parsed?.kind === "error") {
       setErrorMessage(parsed.message);
       return;
     }
-    if (parsed?.kind === 'clone') {
+    if (parsed?.kind === "clone") {
       setCloneOptions({
         branchName: parsed.branchName,
         cloneMainOnly: parsed.cloneMainOnly,
         shallowClone: parsed.shallowClone,
       });
-      if (cloneFlow.source === 'url' || (parsed.source !== 'github' && parsed.source !== 'gitlab')) {
+      if (
+        cloneFlow.source === "url" ||
+        (parsed.source !== "github" && parsed.source !== "gitlab")
+      ) {
         enterCloneDestinationStep({
           remoteUrl: parsed.remoteUrl,
           repository: null,
@@ -652,21 +742,24 @@ function AddProjectModalBody(props: AddProjectModalProps) {
         return;
       }
     }
-    if (!parsed && cloneFlow.source === 'url') {
-      setErrorMessage('Enter a Git repository URL or clone command.');
+    if (!parsed && cloneFlow.source === "url") {
+      setErrorMessage("Enter a Git repository URL or clone command.");
       return;
     }
-    setBusy('lookup');
+    setBusy("lookup");
     setErrorMessage(null);
     try {
       const repository = await propsRef.current.lookupRepository({
         machineId,
         provider: (parsed?.source ?? cloneFlow.source) as AddProjectProviderId,
         repository:
-          parsed?.source === 'gitlab'
+          parsed?.source === "gitlab"
             ? parsed.remoteUrl
-                .replace(/^(?:https?:\/\/|ssh:\/\/(?:[^@/]+@)?|[^@]+@)[^/:]+[/:]/u, '')
-                .replace(/\.git$/u, '')
+                .replace(
+                  /^(?:https?:\/\/|ssh:\/\/(?:[^@/]+@)?|[^@]+@)[^/:]+[/:]/u,
+                  "",
+                )
+                .replace(/\.git$/u, "")
             : (parsed?.remoteUrl ?? repositoryInput),
       });
       if (!isMountedRef.current) {
@@ -681,7 +774,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       });
     } catch (error) {
       if (isMountedRef.current) {
-        setErrorMessage(describeError(error, 'Repository lookup failed.'));
+        setErrorMessage(describeError(error, "Repository lookup failed."));
       }
     } finally {
       if (isMountedRef.current) {
@@ -695,23 +788,35 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     if (trimmed.length === 0) {
       return null;
     }
-    if (isUnsupportedWindowsProjectPath(trimmed, platform)) {
-      setErrorMessage('Windows-style paths are only supported on Windows machines.');
+    if (platform !== "" && isUnsupportedWindowsProjectPath(trimmed, platform)) {
+      setErrorMessage(
+        "Windows-style paths are only supported on Windows machines.",
+      );
       return null;
     }
     if (isExplicitRelativeProjectPath(trimmed) && !activeProjectCwd) {
-      setErrorMessage('Relative paths require an active project.');
+      setErrorMessage("Relative paths require an active project.");
       return null;
     }
-    const resolvedPath = resolveProjectPathForDispatch(trimmed, activeProjectCwd);
+    const resolvedPath = resolveProjectPathForDispatch(
+      trimmed,
+      activeProjectCwd,
+    );
     return resolvedPath.length === 0 ? null : resolvedPath;
   }
 
-  async function registerProject(path: string, createIfMissing: boolean): Promise<void> {
+  async function registerProject(
+    path: string,
+    createIfMissing: boolean,
+  ): Promise<void> {
     if (!machineId) {
       return;
     }
-    const result = await propsRef.current.addProject({ createIfMissing, machineId, path });
+    const result = await propsRef.current.addProject({
+      createIfMissing,
+      machineId,
+      path,
+    });
     propsRef.current.onProjectAdded?.(result);
     propsRef.current.onClose();
   }
@@ -724,13 +829,13 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     if (!path) {
       return;
     }
-    setBusy('add');
+    setBusy("add");
     setErrorMessage(null);
     try {
       await registerProject(path, willCreateProjectPath);
     } catch (error) {
       if (isMountedRef.current) {
-        setErrorMessage(describeError(error, 'Failed to add project.'));
+        setErrorMessage(describeError(error, "Failed to add project."));
       }
     } finally {
       if (isMountedRef.current) {
@@ -741,8 +846,11 @@ function AddProjectModalBody(props: AddProjectModalProps) {
 
   async function pollCloneJob(jobId: string): Promise<AddProjectCloneJob> {
     for (;;) {
-      const job = await propsRef.current.readCloneJob({ jobId, machineId: machineId ?? '' });
-      if (job.state !== 'running') {
+      const job = await propsRef.current.readCloneJob({
+        jobId,
+        machineId: machineId ?? "",
+      });
+      if (job.state !== "running") {
         return job;
       }
       if (!isMountedRef.current) {
@@ -753,14 +861,14 @@ function AddProjectModalBody(props: AddProjectModalProps) {
   }
 
   async function openCloneReview(rawPath: string): Promise<void> {
-    if (busy || !cloneFlow || cloneFlow.step !== 'destination' || !machineId) {
+    if (busy || !cloneFlow || cloneFlow.step !== "destination" || !machineId) {
       return;
     }
     const destinationPath = validateProjectPath(rawPath);
     if (!destinationPath) {
       return;
     }
-    setBusy('preview');
+    setBusy("preview");
     setErrorMessage(null);
     try {
       const preview = await propsRef.current.previewClone({
@@ -774,10 +882,12 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       }
       setCloneDestinationPath(destinationPath);
       setClonePreview(preview);
-      setCloneFlow({ ...cloneFlow, step: 'review' });
+      setCloneFlow({ ...cloneFlow, step: "review" });
     } catch (error) {
       if (isMountedRef.current) {
-        setErrorMessage(describeError(error, 'Unable to review the clone destination.'));
+        setErrorMessage(
+          describeError(error, "Unable to review the clone destination."),
+        );
       }
     } finally {
       if (isMountedRef.current) {
@@ -790,7 +900,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     if (
       busy ||
       !cloneFlow ||
-      cloneFlow.step !== 'review' ||
+      cloneFlow.step !== "review" ||
       !machineId ||
       !clonePreview ||
       clonePreview.destinationBlocked ||
@@ -798,7 +908,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     ) {
       return;
     }
-    setBusy('clone');
+    setBusy("clone");
     setErrorMessage(null);
     try {
       const handle = await propsRef.current.startClone({
@@ -812,21 +922,25 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       if (!isMountedRef.current) {
         return;
       }
-      if (job.state === 'canceled') {
-        setErrorMessage('Clone canceled.');
+      if (job.state === "canceled") {
+        setErrorMessage("Clone canceled.");
         return;
       }
-      if (job.state !== 'completed') {
-        throw new Error(job.error?.trim() || job.message?.trim() || 'Repository clone failed.');
+      if (job.state !== "completed") {
+        throw new Error(
+          job.error?.trim() ||
+            job.message?.trim() ||
+            "Repository clone failed.",
+        );
       }
-      const clonedCwd = job.projectPath?.trim() ?? '';
+      const clonedCwd = job.projectPath?.trim() ?? "";
       if (clonedCwd.length === 0) {
-        throw new Error('Clone finished without a project path.');
+        throw new Error("Clone finished without a project path.");
       }
       await registerProject(clonedCwd, false);
     } catch (error) {
       if (isMountedRef.current) {
-        setErrorMessage(describeError(error, 'Clone failed.'));
+        setErrorMessage(describeError(error, "Clone failed."));
       }
     } finally {
       cloneJobIdRef.current = null;
@@ -842,7 +956,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     }
     setErrorMessage(null);
     setHighlightedItemValue(null);
-    setNewFolderName('');
+    setNewFolderName("");
   }
 
   function cancelNewFolder(): void {
@@ -851,11 +965,16 @@ function AddProjectModalBody(props: AddProjectModalProps) {
   }
 
   async function submitNewFolder(): Promise<void> {
-    const name = (newFolderName ?? '').trim();
-    if (busy || !machineId || name.length === 0 || newFolderParentPath.length === 0) {
+    const name = (newFolderName ?? "").trim();
+    if (
+      busy ||
+      !machineId ||
+      name.length === 0 ||
+      newFolderParentPath.length === 0
+    ) {
       return;
     }
-    setBusy('createFolder');
+    setBusy("createFolder");
     setErrorMessage(null);
     try {
       const created = await propsRef.current.createDirectory({
@@ -873,12 +992,12 @@ function AddProjectModalBody(props: AddProjectModalProps) {
        */
       setNewFolderName(null);
       setHighlightedItemValue(null);
-      setQuery(appendBrowsePathSegment(query, created.name));
+      setQuery(ensureBrowseDirectoryPath(created.path));
       setBrowseResult(null);
       setBrowseGeneration((generation) => generation + 1);
     } catch (error) {
       if (isMountedRef.current) {
-        setErrorMessage(describeError(error, 'Failed to create the folder.'));
+        setErrorMessage(describeError(error, "Failed to create the folder."));
       }
     } finally {
       if (isMountedRef.current) {
@@ -896,12 +1015,12 @@ function AddProjectModalBody(props: AddProjectModalProps) {
   }
 
   function returnToCloneDestination(): void {
-    if (!cloneFlow || cloneFlow.step !== 'review' || busy) {
+    if (!cloneFlow || cloneFlow.step !== "review" || busy) {
       return;
     }
-    setCloneFlow({ ...cloneFlow, step: 'destination' });
+    setCloneFlow({ ...cloneFlow, step: "destination" });
     setClonePreview(null);
-    setCloneDestinationPath('');
+    setCloneDestinationPath("");
     setErrorMessage(null);
     setHighlightedItemValue(null);
     setBrowseGeneration((generation) => generation + 1);
@@ -915,7 +1034,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     }
     void cancelCloneJob({ jobId, machineId }).catch((error: unknown) => {
       if (isMountedRef.current) {
-        setErrorMessage(describeError(error, 'Unable to cancel the clone.'));
+        setErrorMessage(describeError(error, "Unable to cancel the clone."));
       }
     });
   }
@@ -925,23 +1044,35 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       return [];
     }
     if (ambiguousInput && detectionMachine) {
-      const path = resolveInputDestination(ambiguousInput.query, detectionMachine);
+      const path = resolveInputDestination(
+        ambiguousInput.query,
+        detectionMachine,
+      );
       return [
         {
-          field: 'inputChoice',
+          field: "inputChoice",
           icon: <IconFolder className={ADD_PROJECT_ROW_ICON_CLASS} />,
-          title: 'Local folder',
+          title: "Local folder",
           description: path,
-          value: 'input:folder',
-          onSelect: () => pushView({ kind: 'browse', machineId: detectionMachine.machineId, initialQuery: path }),
+          value: "input:folder",
+          onSelect: () =>
+            pushView({
+              kind: "browse",
+              machineId: detectionMachine.machineId,
+              initialQuery: path,
+            }),
         },
         {
-          field: 'inputChoice',
-          icon: sourceIcon('github'),
-          title: 'GitHub repository',
+          field: "inputChoice",
+          icon: sourceIcon("github"),
+          title: "GitHub repository",
           description: ambiguousInput.query,
-          value: 'input:github',
-          onSelect: () => chooseDetectedClone(detectionMachine.machineId, ambiguousInput.clone),
+          value: "input:github",
+          onSelect: () =>
+            chooseDetectedClone(
+              detectionMachine.machineId,
+              ambiguousInput.clone,
+            ),
         },
       ];
     }
@@ -952,101 +1083,122 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       const browseRows: AddProjectRow[] = [];
       if (suggestedProjectPath && !isCloneDestinationStep) {
         browseRows.push({
-          field: 'detectedProject',
+          field: "detectedProject",
           icon: <IconFolderCheck className={ADD_PROJECT_ROW_ICON_CLASS} />,
-          title: pathInspection?.projectId ? 'Open existing project' : 'Add repository root',
+          title: pathInspection?.projectId
+            ? "Open existing project"
+            : "Add repository root",
           description: suggestedProjectPath,
-          value: 'browse:project',
+          value: "browse:project",
           onSelect: () => void submitAddProject(suggestedProjectPath),
         });
       }
-      if (canNavigateUp(browseDirectoryPath)) {
+      if (isWindowsDriveRoot || canNavigateUp(browseDirectoryPath)) {
         browseRows.push({
-          field: 'directoryUp',
+          field: "directoryUp",
           icon: <IconCornerLeftUp className={ADD_PROJECT_ROW_ICON_CLASS} />,
           onSelect: browseUp,
-          title: '..',
+          title: "..",
           value: BROWSE_UP_VALUE,
         });
       }
       for (const entry of filteredEntries) {
         browseRows.push({
-          dataAttributes: { 'data-add-project-path': entry.fullPath },
-          field: 'directoryEntry',
+          dataAttributes: { "data-add-project-path": entry.fullPath },
+          field: "directoryEntry",
           icon: <IconFolder className={ADD_PROJECT_ROW_ICON_CLASS} />,
-          onSelect: () => browseTo(entry.name),
+          onSelect: () => browseTo(entry.fullPath),
           title: entry.name,
           value: `browse:${entry.fullPath}`,
         });
       }
       return browseRows;
     }
-    if (currentView?.kind === 'machines') {
+    if (currentView?.kind === "machines") {
       return machines
-        .filter((option) => matchesAddProjectFilter(query, option.label, [option.description ?? '', option.machineId]))
+        .filter((option) =>
+          matchesAddProjectFilter(query, option.label, [
+            option.description ?? "",
+            option.machineId,
+          ]),
+        )
         .map((option) => ({
-          dataAttributes: { 'data-add-project-machine-id': option.machineId },
+          dataAttributes: { "data-add-project-machine-id": option.machineId },
           description: option.description,
-          field: 'machineOption',
+          field: "machineOption",
           icon: machineIcon(option),
           onSelect: () => {
             setCloneFlow(null);
-            pushView({ kind: 'sources', machineId: option.machineId });
+            pushView({ kind: "sources", machineId: option.machineId });
           },
           submenu: true,
           title: option.label,
           value: `machine:${option.machineId}`,
         }));
     }
-    if (currentView?.kind === 'sources' && machineId) {
+    if (currentView?.kind === "sources" && machineId) {
       const sourceRows: AddProjectRow[] = [];
-      if (matchesAddProjectFilter(query, 'Local folder', ['browse', 'directory', 'disk'])) {
-        sourceRows.push({
-          dataAttributes: { 'data-add-project-source': 'local' },
-          description: 'Browse a folder on disk',
-          field: 'sourceOption',
-          icon: <IconFolder className={ADD_PROJECT_ROW_ICON_CLASS} />,
-          onSelect: () => startLocalBrowse(machineId),
-          submenu: true,
-          title: 'Local folder',
-          value: 'source:local',
-        });
-      }
       if (
-        matchesAddProjectFilter(query, 'External drives and other folders', [
-          'root',
-          'volumes',
-          'external',
-          'drive',
-          'disk',
-          'usb',
-          '/',
+        matchesAddProjectFilter(query, "Local folder", [
+          "browse",
+          "directory",
+          "disk",
         ])
       ) {
         sourceRows.push({
-          dataAttributes: { 'data-add-project-source': 'root' },
-          description: 'Browse from the root of the filesystem',
-          field: 'sourceOption',
-          icon: <IconFolderRoot className={ADD_PROJECT_ROW_ICON_CLASS} />,
-          onSelect: () => startLocalBrowse(machineId, ADD_PROJECT_ROOT_BROWSE_PATH),
+          dataAttributes: { "data-add-project-source": "local" },
+          description: "Browse a folder on disk",
+          field: "sourceOption",
+          icon: <IconFolder className={ADD_PROJECT_ROW_ICON_CLASS} />,
+          onSelect: () => startLocalBrowse(machineId),
           submenu: true,
-          title: 'External drives and other folders',
-          value: 'source:root',
+          title: "Local folder",
+          value: "source:local",
+        });
+      }
+      if (
+        matchesAddProjectFilter(query, "External drives and other folders", [
+          "root",
+          "volumes",
+          "external",
+          "drive",
+          "disk",
+          "usb",
+          "/",
+        ])
+      ) {
+        sourceRows.push({
+          dataAttributes: { "data-add-project-source": "root" },
+          description: "Browse from the root of the filesystem",
+          field: "sourceOption",
+          icon: <IconFolderRoot className={ADD_PROJECT_ROW_ICON_CLASS} />,
+          onSelect: () =>
+            startLocalBrowse(machineId, ADD_PROJECT_ROOT_BROWSE_PATH),
+          submenu: true,
+          title: "External drives and other folders",
+          value: "source:root",
         });
       }
       for (const source of orderedAddProjectSources(readiness)) {
         const title = addProjectSourceRowTitle(source);
-        if (!matchesAddProjectFilter(query, title, [source, 'clone', 'repository', 'git'])) {
+        if (
+          !matchesAddProjectFilter(query, title, [
+            source,
+            "clone",
+            "repository",
+            "git",
+          ])
+        ) {
           continue;
         }
         const sourceReadiness = readiness[source];
         sourceRows.push({
-          dataAttributes: { 'data-add-project-source': source },
+          dataAttributes: { "data-add-project-source": source },
           description: sourceReadiness.ready
             ? addProjectSourceRowDescription(source)
             : (sourceReadiness.hint ?? addProjectSourceRowDescription(source)),
           disabled: !sourceReadiness.ready,
-          field: 'sourceOption',
+          field: "sourceOption",
           icon: sourceIcon(source),
           onSelect: () => startCloneFlow(machineId, source),
           submenu: sourceReadiness.ready,
@@ -1055,19 +1207,21 @@ function AddProjectModalBody(props: AddProjectModalProps) {
             <AppTooltip content={sourceReadiness.hint}>
               <Button
                 aria-label={`${addProjectSourceLabel(source)} setup required`}
-                className='ml-auto h-6 rounded-none px-2 text-sm'
-                data-add-project-field='setupRequired'
+                className="ml-auto h-6 rounded-none px-2 text-sm"
+                data-add-project-field="setupRequired"
                 data-add-project-source={source}
                 onClick={(event) => {
                   event.stopPropagation();
-                  propsRef.current.onOpenSourceControlSettings?.(source as AddProjectProviderId);
+                  propsRef.current.onOpenSourceControlSettings?.(
+                    source as AddProjectProviderId,
+                  );
                 }}
                 onMouseDown={(event) => {
                   event.preventDefault();
                 }}
-                size='xs'
-                type='button'
-                variant='outline'
+                size="xs"
+                type="button"
+                variant="outline"
               >
                 Setup Required
               </Button>
@@ -1083,6 +1237,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
   }, [
     browseDirectoryPath,
     currentView?.kind,
+    isWindowsDriveRoot,
     filteredEntries,
     isBrowsing,
     isNewFolderStep,
@@ -1100,16 +1255,22 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     isCloneDestinationStep,
   ]);
 
-  const selectableRows = useMemo(() => rows.filter((row) => !row.disabled), [rows]);
-  const highlightedRow = selectableRows.find((row) => row.value === highlightedItemValue) ?? null;
+  const selectableRows = useMemo(
+    () => rows.filter((row) => !row.disabled),
+    [rows],
+  );
+  const highlightedRow =
+    selectableRows.find((row) => row.value === highlightedItemValue) ?? null;
 
   useEffect(() => {
     if (!highlightedItemValue || !listRef.current) {
       return;
     }
-    const element = listRef.current.querySelector(`[data-add-project-value="${cssEscape(highlightedItemValue)}"]`);
+    const element = listRef.current.querySelector(
+      `[data-add-project-value="${cssEscape(highlightedItemValue)}"]`,
+    );
     if (element instanceof HTMLElement) {
-      element.scrollIntoView({ block: 'nearest' });
+      element.scrollIntoView({ block: "nearest" });
     }
   }, [highlightedItemValue]);
 
@@ -1117,9 +1278,16 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     if (selectableRows.length === 0) {
       return;
     }
-    const currentIndex = selectableRows.findIndex((row) => row.value === highlightedItemValue);
+    const currentIndex = selectableRows.findIndex(
+      (row) => row.value === highlightedItemValue,
+    );
     if (currentIndex === -1) {
-      setHighlightedItemValue((direction === 1 ? selectableRows[0] : selectableRows[selectableRows.length - 1]).value);
+      setHighlightedItemValue(
+        (direction === 1
+          ? selectableRows[0]
+          : selectableRows[selectableRows.length - 1]
+        ).value,
+      );
       return;
     }
     const nextIndex = currentIndex + direction;
@@ -1130,41 +1298,46 @@ function AddProjectModalBody(props: AddProjectModalProps) {
     setHighlightedItemValue(selectableRows[nextIndex].value);
   }
 
-  function isPrimaryModifierPressed(event: ReactKeyboardEvent<HTMLInputElement>): boolean {
-    return detectghostexHotkeyPlatform() === 'mac' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  function isPrimaryModifierPressed(
+    event: ReactKeyboardEvent<HTMLInputElement>,
+  ): boolean {
+    return detectghostexHotkeyPlatform() === "mac"
+      ? event.metaKey && !event.ctrlKey
+      : event.ctrlKey && !event.metaKey;
   }
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>): void {
     if (isNewFolderStep) {
-      if (event.key === 'Enter') {
+      if (event.key === "Enter") {
         event.preventDefault();
         void submitNewFolder();
         return;
       }
-      if (event.key === 'Backspace' && (newFolderName ?? '').length === 0) {
+      if (event.key === "Backspace" && (newFolderName ?? "").length === 0) {
         event.preventDefault();
         cancelNewFolder();
       }
       return;
     }
-    if (event.key === 'ArrowDown') {
+    if (event.key === "ArrowDown") {
       event.preventDefault();
       moveHighlight(1);
       return;
     }
-    if (event.key === 'ArrowUp') {
+    if (event.key === "ArrowUp") {
       event.preventDefault();
       moveHighlight(-1);
       return;
     }
-    if (event.key === 'Enter') {
+    if (event.key === "Enter") {
       if (isRepositoryStep) {
         event.preventDefault();
         void submitRepositoryStep();
         return;
       }
       const shouldSubmitBrowsePath =
-        canSubmitBrowsePath && (!hasHighlightedBrowseItem || isPrimaryModifierPressed(event));
+        canSubmitBrowsePath &&
+        (!hasHighlightedBrowseItem || isPrimaryModifierPressed(event));
       if (shouldSubmitBrowsePath) {
         event.preventDefault();
         submitResolvedPath();
@@ -1176,23 +1349,26 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       }
       return;
     }
-    if (event.key === 'Backspace' && query === '' && canPopView) {
+    if (event.key === "Backspace" && query === "" && canPopView) {
       event.preventDefault();
       popView();
     }
   }
 
   const emptyStateMessage =
-    pathInspection?.kind === 'file' && !suggestedProjectPath
-      ? 'This is a file outside a Git repository. Choose a project folder.'
+    pathInspection?.kind === "file" && !suggestedProjectPath
+      ? "This is a file outside a Git repository. Choose a project folder."
       : isNewFolderStep
         ? addProjectNewFolderMessage({
-            name: newFolderName ?? '',
+            name: newFolderName ?? "",
             parentPath: newFolderParentPath,
           })
         : addProjectEmptyStateMessage({
             cloneSource: cloneFlow?.source ?? null,
-            cloneStep: cloneFlow?.step === 'review' ? 'destination' : (cloneFlow?.step ?? null),
+            cloneStep:
+              cloneFlow?.step === "review"
+                ? "destination"
+                : (cloneFlow?.step ?? null),
             hasMachines: machines.length > 0,
             isLoadingMachines,
             relativePathNeedsActiveProject,
@@ -1200,91 +1376,113 @@ function AddProjectModalBody(props: AddProjectModalProps) {
             willCreateProjectPath,
           });
   const groupLabel = ambiguousInput
-    ? 'Choose how to open this'
+    ? "Choose how to open this"
     : isBrowsing
       ? isCloneDestinationStep
-        ? 'Select where to clone'
-        : 'Directories'
-      : currentView?.kind === 'machines'
-        ? 'Machines'
-        : 'Sources';
+        ? "Select where to clone"
+        : browseResult?.isDriveList
+          ? "Drives"
+          : "Directories"
+      : currentView?.kind === "machines"
+        ? "Machines"
+        : "Sources";
   const placeholder = isNewFolderStep
-    ? 'New folder name'
+    ? "New folder name"
     : isRepositoryStep
       ? addProjectRepositoryPlaceholder(cloneFlow.source)
       : addProjectPathPlaceholder(canPopView);
-  const repositoryActionLabel = cloneFlow ? addProjectRepositoryActionLabel(cloneFlow.source) : '';
-  const isCloning = busy === 'clone';
+  const repositoryActionLabel = cloneFlow
+    ? addProjectRepositoryActionLabel(cloneFlow.source)
+    : "";
+  const isCloning = busy === "clone";
   const busyLabel =
-    busy === 'add'
-      ? 'Adding'
-      : busy === 'clone'
-        ? 'Cloning'
-        : busy === 'preview'
-          ? 'Reviewing'
-          : busy === 'createFolder'
-            ? 'Creating'
-            : busy === 'lookup'
-              ? 'Working'
+    busy === "add"
+      ? "Adding"
+      : busy === "clone"
+        ? "Cloning"
+        : busy === "preview"
+          ? "Reviewing"
+          : busy === "createFolder"
+            ? "Creating"
+            : busy === "lookup"
+              ? "Working"
               : null;
 
   if (isCloneReviewStep && cloneFlow && clonePreview) {
-    const hasInvalidBranchName = !isRepositoryCloneBranchNameInputValid(cloneOptions.branchName);
+    const hasInvalidBranchName = !isRepositoryCloneBranchNameInputValid(
+      cloneOptions.branchName,
+    );
     const destinationDescription = clonePreview.destinationBlocked
-      ? (clonePreview.warning ?? 'Choose a different destination before cloning.')
+      ? (clonePreview.warning ??
+        "Choose a different destination before cloning.")
       : clonePreview.destinationExists && clonePreview.destinationIsEmpty
-        ? 'Existing empty folder. The repository will be cloned directly into it.'
+        ? "Existing empty folder. The repository will be cloned directly into it."
         : null;
-    const canClone = !hasInvalidBranchName && !clonePreview.destinationBlocked && busy === null;
+    const canClone =
+      !hasInvalidBranchName &&
+      !clonePreview.destinationBlocked &&
+      busy === null;
 
     return (
       <div
-        className='flex h-full min-h-0 w-full min-w-0 flex-col'
-        data-add-project-clone-step='review'
-        data-add-project-modal=''
+        className="flex h-full min-h-0 w-full min-w-0 flex-col"
+        data-add-project-clone-step="review"
+        data-add-project-modal=""
       >
-        <div className='min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-4'>
-          <div className='flex w-full flex-col gap-4'>
-            <div className='flex min-w-0 items-start gap-3'>
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-4">
+          <div className="flex w-full flex-col gap-4">
+            <div className="flex min-w-0 items-start gap-3">
               <Button
-                aria-label='Back to clone destination'
-                className='mt-0.5 size-8 shrink-0 rounded-none'
+                aria-label="Back to clone destination"
+                className="mt-0.5 size-8 shrink-0 rounded-none"
                 disabled={busy !== null}
                 onClick={returnToCloneDestination}
-                size='icon-sm'
-                type='button'
-                variant='ghost'
+                size="icon-sm"
+                type="button"
+                variant="ghost"
               >
-                <IconArrowLeft aria-hidden='true' className='size-4' />
+                <IconArrowLeft aria-hidden="true" className="size-4" />
               </Button>
-              <div className='min-w-0'>
-                <h2 className='text-sm font-semibold text-foreground'>Review clone</h2>
-                <p className='mt-0.5 text-sm leading-relaxed text-muted-foreground'>
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-foreground">
+                  Review clone
+                </h2>
+                <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
                   Confirm the destination and adjust optional Git settings.
                 </p>
               </div>
               {machine ? (
-                <span className='ml-auto inline-flex min-w-0 shrink-0 items-center gap-1.5 pt-1 text-sm text-muted-foreground'>
-                  <IconFolderPlus aria-hidden='true' className='size-3 shrink-0' />
-                  <span className='max-w-32 truncate'>{machine.label}</span>
+                <span className="ml-auto inline-flex min-w-0 shrink-0 items-center gap-1.5 pt-1 text-sm text-muted-foreground">
+                  <IconFolderPlus
+                    aria-hidden="true"
+                    className="size-3 shrink-0"
+                  />
+                  <span className="max-w-32 truncate">{machine.label}</span>
                 </span>
               ) : null}
             </div>
 
-            <div className='flex min-w-0 flex-col gap-2'>
+            <div className="flex min-w-0 flex-col gap-2">
               <div
-                className='flex min-w-0 items-start gap-2.5 border border-border/60 bg-muted/15 px-3 py-2.5'
-                data-add-project-field='reviewRepository'
+                className="flex min-w-0 items-start gap-2.5 border border-border/60 bg-muted/15 px-3 py-2.5"
+                data-add-project-field="reviewRepository"
               >
-                <span className='mt-0.5 shrink-0 text-muted-foreground/80'>{sourceIcon(cloneFlow.source)}</span>
-                <span className='flex min-w-0 flex-1 flex-col'>
-                  <span className='text-sm font-medium text-muted-foreground'>Repository</span>
+                <span className="mt-0.5 shrink-0 text-muted-foreground/80">
+                  {sourceIcon(cloneFlow.source)}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-sm font-medium text-muted-foreground">
+                    Repository
+                  </span>
                   <MiddleEllipsisText
-                    className='mt-1 text-sm font-medium text-foreground'
-                    value={cloneFlow.repository?.nameWithOwner ?? cloneFlow.repositoryInput}
+                    className="mt-1 text-sm font-medium text-foreground"
+                    value={
+                      cloneFlow.repository?.nameWithOwner ??
+                      cloneFlow.repositoryInput
+                    }
                   />
                   <MiddleEllipsisText
-                    className='mt-0.5 text-sm text-muted-foreground'
+                    className="mt-0.5 text-sm text-muted-foreground"
                     value={cloneFlow.repository?.url ?? cloneFlow.remoteUrl}
                   />
                 </span>
@@ -1292,23 +1490,32 @@ function AddProjectModalBody(props: AddProjectModalProps) {
 
               <div
                 className={cn(
-                  'flex min-w-0 items-start gap-2.5 border bg-muted/15 px-3 py-2.5',
-                  clonePreview.destinationBlocked ? 'border-destructive/50' : 'border-border/60'
+                  "flex min-w-0 items-start gap-2.5 border bg-muted/15 px-3 py-2.5",
+                  clonePreview.destinationBlocked
+                    ? "border-destructive/50"
+                    : "border-border/60",
                 )}
-                data-add-project-field='reviewDestination'
+                data-add-project-field="reviewDestination"
               >
-                <IconFolderCheck aria-hidden='true' className='mt-0.5 size-4 shrink-0 text-muted-foreground/80' />
-                <span className='flex min-w-0 flex-1 flex-col'>
-                  <span className='text-sm font-medium text-muted-foreground'>Destination</span>
+                <IconFolderCheck
+                  aria-hidden="true"
+                  className="mt-0.5 size-4 shrink-0 text-muted-foreground/80"
+                />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-sm font-medium text-muted-foreground">
+                    Destination
+                  </span>
                   <MiddleEllipsisText
-                    className='mt-1 text-sm font-medium text-foreground'
+                    className="mt-1 text-sm font-medium text-foreground"
                     value={clonePreview.destinationPath}
                   />
                   {destinationDescription ? (
                     <span
                       className={cn(
-                        'mt-0.5 text-sm leading-relaxed',
-                        clonePreview.destinationBlocked ? 'text-destructive' : 'text-muted-foreground'
+                        "mt-0.5 text-sm leading-relaxed",
+                        clonePreview.destinationBlocked
+                          ? "text-destructive"
+                          : "text-muted-foreground",
                       )}
                     >
                       {destinationDescription}
@@ -1318,21 +1525,25 @@ function AddProjectModalBody(props: AddProjectModalProps) {
               </div>
             </div>
 
-            <div className='border border-border/60 bg-muted/10 px-3 py-3'>
-              <div className='mb-3 flex items-center justify-between gap-3'>
-                <span className='text-sm font-semibold text-foreground'>Clone options</span>
-                <span className='text-sm font-medium text-muted-foreground'>Optional</span>
+            <div className="border border-border/60 bg-muted/10 px-3 py-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-foreground">
+                  Clone options
+                </span>
+                <span className="text-sm font-medium text-muted-foreground">
+                  Optional
+                </span>
               </div>
 
-              <label className='block min-w-0'>
-                <span className='mb-1.5 flex items-center gap-1.5 text-sm font-medium text-muted-foreground'>
-                  <IconGitBranch aria-hidden='true' className='size-3.5' />
+              <label className="block min-w-0">
+                <span className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                  <IconGitBranch aria-hidden="true" className="size-3.5" />
                   Branch
                 </span>
                 <Input
                   aria-invalid={hasInvalidBranchName || undefined}
-                  autoComplete='off'
-                  className='h-9 text-sm'
+                  autoComplete="off"
+                  className="h-9 text-sm"
                   disabled={busy !== null}
                   onChange={(event) => {
                     setCloneOptions((current) => ({
@@ -1341,27 +1552,29 @@ function AddProjectModalBody(props: AddProjectModalProps) {
                     }));
                     setErrorMessage(null);
                   }}
-                  placeholder='Default branch'
+                  placeholder="Default branch"
                   spellCheck={false}
                   value={cloneOptions.branchName}
                 />
                 <span
                   className={cn(
-                    'mt-1.5 block text-sm',
-                    hasInvalidBranchName ? 'text-destructive' : 'text-muted-foreground'
+                    "mt-1.5 block text-sm",
+                    hasInvalidBranchName
+                      ? "text-destructive"
+                      : "text-muted-foreground",
                   )}
                 >
                   {hasInvalidBranchName
-                    ? 'Enter a valid Git branch name.'
-                    : 'Leave empty to use the repository default branch.'}
+                    ? "Enter a valid Git branch name."
+                    : "Leave empty to use the repository default branch."}
                 </span>
               </label>
 
-              <div className='mt-3 grid gap-2 sm:grid-cols-2'>
-                <label className='flex min-w-0 items-start gap-2.5 border border-border/50 px-3 py-2.5 hover:bg-muted/30'>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <label className="flex min-w-0 items-start gap-2.5 border border-border/50 px-3 py-2.5 hover:bg-muted/30">
                   <Checkbox
                     checked={cloneOptions.cloneMainOnly}
-                    className='mt-0.5 rounded-none'
+                    className="mt-0.5 rounded-none"
                     disabled={busy !== null}
                     onCheckedChange={(checked) =>
                       setCloneOptions((current) => ({
@@ -1370,18 +1583,20 @@ function AddProjectModalBody(props: AddProjectModalProps) {
                       }))
                     }
                   />
-                  <span className='min-w-0'>
-                    <span className='block text-sm font-medium text-foreground'>Clone branch only</span>
-                    <span className='mt-0.5 block text-sm leading-relaxed text-muted-foreground'>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground">
+                      Clone branch only
+                    </span>
+                    <span className="mt-0.5 block text-sm leading-relaxed text-muted-foreground">
                       Fetch only the selected branch.
                     </span>
                   </span>
                 </label>
 
-                <label className='flex min-w-0 items-start gap-2.5 border border-border/50 px-3 py-2.5 hover:bg-muted/30'>
+                <label className="flex min-w-0 items-start gap-2.5 border border-border/50 px-3 py-2.5 hover:bg-muted/30">
                   <Checkbox
                     checked={cloneOptions.shallowClone}
-                    className='mt-0.5 rounded-none'
+                    className="mt-0.5 rounded-none"
                     disabled={busy !== null}
                     onCheckedChange={(checked) =>
                       setCloneOptions((current) => ({
@@ -1390,9 +1605,11 @@ function AddProjectModalBody(props: AddProjectModalProps) {
                       }))
                     }
                   />
-                  <span className='min-w-0'>
-                    <span className='block text-sm font-medium text-foreground'>Shallow clone</span>
-                    <span className='mt-0.5 block text-sm leading-relaxed text-muted-foreground'>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground">
+                      Shallow clone
+                    </span>
+                    <span className="mt-0.5 block text-sm leading-relaxed text-muted-foreground">
                       Fetch only the latest commit history.
                     </span>
                   </span>
@@ -1402,28 +1619,31 @@ function AddProjectModalBody(props: AddProjectModalProps) {
 
             {errorMessage ? (
               <div
-                className='flex items-start gap-2 border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive'
-                data-add-project-field='error'
-                role='alert'
+                className="flex items-start gap-2 border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                data-add-project-field="error"
+                role="alert"
               >
-                <IconAlertTriangle aria-hidden='true' className='mt-px size-3.5 shrink-0' />
-                <span className='min-w-0 break-words'>{errorMessage}</span>
+                <IconAlertTriangle
+                  aria-hidden="true"
+                  className="mt-px size-3.5 shrink-0"
+                />
+                <span className="min-w-0 break-words">{errorMessage}</span>
               </div>
             ) : null}
 
             {isSlow && isCloning ? (
               <div
-                className='flex items-center gap-2 border border-border/60 px-3 py-2 text-sm text-muted-foreground'
-                data-add-project-field='notice'
-                role='status'
+                className="flex items-center gap-2 border border-border/60 px-3 py-2 text-sm text-muted-foreground"
+                data-add-project-field="notice"
+                role="status"
               >
                 <span>Still cloning. The machine may be reconnecting.</span>
                 {props.cancelCloneJob ? (
                   <button
-                    className='underline underline-offset-2 hover:text-foreground'
-                    data-add-project-field='cloneCancel'
+                    className="underline underline-offset-2 hover:text-foreground"
+                    data-add-project-field="cloneCancel"
                     onClick={cancelClone}
-                    type='button'
+                    type="button"
                   >
                     Cancel clone
                   </button>
@@ -1434,16 +1654,25 @@ function AddProjectModalBody(props: AddProjectModalProps) {
         </div>
 
         <div
-          className='flex shrink-0 items-center gap-3 border-t border-border/70 px-3 py-2.5 text-sm text-muted-foreground'
-          data-add-project-field='footer'
+          className="flex shrink-0 items-center gap-3 border-t border-border/70 px-3 py-2.5 text-sm text-muted-foreground"
+          data-add-project-field="footer"
         >
-          <AddProjectFooterHint keys='Esc' label='Close' />
-          <div className='ml-auto flex items-center gap-2'>
-            <Button disabled={busy !== null} onClick={returnToCloneDestination} type='button' variant='outline'>
+          <AddProjectFooterHint keys="Esc" label="Close" />
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              disabled={busy !== null}
+              onClick={returnToCloneDestination}
+              type="button"
+              variant="outline"
+            >
               Back
             </Button>
-            <Button disabled={!canClone} onClick={() => void submitClone()} type='button'>
-              {isCloning ? 'Cloning...' : 'Clone & Add'}
+            <Button
+              disabled={!canClone}
+              onClick={() => void submitClone()}
+              type="button"
+            >
+              {isCloning ? "Cloning..." : "Clone & Add"}
             </Button>
           </div>
         </div>
@@ -1457,39 +1686,53 @@ function AddProjectModalBody(props: AddProjectModalProps) {
      * minimum size would otherwise let a long row description push the whole
      * dialog body past the popup's clipped edge.
      */
-    <div className='flex h-full min-h-0 w-full min-w-0 flex-col' data-add-project-modal=''>
-      <div className='shrink-0 px-3 pt-3'>
+    <div
+      className="flex h-full min-h-0 w-full min-w-0 flex-col"
+      data-add-project-modal=""
+    >
+      <div className="shrink-0 px-3 pt-3">
         <InputGroup className={ADD_PROJECT_PATH_BAR_CLASS}>
           {isNewFolderStep || canPopView ? (
-            <InputGroupAddon align='inline-start' className={ADD_PROJECT_ACTION_ADDON_CLASS}>
+            <InputGroupAddon
+              align="inline-start"
+              className={ADD_PROJECT_ACTION_ADDON_CLASS}
+            >
               <button
-                aria-label={isNewFolderStep ? 'Cancel new folder' : 'Back'}
-                className='flex h-full w-10 items-center justify-center self-stretch rounded-none border-r border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground'
-                data-add-project-field='back'
+                aria-label={isNewFolderStep ? "Cancel new folder" : "Back"}
+                className="flex h-full w-10 items-center justify-center self-stretch rounded-none border-r border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground"
+                data-add-project-field="back"
                 onClick={isNewFolderStep ? cancelNewFolder : popView}
                 onMouseDown={(event) => {
                   event.preventDefault();
                 }}
-                type='button'
+                type="button"
               >
-                <IconArrowLeft aria-hidden='true' className='size-4' />
+                <IconArrowLeft aria-hidden="true" className="size-4" />
               </button>
             </InputGroupAddon>
           ) : (
-            <InputGroupAddon align='inline-start'>
+            <InputGroupAddon align="inline-start">
               {isBrowsing ? (
-                <IconFolderPlus aria-hidden='true' className='size-4' />
+                <IconFolderPlus aria-hidden="true" className="size-4" />
               ) : (
-                <IconSearch aria-hidden='true' className='size-4 opacity-50' />
+                <IconSearch aria-hidden="true" className="size-4 opacity-50" />
               )}
             </InputGroupAddon>
           )}
           <InputGroupInput
-            aria-label={isNewFolderStep ? 'New folder name' : isRepositoryStep ? 'Repository' : 'Project path'}
-            autoComplete='off'
+            aria-label={
+              isNewFolderStep
+                ? "New folder name"
+                : isRepositoryStep
+                  ? "Repository"
+                  : "Project path"
+            }
+            autoComplete="off"
             autoFocus
-            className='text-sm'
-            data-add-project-field={isNewFolderStep ? 'newFolderInput' : 'pathInput'}
+            className="text-sm"
+            data-add-project-field={
+              isNewFolderStep ? "newFolderInput" : "pathInput"
+            }
             onChange={(event) => {
               if (isNewFolderStep) {
                 setErrorMessage(null);
@@ -1501,35 +1744,43 @@ function AddProjectModalBody(props: AddProjectModalProps) {
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
             spellCheck={false}
-            value={isNewFolderStep ? (newFolderName ?? '') : query}
+            value={isNewFolderStep ? (newFolderName ?? "") : query}
           />
           {isNewFolderStep ? (
-            <InputGroupAddon align='inline-end' className={ADD_PROJECT_ACTION_ADDON_CLASS}>
+            <InputGroupAddon
+              align="inline-end"
+              className={ADD_PROJECT_ACTION_ADDON_CLASS}
+            >
               <Button
-                aria-label='Create folder (Enter)'
+                aria-label="Create folder (Enter)"
                 className={ADD_PROJECT_ACTION_BUTTON_CLASS}
-                data-add-project-field='newFolderSubmit'
-                disabled={(newFolderName ?? '').trim().length === 0 || busy !== null}
+                data-add-project-field="newFolderSubmit"
+                disabled={
+                  (newFolderName ?? "").trim().length === 0 || busy !== null
+                }
                 onClick={() => {
                   void submitNewFolder();
                 }}
                 onMouseDown={(event) => {
                   event.preventDefault();
                 }}
-                size='xs'
+                size="xs"
                 tabIndex={-1}
-                type='button'
-                variant='ghost'
+                type="button"
+                variant="ghost"
               >
-                {busy === 'createFolder' ? 'Creating' : 'Create Folder'}
+                {busy === "createFolder" ? "Creating" : "Create Folder"}
               </Button>
             </InputGroupAddon>
           ) : isRepositoryStep ? (
-            <InputGroupAddon align='inline-end' className={ADD_PROJECT_ACTION_ADDON_CLASS}>
+            <InputGroupAddon
+              align="inline-end"
+              className={ADD_PROJECT_ACTION_ADDON_CLASS}
+            >
               <Button
                 aria-label={`${repositoryActionLabel} (Enter)`}
                 className={ADD_PROJECT_ACTION_BUTTON_CLASS}
-                data-add-project-field='repositoryAction'
+                data-add-project-field="repositoryAction"
                 disabled={query.trim().length === 0 || busy !== null}
                 onClick={() => {
                   void submitRepositoryStep();
@@ -1537,37 +1788,40 @@ function AddProjectModalBody(props: AddProjectModalProps) {
                 onMouseDown={(event) => {
                   event.preventDefault();
                 }}
-                size='xs'
+                size="xs"
                 tabIndex={-1}
-                type='button'
-                variant='ghost'
+                type="button"
+                variant="ghost"
               >
-                {busy === 'lookup' ? 'Working' : repositoryActionLabel}
+                {busy === "lookup" ? "Working" : repositoryActionLabel}
               </Button>
             </InputGroupAddon>
           ) : isBrowsing ? (
-            <InputGroupAddon align='inline-end' className={ADD_PROJECT_ACTION_ADDON_CLASS}>
+            <InputGroupAddon
+              align="inline-end"
+              className={ADD_PROJECT_ACTION_ADDON_CLASS}
+            >
               <Button
-                aria-label='New folder'
-                className={cn(ADD_PROJECT_ACTION_BUTTON_CLASS, 'gap-1.5')}
-                data-add-project-field='newFolder'
+                aria-label="New folder"
+                className={cn(ADD_PROJECT_ACTION_BUTTON_CLASS, "gap-1.5")}
+                data-add-project-field="newFolder"
                 disabled={!canCreateNewFolder || busy !== null}
                 onClick={startNewFolder}
                 onMouseDown={(event) => {
                   event.preventDefault();
                 }}
-                size='xs'
+                size="xs"
                 tabIndex={-1}
-                type='button'
-                variant='ghost'
+                type="button"
+                variant="ghost"
               >
-                <IconFolderPlus aria-hidden='true' data-icon='inline-start' />
+                <IconFolderPlus aria-hidden="true" data-icon="inline-start" />
                 New Folder
               </Button>
               <Button
                 aria-label={`${submitActionLabel} (${addShortcutLabel})`}
                 className={ADD_PROJECT_ACTION_BUTTON_CLASS}
-                data-add-project-field='submit'
+                data-add-project-field="submit"
                 disabled={!canSubmitBrowsePath || busy !== null}
                 onClick={() => {
                   submitResolvedPath();
@@ -1575,10 +1829,10 @@ function AddProjectModalBody(props: AddProjectModalProps) {
                 onMouseDown={(event) => {
                   event.preventDefault();
                 }}
-                size='xs'
+                size="xs"
                 tabIndex={-1}
-                type='button'
-                variant='ghost'
+                type="button"
+                variant="ghost"
               >
                 {busyLabel ?? submitActionLabel}
               </Button>
@@ -1589,17 +1843,22 @@ function AddProjectModalBody(props: AddProjectModalProps) {
 
       {isCloneDestinationStep && cloneFlow ? (
         <div
-          className='mx-3 mt-2 flex min-w-0 shrink-0 flex-col gap-1 border border-border/60 px-3 py-2'
-          data-add-project-field='repositoryCard'
+          className="mx-3 mt-2 flex min-w-0 shrink-0 flex-col gap-1 border border-border/60 px-3 py-2"
+          data-add-project-field="repositoryCard"
         >
-          <span className='text-sm font-medium text-muted-foreground'>Repository</span>
-          <span className='flex min-w-0 items-center gap-2'>
-            <span className='text-muted-foreground/80'>{sourceIcon(cloneFlow.source)}</span>
-            <span className='flex min-w-0 flex-col'>
-              <span className='truncate text-sm font-medium text-foreground'>
-                {cloneFlow.repository?.nameWithOwner ?? cloneFlow.repositoryInput}
+          <span className="text-sm font-medium text-muted-foreground">
+            Repository
+          </span>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="text-muted-foreground/80">
+              {sourceIcon(cloneFlow.source)}
+            </span>
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-sm font-medium text-foreground">
+                {cloneFlow.repository?.nameWithOwner ??
+                  cloneFlow.repositoryInput}
               </span>
-              <span className='truncate text-sm text-muted-foreground/85'>
+              <span className="truncate text-sm text-muted-foreground/85">
                 {cloneFlow.repository?.url ?? cloneFlow.remoteUrl}
               </span>
             </span>
@@ -1609,28 +1868,31 @@ function AddProjectModalBody(props: AddProjectModalProps) {
 
       {errorMessage ? (
         <div
-          className='mx-3 mt-2 flex shrink-0 items-start gap-2 border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive'
-          data-add-project-field='error'
-          role='alert'
+          className="mx-3 mt-2 flex shrink-0 items-start gap-2 border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          data-add-project-field="error"
+          role="alert"
         >
-          <IconAlertTriangle aria-hidden='true' className='mt-px size-3.5 shrink-0' />
-          <span className='min-w-0 break-words'>{errorMessage}</span>
+          <IconAlertTriangle
+            aria-hidden="true"
+            className="mt-px size-3.5 shrink-0"
+          />
+          <span className="min-w-0 break-words">{errorMessage}</span>
         </div>
       ) : null}
 
       {isSlow && busy ? (
         <div
-          className='mx-3 mt-2 flex shrink-0 items-center gap-2 border border-border/60 px-3 py-2 text-sm text-muted-foreground'
-          data-add-project-field='notice'
-          role='status'
+          className="mx-3 mt-2 flex shrink-0 items-center gap-2 border border-border/60 px-3 py-2 text-sm text-muted-foreground"
+          data-add-project-field="notice"
+          role="status"
         >
           <span>Still working. The machine may be reconnecting.</span>
           {isCloning && props.cancelCloneJob ? (
             <button
-              className='underline underline-offset-2 hover:text-foreground'
-              data-add-project-field='cloneCancel'
+              className="underline underline-offset-2 hover:text-foreground"
+              data-add-project-field="cloneCancel"
               onClick={cancelClone}
-              type='button'
+              type="button"
             >
               Cancel clone
             </button>
@@ -1639,29 +1901,33 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       ) : null}
 
       <div
-        className='vertical-scroll-fade-mask no-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 pb-2'
-        data-add-project-field='list'
+        className="vertical-scroll-fade-mask no-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 pb-2"
+        data-add-project-field="list"
         ref={listRef}
-        role='listbox'
+        role="listbox"
       >
         {rows.length === 0 ? (
           <div
-            className='flex h-full min-h-24 items-center justify-center px-6 text-center text-sm text-balance text-muted-foreground'
-            data-add-project-field='emptyState'
+            className="flex h-full min-h-24 items-center justify-center px-6 text-center text-sm text-balance text-muted-foreground"
+            data-add-project-field="emptyState"
           >
             {emptyStateMessage}
           </div>
         ) : (
           <div>
-            <div className='px-2 pt-3 pb-1.5 text-sm font-medium text-muted-foreground'>{groupLabel}</div>
+            <div className="px-2 pt-3 pb-1.5 text-sm font-medium text-muted-foreground">
+              {groupLabel}
+            </div>
             {rows.map((row) => (
               <div
                 aria-disabled={row.disabled || undefined}
                 aria-selected={row.value === highlightedItemValue}
                 className={cn(
-                  'relative flex min-h-9 cursor-default items-center gap-2.5 rounded-none px-2 py-1.5 text-sm outline-hidden select-none',
-                  row.disabled ? 'opacity-60' : undefined,
-                  row.value === highlightedItemValue ? 'bg-muted text-foreground' : undefined
+                  "relative flex min-h-9 cursor-default items-center gap-2.5 rounded-none px-2 py-1.5 text-sm outline-hidden select-none",
+                  row.disabled ? "opacity-60" : undefined,
+                  row.value === highlightedItemValue
+                    ? "bg-muted text-foreground"
+                    : undefined,
                 )}
                 data-add-project-field={row.field}
                 data-add-project-value={row.value}
@@ -1679,14 +1945,18 @@ function AddProjectModalBody(props: AddProjectModalProps) {
                     setHighlightedItemValue(row.value);
                   }
                 }}
-                role='option'
+                role="option"
                 {...(row.dataAttributes ?? {})}
               >
                 {row.icon}
-                <span className='flex min-w-0 flex-1 flex-col'>
-                  <span className='truncate text-sm text-foreground'>{row.title}</span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-sm text-foreground">
+                    {row.title}
+                  </span>
                   {row.description ? (
-                    <span className='truncate text-sm text-muted-foreground/85'>{row.description}</span>
+                    <span className="truncate text-sm text-muted-foreground/85">
+                      {row.description}
+                    </span>
                   ) : null}
                 </span>
                 {row.trailing}
@@ -1694,37 +1964,48 @@ function AddProjectModalBody(props: AddProjectModalProps) {
             ))}
           </div>
         )}
-        {pendingDiscoveryMachineId && currentView?.kind === 'sources' ? (
-          <div className='px-2 py-2 text-sm text-muted-foreground' data-add-project-field='discoveryPending'>
+        {pendingDiscoveryMachineId && currentView?.kind === "sources" ? (
+          <div
+            className="px-2 py-2 text-sm text-muted-foreground"
+            data-add-project-field="discoveryPending"
+          >
             Checking source control providers...
           </div>
         ) : null}
       </div>
 
       <div
-        className='flex shrink-0 items-center gap-4 border-t border-border/70 px-4 py-2.5 text-sm text-muted-foreground'
-        data-add-project-field='footer'
+        className="flex shrink-0 items-center gap-4 border-t border-border/70 px-4 py-2.5 text-sm text-muted-foreground"
+        data-add-project-field="footer"
       >
-        {isNewFolderStep ? null : <AddProjectFooterHint keys='↑ ↓' label='Navigate' />}
-        {isNewFolderStep ? (
-          <AddProjectFooterHint keys='Enter' label='Create folder' />
-        ) : isRepositoryStep ? (
-          <AddProjectFooterHint keys='Enter' label={repositoryActionLabel} />
-        ) : isBrowsing ? (
-          <AddProjectFooterHint keys={addShortcutLabel} label={submitActionLabel} />
-        ) : (
-          <AddProjectFooterHint keys='Enter' label='Select' />
+        {isNewFolderStep ? null : (
+          <AddProjectFooterHint keys="↑ ↓" label="Navigate" />
         )}
         {isNewFolderStep ? (
-          <AddProjectFooterHint keys='Backspace' label='Cancel' />
+          <AddProjectFooterHint keys="Enter" label="Create folder" />
+        ) : isRepositoryStep ? (
+          <AddProjectFooterHint keys="Enter" label={repositoryActionLabel} />
+        ) : isBrowsing ? (
+          <AddProjectFooterHint
+            keys={addShortcutLabel}
+            label={submitActionLabel}
+          />
+        ) : (
+          <AddProjectFooterHint keys="Enter" label="Select" />
+        )}
+        {isNewFolderStep ? (
+          <AddProjectFooterHint keys="Backspace" label="Cancel" />
         ) : canPopView ? (
-          <AddProjectFooterHint keys='Backspace' label='Back' />
+          <AddProjectFooterHint keys="Backspace" label="Back" />
         ) : null}
-        <AddProjectFooterHint keys='Esc' label='Close' />
+        <AddProjectFooterHint keys="Esc" label="Close" />
         {machine ? (
-          <span className='ml-auto inline-flex min-w-0 items-center gap-1.5' data-add-project-field='machineLabel'>
-            <IconFolderPlus aria-hidden='true' className='size-3 shrink-0' />
-            <span className='truncate'>{machine.label}</span>
+          <span
+            className="ml-auto inline-flex min-w-0 items-center gap-1.5"
+            data-add-project-field="machineLabel"
+          >
+            <IconFolderPlus aria-hidden="true" className="size-3 shrink-0" />
+            <span className="truncate">{machine.label}</span>
           </span>
         ) : null}
       </div>
@@ -1737,13 +2018,19 @@ function AddProjectModalBody(props: AddProjectModalProps) {
  * Footer hints render their keys as key caps so the shortcut row reads as
  * chrome instead of a run-on sentence ("Enter Select Backspace Back Esc Close").
  */
-function AddProjectFooterHint({ keys, label }: { readonly keys: string; readonly label: string }): ReactNode {
+function AddProjectFooterHint({
+  keys,
+  label,
+}: {
+  readonly keys: string;
+  readonly label: string;
+}): ReactNode {
   return (
-    <span className='inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap'>
-      <span className='inline-flex items-center gap-1'>
-        {keys.split(' ').map((key) => (
+    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+      <span className="inline-flex items-center gap-1">
+        {keys.split(" ").map((key) => (
           <kbd
-            className='inline-flex h-5 min-w-5 items-center justify-center rounded-none border border-border/70 bg-muted/60 px-1.5 font-sans text-sm leading-none text-muted-foreground'
+            className="inline-flex h-5 min-w-5 items-center justify-center rounded-none border border-border/70 bg-muted/60 px-1.5 font-sans text-sm leading-none text-muted-foreground"
             key={key}
           >
             {key}
@@ -1757,23 +2044,25 @@ function AddProjectFooterHint({ keys, label }: { readonly keys: string; readonly
 
 function buildInitialViewStack(
   options: readonly AddProjectMachineOption[],
-  initialMachineId: string | undefined
+  initialMachineId: string | undefined,
 ): AddProjectView[] {
   if (options.length === 0) {
     return [];
   }
-  const preselected = initialMachineId ? options.find((option) => option.machineId === initialMachineId) : undefined;
+  const preselected = initialMachineId
+    ? options.find((option) => option.machineId === initialMachineId)
+    : undefined;
   if (preselected) {
-    return [{ kind: 'sources', machineId: preselected.machineId }];
+    return [{ kind: "sources", machineId: preselected.machineId }];
   }
   if (options.length === 1) {
-    return [{ kind: 'sources', machineId: options[0].machineId }];
+    return [{ kind: "sources", machineId: options[0].machineId }];
   }
-  return [{ kind: 'machines' }];
+  return [{ kind: "machines" }];
 }
 
 function machineIcon(option: AddProjectMachineOption): ReactNode {
-  const isLocal = option.machineId === 'local';
+  const isLocal = option.machineId === "local";
   return isLocal ? (
     <IconDeviceDesktop className={ADD_PROJECT_ROW_ICON_CLASS} />
   ) : (
@@ -1783,13 +2072,13 @@ function machineIcon(option: AddProjectMachineOption): ReactNode {
 
 function sourceIcon(source: AddProjectSourceId): ReactNode {
   switch (source) {
-    case 'azure-devops':
+    case "azure-devops":
       return <IconBrandAzure className={ADD_PROJECT_ROW_ICON_CLASS} />;
-    case 'bitbucket':
+    case "bitbucket":
       return <IconBrandBitbucket className={ADD_PROJECT_ROW_ICON_CLASS} />;
-    case 'github':
+    case "github":
       return <IconBrandGithub className={ADD_PROJECT_ROW_ICON_CLASS} />;
-    case 'gitlab':
+    case "gitlab":
       return <IconBrandGitlab className={ADD_PROJECT_ROW_ICON_CLASS} />;
     default:
       return <IconLink className={ADD_PROJECT_ROW_ICON_CLASS} />;
@@ -1800,14 +2089,14 @@ function describeError(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message.trim();
   }
-  if (typeof error === 'string' && error.trim().length > 0) {
+  if (typeof error === "string" && error.trim().length > 0) {
     return error.trim();
   }
   return fallback;
 }
 
 function cssEscape(value: string): string {
-  return value.replace(/["\\]/gu, '\\$&');
+  return value.replace(/["\\]/gu, "\\$&");
 }
 
 function delay(milliseconds: number): Promise<void> {

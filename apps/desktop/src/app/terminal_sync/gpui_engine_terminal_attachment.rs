@@ -13,6 +13,14 @@ use crate::app::helpers::*;
 use crate::app::model::*;
 use crate::*;
 
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct PickTerminalAttachmentKind {
+    pub(crate) target: GpuiTerminalAttachmentTarget,
+    pub(crate) runtime_session_id: AgentsTerminalRuntimeSessionId,
+    pub(crate) directories_only: bool,
+}
+
 impl GhostexGpuiApp {
     pub(crate) fn gpui_terminal_attachment_target_for_engine_target(
         &self,
@@ -27,6 +35,70 @@ impl GhostexGpuiApp {
         runtime_session_id: AgentsTerminalRuntimeSessionId,
         cx: &mut gpui::Context<Self>,
     ) {
+        if cfg!(target_os = "linux") {
+            cx.spawn(async move |this, cx| {
+                let _ = this.update_in(cx, |_, window, cx| {
+                    crate::app::context_menu::GpuiContextMenu::new()
+                        .menu(
+                            "Images or files…",
+                            Box::new(PickTerminalAttachmentKind {
+                                target: target.clone(),
+                                runtime_session_id,
+                                directories_only: false,
+                            }),
+                        )
+                        .menu(
+                            "Folders…",
+                            Box::new(PickTerminalAttachmentKind {
+                                target,
+                                runtime_session_id,
+                                directories_only: true,
+                            }),
+                        )
+                        .show_for_app(cx.entity(), window.mouse_position(), window, cx);
+                });
+            })
+            .detach();
+            return;
+        }
+        self.request_gpui_engine_terminal_attachment_paths_for_kind(
+            target,
+            runtime_session_id,
+            None,
+            cx,
+        );
+    }
+
+    /// CDXC:PlatformSupport 2026-09-23 WHY:
+    /// XDG file chooser portals have mutually exclusive file and directory modes. Linux attachment menus choose the mode before opening the portal; passing both flags hides every file in KDE's folder chooser.
+    pub(crate) fn attachment_path_prompt_options(
+        multiple: bool,
+        directories_only: Option<bool>,
+    ) -> gpui::PathPromptOptions {
+        let directories_only =
+            directories_only.or_else(|| cfg!(target_os = "linux").then_some(false));
+        gpui::PathPromptOptions {
+            files: directories_only != Some(true),
+            directories: directories_only != Some(false),
+            multiple,
+            prompt: Some(
+                match directories_only {
+                    Some(true) => "Attach Folders",
+                    Some(false) => "Attach Images or Files",
+                    None => "Attach an Image, File, or Folder",
+                }
+                .into(),
+            ),
+        }
+    }
+
+    pub(crate) fn request_gpui_engine_terminal_attachment_paths_for_kind(
+        &mut self,
+        target: GpuiTerminalAttachmentTarget,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        directories_only: Option<bool>,
+        cx: &mut gpui::Context<Self>,
+    ) {
         let Some((origin_view_id, lease)) = (match target.engine_target() {
             GpuiEngineTerminalEventTarget::Agents(id) => self.agents_gpui_engine_terminals.get(&id),
             GpuiEngineTerminalEventTarget::Command(id) => {
@@ -37,12 +109,10 @@ impl GhostexGpuiApp {
         .map(|record| (record.view.entity_id(), record.pin_viewer())) else {
             return;
         };
-        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
-            files: true,
-            directories: true,
-            multiple: false,
-            prompt: Some("Attach File or Folder".into()),
-        });
+        let receiver = cx.prompt_for_paths(Self::attachment_path_prompt_options(
+            false,
+            directories_only,
+        ));
         cx.spawn(async move |this, cx| {
             let _lease = lease;
             let Ok(Ok(Some(paths))) = receiver.await else {
@@ -82,14 +152,13 @@ impl GhostexGpuiApp {
             GpuiTerminalAttachmentTarget::Terminal(GpuiEngineTerminalEventTarget::Agents(
                 session_id,
             )) => self
-                .remote_attach_sessions
-                .iter()
-                .find_map(|(key, mapped_session_id)| {
-                    (mapped_session_id == session_id).then(|| key.remote_machine_id.clone())
-                }),
-            GpuiTerminalAttachmentTarget::Terminal(GpuiEngineTerminalEventTarget::Command(_)) => {
-                None
-            }
+                .agents_chat_remote_key_for_session(*session_id)
+                .map(|key| key.remote_machine_id),
+            GpuiTerminalAttachmentTarget::Terminal(GpuiEngineTerminalEventTarget::Command(
+                session_id,
+            )) => self
+                .command_remote_action_session_for_command_tab(*session_id)
+                .map(|reference| reference.remote_machine_id.clone()),
         };
         let Some(remote_machine_id) = remote_machine_id else {
             match gpui_local_terminal_attachment_reference(path.as_path()) {

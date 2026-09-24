@@ -1,139 +1,191 @@
-import { computeSessionChatFiles } from '@/packages/shared/session-chat-controller/files';
-import { queuedModelSelection } from '@/packages/shared/session-chat-controller/model-selection';
-import { sendSessionChatOptionAware } from '@/packages/shared/session-chat-controller/option-command';
-import { terminalNoticeChoiceAnswer } from '@/packages/shared/session-chat-presentation/terminal-prompts';
+import { computeSessionChatFiles } from "@/packages/shared/session-chat-controller/files";
+import { queuedModelSelection } from "@/packages/shared/session-chat-controller/model-selection";
+import { sendSessionChatOptionAware } from "@/packages/shared/session-chat-controller/option-command";
+import { terminalNoticeChoiceAnswer } from "@/packages/shared/session-chat-presentation/terminal-prompts";
 import {
   sessionChatTranscriptMenuItems,
   sessionChatTranscriptQuote,
-} from '@/packages/shared/session-chat-presentation/transcript-menu';
-import { sessionChatAccountIndicator } from '@/packages/shared/session-chat-presentation/option-pills';
+} from "@/packages/shared/session-chat-presentation/transcript-menu";
+import { sessionChatAccountIndicator } from "@/packages/shared/session-chat-presentation/option-pills";
 import {
   sessionChatSendBlockedReason,
   sessionChatComposerPlaceholder,
-} from '@/packages/shared/session-chat-controller/composer-policy';
-import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
-import { AccountSwitchCard } from '../accounts/account-switch-card';
-import { useAccountSwitchStatus } from '../accounts/use-account-switch-status';
-import type { SessionChatDraftHandoff } from '@/packages/shared/session-chat-queue';
-import { AppMenuThemeProvider } from '@/packages/components/ui/app-menu-panel';
+} from "@/packages/shared/session-chat-controller/composer-policy";
+import { useAppScrollbars } from "@/packages/components/ui/app-scrollbars";
+import { AccountSwitchCard } from "../accounts/account-switch-card";
+import { useAccountSwitchStatus } from "../accounts/use-account-switch-status";
+import type { SessionChatDraftHandoff } from "@/packages/shared/session-chat-queue";
+import { AppMenuThemeProvider } from "@/packages/components/ui/app-menu-panel";
 import {
   SessionChatPresentationProvider,
   sessionChatPreservesAgentLineBreaks,
-} from './session-chat-presentation-provider';
-import type { SessionChatDraftVersion } from '@/packages/shared/session-chat-queue';
-import type { AccountsTransport } from '@/packages/shared/agent-accounts';
-import { useAccounts, type AccountsSnapshotCache } from '@/packages/core-ui/accounts/use-accounts';
-import { SessionAccountsPanel } from '@/packages/core-ui/accounts/session-panel';
+} from "./session-chat-presentation-provider";
+import type { SessionChatDraftVersion } from "@/packages/shared/session-chat-queue";
+import type { AccountsTransport } from "@/packages/shared/agent-accounts";
+import {
+  useAccounts,
+  type AccountsSnapshotCache,
+} from "@/packages/core-ui/accounts/use-accounts";
+import { SessionAccountsPanel } from "@/packages/core-ui/accounts/session-panel";
 // SessionChatView — root layout (upstream chat spec §11.1 port): message list
 // over an interactive-card slot over the composer. The question card replaces
 // the composer while showing. Hosts inject a SessionChatTransport; everything
 // else is derived by useSessionChat.
 
-import { IconBlockquote, IconCopy } from '@tabler/icons-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ClipboardEvent, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, RefObject } from 'react';
+import { IconBlockquote, IconCopy } from "@tabler/icons-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type {
+  ClipboardEvent,
+  DragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent,
+  RefObject,
+} from "react";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuGroup,
   ContextMenuItem,
   ContextMenuTrigger,
-} from '../../components/ui/context-menu';
-import { cn } from '@/packages/components/utils';
-import type { GxserverSessionForkBranch } from '../../shared/gxserver-protocol';
-import type { SessionChatThemeSetting } from '../../shared/session-chat';
-import type { SidebarThemeSetting } from '../../shared/session-grid-contract-core';
-import { useSessionChatTheme } from './session-chat-theme';
-import { ghostexHotkeyTextFromKeyboardEvent, type ghostexHotkeySettings } from '../../shared/ghostex-hotkeys';
-import { useSessionChatScrollToBottom } from './use-session-chat-scroll-to-bottom';
-import { AppTooltip, TooltipProvider } from '../app-tooltip';
-import { displayAgentName, NewSessionWelcome } from './session-chat-new-session-welcome';
+} from "../../components/ui/context-menu";
+import { cn } from "@/packages/components/utils";
+import type { GxserverSessionForkBranch } from "../../shared/gxserver-protocol";
+import type { SessionChatThemeSetting } from "../../shared/session-chat";
+import type { SidebarThemeSetting } from "../../shared/session-grid-contract-core";
+import { useSessionChatTheme } from "./session-chat-theme";
+import {
+  ghostexHotkeyTextFromKeyboardEvent,
+  type ghostexHotkeySettings,
+} from "../../shared/ghostex-hotkeys";
+import { useSessionChatScrollToBottom } from "./use-session-chat-scroll-to-bottom";
+import { AppTooltip, TooltipProvider } from "../app-tooltip";
+import {
+  displayAgentName,
+  NewSessionWelcome,
+} from "./session-chat-new-session-welcome";
 import {
   SESSION_CHAT_LOADING_INDICATOR_DELAY_MS,
   SESSION_CHAT_LOADING_RETRY_DELAY_MS,
   sessionChatShowsNewSessionWelcome,
-} from '@/packages/shared/session-chat-presentation/new-session-welcome';
-import { SessionChatComposer, type SessionChatComposerHandle } from './session-chat-composer';
-import { sessionChatKeyboardPopupOpen } from './session-chat-caret-navigation';
-import { sessionChatEditingShortcut, sessionChatHasTranscriptSelection } from './session-chat-edit-shortcuts';
-import { useSessionChatPaneFocus } from './use-session-chat-pane-focus';
-import { sessionChatCardButtonAllowsTyping, useSessionChatCardFocus } from './use-session-chat-card-focus';
-import { useSessionChatSkills } from './use-session-chat-skills';
-import { SessionChatAsyncQuestions } from './session-chat-async-questions';
-import { sessionChatDataTransferHasFiles } from './session-chat-drop-attachments';
-import { sessionChatEmptyStateCopy } from './session-chat-empty-state';
-import { SESSION_CHAT_FILE_PATH_ATTRIBUTE } from './session-chat-file-paths';
+} from "@/packages/shared/session-chat-presentation/new-session-welcome";
+import {
+  SessionChatComposer,
+  type SessionChatComposerHandle,
+} from "./session-chat-composer";
+import { sessionChatKeyboardPopupOpen } from "./session-chat-caret-navigation";
+import {
+  sessionChatEditingShortcut,
+  sessionChatHasTranscriptSelection,
+} from "./session-chat-edit-shortcuts";
+import { useSessionChatPaneFocus } from "./use-session-chat-pane-focus";
+import {
+  sessionChatCardButtonAllowsTyping,
+  useSessionChatCardFocus,
+} from "./use-session-chat-card-focus";
+import { useSessionChatSkills } from "./use-session-chat-skills";
+import { SessionChatAsyncQuestions } from "./session-chat-async-questions";
+import { sessionChatDataTransferHasFiles } from "./session-chat-drop-attachments";
+import { sessionChatEmptyStateCopy } from "./session-chat-empty-state";
+import { SESSION_CHAT_FILE_PATH_ATTRIBUTE } from "./session-chat-file-paths";
 import {
   SessionChatExtensionPanel,
   type SessionChatBarExtension,
   type SessionChatExtensionPanelProps,
-} from './session-chat-extension-panel';
-import type { SessionChatHostAction, SessionChatHostActions } from './session-chat-host-actions';
-import { SessionChatImageViewerProvider } from './session-chat-image-viewer';
-import { SessionChatSubagentViewer } from './session-chat-subagent-viewer';
-import { SessionChatForkBranchSwitcher } from './session-chat-fork-branch-switcher';
+} from "./session-chat-extension-panel";
+import type {
+  SessionChatHostAction,
+  SessionChatHostActions,
+} from "./session-chat-host-actions";
+import { SessionChatImageViewerProvider } from "./session-chat-image-viewer";
+import { SessionChatSubagentViewer } from "./session-chat-subagent-viewer";
+import { SessionChatForkBranchSwitcher } from "./session-chat-fork-branch-switcher";
 import {
   SESSION_CHAT_WEB_URL_ATTRIBUTE,
   SessionChatHostLinksProvider,
   type SessionChatHostLinks,
-} from './session-chat-links';
-import { SessionChatInteractiveCard, sessionChatCardDismissKey } from './session-chat-interactive-card';
-import { SessionChatMessageList } from './session-chat-message-list';
-import { SessionChatReferenceMenuItems } from './session-chat-reference-menu-items';
-import { SessionChatNotePanel } from './session-chat-note-panel';
-import { SessionChatSearch, type SessionChatHostSearchBridge } from './session-chat-search';
+} from "./session-chat-links";
+import {
+  SessionChatInteractiveCard,
+  sessionChatCardDismissKey,
+} from "./session-chat-interactive-card";
+import { SessionChatMessageList } from "./session-chat-message-list";
+import { SessionChatReferenceMenuItems } from "./session-chat-reference-menu-items";
+import { SessionChatNotePanel } from "./session-chat-note-panel";
+import {
+  SessionChatSearch,
+  type SessionChatHostSearchBridge,
+} from "./session-chat-search";
 import {
   readStoredSessionChatSummary,
   sessionChatSummaryToggleHotkey,
   writeStoredSessionChatSummary,
-} from './session-chat-summary-override';
+} from "./session-chat-summary-override";
 import {
   SessionChatTerminalNoticeCard,
   sessionChatTerminalNoticeDismissKey,
-} from './session-chat-terminal-notice-card';
-import { SessionChatSessionOptionPills, useSessionChatSessionOptions } from './session-chat-option-pills';
-import { modelPickerProvider } from './session-chat-model-picker-request';
+} from "./session-chat-terminal-notice-card";
+import {
+  SessionChatSessionOptionPills,
+  useSessionChatSessionOptions,
+} from "./session-chat-option-pills";
+import { modelPickerProvider } from "./session-chat-model-picker-request";
 import {
   orderedSessionChatStarredRows,
   resolveSessionChatStarredContextDetails,
   useSessionChatContextDetailsClock,
   useSessionChatContextDetailsPreferences,
   type SessionChatContextDetailSession,
-} from './session-chat-context-details';
-import { SessionChatContextDetailsDialog } from './session-chat-context-details-dialog';
-import { resolveContextDetailStatus, type ContextDetailsAgent } from './session-chat-context-details-agents';
-import { SessionChatStatusLine } from './session-chat-status-line';
-import { sessionChatOptionCommandNames } from './session-chat-session-options';
-import { readStoredSessionChatVerbose, writeStoredSessionChatVerbose } from './session-chat-verbose-override';
-import { sessionChatSlashCommandsForAgent, sessionChatSlashHeadingForAgent } from './session-chat-slash-commands';
-import type { SessionChatTransport } from './session-chat-transport';
-import type { SessionChatArmedAction } from '@/packages/shared/session-chat-presentation/armed-actions';
+} from "./session-chat-context-details";
+import { SessionChatContextDetailsDialog } from "./session-chat-context-details-dialog";
+import {
+  resolveContextDetailStatus,
+  type ContextDetailsAgent,
+} from "./session-chat-context-details-agents";
+import { SessionChatStatusLine } from "./session-chat-status-line";
+import { sessionChatOptionCommandNames } from "./session-chat-session-options";
+import {
+  readStoredSessionChatVerbose,
+  writeStoredSessionChatVerbose,
+} from "./session-chat-verbose-override";
+import {
+  sessionChatSlashCommandsForAgent,
+  sessionChatSlashHeadingForAgent,
+} from "./session-chat-slash-commands";
+import type { SessionChatTransport } from "./session-chat-transport";
+import type { SessionChatArmedAction } from "@/packages/shared/session-chat-presentation/armed-actions";
 import {
   hasAppliedSessionChatReturnedPrompt,
   markSessionChatReturnedPromptApplied,
-} from './session-chat-returned-prompt';
-import { useSessionChat } from './use-session-chat';
-import { useSessionChatWorkingHold } from './use-session-chat-working-hold';
-import { useSessionChatComposerInset } from './use-session-chat-composer-inset';
-import { SessionChatLoadingState } from './session-chat-loading-state';
-import { playCopySound } from '../copy-sound';
+} from "./session-chat-returned-prompt";
+import { useSessionChat } from "./use-session-chat";
+import { useSessionChatWorkingHold } from "./use-session-chat-working-hold";
+import { useSessionChatComposerInset } from "./use-session-chat-composer-inset";
+import { SessionChatLoadingState } from "./session-chat-loading-state";
+import { playCopySound } from "../copy-sound";
 
 /** Controls that own the Enter key themselves; every other target sends the draft. */
 const EDITABLE_TARGET_SELECTOR = [
-  'input',
-  'select',
-  'textarea',
+  "input",
+  "select",
+  "textarea",
   '[contenteditable]:not([contenteditable="false"])',
   '[role="textbox"]',
   '[role="combobox"]',
-].join(', ');
+].join(", ");
 
 const INTERACTIVE_TARGET_SELECTOR = [
-  'a[href]',
-  'button',
-  'input',
-  'select',
-  'textarea',
+  "a[href]",
+  "button",
+  "input",
+  "select",
+  "textarea",
   '[contenteditable]:not([contenteditable="false"])',
   '[role="button"]',
   '[role="checkbox"]',
@@ -145,7 +197,7 @@ const INTERACTIVE_TARGET_SELECTOR = [
   '[role="switch"]',
   '[role="textbox"]',
   '[data-session-chat-typing-redirect-ignore="true"]',
-].join(', ');
+].join(", ");
 
 /*
 The indeterminate transcript phase renders blank on purpose (see the early
@@ -160,7 +212,7 @@ const LOADING_RETRY_DELAY_MS = SESSION_CHAT_LOADING_RETRY_DELAY_MS;
 CDXC:Drafts 2026-08-28:
 Host actions that mean nothing on a draft. See the filter that uses them.
 */
-const DRAFT_HIDDEN_HOST_ACTION_IDS = new Set(['fork', 'fullReload']);
+const DRAFT_HIDDEN_HOST_ACTION_IDS = new Set(["fork", "fullReload"]);
 
 /*
 CDXC:Drafts 2026-08-28:
@@ -177,7 +229,12 @@ same model string.
 */
 const DRAFT_AGENT_SWITCH_REREAD_DELAYS_MS = [2_000, 6_000];
 
-export type { SessionChatHostAction, SessionChatHostActions, SessionChatHostLinks, SessionChatHostSearchBridge };
+export type {
+  SessionChatHostAction,
+  SessionChatHostActions,
+  SessionChatHostLinks,
+  SessionChatHostSearchBridge,
+};
 
 /** Where a stash left the durable copy of the text it was given. */
 export interface SessionChatStashedPrompt {
@@ -203,7 +260,9 @@ export interface SessionChatComposerHandoff extends SessionChatDraftHandoff {
 export interface SessionChatHostComposerActions {
   setPaneFocused: (focused: boolean) => void;
   canRelease: () => boolean;
-  prepareRelease: () => Promise<import('./session-chat-draft-outbox').PendingDraft[] | null>;
+  prepareRelease: () => Promise<
+    import("./session-chat-draft-outbox").PendingDraft[] | null
+  >;
   /** Clears only when the composer still holds this exact acknowledged send. */
   clearDraft: (expectedContent: string) => boolean;
   focus: () => void;
@@ -233,7 +292,10 @@ export interface SessionChatHostComposerBridge {
    * without being able to stash. Absent it, the composer's stash control is
    * not rendered and the chat → terminal handoff is unavailable.
    */
-  stashPrompt?: (content: string, options?: { transient?: boolean }) => Promise<SessionChatStashedPrompt | undefined>;
+  stashPrompt?: (
+    content: string,
+    options?: { transient?: boolean },
+  ) => Promise<SessionChatStashedPrompt | undefined>;
   /*
   CDXC:SavedPrompts 2026-08-24:
   The two halves of "the prompts stashed from this conversation": how many
@@ -247,7 +309,9 @@ export interface SessionChatHostComposerBridge {
    * identity it was built with). Rejections are swallowed by the caller: a
    * missing count only hides the badge.
    */
-  countSessionStashedPrompts?: (agentSessionId: string | null) => Promise<number>;
+  countSessionStashedPrompts?: (
+    agentSessionId: string | null,
+  ) => Promise<number>;
   /** Opens the host's Saved Prompts surface with this session's context. */
   showStashedPrompts?: () => void;
 }
@@ -309,7 +373,7 @@ export interface SessionChatViewProps {
    */
   hostLinks?: SessionChatHostLinks;
   /** Defaults to the shared Lexical input on desktop, web, and mobile. */
-  inputBackend?: 'lexical' | 'plain';
+  inputBackend?: "lexical" | "plain";
   /** Chat-only palette. It does not change the host application's chrome. */
   theme?: SessionChatThemeSetting;
   appTheme?: SidebarThemeSetting;
@@ -323,7 +387,7 @@ export interface SessionChatViewProps {
   simpleMode?: boolean;
   onSimpleModeChange?: (enabled: boolean) => void;
   /** Presentation of the transcript search box (see SessionChatSearch). */
-  searchLayout?: 'inline' | 'overlay';
+  searchLayout?: "inline" | "overlay";
   /** Lets a native host open transcript search from its own chrome. */
   hostSearchBridge?: SessionChatHostSearchBridge;
   /** Show the composer's per-session Verbose mode action. */
@@ -355,33 +419,48 @@ export interface SessionChatViewProps {
   /** Enabled extensions whose selected placement is below this chat's composer. */
   chatBarExtensions?: readonly SessionChatBarExtension[];
   /** Per-session persisted panel state supplied by the gxserver-backed host. */
-  chatBarPanelState?: { activeExtensionId?: string; minimized: boolean; open: boolean };
+  chatBarPanelState?: {
+    activeExtensionId?: string;
+    minimized: boolean;
+    open: boolean;
+  };
   /** Persists a partial panel-state update for this session. */
-  onChatBarPanelStateChange?: (patch: { activeExtensionId?: string; minimized?: boolean; open?: boolean }) => void;
+  onChatBarPanelStateChange?: (patch: {
+    activeExtensionId?: string;
+    minimized?: boolean;
+    open?: boolean;
+  }) => void;
   /** Strict typed SDK proxy used because CEF does not inject the bridge into chat subframes. */
-  onChatBarBridgeRequest?: SessionChatExtensionPanelProps['onBridgeRequest'];
+  onChatBarBridgeRequest?: SessionChatExtensionPanelProps["onBridgeRequest"];
   className?: string;
 }
 
 function EmptyState({ detail, title }: { detail: string; title: string }) {
   return (
-    <div className='ghostex-chat-empty-state'>
-      <div className='ghostex-chat-empty-title'>{title}</div>
-      <div className='ghostex-chat-empty-detail'>{detail}</div>
+    <div className="ghostex-chat-empty-state">
+      <div className="ghostex-chat-empty-title">{title}</div>
+      <div className="ghostex-chat-empty-detail">{detail}</div>
     </div>
   );
 }
 
 function readTranscriptSelection(container: HTMLElement | null): string {
   const selection = window.getSelection();
-  if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) {
-    return '';
+  if (
+    !container ||
+    !selection ||
+    selection.isCollapsed ||
+    selection.rangeCount === 0
+  ) {
+    return "";
   }
   const commonAncestor = selection.getRangeAt(0).commonAncestorContainer;
   const commonElement =
-    commonAncestor.nodeType === Node.ELEMENT_NODE ? (commonAncestor as Element) : commonAncestor.parentElement;
+    commonAncestor.nodeType === Node.ELEMENT_NODE
+      ? (commonAncestor as Element)
+      : commonAncestor.parentElement;
   if (!commonElement || !container.contains(commonElement)) {
-    return '';
+    return "";
   }
   return selection.toString().trim();
 }
@@ -402,7 +481,11 @@ function TranscriptSelectionToolbar({
   containerRef: RefObject<HTMLDivElement | null>;
   onAddToChat: (text: string) => void;
 }) {
-  const [anchor, setAnchor] = useState<{ left: number; text: string; top: number } | null>(null);
+  const [anchor, setAnchor] = useState<{
+    left: number;
+    text: string;
+    top: number;
+  } | null>(null);
 
   useEffect(() => {
     let timer: number | undefined;
@@ -410,7 +493,12 @@ function TranscriptSelectionToolbar({
       const container = containerRef.current;
       const text = readTranscriptSelection(container);
       const selection = window.getSelection();
-      if (!container || text === '' || !selection || selection.rangeCount === 0) {
+      if (
+        !container ||
+        text === "" ||
+        !selection ||
+        selection.rangeCount === 0
+      ) {
         setAnchor(null);
         return;
       }
@@ -421,7 +509,10 @@ function TranscriptSelectionToolbar({
       }
       const containerRect = container.getBoundingClientRect();
       setAnchor({
-        left: Math.min(Math.max(rect.left + rect.width / 2 - containerRect.left, 84), containerRect.width - 84),
+        left: Math.min(
+          Math.max(rect.left + rect.width / 2 - containerRect.left, 84),
+          containerRect.width - 84,
+        ),
         text,
         top: rect.bottom - containerRect.top + 8,
       });
@@ -432,13 +523,13 @@ function TranscriptSelectionToolbar({
       window.clearTimeout(timer);
       timer = window.setTimeout(measure, 250);
     };
-    document.addEventListener('selectionchange', schedule);
+    document.addEventListener("selectionchange", schedule);
     const container = containerRef.current;
-    container?.addEventListener('scroll', schedule, true);
+    container?.addEventListener("scroll", schedule, true);
     return () => {
       window.clearTimeout(timer);
-      document.removeEventListener('selectionchange', schedule);
-      container?.removeEventListener('scroll', schedule, true);
+      document.removeEventListener("selectionchange", schedule);
+      container?.removeEventListener("scroll", schedule, true);
     };
   }, [containerRef]);
 
@@ -448,33 +539,33 @@ function TranscriptSelectionToolbar({
   // pointerdown + preventDefault acts before the tap collapses the selection.
   return (
     <div
-      className='ghostex-chat-transcript-selection-toolbar absolute z-30 flex -translate-x-1/2 select-none items-center overflow-hidden rounded-full bg-popover text-popover-foreground shadow-lg ring-1 ring-foreground/10'
+      className="ghostex-chat-transcript-selection-toolbar absolute z-30 flex -translate-x-1/2 select-none items-center overflow-hidden rounded-full bg-popover text-popover-foreground shadow-lg ring-1 ring-foreground/10"
       style={{ left: anchor.left, top: anchor.top }}
     >
       <button
-        className='flex items-center gap-1.5 px-3 py-1.5 text-sm'
+        className="flex items-center gap-1.5 px-3 py-1.5 text-sm"
         onPointerDown={(event) => {
           event.preventDefault();
           playCopySound();
-          document.execCommand('copy');
+          document.execCommand("copy");
           window.getSelection()?.removeAllRanges();
         }}
-        type='button'
+        type="button"
       >
-        <IconCopy aria-hidden='true' className='size-4' />
+        <IconCopy aria-hidden="true" className="size-4" />
         Copy
       </button>
       {addToChatEnabled ? (
         <button
-          className='flex items-center gap-1.5 border-l border-foreground/10 px-3 py-1.5 text-sm'
+          className="flex items-center gap-1.5 border-l border-foreground/10 px-3 py-1.5 text-sm"
           onPointerDown={(event) => {
             event.preventDefault();
             window.getSelection()?.removeAllRanges();
             onAddToChat(anchor.text);
           }}
-          type='button'
+          type="button"
         >
-          <IconBlockquote aria-hidden='true' className='size-4' />
+          <IconBlockquote aria-hidden="true" className="size-4" />
           Add to Chat
         </button>
       ) : null}
@@ -497,7 +588,7 @@ export function SessionChatView({
   hostSessionNoteBridge,
   onAnnotateMessage,
   hostLinks,
-  inputBackend = 'lexical',
+  inputBackend = "lexical",
   nativeSelectionMenus = false,
   onSwitchToTerminalForAgentPicker,
   onDelayedActions,
@@ -510,11 +601,11 @@ export function SessionChatView({
   sessionKey,
   sessionTitle,
   hostSearchBridge,
-  searchLayout = 'inline',
+  searchLayout = "inline",
   showNewSessionWelcomeTitle = true,
   showShortcutLabels = true,
   showVerbosePill = true,
-  theme: themeSetting = 'app',
+  theme: themeSetting = "app",
   appTheme,
   transport,
   verboseMode = false,
@@ -555,13 +646,19 @@ export function SessionChatView({
       ? readAgentEntry.agent
       : (transport.presentation?.getSnapshot().agent ?? null);
   const resolvedAgentLabel = agentLabelFromRead ?? agentLabel ?? null;
-  const slashCommands = useMemo(() => sessionChatSlashCommandsForAgent(resolvedAgentLabel), [resolvedAgentLabel]);
+  const slashCommands = useMemo(
+    () => sessionChatSlashCommandsForAgent(resolvedAgentLabel),
+    [resolvedAgentLabel],
+  );
   // The option pills type commands the "/" picker does not offer (/effort,
   // /fast). They still have to classify as commands so a dispatched pill
   // renders the same muted "Ran /model sonnet" row a typed one does.
   const slashCommandNames = useMemo(
-    () => [...slashCommands.map((command) => command.name), ...sessionChatOptionCommandNames(resolvedAgentLabel)],
-    [resolvedAgentLabel, slashCommands]
+    () => [
+      ...slashCommands.map((command) => command.name),
+      ...sessionChatOptionCommandNames(resolvedAgentLabel),
+    ],
+    [resolvedAgentLabel, slashCommands],
   );
   const chat = useSessionChat({
     commandCatalog: commandCatalog ?? slashCommandNames,
@@ -584,7 +681,7 @@ export function SessionChatView({
   signal.
   */
   const transcriptWorking = useSessionChatWorkingHold(
-    (chat.view.kind === 'ready' && chat.view.isWorking) || chat.workingSignal
+    (chat.view.kind === "ready" && chat.view.isWorking) || chat.workingSignal,
   );
   /*
   CDXC:Drafts 2026-08-28:
@@ -596,8 +693,9 @@ export function SessionChatView({
   */
   const draftAgents = chat.availableAgents;
   const draftAgentRow = useMemo(
-    () => draftAgents?.find((row) => row.agentId === chat.sessionAgentId) ?? null,
-    [chat.sessionAgentId, draftAgents]
+    () =>
+      draftAgents?.find((row) => row.agentId === chat.sessionAgentId) ?? null,
+    [chat.sessionAgentId, draftAgents],
   );
   /*
   The chat-supported family the read state names: the draft's base family when
@@ -606,17 +704,19 @@ export function SessionChatView({
   */
   const readStateAgent = draftAgentRow?.baseAgentId ?? chat.agent ?? null;
   const accountProvider = (readStateAgent ?? agentLabel)?.toLowerCase();
-  const accountsEnabled = accountProvider === 'claude' || accountProvider === 'codex';
+  const accountsEnabled =
+    accountProvider === "claude" || accountProvider === "codex";
   const chatRefresh = chat.refresh;
   useEffect(() => {
     setReadAgentEntry({ agent: readStateAgent, transport });
   }, [readStateAgent, transport]);
   const composerRef = useRef<SessionChatComposerHandle | null>(null);
-  const [workingStatusContainer, setWorkingStatusContainer] = useState<HTMLDivElement | null>(null);
+  const [workingStatusContainer, setWorkingStatusContainer] =
+    useState<HTMLDivElement | null>(null);
   const chatRootRef = useRef<HTMLDivElement | null>(null);
   const [paneFocused, setPaneFocused] = useSessionChatPaneFocus(
     chatRootRef,
-    hostComposerBridge?.providesPaneFocus === true
+    hostComposerBridge?.providesPaneFocus === true,
   );
   const [composerCollapsed, setComposerCollapsed] = useState(false);
   const composerInset = useSessionChatComposerInset(composerCollapsed);
@@ -649,7 +749,10 @@ export function SessionChatView({
   }, []);
   // Unmount, and a move to another session: a follow-up read belongs to the
   // draft it was armed for and to nothing else.
-  useEffect(() => clearDraftAgentSwitchTimers, [clearDraftAgentSwitchTimers, transport]);
+  useEffect(
+    () => clearDraftAgentSwitchTimers,
+    [clearDraftAgentSwitchTimers, transport],
+  );
   const refreshAfterDraftSwitch = useCallback((): void => {
     chatRefresh();
     // The new CLI is launched after the switch request returns.
@@ -660,7 +763,10 @@ export function SessionChatView({
   const switchDraftAgent = useMemo(() => {
     const switchAgent = transport.switchDraftAgent?.bind(transport);
     return switchAgent
-      ? async (agentId: string, launch?: { model: string; effort: string }): Promise<void> => {
+      ? async (
+          agentId: string,
+          launch?: { model: string; effort: string },
+        ): Promise<void> => {
           /*
           CDXC:Drafts 2026-08-28:
           The switch restarts the agent CLI inside the draft's pane, so the
@@ -698,7 +804,7 @@ export function SessionChatView({
     const accounts = transport.accounts?.bind(transport);
     if (!accounts) return undefined;
     return async (params) => {
-      if (params.operation !== 'select') return accounts(params);
+      if (params.operation !== "select") return accounts(params);
       composerRef.current?.flushDraft();
       clearDraftAgentSwitchTimers();
       try {
@@ -714,11 +820,13 @@ export function SessionChatView({
     return {
       getSnapshot(sessionAgentId) {
         const cached = presentation.getSnapshot().accounts;
-        return cached?.sessionAgentId === sessionAgentId && cached.data.session?.provider === accountProvider
+        return cached?.sessionAgentId === sessionAgentId &&
+          cached.data.session?.provider === accountProvider
           ? cached.data
           : undefined;
       },
-      update: (data, sessionAgentId) => presentation.update({ accounts: { data, sessionAgentId } }),
+      update: (data, sessionAgentId) =>
+        presentation.update({ accounts: { data, sessionAgentId } }),
     };
   }, [transport.presentation, accountProvider]);
   const accountState = useAccounts(
@@ -727,7 +835,7 @@ export function SessionChatView({
     accountsEnabled,
     false,
     chat.sessionAgentId,
-    retainedAccounts
+    retainedAccounts,
   );
   /*
   CDXC:AgentProviders 2026-09-15 DECISION:
@@ -747,55 +855,84 @@ export function SessionChatView({
   // A failed selection stays only to explain itself; it is not work the switch has to wait for.
   const accountSwitchReady =
     accountSwitchConfirmed &&
-    chat.pendingModelSelection?.state !== 'queued' &&
-    chat.pendingModelSelection?.state !== 'applying';
-  const accountSwitch = useAccountSwitchStatus(chat.accountSwitch, sessionKey, accountSwitchReady);
-  const accountSwitchRefreshKey = chat.accountSwitch ? `${chat.accountSwitch.id}:${chat.accountSwitch.phase}` : null;
+    chat.pendingModelSelection?.state !== "queued" &&
+    chat.pendingModelSelection?.state !== "applying";
+  const accountSwitch = useAccountSwitchStatus(
+    chat.accountSwitch,
+    sessionKey,
+    accountSwitchReady,
+  );
+  const accountSwitchRefreshKey = chat.accountSwitch
+    ? `${chat.accountSwitch.id}:${chat.accountSwitch.phase}`
+    : null;
   useEffect(() => {
-    if (accountSwitchRefreshKey && accountsEnabled) void accountState.request({ operation: 'session' });
+    if (accountSwitchRefreshKey && accountsEnabled)
+      void accountState.request({ operation: "session" });
   }, [accountSwitchRefreshKey, accountsEnabled, accountState.request]);
-  const activeAccount = accountState.data?.accounts.find((a) => a.id === accountState.data?.session?.accountId);
+  const activeAccount = accountState.data?.accounts.find(
+    (a) => a.id === accountState.data?.session?.accountId,
+  );
   const renderAccountMenu =
     accountsEnabled && transport.accounts
       ? (close: () => void) => (
-          <SessionAccountsPanel {...accountState} contextUsage={detectedOptions?.contextUsage} close={close} />
+          <SessionAccountsPanel
+            {...accountState}
+            contextUsage={detectedOptions?.contextUsage}
+            close={close}
+          />
         )
       : undefined;
-  const showNewSessionWelcome = sessionChatShowsNewSessionWelcome(chat.view.kind, chat.availableAgents !== null);
-  const initialTranscriptLoading = chat.view.kind === 'loading' && !showNewSessionWelcome;
+  const showNewSessionWelcome = sessionChatShowsNewSessionWelcome(
+    chat.view.kind,
+    chat.availableAgents !== null,
+  );
+  const initialTranscriptLoading =
+    chat.view.kind === "loading" && !showNewSessionWelcome;
   /*
   How far the blank hold has been allowed to progress. Keyed to the moment
   loading started, so it restarts from 'blank' whenever loading clears or the
   session identity changes — an already-loaded conversation never inherits a
   previous session's expired timers.
   */
-  const [loadingStage, setLoadingStage] = useState<'blank' | 'indicator' | 'retry'>('blank');
+  const [loadingStage, setLoadingStage] = useState<
+    "blank" | "indicator" | "retry"
+  >("blank");
   useEffect(() => {
-    setLoadingStage('blank');
+    setLoadingStage("blank");
     if (!initialTranscriptLoading) {
       return;
     }
-    const indicatorTimer = setTimeout(() => setLoadingStage('indicator'), LOADING_INDICATOR_DELAY_MS);
-    const retryTimer = setTimeout(() => setLoadingStage('retry'), LOADING_RETRY_DELAY_MS);
+    const indicatorTimer = setTimeout(
+      () => setLoadingStage("indicator"),
+      LOADING_INDICATOR_DELAY_MS,
+    );
+    const retryTimer = setTimeout(
+      () => setLoadingStage("retry"),
+      LOADING_RETRY_DELAY_MS,
+    );
     return () => {
       clearTimeout(indicatorTimer);
       clearTimeout(retryTimer);
     };
   }, [initialTranscriptLoading, sessionKey, transport]);
-  const { skills, skillsLoading, skillsError, requestSkills } = useSessionChatSkills(transport, chat.sessionAgentId);
+  const { skills, skillsLoading, skillsError, requestSkills } =
+    useSessionChatSkills(transport, chat.sessionAgentId);
   /*
   Composer "@" mentions. The project walk is server work, so it runs on first
   use and the answer is cached for the rest of the mount; `undefined` means
   "not listed yet" and keeps the picker in its loading state.
   */
-  const { files, filesLoading, requestFiles } = computeSessionChatFiles(transport, {
-    useState,
-    useEffect,
-    useRef,
-    useCallback,
-    useMemo,
-    useLayoutEffect,
-  });
+  const { files, filesLoading, requestFiles } = computeSessionChatFiles(
+    transport,
+    {
+      useState,
+      useEffect,
+      useRef,
+      useCallback,
+      useMemo,
+      useLayoutEffect,
+    },
+  );
   const sessionOptions = useSessionChatSessionOptions({
     agent: resolvedAgentLabel,
     /*
@@ -809,7 +946,7 @@ export function SessionChatView({
   });
   // null = this chat has never been toggled, so it follows the global setting.
   const [verboseOverride, setVerboseOverride] = useState<boolean | null>(() =>
-    readStoredSessionChatVerbose(sessionKey)
+    readStoredSessionChatVerbose(sessionKey),
   );
   useEffect(() => {
     setVerboseOverride(readStoredSessionChatVerbose(sessionKey));
@@ -820,7 +957,9 @@ export function SessionChatView({
     writeStoredSessionChatVerbose(sessionKey, next);
     setVerboseOverride(next);
   }, [sessionKey, verbose]);
-  const [summaryMode, setSummaryMode] = useState(() => readStoredSessionChatSummary(sessionKey));
+  const [summaryMode, setSummaryMode] = useState(() =>
+    readStoredSessionChatSummary(sessionKey),
+  );
   useEffect(() => {
     setSummaryMode(readStoredSessionChatSummary(sessionKey));
   }, [sessionKey]);
@@ -829,13 +968,14 @@ export function SessionChatView({
     writeStoredSessionChatSummary(sessionKey, next);
     setSummaryMode(next);
   }, [sessionKey, summaryMode]);
-  const { request: scrollToBottomRequest, label: scrollToBottomShortcutLabel } = useSessionChatScrollToBottom(
-    chatRootRef,
-    hotkeys
-  );
+  const { request: scrollToBottomRequest, label: scrollToBottomShortcutLabel } =
+    useSessionChatScrollToBottom(chatRootRef, hotkeys);
   useEffect(() => {
     const handleSummaryHotkey = (event: globalThis.KeyboardEvent): void => {
-      if (ghostexHotkeyTextFromKeyboardEvent(event) !== sessionChatSummaryToggleHotkey()) {
+      if (
+        ghostexHotkeyTextFromKeyboardEvent(event) !==
+        sessionChatSummaryToggleHotkey()
+      ) {
         return;
       }
       event.preventDefault();
@@ -844,8 +984,9 @@ export function SessionChatView({
         toggleSummary();
       }
     };
-    window.addEventListener('keydown', handleSummaryHotkey, true);
-    return () => window.removeEventListener('keydown', handleSummaryHotkey, true);
+    window.addEventListener("keydown", handleSummaryHotkey, true);
+    return () =>
+      window.removeEventListener("keydown", handleSummaryHotkey, true);
   }, [toggleSummary]);
   /*
   What the agent is actually running, confirmed by gxserver from structured
@@ -871,7 +1012,8 @@ export function SessionChatView({
   separate native window and can delete rows while this page sits idle.
   */
   const [stashedPromptCount, setStashedPromptCount] = useState(0);
-  const countSessionStashedPrompts = hostComposerBridge?.countSessionStashedPrompts;
+  const countSessionStashedPrompts =
+    hostComposerBridge?.countSessionStashedPrompts;
   const chatAgentSessionId = chat.agentSessionId;
   // Answers that land after the chat moved on must not paint the previous
   // conversation's count, so every read carries the generation it started in.
@@ -889,7 +1031,9 @@ export function SessionChatView({
         if (stashedPromptCountGenerationRef.current !== generation) {
           return;
         }
-        setStashedPromptCount(Number.isFinite(count) && count > 0 ? Math.floor(count) : 0);
+        setStashedPromptCount(
+          Number.isFinite(count) && count > 0 ? Math.floor(count) : 0,
+        );
       })
       .catch(() => {
         // A count that cannot be read only hides the badge.
@@ -911,9 +1055,9 @@ export function SessionChatView({
     const handleFocus = (): void => {
       refreshStashedPromptCount();
     };
-    window.addEventListener('focus', handleFocus);
+    window.addEventListener("focus", handleFocus);
     return () => {
-      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener("focus", handleFocus);
     };
   }, [countSessionStashedPrompts, refreshStashedPromptCount]);
   const saveTranscriptPrompt = useCallback(
@@ -924,11 +1068,11 @@ export function SessionChatView({
       setStashedPromptCount((count) => count + 1);
       refreshStashedPromptCount();
     },
-    [hostComposerBridge, refreshStashedPromptCount]
+    [hostComposerBridge, refreshStashedPromptCount],
   );
   const stashComposerDraft = useCallback((): void => {
     const composer = composerRef.current;
-    const draft = composer?.getDraft() ?? '';
+    const draft = composer?.getDraft() ?? "";
     const stashPrompt = hostComposerBridge?.stashPrompt;
     if (!stashPrompt || !draft.trim()) {
       return;
@@ -953,30 +1097,38 @@ export function SessionChatView({
   }, [hostComposerBridge, refreshStashedPromptCount]);
   const stashComposerDraftRef = useRef(stashComposerDraft);
   stashComposerDraftRef.current = stashComposerDraft;
-  const handoffComposerDraft = useCallback(async (): Promise<SessionChatComposerHandoff> => {
-    const composer = composerRef.current;
-    if (!composer) throw new Error('The Chat input is not ready.');
-    return composer.handoffDraft();
-  }, []);
+  const handoffComposerDraft =
+    useCallback(async (): Promise<SessionChatComposerHandoff> => {
+      const composer = composerRef.current;
+      if (!composer) throw new Error("The Chat input is not ready.");
+      return composer.handoffDraft();
+    }, []);
   useEffect(() => {
     if (!hostComposerBridge) {
       return;
     }
     return hostComposerBridge.register({
       setPaneFocused,
-      canRelease: () => !noteOpenRef.current && composerRef.current?.canRelease() === true,
+      canRelease: () =>
+        !noteOpenRef.current && composerRef.current?.canRelease() === true,
       prepareRelease: () =>
-        noteOpenRef.current ? Promise.resolve(null) : (composerRef.current?.prepareRelease() ?? Promise.resolve(null)),
-      clearDraft: (expectedContent) => composerRef.current?.clearDraft(expectedContent) ?? false,
+        noteOpenRef.current
+          ? Promise.resolve(null)
+          : (composerRef.current?.prepareRelease() ?? Promise.resolve(null)),
+      clearDraft: (expectedContent) =>
+        composerRef.current?.clearDraft(expectedContent) ?? false,
       focus: () => composerRef.current?.focus(),
       handoffToTerminal: handoffComposerDraft,
       receiveDraftHandoff: (handoff) => {
         const composer = composerRef.current;
-        if (!composer) return Promise.reject(new Error('The Chat input is not ready.'));
+        if (!composer)
+          return Promise.reject(new Error("The Chat input is not ready."));
         return composer.receiveDraftHandoff(handoff);
       },
-      insertPrompt: (content) => composerRef.current?.insertSavedPrompt(content) ?? false,
-      appendPrompt: (content) => composerRef.current?.appendText(content) ?? false,
+      insertPrompt: (content) =>
+        composerRef.current?.insertSavedPrompt(content) ?? false,
+      appendPrompt: (content) =>
+        composerRef.current?.appendText(content) ?? false,
       requestStash: () => stashComposerDraftRef.current(),
     });
   }, [handoffComposerDraft, hostComposerBridge, setPaneFocused]);
@@ -985,23 +1137,27 @@ export function SessionChatView({
     (empty: boolean) => {
       reportDraftState?.({ empty });
     },
-    [reportDraftState]
+    [reportDraftState],
   );
   const pasteImage = useMemo(() => {
     const saveImage = transport.saveImage?.bind(transport);
     return saveImage
-      ? async (payload: { base64Data: string; suggestedName?: string }) => (await saveImage(payload)).path
+      ? async (payload: { base64Data: string; suggestedName?: string }) =>
+          (await saveImage(payload)).path
       : undefined;
   }, [transport]);
   const attachFile = useMemo(() => {
     const saveAttachment = transport.saveAttachment?.bind(transport);
     return saveAttachment
-      ? async (payload: { base64Data: string; suggestedName?: string }) => (await saveAttachment(payload)).path
+      ? async (payload: { base64Data: string; suggestedName?: string }) =>
+          (await saveAttachment(payload)).path
       : undefined;
   }, [transport]);
   const pickPaths = useMemo(() => {
     const pickAttachmentPaths = transport.pickAttachmentPaths?.bind(transport);
-    return pickAttachmentPaths ? () => pickAttachmentPaths() : undefined;
+    return pickAttachmentPaths
+      ? (selection?: "files" | "folders") => pickAttachmentPaths(selection)
+      : undefined;
   }, [transport]);
   const nativeDropPaths = useMemo(() => {
     const readDropPaths = transport.readDropPaths?.bind(transport);
@@ -1009,7 +1165,9 @@ export function SessionChatView({
   }, [transport]);
   const saveImageAs = useMemo(() => {
     const save = transport.saveImageAs?.bind(transport);
-    return save ? (params: { base64Data: string; suggestedName: string }) => save(params) : undefined;
+    return save
+      ? (params: { base64Data: string; suggestedName: string }) => save(params)
+      : undefined;
   }, [transport]);
   const listMessageMarkdownPaths = useMemo(() => {
     const list = transport.listMessageMarkdownPaths?.bind(transport);
@@ -1017,7 +1175,9 @@ export function SessionChatView({
   }, [transport]);
   const saveMessageMarkdown = useMemo(() => {
     const save = transport.saveMessageMarkdown?.bind(transport);
-    return save ? (params: { content: string; path: string }) => save(params) : undefined;
+    return save
+      ? (params: { content: string; path: string }) => save(params)
+      : undefined;
   }, [transport]);
   /*
   CDXC:SessionChat 2026-08-26:
@@ -1040,7 +1200,8 @@ export function SessionChatView({
     return load ? () => load() : undefined;
   }, [transport]);
   const readSubagent = useMemo(() => {
-    if (readStateAgent !== 'codex' && readStateAgent !== 'claude') return undefined;
+    if (readStateAgent !== "codex" && readStateAgent !== "claude")
+      return undefined;
     return transport.readSubagent?.bind(transport);
   }, [readStateAgent, transport]);
 
@@ -1076,7 +1237,9 @@ export function SessionChatView({
     return save ? (note: string) => save(note) : undefined;
   }, [transport]);
   const sessionNoteAvailable =
-    readSessionNote !== undefined && saveSessionNote !== undefined && chat.agentSessionId !== null;
+    readSessionNote !== undefined &&
+    saveSessionNote !== undefined &&
+    chat.agentSessionId !== null;
   const [sessionNoteHasText, setSessionNoteHasText] = useState(false);
   const sessionNotePresenceGenerationRef = useRef(0);
   const refreshSessionNotePresence = useCallback((): void => {
@@ -1089,7 +1252,7 @@ export function SessionChatView({
         if (sessionNotePresenceGenerationRef.current !== generation) {
           return;
         }
-        setSessionNoteHasText((result.note ?? '').trim() !== '');
+        setSessionNoteHasText((result.note ?? "").trim() !== "");
       })
       .catch(() => {
         // Keep the last known indicator state when the daemon cannot be read.
@@ -1102,14 +1265,19 @@ export function SessionChatView({
     sessionNotePresenceGenerationRef.current += 1;
     setSessionNoteHasText(false);
     refreshSessionNotePresence();
-  }, [chat.agentSessionId, refreshSessionNotePresence, sessionNoteAvailable, transport]);
+  }, [
+    chat.agentSessionId,
+    refreshSessionNotePresence,
+    sessionNoteAvailable,
+    transport,
+  ]);
   useEffect(() => {
     if (!sessionNoteAvailable) {
       return;
     }
     const handleFocus = (): void => refreshSessionNotePresence();
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
   }, [refreshSessionNotePresence, sessionNoteAvailable]);
   const toggleSessionNote = useCallback((): void => {
     setNoteOpen((open) => !open);
@@ -1128,19 +1296,32 @@ export function SessionChatView({
     });
   }, [hostSessionNoteBridge, sessionNoteAvailable]);
   const [questionActive, setQuestionActive] = useState(false);
-  useSessionChatCardFocus(chatRootRef, composerRef, !questionActive, sessionKey);
+  useSessionChatCardFocus(
+    chatRootRef,
+    composerRef,
+    !questionActive,
+    sessionKey,
+  );
   const diagnosticLogRef = useRef(diagnosticLog);
   diagnosticLogRef.current = diagnosticLog;
   // Track transcript and question transitions alongside composer focus events.
-  const promptKind = chat.prompt?.kind ?? 'none';
+  const promptKind = chat.prompt?.kind ?? "none";
   useEffect(() => {
-    diagnosticLogRef.current?.('sessionChat.promptKindChanged', { kind: promptKind });
+    diagnosticLogRef.current?.("sessionChat.promptKindChanged", {
+      kind: promptKind,
+    });
   }, [promptKind]);
   useEffect(() => {
-    diagnosticLogRef.current?.('sessionChat.questionActiveChanged', { active: questionActive });
+    diagnosticLogRef.current?.("sessionChat.questionActiveChanged", {
+      active: questionActive,
+    });
   }, [questionActive]);
   const viewKind = chat.view.kind;
-  const previousViewRef = useRef<{ sessionKey: string | undefined; kind: string; atMs: number } | null>(null);
+  const previousViewRef = useRef<{
+    sessionKey: string | undefined;
+    kind: string;
+    atMs: number;
+  } | null>(null);
   // The inputs selectSessionChatViewState decided from, snapshotted every
   // render so the kind-change breadcrumb reports the values that produced it.
   const viewKindInputsRef = useRef<Record<string, unknown>>({});
@@ -1158,23 +1339,31 @@ export function SessionChatView({
     const regressed =
       previous !== null &&
       previous.sessionKey === sessionKey &&
-      ['ready', 'empty', 'starting'].includes(previous.kind) &&
-      viewKind === 'loading';
+      ["ready", "empty", "starting"].includes(previous.kind) &&
+      viewKind === "loading";
     const details = {
       kind: viewKind,
       previousKind: previous?.kind ?? null,
       previousStateDurationMs: previous ? atMs - previous.atMs : null,
       ...viewKindInputsRef.current,
     };
-    diagnosticLogRef.current?.('sessionChat.viewKindChanged', details);
-    if (regressed) diagnosticLogRef.current?.('sessionChat.loadingRegressionWarning', details);
+    diagnosticLogRef.current?.("sessionChat.viewKindChanged", details);
+    if (regressed)
+      diagnosticLogRef.current?.(
+        "sessionChat.loadingRegressionWarning",
+        details,
+      );
     previousViewRef.current = { sessionKey, kind: viewKind, atMs };
   }, [sessionKey, viewKind]);
   useEffect(() => {
-    diagnosticLogRef.current?.('sessionChat.loadingStageChanged', { stage: loadingStage });
+    diagnosticLogRef.current?.("sessionChat.loadingStageChanged", {
+      stage: loadingStage,
+    });
   }, [loadingStage]);
   useEffect(() => {
-    diagnosticLogRef.current?.('sessionChat.workingChanged', { working: chat.working });
+    diagnosticLogRef.current?.("sessionChat.workingChanged", {
+      working: chat.working,
+    });
   }, [chat.working]);
   // Cards stacked above the composer own their own visibility (per-detection
   // dismissal, prompt identity), so each reports it back here. While one is up
@@ -1183,8 +1372,10 @@ export function SessionChatView({
   const [noticeCardVisible, setNoticeCardVisible] = useState(false);
   const [interactiveCardVisible, setInteractiveCardVisible] = useState(false);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
-  const [transcriptSelection, setTranscriptSelection] = useState('');
-  const [transcriptFilePath, setTranscriptFilePath] = useState<string | null>(null);
+  const [transcriptSelection, setTranscriptSelection] = useState("");
+  const [transcriptFilePath, setTranscriptFilePath] = useState<string | null>(
+    null,
+  );
   const [transcriptWebUrl, setTranscriptWebUrl] = useState<string | null>(null);
 
   const interrupt = useCallback((): void => {
@@ -1196,8 +1387,9 @@ export function SessionChatView({
   // interactive card's Allow/Deny buttons use.
   const chatAnswerPrompt = chat.answerPrompt;
   const sendNoticeKeys = useCallback(
-    (send: string): Promise<void> => chatAnswerPrompt({ approvalSend: send, kind: 'approval' }),
-    [chatAnswerPrompt]
+    (send: string): Promise<void> =>
+      chatAnswerPrompt({ approvalSend: send, kind: "approval" }),
+    [chatAnswerPrompt],
   );
 
   /*
@@ -1210,7 +1402,9 @@ export function SessionChatView({
   */
   const noticeKey = sessionChatTerminalNoticeDismissKey(chat.terminalNotice);
   const [retiredNoticeKey, setRetiredNoticeKey] = useState<string | null>(null);
-  const [answeredApprovalKey, setAnsweredApprovalKey] = useState<string | null>(null);
+  const [answeredApprovalKey, setAnsweredApprovalKey] = useState<string | null>(
+    null,
+  );
   useEffect(() => {
     if (chat.prompt === null) {
       setAnsweredApprovalKey(null);
@@ -1219,8 +1413,13 @@ export function SessionChatView({
   const answerNoticeChoice = useCallback(
     async (choiceIndex: number): Promise<void> => {
       try {
-        await chatAnswerPrompt(terminalNoticeChoiceAnswer(chat.terminalNotice, choiceIndex));
-        if (chat.terminalNotice?.kind === 'permissionPrompt' && chat.prompt?.kind === 'approval') {
+        await chatAnswerPrompt(
+          terminalNoticeChoiceAnswer(chat.terminalNotice, choiceIndex),
+        );
+        if (
+          chat.terminalNotice?.kind === "permissionPrompt" &&
+          chat.prompt?.kind === "approval"
+        ) {
           setAnsweredApprovalKey(sessionChatCardDismissKey(chat.prompt));
         }
       } catch (error) {
@@ -1238,7 +1437,7 @@ export function SessionChatView({
         throw error;
       }
     },
-    [chat.prompt, chat.terminalNotice, chatAnswerPrompt, noticeKey]
+    [chat.prompt, chat.terminalNotice, chatAnswerPrompt, noticeKey],
   );
   const terminalChoicePending =
     ((chat.terminalNotice?.choices?.length ?? 0) > 0 ||
@@ -1258,18 +1457,28 @@ export function SessionChatView({
   from resurfacing stale once the notice retires.
   */
   const interactivePrompt =
-    (terminalChoicePending && chat.terminalNotice?.kind === 'permissionPrompt' && chat.prompt?.kind === 'approval') ||
-    (chat.prompt?.kind === 'approval' && sessionChatCardDismissKey(chat.prompt) === answeredApprovalKey)
+    (terminalChoicePending &&
+      chat.terminalNotice?.kind === "permissionPrompt" &&
+      chat.prompt?.kind === "approval") ||
+    (chat.prompt?.kind === "approval" &&
+      sessionChatCardDismissKey(chat.prompt) === answeredApprovalKey)
       ? null
       : chat.prompt;
   const [sessionOptionSwitching, setSessionOptionSwitching] = useState(false);
   const [contextDetailsOpen, setContextDetailsOpen] = useState(false);
-  const contextDetailsAgent: ContextDetailsAgent = accountProvider === 'codex' ? 'codex' : 'claude';
-  const contextDetailsPreferences = useSessionChatContextDetailsPreferences(contextDetailsAgent);
+  const contextDetailsAgent: ContextDetailsAgent =
+    accountProvider === "codex" ? "codex" : "claude";
+  const contextDetailsPreferences =
+    useSessionChatContextDetailsPreferences(contextDetailsAgent);
   const contextDetailsNow = useSessionChatContextDetailsClock();
   const contextDetailsStatus = useMemo(
-    () => resolveContextDetailStatus(contextDetailsAgent, chat.selectedOptions, activeAccount),
-    [contextDetailsAgent, chat.selectedOptions, activeAccount]
+    () =>
+      resolveContextDetailStatus(
+        contextDetailsAgent,
+        chat.selectedOptions,
+        activeAccount,
+      ),
+    [contextDetailsAgent, chat.selectedOptions, activeAccount],
   );
   const contextDetailsSession = useMemo<SessionChatContextDetailSession>(
     () => ({
@@ -1279,7 +1488,7 @@ export function SessionChatView({
       // (null, not undefined, on a promoted session).
       draft: chat.availableAgents !== null,
     }),
-    [chat.agentSessionId, chat.availableAgents, sessionTitle]
+    [chat.agentSessionId, chat.availableAgents, sessionTitle],
   );
   const starredContextDetails = useMemo(
     () =>
@@ -1288,15 +1497,29 @@ export function SessionChatView({
         contextDetailsPreferences,
         contextDetailsNow,
         contextDetailsSession,
-        contextDetailsAgent
+        contextDetailsAgent,
       ),
-    [contextDetailsStatus, contextDetailsAgent, contextDetailsNow, contextDetailsPreferences, contextDetailsSession]
+    [
+      contextDetailsStatus,
+      contextDetailsAgent,
+      contextDetailsNow,
+      contextDetailsPreferences,
+      contextDetailsSession,
+    ],
   );
   const hasConfiguredStatusLineItems = useMemo(
-    () => orderedSessionChatStarredRows(contextDetailsPreferences, contextDetailsAgent).length > 0,
-    [contextDetailsAgent, contextDetailsPreferences]
+    () =>
+      orderedSessionChatStarredRows(
+        contextDetailsPreferences,
+        contextDetailsAgent,
+      ).length > 0,
+    [contextDetailsAgent, contextDetailsPreferences],
   );
-  const composerEnabled = canSend && !terminalChoicePending && !sessionOptionSwitching && !accountSwitch.busy;
+  const composerEnabled =
+    canSend &&
+    !terminalChoicePending &&
+    !sessionOptionSwitching &&
+    !accountSwitch.busy;
   /*
   CDXC:SessionChat 2026-09-03:
   `composerEnabled` gates only the actions that reach the agent (send, queue,
@@ -1329,17 +1552,24 @@ export function SessionChatView({
   */
   const rewindSessionChat = useMemo(() => {
     const rewind = transport.rewindSessionChat?.bind(transport);
-    return rewind ? (params: { messageId: string }) => rewind(params) : undefined;
+    return rewind
+      ? (params: { messageId: string }) => rewind(params)
+      : undefined;
   }, [transport]);
-  const rewindToMessage = readStateAgent === 'claude' || readStateAgent === 'codex' ? rewindSessionChat : undefined;
-  const canRewind = composerEnabled && (readStateAgent !== 'codex' || !chat.sessionWorking);
-  const rewindAgent: 'claude' | 'codex' = readStateAgent === 'codex' ? 'codex' : 'claude';
+  const rewindToMessage =
+    readStateAgent === "claude" || readStateAgent === "codex"
+      ? rewindSessionChat
+      : undefined;
+  const canRewind =
+    composerEnabled && (readStateAgent !== "codex" || !chat.sessionWorking);
+  const rewindAgent: "claude" | "codex" =
+    readStateAgent === "codex" ? "codex" : "claude";
   // CDXC:AgentScreenDetection 2026-09-03 WHY: same two gates as the
   // rewind — a host route to `/api/selectSessionChatModel`, and a Codex
   // session, the only agent whose picker the daemon knows how to drive.
   const pickModel = useMemo(() => {
     const select = transport.selectSessionChatModel?.bind(transport);
-    return select && readStateAgent === 'codex'
+    return select && readStateAgent === "codex"
       ? async (params: { model: string; effort: string }) => {
           await select(params);
         }
@@ -1369,16 +1599,16 @@ export function SessionChatView({
     (prompt: string): void => {
       chatRefresh();
       const composer = composerRef.current;
-      if (composer === null || prompt === '') {
+      if (composer === null || prompt === "") {
         return;
       }
       const draft = composer.getDraft();
-      if (draft !== '' && draft.trim() === '') {
+      if (draft !== "" && draft.trim() === "") {
         composer.clearDraft(draft);
       }
       composer.appendText(prompt);
     },
-    [chatRefresh]
+    [chatRefresh],
   );
 
   // A command the user types themselves reconciles the pills (§1.4), so the
@@ -1387,7 +1617,10 @@ export function SessionChatView({
   const reconcileTypedCommand = sessionOptions.reconcileTypedCommand;
   const isDraft = draftAgents !== null;
   const send = useCallback(
-    async (text: string, draftVersion?: SessionChatDraftVersion): Promise<void> => {
+    async (
+      text: string,
+      draftVersion?: SessionChatDraftVersion,
+    ): Promise<void> => {
       await sendSessionChatOptionAware(text, draftVersion, {
         reconcileTypedCommand,
         send: (text, version) => chatSend(text, undefined, version),
@@ -1403,7 +1636,7 @@ export function SessionChatView({
       once the conversation exists.
       */
     },
-    [chatRefresh, chatSend, isDraft, reconcileTypedCommand]
+    [chatRefresh, chatSend, isDraft, reconcileTypedCommand],
   );
 
   /*
@@ -1439,9 +1672,11 @@ export function SessionChatView({
         changed = true;
         return [];
       }
-      if (action.id === 'switchAccount' && action.items === undefined) {
+      if (action.id === "switchAccount" && action.items === undefined) {
         changed = true;
-        return accountItems.length > 0 ? [{ ...action, items: accountItems }] : [];
+        return accountItems.length > 0
+          ? [{ ...action, items: accountItems }]
+          : [];
       }
       return [action];
     });
@@ -1452,7 +1687,11 @@ export function SessionChatView({
   // selection. Card buttons keep activation keys; inputs and open pickers own theirs.
   const handleKeyDownCapture = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-      if (event.defaultPrevented || questionActive || event.nativeEvent.isComposing) {
+      if (
+        event.defaultPrevented ||
+        questionActive ||
+        event.nativeEvent.isComposing
+      ) {
         return;
       }
       const target = event.target as HTMLElement | null;
@@ -1466,13 +1705,13 @@ export function SessionChatView({
       Text fields keep their own Enter; an open menu, dialog or picker keeps its own Enter for item selection.
       */
       if (
-        event.key === 'Enter' &&
+        event.key === "Enter" &&
         !event.metaKey &&
         !event.ctrlKey &&
         !sessionChatKeyboardPopupOpen(event.currentTarget)
       ) {
         if (event.shiftKey) {
-          if (!event.altKey && composerRef.current?.insertTypedText('\n')) {
+          if (!event.altKey && composerRef.current?.insertTypedText("\n")) {
             composerRef.current.focus();
             event.preventDefault();
             event.stopPropagation();
@@ -1491,12 +1730,23 @@ export function SessionChatView({
       if (interactiveTarget) {
         if (!sessionChatCardButtonAllowsTyping(interactiveTarget)) return;
         // Space, Tab and arrows still activate or navigate the card.
-        const typing = event.key.length === 1 && event.key !== ' ' && !event.metaKey && !event.ctrlKey;
+        const typing =
+          event.key.length === 1 &&
+          event.key !== " " &&
+          !event.metaKey &&
+          !event.ctrlKey;
         if (!typing && !editingShortcut) return;
       }
       if (sessionChatKeyboardPopupOpen(event.currentTarget)) return;
-      if (editingShortcut === 'copy' || editingShortcut === 'cut' || editingShortcut === 'paste') {
-        if (editingShortcut === 'paste' || !sessionChatHasTranscriptSelection(event.currentTarget)) {
+      if (
+        editingShortcut === "copy" ||
+        editingShortcut === "cut" ||
+        editingShortcut === "paste"
+      ) {
+        if (
+          editingShortcut === "paste" ||
+          !sessionChatHasTranscriptSelection(event.currentTarget)
+        ) {
           composerRef.current?.focus();
         }
         // Keep the trusted browser clipboard event, including image payloads.
@@ -1507,23 +1757,36 @@ export function SessionChatView({
         event.stopPropagation();
         return;
       }
-      if (event.key.startsWith('Arrow') && composerRef.current?.navigateCaret(event.nativeEvent)) {
+      if (
+        event.key.startsWith("Arrow") &&
+        composerRef.current?.navigateCaret(event.nativeEvent)
+      ) {
         event.preventDefault();
         event.stopPropagation();
         return;
       }
-      if ((event.key === 'Backspace' || event.key === 'Delete') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (
+        (event.key === "Backspace" || event.key === "Delete") &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
         composerRef.current?.focus();
         return;
       }
-      if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.nativeEvent.isComposing) {
+      if (
+        event.key.length === 1 &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.nativeEvent.isComposing
+      ) {
         if (composerRef.current?.insertTypedText(event.key)) {
           event.preventDefault();
           event.stopPropagation();
         }
       }
     },
-    [questionActive]
+    [questionActive],
   );
 
   // Pasting after a click on the pane background lands in the composer too,
@@ -1536,7 +1799,10 @@ export function SessionChatView({
       }
       const target = event.target as HTMLElement | null;
       const interactiveTarget = target?.closest?.(INTERACTIVE_TARGET_SELECTOR);
-      if (interactiveTarget && !sessionChatCardButtonAllowsTyping(interactiveTarget)) {
+      if (
+        interactiveTarget &&
+        !sessionChatCardButtonAllowsTyping(interactiveTarget)
+      ) {
         return;
       }
       if (sessionChatKeyboardPopupOpen(event.currentTarget)) return;
@@ -1545,7 +1811,7 @@ export function SessionChatView({
         event.stopPropagation();
       }
     },
-    [questionActive]
+    [questionActive],
   );
 
   const handleCopyCutCapture = useCallback(
@@ -1553,62 +1819,91 @@ export function SessionChatView({
       if (event.defaultPrevented || questionActive) return;
       const target = event.target as HTMLElement | null;
       const interactiveTarget = target?.closest?.(INTERACTIVE_TARGET_SELECTOR);
-      if (interactiveTarget && !sessionChatCardButtonAllowsTyping(interactiveTarget)) return;
-      if (sessionChatKeyboardPopupOpen(event.currentTarget) || sessionChatHasTranscriptSelection(event.currentTarget))
+      if (
+        interactiveTarget &&
+        !sessionChatCardButtonAllowsTyping(interactiveTarget)
+      )
         return;
-      if (composerRef.current?.copyClipboard(event.clipboardData, event.type === 'cut')) {
+      if (
+        sessionChatKeyboardPopupOpen(event.currentTarget) ||
+        sessionChatHasTranscriptSelection(event.currentTarget)
+      )
+        return;
+      if (
+        composerRef.current?.copyClipboard(
+          event.clipboardData,
+          event.type === "cut",
+        )
+      ) {
         event.preventDefault();
         event.stopPropagation();
       }
     },
-    [questionActive]
+    [questionActive],
   );
 
   const handleDragOverCapture = useCallback(
     (event: DragEvent<HTMLDivElement>): void => {
-      if ((!attachFile && !pickPaths) || questionActive || !sessionChatDataTransferHasFiles(event.dataTransfer)) {
+      if (
+        (!attachFile && !pickPaths) ||
+        questionActive ||
+        !sessionChatDataTransferHasFiles(event.dataTransfer)
+      ) {
         return;
       }
       event.preventDefault();
-      event.dataTransfer.dropEffect = 'copy';
+      event.dataTransfer.dropEffect = "copy";
     },
-    [attachFile, pickPaths, questionActive]
+    [attachFile, pickPaths, questionActive],
   );
 
   const handleDropCapture = useCallback(
     (event: DragEvent<HTMLDivElement>): void => {
-      if (questionActive || !composerRef.current?.attachDroppedFiles(event.dataTransfer)) {
+      if (
+        questionActive ||
+        !composerRef.current?.attachDroppedFiles(event.dataTransfer)
+      ) {
         return;
       }
       event.preventDefault();
       event.stopPropagation();
     },
-    [questionActive]
+    [questionActive],
   );
 
-  const captureTranscriptContext = useCallback((event: MouseEvent<HTMLDivElement>): void => {
-    setTranscriptSelection(readTranscriptSelection(transcriptRef.current));
-    const target = event.target instanceof Element ? event.target : null;
-    const fileChip = target?.closest(`[${SESSION_CHAT_FILE_PATH_ATTRIBUTE}]`);
-    const webLink = target?.closest(`[${SESSION_CHAT_WEB_URL_ATTRIBUTE}]`);
-    setTranscriptFilePath(
-      fileChip && event.currentTarget.contains(fileChip)
-        ? fileChip.getAttribute(SESSION_CHAT_FILE_PATH_ATTRIBUTE)
-        : null
-    );
-    setTranscriptWebUrl(
-      webLink && event.currentTarget.contains(webLink) ? webLink.getAttribute(SESSION_CHAT_WEB_URL_ATTRIBUTE) : null
-    );
-  }, []);
+  const captureTranscriptContext = useCallback(
+    (event: MouseEvent<HTMLDivElement>): void => {
+      setTranscriptSelection(readTranscriptSelection(transcriptRef.current));
+      const target = event.target instanceof Element ? event.target : null;
+      const fileChip = target?.closest(`[${SESSION_CHAT_FILE_PATH_ATTRIBUTE}]`);
+      const webLink = target?.closest(`[${SESSION_CHAT_WEB_URL_ATTRIBUTE}]`);
+      setTranscriptFilePath(
+        fileChip && event.currentTarget.contains(fileChip)
+          ? fileChip.getAttribute(SESSION_CHAT_FILE_PATH_ATTRIBUTE)
+          : null,
+      );
+      setTranscriptWebUrl(
+        webLink && event.currentTarget.contains(webLink)
+          ? webLink.getAttribute(SESSION_CHAT_WEB_URL_ATTRIBUTE)
+          : null,
+      );
+    },
+    [],
+  );
 
   const copyTranscriptSelection = useCallback((): void => {
-    if (transcriptSelection === '') {
+    if (transcriptSelection === "") {
       return;
     }
     playCopySound();
-    void navigator.clipboard.writeText(transcriptSelection).catch((error: unknown) => {
-      console.error('[session-chat] transcript clipboard write failed', error);
-    });
+    void navigator.clipboard
+      .writeText(transcriptSelection)
+      .catch((error: unknown) => {
+        console.error(
+          "[session-chat] transcript clipboard write failed",
+          error,
+        );
+      });
   }, [transcriptSelection]);
 
   /*
@@ -1617,7 +1912,11 @@ export function SessionChatView({
   */
   const addTranscriptTextToChat = useCallback((text: string): boolean => {
     const composer = composerRef.current;
-    return text !== '' && composer !== null && composer.appendText(sessionChatTranscriptQuote(text));
+    return (
+      text !== "" &&
+      composer !== null &&
+      composer.appendText(sessionChatTranscriptQuote(text))
+    );
   }, []);
 
   const addTranscriptSelectionToChat = useCallback((): void => {
@@ -1632,13 +1931,19 @@ export function SessionChatView({
   The loading branch must share the composer and its host bridge with every other transcript state.
   */
   const emptyKind =
-    chat.view.kind === 'ready' ? null : chat.view.kind === 'error' ? ('error' as const) : chat.view.kind;
+    chat.view.kind === "ready"
+      ? null
+      : chat.view.kind === "error"
+        ? ("error" as const)
+        : chat.view.kind;
   const bottomCardVisible = noticeCardVisible || interactiveCardVisible;
 
   return (
     <SessionChatPresentationProvider
       fileEditPreviews={fileEditPreviews}
-      preserveAgentLineBreaks={sessionChatPreservesAgentLineBreaks(readStateAgent ?? agentLabel ?? chat.sessionAgentId)}
+      preserveAgentLineBreaks={sessionChatPreservesAgentLineBreaks(
+        readStateAgent ?? agentLabel ?? chat.sessionAgentId,
+      )}
       simpleMode={simpleMode}
       onSimpleModeChange={onSimpleModeChange}
     >
@@ -1650,15 +1955,20 @@ export function SessionChatView({
               // shadcn default inside the chat so bubbles and cards keep their
               // rounded look. The scope class lifts the SquareTheme border-radius
               // override (packages/core-ui/styles.css) for controls inside the chat.
-              'ghostex-session-chat-scope relative flex h-full min-h-0 flex-col bg-background text-foreground outline-none [--radius:0.625rem]',
-              theme === 'dark' && 'dark',
-              className
+              "ghostex-session-chat-scope relative flex h-full min-h-0 flex-col bg-background text-foreground outline-none [--radius:0.625rem]",
+              theme === "dark" && "dark",
+              className,
             )}
-            data-chat-custom-transcript-width={customTranscriptWidthEnabled ? 'true' : 'false'}
+            data-chat-custom-transcript-width={
+              customTranscriptWidthEnabled ? "true" : "false"
+            }
             data-chat-theme={theme}
             {...(nativeSelectionMenus
               ? {}
-              : { onContextMenu: (event: MouseEvent<HTMLDivElement>) => event.preventDefault() })}
+              : {
+                  onContextMenu: (event: MouseEvent<HTMLDivElement>) =>
+                    event.preventDefault(),
+                })}
             onKeyDownCapture={handleKeyDownCapture}
             onPasteCapture={handlePasteCapture}
             onCopyCapture={handleCopyCutCapture}
@@ -1672,23 +1982,33 @@ export function SessionChatView({
               onClosed={() => {
                 // The thumbnail that opened the picture still holds DOM focus;
                 // left there, the next Enter would open the picture again.
-                window.requestAnimationFrame(() => composerRef.current?.focus());
+                window.requestAnimationFrame(() =>
+                  composerRef.current?.focus(),
+                );
               }}
               {...(loadImageDataUrl ? { loadImage: loadImageDataUrl } : {})}
               {...(saveImageAs ? { saveImageAs } : {})}
               {...(sessionTitle ? { sessionTitle } : {})}
             >
-              <SessionChatHostLinksProvider {...(hostLinks ? { links: hostLinks } : {})}>
-                <SessionChatSubagentViewer key={sessionKey} read={readSubagent} theme={theme}>
-                  <div className='relative flex min-h-0 flex-1 flex-col'>
+              <SessionChatHostLinksProvider
+                {...(hostLinks ? { links: hostLinks } : {})}
+              >
+                <SessionChatSubagentViewer
+                  key={sessionKey}
+                  read={readSubagent}
+                  theme={theme}
+                >
+                  <div className="relative flex min-h-0 flex-1 flex-col">
                     <SessionChatSearch
-                      {...(hostSearchBridge ? { hostBridge: hostSearchBridge } : {})}
+                      {...(hostSearchBridge
+                        ? { hostBridge: hostSearchBridge }
+                        : {})}
                       layout={searchLayout}
                       rootRef={chatRootRef}
                       searchRevision={chat.messages}
                     />
                     <div
-                      className='ghostex-chat-scroll-region relative flex min-h-0 flex-1 flex-col'
+                      className="ghostex-chat-scroll-region relative flex min-h-0 flex-1 flex-col"
                       ref={composerInset.hostRef}
                     >
                       {/*
@@ -1703,25 +2023,39 @@ export function SessionChatView({
                 This supersedes the 2026-08-28 thin strip above the transcript.
                 The GPUI half is apps/desktop/src/app/native_chat/fork_branches.rs.
                 */}
-                      <div className='absolute top-1.5 right-2.5 z-10 empty:hidden'>
+                      <div className="absolute top-1.5 right-2.5 z-10 empty:hidden">
                         <SessionChatForkBranchSwitcher
-                          {...(loadForkBranches ? { loadBranches: loadForkBranches } : {})}
-                          {...(onSelectForkBranch ? { onSelectBranch: onSelectForkBranch } : {})}
-                          sessionKey={sessionKey ?? 'session-chat'}
+                          {...(loadForkBranches
+                            ? { loadBranches: loadForkBranches }
+                            : {})}
+                          {...(onSelectForkBranch
+                            ? { onSelectBranch: onSelectForkBranch }
+                            : {})}
+                          sessionKey={sessionKey ?? "session-chat"}
                         />
                       </div>
-                      <div className='flex min-h-0 flex-1 flex-col'>
+                      <div className="flex min-h-0 flex-1 flex-col">
                         {initialTranscriptLoading ? (
-                          <SessionChatLoadingState stage={loadingStage} onRetry={chat.retry} />
-                        ) : chat.view.kind === 'ready' ? (
+                          <SessionChatLoadingState
+                            stage={loadingStage}
+                            onRetry={chat.retry}
+                          />
+                        ) : chat.view.kind === "ready" ? (
                           nativeSelectionMenus ? (
-                            <div className='relative flex min-h-0 flex-1 select-text' ref={transcriptRef}>
+                            <div
+                              className="relative flex min-h-0 flex-1 select-text"
+                              ref={transcriptRef}
+                            >
                               <SessionChatMessageList
                                 key={sessionKey}
                                 sessionKey={sessionKey}
                                 composerCollapsed={composerCollapsed}
                                 scrollToBottomRequest={scrollToBottomRequest}
-                                scrollToBottomShortcutLabel={showShortcutLabels ? scrollToBottomShortcutLabel : ''}
+                                scrollToBottomShortcutLabel={
+                                  showShortcutLabels
+                                    ? scrollToBottomShortcutLabel
+                                    : ""
+                                }
                                 hasMore={chat.hasMore}
                                 isWorking={transcriptWorking}
                                 loadingEarlier={chat.loadingEarlier}
@@ -1731,13 +2065,26 @@ export function SessionChatView({
                                 onRemoveStartupSend={chat.queue.removePrompt}
                                 onLoadEarlier={chat.loadEarlier}
                                 readHistory={transport.readHistory}
-                                {...(hostComposerBridge?.stashPrompt ? { onSavePrompt: saveTranscriptPrompt } : {})}
-                                {...(onAnnotateMessage ? { onAnnotateMessage } : {})}
-                                {...(listMessageMarkdownPaths ? { listMessageMarkdownPaths } : {})}
-                                {...(rewindToMessage
-                                  ? { canRewind, onRewound: holdRewoundPromptInComposer, rewindToMessage, rewindAgent }
+                                {...(hostComposerBridge?.stashPrompt
+                                  ? { onSavePrompt: saveTranscriptPrompt }
                                   : {})}
-                                {...(saveMessageMarkdown ? { saveMessageMarkdown } : {})}
+                                {...(onAnnotateMessage
+                                  ? { onAnnotateMessage }
+                                  : {})}
+                                {...(listMessageMarkdownPaths
+                                  ? { listMessageMarkdownPaths }
+                                  : {})}
+                                {...(rewindToMessage
+                                  ? {
+                                      canRewind,
+                                      onRewound: holdRewoundPromptInComposer,
+                                      rewindToMessage,
+                                      rewindAgent,
+                                    }
+                                  : {})}
+                                {...(saveMessageMarkdown
+                                  ? { saveMessageMarkdown }
+                                  : {})}
                                 sessionTitle={sessionTitle}
                                 theme={theme}
                                 summaryMode={summaryMode}
@@ -1752,14 +2099,19 @@ export function SessionChatView({
                           ) : (
                             <ContextMenu
                               onOpenChangeComplete={(open) => {
-                                if (!open && focusComposerAfterTranscriptMenuCloseRef.current) {
+                                if (
+                                  !open &&
+                                  focusComposerAfterTranscriptMenuCloseRef.current
+                                ) {
                                   focusComposerAfterTranscriptMenuCloseRef.current = false;
-                                  window.requestAnimationFrame(() => composerRef.current?.focus());
+                                  window.requestAnimationFrame(() =>
+                                    composerRef.current?.focus(),
+                                  );
                                 }
                               }}
                             >
                               <ContextMenuTrigger
-                                className='flex min-h-0 flex-1 select-text'
+                                className="flex min-h-0 flex-1 select-text"
                                 onContextMenu={captureTranscriptContext}
                                 ref={transcriptRef}
                               >
@@ -1768,7 +2120,11 @@ export function SessionChatView({
                                   sessionKey={sessionKey}
                                   composerCollapsed={composerCollapsed}
                                   scrollToBottomRequest={scrollToBottomRequest}
-                                  scrollToBottomShortcutLabel={showShortcutLabels ? scrollToBottomShortcutLabel : ''}
+                                  scrollToBottomShortcutLabel={
+                                    showShortcutLabels
+                                      ? scrollToBottomShortcutLabel
+                                      : ""
+                                  }
                                   hasMore={chat.hasMore}
                                   isWorking={transcriptWorking}
                                   loadingEarlier={chat.loadingEarlier}
@@ -1778,9 +2134,15 @@ export function SessionChatView({
                                   onRemoveStartupSend={chat.queue.removePrompt}
                                   onLoadEarlier={chat.loadEarlier}
                                   readHistory={transport.readHistory}
-                                  {...(hostComposerBridge?.stashPrompt ? { onSavePrompt: saveTranscriptPrompt } : {})}
-                                  {...(onAnnotateMessage ? { onAnnotateMessage } : {})}
-                                  {...(listMessageMarkdownPaths ? { listMessageMarkdownPaths } : {})}
+                                  {...(hostComposerBridge?.stashPrompt
+                                    ? { onSavePrompt: saveTranscriptPrompt }
+                                    : {})}
+                                  {...(onAnnotateMessage
+                                    ? { onAnnotateMessage }
+                                    : {})}
+                                  {...(listMessageMarkdownPaths
+                                    ? { listMessageMarkdownPaths }
+                                    : {})}
                                   {...(rewindToMessage
                                     ? {
                                         canRewind,
@@ -1789,7 +2151,9 @@ export function SessionChatView({
                                         rewindAgent,
                                       }
                                     : {})}
-                                  {...(saveMessageMarkdown ? { saveMessageMarkdown } : {})}
+                                  {...(saveMessageMarkdown
+                                    ? { saveMessageMarkdown }
+                                    : {})}
                                   sessionTitle={sessionTitle}
                                   theme={theme}
                                   summaryMode={summaryMode}
@@ -1799,27 +2163,35 @@ export function SessionChatView({
                               <ContextMenuContent data-chat-theme={theme}>
                                 <ContextMenuGroup>
                                   {transcriptFilePath !== null ? (
-                                    <SessionChatReferenceMenuItems filePath={transcriptFilePath} />
+                                    <SessionChatReferenceMenuItems
+                                      filePath={transcriptFilePath}
+                                    />
                                   ) : null}
                                   {transcriptWebUrl !== null ? (
-                                    <SessionChatReferenceMenuItems href={transcriptWebUrl} />
+                                    <SessionChatReferenceMenuItems
+                                      href={transcriptWebUrl}
+                                    />
                                   ) : null}
                                   {sessionChatTranscriptMenuItems({
                                     selection: transcriptSelection,
-                                    onReference: transcriptFilePath !== null || transcriptWebUrl !== null,
+                                    onReference:
+                                      transcriptFilePath !== null ||
+                                      transcriptWebUrl !== null,
                                     questionActive,
                                   }).map((item) => (
                                     <ContextMenuItem
                                       disabled={item.disabled}
                                       key={item.id}
                                       onClick={
-                                        item.id === 'copy' ? copyTranscriptSelection : addTranscriptSelectionToChat
+                                        item.id === "copy"
+                                          ? copyTranscriptSelection
+                                          : addTranscriptSelectionToChat
                                       }
                                     >
-                                      {item.id === 'copy' ? (
-                                        <IconCopy aria-hidden='true' />
+                                      {item.id === "copy" ? (
+                                        <IconCopy aria-hidden="true" />
                                       ) : (
-                                        <IconBlockquote aria-hidden='true' />
+                                        <IconBlockquote aria-hidden="true" />
                                       )}
                                       {item.label}
                                     </ContextMenuItem>
@@ -1831,44 +2203,69 @@ export function SessionChatView({
                         ) : showNewSessionWelcome ? (
                           <NewSessionWelcome
                             agentLabel={resolvedAgentLabel}
-                            {...(draftAgentRow ? { agentIcon: draftAgentRow.icon, agentName: draftAgentRow.name } : {})}
-                            showTitle={showNewSessionWelcomeTitle && !bottomCardVisible}
+                            {...(draftAgentRow
+                              ? {
+                                  agentIcon: draftAgentRow.icon,
+                                  agentName: draftAgentRow.name,
+                                }
+                              : {})}
+                            showTitle={
+                              showNewSessionWelcomeTitle && !bottomCardVisible
+                            }
                           />
                         ) : emptyKind ? (
-                          chat.view.kind === 'error' ? (
+                          chat.view.kind === "error" ? (
                             <EmptyState
-                              detail={sessionChatEmptyStateCopy('error').detail}
-                              title={sessionChatEmptyStateCopy('error').title}
+                              detail={sessionChatEmptyStateCopy("error").detail}
+                              title={sessionChatEmptyStateCopy("error").title}
                             />
                           ) : (
                             <EmptyState
-                              detail={sessionChatEmptyStateCopy(emptyKind, resolvedAgentLabel).detail}
-                              title={sessionChatEmptyStateCopy(emptyKind, resolvedAgentLabel).title}
+                              detail={
+                                sessionChatEmptyStateCopy(
+                                  emptyKind,
+                                  resolvedAgentLabel,
+                                ).detail
+                              }
+                              title={
+                                sessionChatEmptyStateCopy(
+                                  emptyKind,
+                                  resolvedAgentLabel,
+                                ).title
+                              }
                             />
                           )
                         ) : null}
                       </div>
                       {accountSwitch.visible && (
-                        <div className='gx-account-switch-overlay' data-phase={accountSwitch.visible.phase}>
-                          <div className='gx-account-switch-region'>
+                        <div
+                          className="gx-account-switch-overlay"
+                          data-phase={accountSwitch.visible.phase}
+                        >
+                          <div className="gx-account-switch-region">
                             <AccountSwitchCard
                               progress={
-                                accountState.error && accountSwitch.visible.phase === 'failed'
-                                  ? { ...accountSwitch.visible, reason: accountState.error }
+                                accountState.error &&
+                                accountSwitch.visible.phase === "failed"
+                                  ? {
+                                      ...accountSwitch.visible,
+                                      reason: accountState.error,
+                                    }
                                   : accountSwitch.visible
                               }
                               accounts={accountState.data?.accounts ?? []}
                               now={accountSwitch.now}
                               ready={accountSwitchReady}
                               retrying={accountState.busy}
-                              {...(accountSwitch.visible.phase === 'failed' &&
+                              {...(accountSwitch.visible.phase === "failed" &&
                               accountSwitch.visible.toAccountId &&
                               canSend
                                 ? {
                                     onRetry: () =>
                                       void accountState.request({
-                                        operation: 'select',
-                                        accountId: accountSwitch.visible!.toAccountId,
+                                        operation: "select",
+                                        accountId:
+                                          accountSwitch.visible!.toAccountId,
                                       }),
                                   }
                                 : {})}
@@ -1878,28 +2275,43 @@ export function SessionChatView({
                       )}
                       {/* The composer band overlays the transcript; use-session-chat-composer-inset.ts keeps the transcript's end clear beneath it. */}
                       <div
-                        className='ghostex-chat-composer-overlay absolute inset-x-0 bottom-0 z-20'
-                        data-chat-composer-overlay='true'
+                        className="ghostex-chat-composer-overlay absolute inset-x-0 bottom-0 z-20"
+                        data-chat-composer-overlay="true"
                         ref={composerInset.overlayRef}
                       >
-                        <div className='mx-auto grid w-full max-w-3xl gap-2 px-4 pt-2 pb-3'>
-                          <div className='contents' ref={setWorkingStatusContainer} />
+                        <div className="mx-auto grid w-full max-w-3xl gap-2 px-4 pt-2 pb-3">
+                          <div
+                            className="contents"
+                            ref={setWorkingStatusContainer}
+                          />
                           <SessionChatTerminalNoticeCard
                             canSend={canSend}
                             notice={chat.terminalNotice}
                             onAnswerChoice={answerNoticeChoice}
                             onAnswerDialog={chat.answerPrompt}
                             onSendKeys={sendNoticeKeys}
-                            {...(hostActions?.onFocusSession ? { onFocusSession: hostActions.onFocusSession } : {})}
+                            {...(hostActions?.onFocusSession
+                              ? { onFocusSession: hostActions.onFocusSession }
+                              : {})}
                             onVisibleChange={setNoticeCardVisible}
-                            {...(renderAccountMenu ? { renderAccountMenu } : {})}
+                            {...(renderAccountMenu
+                              ? { renderAccountMenu }
+                              : {})}
                             showShortcutLabels={showShortcutLabels}
-                            {...(sessionKey !== undefined ? { sessionKey } : {})}
+                            {...(sessionKey !== undefined
+                              ? { sessionKey }
+                              : {})}
                             {...(hostActions?.onSwitchToTerminal
-                              ? { onSwitchToTerminal: hostActions.onSwitchToTerminal }
+                              ? {
+                                  onSwitchToTerminal:
+                                    hostActions.onSwitchToTerminal,
+                                }
                               : {})}
                             {...(hostActions?.switchViewShortcut
-                              ? { switchToTerminalShortcut: hostActions.switchViewShortcut }
+                              ? {
+                                  switchToTerminalShortcut:
+                                    hostActions.switchViewShortcut,
+                                }
                               : {})}
                           />
                           <SessionChatAsyncQuestions
@@ -1910,14 +2322,26 @@ export function SessionChatView({
                             messages={chat.messages}
                             retiredIds={chat.retiredAsyncQuestionIds}
                             canSend={
-                              composerEnabled && !questionActive && chat.status !== 'error' && chat.status !== 'loading'
+                              composerEnabled &&
+                              !questionActive &&
+                              chat.status !== "error" &&
+                              chat.status !== "loading"
                             }
                             // CDXC:SessionChat 2026-09-15 WHY: A question can outlive its Codex turn. Honor task completion here so a delayed host activity update cannot label an idle question "Still working".
                             working={chat.working}
                             onSend={(questionId, text) =>
-                              chat.answerPrompt({ kind: 'asyncQuestion', questionId, text })
+                              chat.answerPrompt({
+                                kind: "asyncQuestion",
+                                questionId,
+                                text,
+                              })
                             }
-                            onDismiss={(questionId) => chat.answerPrompt({ kind: 'dismissAsyncQuestion', questionId })}
+                            onDismiss={(questionId) =>
+                              chat.answerPrompt({
+                                kind: "dismissAsyncQuestion",
+                                questionId,
+                              })
+                            }
                           />
                           <SessionChatInteractiveCard
                             theme={theme}
@@ -1942,7 +2366,9 @@ export function SessionChatView({
                   state. display:contents keeps the grid layout identical
                   when visible.
                   */}
-                          <div className={questionActive ? 'hidden' : 'contents'}>
+                          <div
+                            className={questionActive ? "hidden" : "contents"}
+                          >
                             {noteOpen && readSessionNote && saveSessionNote ? (
                               <SessionChatNotePanel
                                 /*
@@ -1964,10 +2390,15 @@ export function SessionChatView({
                             <SessionChatComposer
                               workingStatusContainer={workingStatusContainer}
                               workingStatus={{
-                                working: !accountSwitch.busy && chat.sessionWorking,
-                                activity: accountSwitch.busy ? null : chat.terminalActivity,
+                                working:
+                                  !accountSwitch.busy && chat.sessionWorking,
+                                activity: accountSwitch.busy
+                                  ? null
+                                  : chat.terminalActivity,
                                 ...(armedActions ? { armedActions } : {}),
-                                ...(onDelayedActions ? { onArmedActionClick: onDelayedActions } : {}),
+                                ...(onDelayedActions
+                                  ? { onArmedActionClick: onDelayedActions }
+                                  : {}),
                               }}
                               paneFocused={paneFocused}
                               agentFleet={chat.agentFleet}
@@ -1982,7 +2413,7 @@ export function SessionChatView({
                               nativeContextMenu={nativeSelectionMenus}
                               queue={chat.queue}
                               scrollCollapseEnabled={
-                                chat.view.kind === 'ready' &&
+                                chat.view.kind === "ready" &&
                                 !questionActive &&
                                 !nativeSelectionMenus &&
                                 !accountSwitch.visible
@@ -1997,55 +2428,101 @@ export function SessionChatView({
                               onNativeDropPaths={nativeDropPaths}
                               onPasteImage={pasteImage}
                               onPickPaths={pickPaths}
-                              {...(readTerminalTail ? { onReadTerminalTail: readTerminalTail } : {})}
+                              {...(readTerminalTail
+                                ? { onReadTerminalTail: readTerminalTail }
+                                : {})}
                               onSend={send}
                               sendOnEnter={sendOnEnter}
-                              {...(draftAwareHostActions ? { hostActions: draftAwareHostActions } : {})}
-                              {...(renderAccountMenu ? { renderAccountMenu } : {})}
-                              {...(onDelayedActions ? { onDelayedActions } : {})}
-                              {...(sessionNoteAvailable ? { onSessionNote: toggleSessionNote } : {})}
+                              {...(draftAwareHostActions
+                                ? { hostActions: draftAwareHostActions }
+                                : {})}
+                              {...(renderAccountMenu
+                                ? { renderAccountMenu }
+                                : {})}
+                              {...(onDelayedActions
+                                ? { onDelayedActions }
+                                : {})}
+                              {...(sessionNoteAvailable
+                                ? { onSessionNote: toggleSessionNote }
+                                : {})}
                               sessionNoteActive={noteOpen}
                               sessionNoteHasText={sessionNoteHasText}
                               showShortcutLabels={showShortcutLabels}
                               summaryMode={summaryMode}
                               verboseMode={verbose}
-                              {...(showVerbosePill ? { onToggleSummary: toggleSummary } : {})}
-                              {...(showVerbosePill ? { onToggleVerbose: toggleVerbose } : {})}
-                              {...(hostComposerBridge?.stashPrompt ? { onStash: stashComposerDraft } : {})}
+                              {...(showVerbosePill
+                                ? { onToggleSummary: toggleSummary }
+                                : {})}
+                              {...(showVerbosePill
+                                ? { onToggleVerbose: toggleVerbose }
+                                : {})}
+                              {...(hostComposerBridge?.stashPrompt
+                                ? { onStash: stashComposerDraft }
+                                : {})}
                               {...(hostComposerBridge?.showStashedPrompts
-                                ? { onShowStashedPrompts: hostComposerBridge.showStashedPrompts }
+                                ? {
+                                    onShowStashedPrompts:
+                                      hostComposerBridge.showStashedPrompts,
+                                  }
                                 : {})}
                               stashedPromptCount={stashedPromptCount}
-                              {...(reportDraftState ? { onDraftEmptyChange: reportComposerDraftState } : {})}
+                              {...(reportDraftState
+                                ? {
+                                    onDraftEmptyChange:
+                                      reportComposerDraftState,
+                                  }
+                                : {})}
                               optionPills={
                                 <>
                                   <SessionChatSessionOptionPills
                                     canSend={canSend}
                                     canSendKey={chat.sendKey !== undefined}
                                     controller={sessionOptions}
-                                    accountIndicator={sessionChatAccountIndicator(accountState.data)}
+                                    accountIndicator={sessionChatAccountIndicator(
+                                      accountState.data,
+                                    )}
                                     detectedOptions={detectedOptions}
                                     {...(draftAgents ? { draftAgents } : {})}
-                                    {...(chat.sessionAgentId !== null ? { draftAgentId: chat.sessionAgentId } : {})}
-                                    {...(switchDraftAgent ? { onSwitchDraftAgent: switchDraftAgent } : {})}
+                                    {...(chat.sessionAgentId !== null
+                                      ? { draftAgentId: chat.sessionAgentId }
+                                      : {})}
+                                    {...(switchDraftAgent
+                                      ? { onSwitchDraftAgent: switchDraftAgent }
+                                      : {})}
                                     isWorking={chat.working}
                                     screenProbed={chat.screenProbed}
                                     onQueueModel={queueModel}
-                                    pendingModelSelection={chat.pendingModelSelection}
+                                    pendingModelSelection={
+                                      chat.pendingModelSelection
+                                    }
                                     onDispatchCommand={send}
                                     onDispatchKey={async (key, marker) => {
                                       await chat.sendKey?.(key, marker);
                                     }}
-                                    {...(pickModel ? { onPickModel: pickModel } : {})}
-                                    contextDetailsSession={contextDetailsSession}
-                                    contextDetailsStatus={contextDetailsStatus}
-                                    onEditContextDetails={() => setContextDetailsOpen(true)}
-                                    onSwitchingChange={setSessionOptionSwitching}
-                                    onReturnFocusToComposer={() => composerRef.current?.focus()}
-                                    {...(hostActions?.onHandoffToModel
-                                      ? { onHandoffToModel: hostActions.onHandoffToModel }
+                                    {...(pickModel
+                                      ? { onPickModel: pickModel }
                                       : {})}
-                                    {...(onSwitchToTerminalForAgentPicker || hostActions?.onSwitchToTerminal
+                                    contextDetailsSession={
+                                      contextDetailsSession
+                                    }
+                                    contextDetailsStatus={contextDetailsStatus}
+                                    onEditContextDetails={() =>
+                                      setContextDetailsOpen(true)
+                                    }
+                                    onSwitchingChange={
+                                      setSessionOptionSwitching
+                                    }
+                                    onReturnFocusToComposer={() =>
+                                      composerRef.current?.focus()
+                                    }
+                                    {...(hostActions?.onHandoffToModel
+                                      ? {
+                                          onHandoffToModel:
+                                            hostActions.onHandoffToModel,
+                                        }
+                                      : {})}
+                                    {...(onSwitchToTerminalForAgentPicker ||
+                                    hostActions?.onSwitchToTerminal
                                       ? {
                                           onSwitchToTerminal:
                                             onSwitchToTerminalForAgentPicker ??
@@ -2059,13 +2536,17 @@ export function SessionChatView({
                               placeholder={sessionChatComposerPlaceholder({
                                 canSend,
                                 terminalChoicePending,
-                                controlsOnly: chat.terminalNotice?.dialog?.rows.length === 0,
+                                controlsOnly:
+                                  chat.terminalNotice?.dialog?.rows.length ===
+                                  0,
                                 noticeCardVisible,
                                 sessionOptionSwitching,
                               })}
                               ref={composerRef}
                               slashCommands={slashCommands}
-                              slashHeading={sessionChatSlashHeadingForAgent(resolvedAgentLabel)}
+                              slashHeading={sessionChatSlashHeadingForAgent(
+                                resolvedAgentLabel,
+                              )}
                               skills={skills}
                               skillsLoading={skillsLoading}
                               skillsError={skillsError}
@@ -2073,13 +2554,16 @@ export function SessionChatView({
                               files={files}
                               filesLoading={filesLoading}
                               onRequestFiles={requestFiles}
-                              skillHeading={`${draftAgentRow?.name ?? displayAgentName(resolvedAgentLabel) ?? 'Agent'} skills`}
+                              skillHeading={`${draftAgentRow?.name ?? displayAgentName(resolvedAgentLabel) ?? "Agent"} skills`}
                             />
                             <SessionChatStatusLine
                               // CDXC:SessionChat 2026-09-14 WHY: Sharing the composer's session key makes React retain duplicate composers during reconciliation; the status line needs its own per-session identity.
                               key={`session-status:${sessionKey}`}
                               hasConfiguredItems={hasConfiguredStatusLineItems}
-                              loading={chat.view.kind === 'loading' || chat.view.kind === 'starting'}
+                              loading={
+                                chat.view.kind === "loading" ||
+                                chat.view.kind === "starting"
+                              }
                               items={starredContextDetails}
                             />
                           </div>
@@ -2091,17 +2575,28 @@ export function SessionChatView({
                             status={contextDetailsStatus}
                             theme={theme}
                           />
-                          {chatBarPanelState?.open && chatBarExtensions.length > 0 ? (
+                          {chatBarPanelState?.open &&
+                          chatBarExtensions.length > 0 ? (
                             <SessionChatExtensionPanel
-                              activeExtensionId={chatBarPanelState.activeExtensionId}
+                              activeExtensionId={
+                                chatBarPanelState.activeExtensionId
+                              }
                               extensions={chatBarExtensions}
                               minimized={chatBarPanelState.minimized}
                               onActiveExtensionChange={(activeExtensionId) =>
-                                onChatBarPanelStateChange?.({ activeExtensionId, minimized: false, open: true })
+                                onChatBarPanelStateChange?.({
+                                  activeExtensionId,
+                                  minimized: false,
+                                  open: true,
+                                })
                               }
                               onBridgeRequest={onChatBarBridgeRequest}
-                              onClose={() => onChatBarPanelStateChange?.({ open: false })}
-                              onMinimizedChange={(minimized) => onChatBarPanelStateChange?.({ minimized })}
+                              onClose={() =>
+                                onChatBarPanelStateChange?.({ open: false })
+                              }
+                              onMinimizedChange={(minimized) =>
+                                onChatBarPanelStateChange?.({ minimized })
+                              }
                             />
                           ) : null}
                         </div>

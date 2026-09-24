@@ -53,6 +53,7 @@ response text may be retained here.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GpuiRemoteGxserverCapabilities {
     pub(crate) code_server_prompt_editor: bool,
+    pub(crate) browser_tcp_websocket_v1: bool,
 }
 
 pub(crate) struct GpuiRemoteGxserverConnection {
@@ -378,7 +379,6 @@ pub(crate) enum GpuiProjectSnapshotStoreResult {
 pub(crate) struct ProjectScopedWorkareaAvailability {
     pub(crate) project_context: GpuiProjectContext,
     pub(crate) project_features: GpuiProjectScopedFeatureAvailability,
-    pub(crate) active_project_is_remote: bool,
 }
 
 impl ProjectScopedWorkareaAvailability {
@@ -392,7 +392,6 @@ impl ProjectScopedWorkareaAvailability {
             project_features: GpuiProjectScopedFeatureAvailability::for_project_context(
                 project_context,
             ),
-            active_project_is_remote: false,
         }
     }
 
@@ -401,11 +400,6 @@ impl ProjectScopedWorkareaAvailability {
         Self {
             project_context: snapshot.project_context(),
             project_features: snapshot.feature_availability,
-            active_project_is_remote: snapshot.active_project_id.as_ref().is_some_and(
-                |project_id| {
-                    gpui_remote_project_reference_from_project_id(project_id.0.as_str()).is_some()
-                },
-            ),
         }
     }
 
@@ -413,15 +407,11 @@ impl ProjectScopedWorkareaAvailability {
         /*
         CDXC:Navigation 2026-07-04-01:00:
         Titlebar availability mirrors macOS: Agents and Source are always selectable; Browser, Kanban, Automate, and Docs are visible for all contexts but selectable only for real project-scoped contexts. The old Docs/Manage debuggingMode plus showBetaFeatures visibility gate must not participate in switcher visibility, activation guards, restored active-mode coercion, or persisted active-mode fallback.
-
-        CDXC:Titlebar 2026-08-20:
-        Source is the one exception: a machine-scoped remote project has no
-        working Source runtime, so it is unavailable there.
         */
         match mode {
             TitlebarMode::Agents => true,
             TitlebarMode::Extension(_) => self.project_context.has_project_scoped_workareas(),
-            TitlebarMode::Source => self.project_features.source && !self.active_project_is_remote,
+            TitlebarMode::Source => self.project_features.source,
             TitlebarMode::Browser | TitlebarMode::Kanban | TitlebarMode::Automate => {
                 self.project_context.has_project_scoped_workareas()
                     && match mode {
@@ -462,8 +452,6 @@ impl ProjectScopedWorkareaAvailability {
                 let is_available = self.titlebar_mode_available(mode);
                 let disabled_reason = if is_available {
                     None
-                } else if mode == TitlebarMode::Source && self.active_project_is_remote {
-                    Some(TITLEBAR_REMOTE_SOURCE_DISABLED_REASON)
                 } else if matches!(self.project_context, GpuiProjectContext::QuickProjectless)
                     && matches!(
                         mode,
@@ -647,16 +635,27 @@ impl SourceCodeServerRuntimeTarget {
             }
             (
                 SourceCodeServerRuntimeEndpoint::Remote {
-                    connection_generation: left_generation,
+                    component_platform: left_platform,
+                    execution_target: left_execution,
+                    machine_config: left_config,
                     remote_machine_id: left_machine,
                     ..
                 },
                 SourceCodeServerRuntimeEndpoint::Remote {
-                    connection_generation: right_generation,
+                    component_platform: right_platform,
+                    execution_target: right_execution,
+                    machine_config: right_config,
                     remote_machine_id: right_machine,
                     ..
                 },
-            ) => left_generation == right_generation && left_machine == right_machine,
+            ) => {
+                // Code's independent tunnel survives API-generation changes; request
+                // delivery still validates the exact current target and generation.
+                left_machine == right_machine
+                    && left_platform == right_platform
+                    && left_execution == right_execution
+                    && left_config == right_config
+            }
             _ => false,
         }
     }
@@ -676,7 +675,6 @@ pub(crate) enum RemotePromptEditorDeliveryTarget {
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct PendingRemotePromptEditorRequest {
-    pub(crate) shell_session_id: TerminalSessionId,
     pub(crate) remote_key: GpuiRemoteAttachSessionKey,
     pub(crate) connection_generation: u64,
     pub(crate) source_target: SourceCodeServerRuntimeTarget,
@@ -830,14 +828,14 @@ impl SourceCodeServerRuntimeOwner {
         self.pending_remote_prompt_editor_request = Some(request);
     }
 
-    pub(crate) fn cancel_remote_prompt_editor_request_for_shell_session(
+    pub(crate) fn cancel_remote_prompt_editor_request_for_remote_session(
         &mut self,
-        shell_session_id: TerminalSessionId,
+        remote_key: &GpuiRemoteAttachSessionKey,
     ) {
         if self
             .pending_remote_prompt_editor_request
             .as_ref()
-            .is_some_and(|request| request.shell_session_id == shell_session_id)
+            .is_some_and(|request| &request.remote_key == remote_key)
         {
             self.pending_remote_prompt_editor_request = None;
         }
@@ -1078,13 +1076,24 @@ impl SourceCodeServerRuntimeOwner {
         let Some(child) = self.child.as_mut() else {
             return false;
         };
-        match child.try_wait() {
+        let result = child.try_wait();
+        match &result {
             Ok(Some(_)) | Err(_) => {
+                support_logs::append_for_scenario(
+                    support_logs::GpuiSupportLog::SidebarRefresh,
+                    "native.sidebar.refresh",
+                    "gpui.codeRuntime.childExited",
+                    serde_json::json!({
+                        "generation": self.generation,
+                        "exitCode": result.as_ref().ok().and_then(|status| status.as_ref()).and_then(|status| status.code()),
+                        "waitError": result.is_err(),
+                    }),
+                );
                 self.pending_remote_prompt_editor_request = None;
                 self.child = None;
                 self.started_at = None;
-                self.state = SourceCodeServerRuntimeLaunchState::Idle;
-                self.failure = None;
+                self.state = SourceCodeServerRuntimeLaunchState::Failed;
+                self.failure = Some(SourceCodeServerRuntimeFailure::Launch);
                 self.install_progress = None;
                 self.runtime_origin = None;
                 self.prompt_editor_ipc_ready = false;
@@ -1124,5 +1133,5 @@ pub(crate) struct SourceCodeServerRuntimeStartOutput {
     pub(crate) http_runtime_ready: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct AgentsTerminalRuntimeSessionId(pub(crate) u64);

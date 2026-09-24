@@ -1,11 +1,20 @@
-import { SessionChatMarkdownSaveController } from './save-markdown';
-import { startNativeChatRecording } from './native-host-replay';
-import { listProjectMarkdownDocumentPaths, saveProjectMarkdownDocument } from '../project-docs';
-import { nativeContextTitle } from './native-context';
-import { COLLAPSED_CHOICE_COUNT, collapsedChoiceLabel } from '../session-chat-presentation/notice-choices';
-import { classifySessionChatLinkHref, sessionChatFilePositionFromHref } from '../session-chat-presentation/links';
-import { SessionChatAsyncQuestionsController } from './async-questions';
-import { canCollapseSessionChatComposer } from '../session-chat-presentation/composer-scroll';
+import { SessionChatMarkdownSaveController } from "./save-markdown";
+import { startNativeChatRecording } from "./native-host-replay";
+import {
+  listProjectMarkdownDocumentPaths,
+  saveProjectMarkdownDocument,
+} from "../project-docs";
+import { nativeContextTitle } from "./native-context";
+import {
+  COLLAPSED_CHOICE_COUNT,
+  collapsedChoiceLabel,
+} from "../session-chat-presentation/notice-choices";
+import {
+  classifySessionChatLinkHref,
+  sessionChatFilePositionFromHref,
+} from "../session-chat-presentation/links";
+import { SessionChatAsyncQuestionsController } from "./async-questions";
+import { canCollapseSessionChatComposer } from "../session-chat-presentation/composer-scroll";
 import {
   COMPOSER_SCROLL_RESET_MS,
   COMPOSER_SCROLL_THRESHOLD_PX,
@@ -14,105 +23,125 @@ import {
   resetSessionChatComposerScrollGesture,
   recordSessionChatComposerScrollGesture,
   suppressSessionChatComposerScrollGesture,
-} from '../session-chat-presentation/composer-scroll';
-import { ChatPreviewBackend } from '../session-chat-preview/backend';
-import type { ChatPreviewConfig } from '../session-chat-preview/fixture';
-import { computeSessionChatActivity } from './activity';
-import { computeSessionChatWorkingStrip } from './working-strip';
-import { NativeComposerSuggestions } from './native-suggestions';
-import { computeSessionChatSkills } from './skills';
-import { computeSessionChatFiles } from './files';
-import { balancedRowStarts } from '../session-chat-presentation/status-line-layout';
-import { nativeContextEditor, nativeContextEditorCommand } from './native-context-editor';
-import { adoptNativeChatSettings, adoptNativeContextPreferences, computeNativeChatContext } from './native-context';
-import { dispatchSessionChatOption, queueSessionChatOption } from './option-dispatch';
-import { sendSessionChatOptionAware } from './option-command';
-import { NativeModelPicker } from './native-model-picker';
-import { currentAgentModelCatalog } from '../agent-model-catalog-state';
-import { createModelPickerRequest } from '../session-chat-presentation/model-picker-request';
-import { modelSelectionUnchanged } from './model-selection';
-import { modelPickScope, modelPickerSupportsSessionScope } from '../session-chat-presentation/model-picker';
-import { modelMenuPick, modelMenuProjection } from './model-menu';
-import { adoptModelFavorites } from './model-favorites';
-import { modelPickerProvider } from '../session-chat-presentation/model-picker-request';
-import type { ModelMenuTabId } from '../session-chat-presentation/model-menu';
-import { adoptAgentModelCatalog } from '../agent-model-catalog-state';
-import { computeNativeChatOptions, nativeOptionPersistence } from './native-options';
+} from "../session-chat-presentation/composer-scroll";
+import { ChatPreviewBackend } from "../session-chat-preview/backend";
+import type { ChatPreviewConfig } from "../session-chat-preview/fixture";
+import { computeSessionChatActivity } from "./activity";
+import { computeSessionChatWorkingStrip } from "./working-strip";
+import { NativeComposerSuggestions } from "./native-suggestions";
+import { computeSessionChatSkills } from "./skills";
+import { computeSessionChatFiles } from "./files";
+import { balancedRowStarts } from "../session-chat-presentation/status-line-layout";
+import {
+  nativeContextEditor,
+  nativeContextEditorCommand,
+} from "./native-context-editor";
+import {
+  adoptNativeChatSettings,
+  adoptNativeContextPreferences,
+  computeNativeChatContext,
+} from "./native-context";
+import {
+  dispatchSessionChatOption,
+  queueSessionChatOption,
+} from "./option-dispatch";
+import { sendSessionChatOptionAware } from "./option-command";
+import { NativeModelPicker } from "./native-model-picker";
+import { currentAgentModelCatalog } from "../agent-model-catalog-state";
+import { createModelPickerRequest } from "../session-chat-presentation/model-picker-request";
+import { modelSelectionUnchanged } from "./model-selection";
+import {
+  modelPickScope,
+  modelPickerSupportsSessionScope,
+} from "../session-chat-presentation/model-picker";
+import { modelMenuPick, modelMenuProjection } from "./model-menu";
+import { adoptModelFavorites } from "./model-favorites";
+import { modelPickerProvider } from "../session-chat-presentation/model-picker-request";
+import type { ModelMenuTabId } from "../session-chat-presentation/model-menu";
+import { adoptAgentModelCatalog } from "../agent-model-catalog-state";
+import {
+  computeNativeChatOptions,
+  nativeOptionPersistence,
+} from "./native-options";
 import {
   dismissedNoticeState,
   isNoticeDismissed,
   sessionChatTerminalNoticeDismissKey,
   type DismissedNotice,
-} from './notice-state';
+} from "./notice-state";
 import {
   terminalDialogPresentation,
   terminalNoticeActionAnswer,
   terminalNoticeActionShortcutEligible,
   terminalNoticeChoiceAnswer,
-} from '../session-chat-presentation/terminal-prompts';
-import { fitChatComposerControls } from '../session-chat-presentation/composer-layout';
-import { computeNativeChatControls } from './native-controls';
+} from "../session-chat-presentation/terminal-prompts";
+import { fitChatComposerControls } from "../session-chat-presentation/composer-layout";
+import { computeNativeChatControls } from "./native-controls";
 import {
   SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS,
   sessionChatSendBlockedReason,
   sessionChatComposerPlaceholder,
   DESKTOP_SESSION_CHAT_PLACEHOLDER,
-} from './composer-policy';
-import { NativeChatPresentation } from './native-presentation';
-import { NativeSubagentViewer } from './native-subagent';
-import { NativeChatPanels } from './native-panels';
-import { NativeChatSearch } from './native-search';
-import { NativeTerminalTail } from './native-terminal-tail';
-import { NativeForkBranches } from './native-fork-branches';
-import { NativeChatMessageActions } from './native-message-actions';
-import { sessionChatAgentSupportsRewind } from '../session-chat-presentation/message-rewind';
-import { deliverChatSubmission, editQueuedChatPrompt, restoreUndeliveredChatText } from './submission';
+} from "./composer-policy";
+import { NativeChatPresentation } from "./native-presentation";
+import { NativeSubagentViewer } from "./native-subagent";
+import { NativeChatPanels } from "./native-panels";
+import { NativeChatSearch } from "./native-search";
+import { NativeTerminalTail } from "./native-terminal-tail";
+import { NativeForkBranches } from "./native-fork-branches";
+import { NativeChatMessageActions } from "./native-message-actions";
+import { sessionChatAgentSupportsRewind } from "../session-chat-presentation/message-rewind";
+import {
+  deliverChatSubmission,
+  editQueuedChatPrompt,
+  restoreUndeliveredChatText,
+} from "./submission";
 import {
   SESSION_CHAT_QUEUE_LONG_PRESS_MS,
   isSessionChatQueueRowBusy,
   sessionChatQueueRowPreview,
   moveSessionChatQueueRow,
   sessionChatQueuePromptIds,
-} from './queue';
+} from "./queue";
 import {
   EMPTY_SESSION_CHAT_COMPOSER_HISTORY,
   recallPreviousSessionChatDraft,
   recallNextSessionChatDraft,
   resetSessionChatComposerHistoryIndex,
-} from '@/packages/core-ui/chat/session-chat-composer-state';
-import { GxserverRpcError, gxserverRpcErrorCode } from '../gxserver-rpc-error';
-import type { GxserverRpcErrorCode } from '../gxserver-protocol';
+} from "@/packages/core-ui/chat/session-chat-composer-state";
+import { GxserverRpcError, gxserverRpcErrorCode } from "../gxserver-rpc-error";
+import type { GxserverRpcErrorCode } from "../gxserver-protocol";
 import {
   sessionChatCardDismissKey,
   selectQuestionOption,
   questionAnswerControls,
   type QuestionDraft,
-} from '../session-chat-presentation/interactive';
+} from "../session-chat-presentation/interactive";
 import {
   chatHostActionDefinitions,
   COMPOSER_MENU_EXCLUDED_HOST_ACTION_IDS,
   AGENT_HOST_ACTION_IDS,
-} from '../session-chat-presentation/actions';
+} from "../session-chat-presentation/actions";
 import {
   insertAnswerAttachments,
   insertChatReference,
   nativePathReference,
   removeChatReference,
-} from '../session-chat-presentation/references';
-import { nativeComposerKeyIntent } from '../session-chat-presentation/native-composer-keys';
-import { sessionChatReferenceMenuRows } from '../session-chat-presentation/reference-menu';
+} from "../session-chat-presentation/references";
+import { nativeComposerKeyIntent } from "../session-chat-presentation/native-composer-keys";
+import { sessionChatReferenceMenuRows } from "../session-chat-presentation/reference-menu";
 import {
   sessionChatAppendDraftText,
   sessionChatTranscriptMenuRows,
-} from '../session-chat-presentation/transcript-menu';
-import { sessionChatSendBlockedToastRequest } from '../session-chat-presentation/send-blocked';
-import { NativeComposerChrome } from './native-composer-chrome';
+} from "../session-chat-presentation/transcript-menu";
+import { sessionChatSendBlockedToastRequest } from "../session-chat-presentation/send-blocked";
+import { NativeComposerChrome } from "./native-composer-chrome";
 import {
   sessionChatComposerReferences,
   sessionChatReferencePillText,
-} from '../session-chat-presentation/reference-pills';
-import { flushSessionNote } from './note';
-import { sessionChatEmptyStateCopy } from '@/packages/core-ui/chat/session-chat-empty-state';
+} from "../session-chat-presentation/reference-pills";
+import { flushSessionNote } from "./note";
+import { sessionChatEmptyStateCopy } from "@/packages/core-ui/chat/session-chat-empty-state";
 import {
   SESSION_CHAT_LOADING_INDICATOR_DELAY_MS,
   SESSION_CHAT_LOADING_RETRY_DELAY_MS,
@@ -121,21 +150,35 @@ import {
   sessionChatWelcomeAgentIcon,
   sessionChatWelcomeAgentName,
   type SessionChatLoadingStage,
-} from '../session-chat-presentation/new-session-welcome';
-import { ChatTransfers } from './transfers';
-import { computeSessionChat } from './controller';
-import { ChatComputation } from './lifecycle';
-import { readWork } from '../session-chat-presentation/deferred-work';
-import type { SessionChatTransport } from '@/packages/core-ui/chat/session-chat-transport';
-import type { UseSessionChatResult } from '@/packages/core-ui/chat/use-session-chat/state';
-import { createSessionChatPresentationStore } from '@/packages/core-ui/chat/session-chat-presentation-cache';
-import type { GxserverSessionChatEvent, SessionChatMessage } from '../session-chat';
+} from "../session-chat-presentation/new-session-welcome";
+import { ChatTransfers } from "./transfers";
+import { computeSessionChat } from "./controller";
+import { ChatComputation } from "./lifecycle";
+import { readWork } from "../session-chat-presentation/deferred-work";
+import type { SessionChatTransport } from "@/packages/core-ui/chat/session-chat-transport";
+import type { UseSessionChatResult } from "@/packages/core-ui/chat/use-session-chat/state";
+import { createSessionChatPresentationStore } from "@/packages/core-ui/chat/session-chat-presentation-cache";
+import type {
+  GxserverSessionChatEvent,
+  SessionChatMessage,
+} from "../session-chat";
 
-type HostRequest = { id?: number; kind: string; method: string; params: Record<string, unknown> };
+type HostRequest = {
+  id?: number;
+  kind: string;
+  method: string;
+  params: Record<string, unknown>;
+};
 const requests: HostRequest[] = [];
 let preview: ChatPreviewBackend | undefined;
-const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
-const timers = new Map<number, { at: number; interval: number; callback: () => void }>();
+const pending = new Map<
+  number,
+  { resolve: (value: any) => void; reject: (error: Error) => void }
+>();
+const timers = new Map<
+  number,
+  { at: number; interval: number; callback: () => void }
+>();
 let sequence = 0;
 let revision = 0;
 let snapshot: unknown;
@@ -155,31 +198,36 @@ const subagentViewer = new NativeSubagentViewer(
   () => transport?.readSubagent,
   () => {
     if (controller) publish(controller.current());
-  }
+  },
 );
 const panels = new NativeChatPanels(() => {
   if (controller) publish(controller.current());
 });
 const search = new NativeChatSearch();
 const terminalTail = new NativeTerminalTail(
-  () => rpc('readSessionTerminalTail'),
+  () => rpc("readSessionTerminalTail"),
   () => {
     if (controller) publish(controller.current());
-  }
+  },
 );
 const forkBranches = new NativeForkBranches(
-  () => rpc('sessionForkBranches'),
+  () => rpc("sessionForkBranches"),
   () => {
     if (controller) publish(controller.current());
-  }
+  },
 );
 const suggestions = new NativeComposerSuggestions();
 const composerScrollGesture = createSessionChatComposerScrollGesture();
 let composerCollapsed = false;
 let detailRevision = 0;
 /** The rows GPUI draws open; only these ship their detail (apps/desktop/src/app/native_chat/row_details.rs). */
-let openRowDetails: { key: string; kind: string; messageId: string; index: number }[] = [];
-let rowDetails = '{}';
+let openRowDetails: {
+  key: string;
+  kind: string;
+  messageId: string;
+  index: number;
+}[] = [];
+let rowDetails = "{}";
 let sentRowDetails: string | undefined;
 type NativeChatState = {
   workingStrip: ReturnType<typeof computeSessionChatWorkingStrip> & {
@@ -197,7 +245,12 @@ let retiredNoticeKey: string | null = null;
 let answeredNoticeKey: string | null = null;
 let activeNoticeKey: string | null = null;
 let dismissedNotice: DismissedNotice | null = null;
-let bootConfig: { clientId: string; projectId: string; initialSnapshot?: any; initialPresentation?: any };
+let bootConfig: {
+  clientId: string;
+  projectId: string;
+  initialSnapshot?: any;
+  initialPresentation?: any;
+};
 let booting = false;
 let eventListener: ((event: GxserverSessionChatEvent) => void) | undefined;
 let transport: SessionChatTransport;
@@ -215,7 +268,10 @@ let optionDispatchId: string | null = null;
 let optionSwitching = false;
 let modelPicker: NativeModelPicker | null = null;
 /** The picker's tab and search text. Rust owns whether it is open and resets this when it opens. */
-let modelMenuView: { tab: ModelMenuTabId | null; query: string } = { tab: null, query: '' };
+let modelMenuView: { tab: ModelMenuTabId | null; query: string } = {
+  tab: null,
+  query: "",
+};
 let promptKey: string | null = null;
 let dismissedPrompt: string | null = null;
 let questionIndex = 0;
@@ -225,12 +281,12 @@ let questionTransition = false;
 let questionDrafts: QuestionDraft[] = [];
 let answering = false;
 const asyncQuestions = new SessionChatAsyncQuestionsController({
-  read: () => composer('asyncQuestionRead'),
+  read: () => composer("asyncQuestionRead"),
   write: async (answers) => {
-    await composer('asyncQuestionWrite', { answers });
+    await composer("asyncQuestionWrite", { answers });
   },
   retire: async (questionId, answers) => {
-    await composer('asyncQuestionRetire', { questionId, answers });
+    await composer("asyncQuestionRetire", { questionId, answers });
   },
 });
 asyncQuestions.subscribe(() => {
@@ -240,18 +296,31 @@ let submissionAttempt: { cancelled: boolean } | undefined;
 let incomingDraft: any = null;
 let summaryMode = false;
 let verboseOverride: boolean | null = null;
-let composerOverflow: ReturnType<typeof fitChatComposerControls> = { overflowed: [], optionsOverflowed: false };
+let composerOverflow: ReturnType<typeof fitChatComposerControls> = {
+  overflowed: [],
+  optionsOverflowed: false,
+};
 let contextStatusRows = [0];
 let composerHistory = EMPTY_SESSION_CHAT_COMPOSER_HISTORY;
-const note = { open: false, value: '', saved: '', edited: false, loading: false };
+const note = {
+  open: false,
+  value: "",
+  saved: "",
+  edited: false,
+  loading: false,
+};
 const composerChrome = new NativeComposerChrome(
   {
-    listStashedPrompts: () => rpc('listStashedPrompts', { includeRecovery: false, includeDelivered: false }),
-    readSessionNote: () => rpc('readSessionAgentNote'),
+    listStashedPrompts: () =>
+      rpc("listStashedPrompts", {
+        includeRecovery: false,
+        includeDelivered: false,
+      }),
+    readSessionNote: () => rpc("readSessionAgentNote"),
   },
   () => {
     if (controller) publish(controller.current());
-  }
+  },
 );
 const receivingHandoffs = new Set<string>();
 const receivedHandoffs = new Set<string>();
@@ -261,13 +330,16 @@ const deferredWork = new Map<string, { loading: boolean; error?: string }>();
 
 const markdownSave = new SessionChatMarkdownSaveController({
   list: () =>
-    listProjectMarkdownDocumentPaths(bootConfig.projectId, (_, request) => rpc('runProjectDocsAction', request)),
+    listProjectMarkdownDocumentPaths(bootConfig.projectId, (_, request) =>
+      rpc("runProjectDocsAction", request),
+    ),
   save: (params) =>
-    saveProjectMarkdownDocument({ ...params, projectId: bootConfig.projectId }, (_, request) =>
-      rpc('runProjectDocsAction', request)
+    saveProjectMarkdownDocument(
+      { ...params, projectId: bootConfig.projectId },
+      (_, request) => rpc("runProjectDocsAction", request),
     ),
   saved: (path) => {
-    requests.push({ kind: 'markdownSaved', method: 'save', params: { path } });
+    requests.push({ kind: "markdownSaved", method: "save", params: { path } });
   },
 });
 markdownSave.subscribe(() => {
@@ -276,10 +348,14 @@ markdownSave.subscribe(() => {
 
 /** Rewind and Save prompt, the transcript's own per-message actions (native-message-actions.ts). */
 const messageActions = new NativeChatMessageActions({
-  rewind: (params) => rpc('rewindSessionChat', params),
-  savePrompt: (content) => rpc('saveStashedPrompt', { content }),
+  rewind: (params) => rpc("rewindSessionChat", params),
+  savePrompt: (content) => rpc("saveStashedPrompt", { content }),
   restore: (prompt) => {
-    requests.push({ kind: 'composer', method: 'insert', params: { content: prompt, caret: prompt.length } });
+    requests.push({
+      kind: "composer",
+      method: "insert",
+      params: { content: prompt, caret: prompt.length },
+    });
   },
   changed: () => {
     if (controller) publish(controller.current());
@@ -293,30 +369,46 @@ function schedule(callback: () => void, delay = 0, interval = 0): number {
 }
 
 Object.assign(globalThis, {
-  setTimeout: (callback: () => void, delay: number) => schedule(callback, delay),
+  setTimeout: (callback: () => void, delay: number) =>
+    schedule(callback, delay),
   clearTimeout: (id: number) => timers.delete(id),
-  setInterval: (callback: () => void, delay: number) => schedule(callback, delay, delay),
+  setInterval: (callback: () => void, delay: number) =>
+    schedule(callback, delay, delay),
   clearInterval: (id: number) => timers.delete(id),
 });
 
-function rpc<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+function rpc<T>(
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<T> {
   if (preview) return preview.rpc<T>(method, params);
   const id = ++sequence;
-  requests.push({ id, kind: 'rpc', method, params });
-  return new Promise<T>((resolve, reject) => pending.set(id, { resolve, reject }));
+  requests.push({ id, kind: "rpc", method, params });
+  return new Promise<T>((resolve, reject) =>
+    pending.set(id, { resolve, reject }),
+  );
 }
 
-function composer(operation: string, params: Record<string, unknown> = {}): Promise<any> {
+function composer(
+  operation: string,
+  params: Record<string, unknown> = {},
+): Promise<any> {
   if (preview) return preview.composer(operation, params);
   const id = ++sequence;
-  requests.push({ id, kind: 'broker', method: 'composer', params: { composer: { operation, ...params } } });
+  requests.push({
+    id,
+    kind: "broker",
+    method: "composer",
+    params: { composer: { operation, ...params } },
+  });
   return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
 }
 
 function noticeVisible(state: NativeChatState): boolean {
   return (
     state.terminalNotice !== null &&
-    sessionChatTerminalNoticeDismissKey(state.terminalNotice) !== answeredNoticeKey &&
+    sessionChatTerminalNoticeDismissKey(state.terminalNotice) !==
+      answeredNoticeKey &&
     !isNoticeDismissed(state.terminalNotice, dismissedNotice)
   );
 }
@@ -347,9 +439,9 @@ function asyncQuestionsCanSend(state: NativeChatState): boolean {
     !terminalChoicePending &&
     !optionSwitching &&
     !state.accountStatus.busy &&
-    !(state.prompt?.kind === 'question' && promptKey !== dismissedPrompt) &&
-    state.status !== 'error' &&
-    state.status !== 'loading'
+    !(state.prompt?.kind === "question" && promptKey !== dismissedPrompt) &&
+    state.status !== "error" &&
+    state.status !== "loading"
   );
 }
 
@@ -359,7 +451,7 @@ React advances the empty region through the shared loading stages (skeleton at o
 2026-09-19 decision in new-session-welcome.ts, Retry later) on timers of its own. GPUI chat renders
 whatever the snapshot says, so the same stages have to be computed here to match.
 */
-let loadingStage: SessionChatLoadingStage = 'blank';
+let loadingStage: SessionChatLoadingStage = "blank";
 let loadingStageTimers: ReturnType<typeof setTimeout>[] = [];
 let loadingStageActive = false;
 
@@ -368,21 +460,23 @@ function trackTranscriptLoading(loading: boolean): void {
   loadingStageActive = loading;
   for (const timer of loadingStageTimers) clearTimeout(timer);
   loadingStageTimers = [];
-  loadingStage = 'blank';
+  loadingStage = "blank";
   if (!loading) return;
   const advance = (stage: SessionChatLoadingStage) => () => {
     loadingStage = stage;
     if (controller) publish(controller.current());
   };
   loadingStageTimers = [
-    setTimeout(advance('indicator'), SESSION_CHAT_LOADING_INDICATOR_DELAY_MS),
-    setTimeout(advance('retry'), SESSION_CHAT_LOADING_RETRY_DELAY_MS),
+    setTimeout(advance("indicator"), SESSION_CHAT_LOADING_INDICATOR_DELAY_MS),
+    setTimeout(advance("retry"), SESSION_CHAT_LOADING_RETRY_DELAY_MS),
   ];
 }
 
 function publish(state: NativeChatState): void {
   forkBranches.ensure();
-  const nextNoticeKey = sessionChatTerminalNoticeDismissKey(state.terminalNotice);
+  const nextNoticeKey = sessionChatTerminalNoticeDismissKey(
+    state.terminalNotice,
+  );
   if (activeNoticeKey !== nextNoticeKey) {
     activeNoticeKey = nextNoticeKey;
     answeredNoticeKey = null;
@@ -393,32 +487,48 @@ function publish(state: NativeChatState): void {
     promptKey = nextPromptKey;
     dismissedPrompt = null;
   }
-  const nextContentKey = state.prompt === null ? null : `interactive:${JSON.stringify(state.prompt)}`;
+  const nextContentKey =
+    state.prompt === null
+      ? null
+      : `interactive:${JSON.stringify(state.prompt)}`;
   if (nextContentKey !== questionContentKey) {
     questionContentKey = nextContentKey;
     questionIndex = 0;
     questionTransition = false;
     answering = false;
     questionDrafts =
-      state.prompt?.kind === 'question' ? state.prompt.questions.map(() => ({ indices: [], other: '' })) : [];
-    questionDraftsLoading = state.prompt?.kind === 'question';
+      state.prompt?.kind === "question"
+        ? state.prompt.questions.map(() => ({ indices: [], other: "" }))
+        : [];
+    questionDraftsLoading = state.prompt?.kind === "question";
     if (questionDraftsLoading)
-      void composer('questionRead', { promptKey: nextContentKey })
+      void composer("questionRead", { promptKey: nextContentKey })
         .then((answers) => {
           if (questionContentKey !== nextContentKey) return;
-          questionDrafts = questionDrafts.map((empty, index) => answers[index] ?? empty);
+          questionDrafts = questionDrafts.map(
+            (empty, index) => answers[index] ?? empty,
+          );
           questionDraftsLoading = false;
           publish(controller.current());
         })
         .catch((error) => {
           if (questionContentKey !== nextContentKey) return;
           questionDraftsLoading = false;
-          operationError = error instanceof Error ? error.message : String(error);
+          operationError =
+            error instanceof Error ? error.message : String(error);
           publish(controller.current());
         });
   }
-  presentation.setWorkingDirectory(transport?.presentation?.getSnapshot().workingDirectory);
-  const projection = presentation.update(state.messages, state.workingSignal, summaryMode, deferred, detailRevision);
+  presentation.setWorkingDirectory(
+    transport?.presentation?.getSnapshot().workingDirectory,
+  );
+  const projection = presentation.update(
+    state.messages,
+    state.workingSignal,
+    summaryMode,
+    deferred,
+    detailRevision,
+  );
   transcriptItems = projection.items;
   minimapMarkers = projection.minimap;
   subagentItems = subagentViewer.transcriptItems();
@@ -426,12 +536,13 @@ function publish(state: NativeChatState): void {
     Object.fromEntries(
       openRowDetails.flatMap(({ key, kind, messageId, index }) => {
         const detail =
-          presentation.rowDetail(kind, messageId, index) ?? subagentViewer.rowDetail(kind, messageId, index);
+          presentation.rowDetail(kind, messageId, index) ??
+          subagentViewer.rowDetail(kind, messageId, index);
         return detail ? [[key, detail]] : [];
-      })
-    )
+      }),
+    ),
   );
-  if (operationErrorCode !== 'composerNotReady') terminalTail.retire();
+  if (operationErrorCode !== "composerNotReady") terminalTail.retire();
   const {
     messages: _messages,
     skills: _skills,
@@ -450,27 +561,43 @@ function publish(state: NativeChatState): void {
     pendingAttachments,
     queuedPrompts: state.queue.prompts.length,
   });
-  if (!composerCollapseEligible || (state.prompt?.kind === 'question' && promptKey !== dismissedPrompt))
+  if (
+    !composerCollapseEligible ||
+    (state.prompt?.kind === "question" && promptKey !== dismissedPrompt)
+  )
     composerCollapsed = false;
-  const showNewSessionWelcome = sessionChatShowsNewSessionWelcome(state.view.kind, state.availableAgents !== null);
-  const transcriptLoading = state.view.kind === 'loading' && !showNewSessionWelcome;
+  const showNewSessionWelcome = sessionChatShowsNewSessionWelcome(
+    state.view.kind,
+    state.availableAgents !== null,
+  );
+  const transcriptLoading =
+    state.view.kind === "loading" && !showNewSessionWelcome;
   trackTranscriptLoading(transcriptLoading);
   /*
   The agent identity the welcome greets the user with. A draft's own row wins over the
   transcript family, because a project custom agent built on Claude reports `claude` there
   and would otherwise greet the user as its base family.
   */
-  const draftAgentRow = state.availableAgents?.find((row) => row.agentId === state.sessionAgentId) ?? null;
-  const welcomeAgentName = draftAgentRow?.name ?? sessionChatWelcomeAgentName(state.agent);
-  const welcomeAgentIcon = sessionChatWelcomeAgentIcon(state.agent, draftAgentRow?.icon);
+  const draftAgentRow =
+    state.availableAgents?.find(
+      (row) => row.agentId === state.sessionAgentId,
+    ) ?? null;
+  const welcomeAgentName =
+    draftAgentRow?.name ?? sessionChatWelcomeAgentName(state.agent);
+  const welcomeAgentIcon = sessionChatWelcomeAgentIcon(
+    state.agent,
+    draftAgentRow?.icon,
+  );
   const questionCardVisible =
     promptKey !== null &&
     promptKey !== dismissedPrompt &&
     !(
-      state.prompt?.kind === 'approval' &&
-      state.terminalNotice?.kind === 'permissionPrompt' &&
-      (!!state.terminalNotice.choices?.length || !!state.terminalNotice.dialog) &&
-      `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !== retiredNoticeKey
+      state.prompt?.kind === "approval" &&
+      state.terminalNotice?.kind === "permissionPrompt" &&
+      (!!state.terminalNotice.choices?.length ||
+        !!state.terminalNotice.dialog) &&
+      `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !==
+        retiredNoticeKey
     );
   // The welcome drops its headline once a notice or question card takes the space below it.
   const bottomCardVisible = noticeVisible(state) || questionCardVisible;
@@ -488,7 +615,9 @@ function publish(state: NativeChatState): void {
         }
       : {}),
     modelPicker: modelPicker?.projection() ?? null,
-    modelMenu: state.modelMenuContext ? modelMenuProjection(state.modelMenuContext, modelMenuView) : null,
+    modelMenu: state.modelMenuContext
+      ? modelMenuProjection(state.modelMenuContext, modelMenuView)
+      : null,
     contextStatusRows,
     suggestions: composerSuggestions,
     composerCommand: suggestions.nativeCommand(state),
@@ -519,10 +648,12 @@ function publish(state: NativeChatState): void {
       })),
     },
     hostActions: chatHostActionDefinitions
-      .filter((action) => !COMPOSER_MENU_EXCLUDED_HOST_ACTION_IDS.has(action.id))
+      .filter(
+        (action) => !COMPOSER_MENU_EXCLUDED_HOST_ACTION_IDS.has(action.id),
+      )
       .map((action) => ({
         ...action,
-        group: AGENT_HOST_ACTION_IDS.has(action.id) ? 'agent' : 'session',
+        group: AGENT_HOST_ACTION_IDS.has(action.id) ? "agent" : "session",
       })),
     /*
     Which composer controls the host can actually serve, the gate React applies by only passing the
@@ -532,13 +663,19 @@ function publish(state: NativeChatState): void {
     */
     composerActions: {
       summary: true,
-      note: !!transport?.readSessionNote && !!transport?.saveSessionNote && state.agentSessionId !== null,
+      note:
+        !!transport?.readSessionNote &&
+        !!transport?.saveSessionNote &&
+        state.agentSessionId !== null,
       stash: !preview,
       attach: !preview,
       terminal: !preview,
     },
     // React picks this copy from the view, not the agent status (session-chat-view.tsx `emptyKind`).
-    emptyState: sessionChatEmptyStateCopy(state.view.kind === 'ready' ? 'empty' : state.view.kind, state.agent),
+    emptyState: sessionChatEmptyStateCopy(
+      state.view.kind === "ready" ? "empty" : state.view.kind,
+      state.agent,
+    ),
     /*
     The new-session welcome, projected for GPUI chat the same way React renders it: a
     `starting` or `empty` transcript greets the user with the agent mark and headline
@@ -560,20 +697,34 @@ function publish(state: NativeChatState): void {
           ...state.terminalNotice,
           collapsedChoiceCount: COLLAPSED_CHOICE_COUNT,
           dialog: state.terminalNotice.dialog
-            ? { ...state.terminalNotice.dialog, presentation: terminalDialogPresentation(state.terminalNotice.dialog) }
+            ? {
+                ...state.terminalNotice.dialog,
+                presentation: terminalDialogPresentation(
+                  state.terminalNotice.dialog,
+                ),
+              }
             : undefined,
           choices: state.terminalNotice.choices
             ?.filter((choice) => choice.label.trim())
             .map((choice) => ({
               ...choice,
               collapsedLabel: collapsedChoiceLabel(
-                state.terminalNotice?.dialog?.rows[choice.index]?.label ?? choice.label
+                state.terminalNotice?.dialog?.rows[choice.index]?.label ??
+                  choice.label,
               ),
-              answer: terminalNoticeChoiceAnswer(state.terminalNotice, choice.index),
+              answer: terminalNoticeChoiceAnswer(
+                state.terminalNotice,
+                choice.index,
+              ),
             })),
           actions: state.terminalNotice.actions?.flatMap((action) => {
-            const answer = terminalNoticeActionAnswer(state.terminalNotice!, action);
-            return action.kind === 'switchToTerminal' || answer ? [{ ...action, answer }] : [];
+            const answer = terminalNoticeActionAnswer(
+              state.terminalNotice!,
+              action,
+            );
+            return action.kind === "switchToTerminal" || answer
+              ? [{ ...action, answer }]
+              : [];
           }),
         }
       : null,
@@ -592,7 +743,8 @@ function publish(state: NativeChatState): void {
             state.terminalNotice.dialog ||
             state.terminalNotice.conversationLock
           ) &&
-          `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !== retiredNoticeKey,
+          `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !==
+            retiredNoticeKey,
         controlsOnly: state.terminalNotice?.dialog?.rows.length === 0,
         noticeCardVisible: noticeVisible(state),
         sessionOptionSwitching: optionSwitching,
@@ -608,12 +760,16 @@ function publish(state: NativeChatState): void {
     },
     incomingDraft,
     note: { ...note },
-    composerChrome: composerChrome.projection(note, summaryMode, state.agentSessionId),
+    composerChrome: composerChrome.projection(
+      note,
+      summaryMode,
+      state.agentSessionId,
+    ),
     asyncQuestions: asyncQuestions.project(
       state.messages,
       asyncQuestionsCanSend(state),
       state.working,
-      state.retiredAsyncQuestionIds
+      state.retiredAsyncQuestionIds,
     ),
     questionCard: {
       visible: questionCardVisible,
@@ -621,8 +777,8 @@ function publish(state: NativeChatState): void {
       controls: questionAnswerControls(
         questionDrafts,
         questionIndex,
-        state.prompt?.kind === 'question' ? state.prompt.questions.length : 0,
-        answering
+        state.prompt?.kind === "question" ? state.prompt.questions.length : 0,
+        answering,
       ),
       drafts: questionDrafts,
       answering,
@@ -646,7 +802,7 @@ function start(config: {
   bootConfig = config;
   if (booting) return;
   booting = true;
-  void composer('read')
+  void composer("read")
     .then((result) => {
       controller?.dispose();
       adoptAgentModelCatalog(result.modelCatalog);
@@ -656,7 +812,11 @@ function start(config: {
         operationError = error instanceof Error ? error.message : String(error);
         if (controller) publish(controller.current());
       });
-      requests.push({ kind: 'composerInit', method: 'restore', params: result });
+      requests.push({
+        kind: "composerInit",
+        method: "restore",
+        params: result,
+      });
       dismissedNotice = result.dismissedNotice ?? null;
       summaryMode = result.summaryMode === true;
       verboseOverride = result.verboseOverride ?? null;
@@ -665,7 +825,7 @@ function start(config: {
     })
     .catch((error) => {
       transcriptItems = [];
-      snapshot = { status: 'error', error: String(error) };
+      snapshot = { status: "error", error: String(error) };
       revision++;
     })
     .finally(() => {
@@ -674,42 +834,66 @@ function start(config: {
 }
 
 function onUnconfirmedOptions(): void {
-  operationError = 'The agent did not confirm the selection. The controls now reflect the latest detected settings.';
+  operationError =
+    "The agent did not confirm the selection. The controls now reflect the latest detected settings.";
 }
 
-function startController(config: { clientId: string; initialSnapshot?: any; initialPresentation?: any }): void {
+function startController(config: {
+  clientId: string;
+  initialSnapshot?: any;
+  initialPresentation?: any;
+}): void {
   transport = {
-    getCachedSnapshot: () => preview?.snapshot ?? config.initialSnapshot ?? undefined,
-    presentation: createSessionChatPresentationStore(config.initialPresentation ?? undefined, (state) =>
-      requests.push({ kind: 'broker', method: 'presentation', params: { state } })
+    getCachedSnapshot: () =>
+      preview?.snapshot ?? config.initialSnapshot ?? undefined,
+    presentation: createSessionChatPresentationStore(
+      config.initialPresentation ?? undefined,
+      (state) =>
+        requests.push({
+          kind: "broker",
+          method: "presentation",
+          params: { state },
+        }),
     ),
-    read: (params) => rpc('readSessionChat', params),
-    readSkills: () => rpc('readSessionChatSkills'),
-    readFiles: () => rpc('readSessionChatFiles'),
-    readHistory: (params) => rpc('readSessionChat', { ...params, historyMode: params.detail ? 'detail' : 'turns' }),
-    readSubagent: (params) => rpc('readSessionChat', params),
+    read: (params) => rpc("readSessionChat", params),
+    readSkills: () => rpc("readSessionChatSkills"),
+    readFiles: () => rpc("readSessionChatFiles"),
+    readHistory: (params) =>
+      rpc("readSessionChat", {
+        ...params,
+        historyMode: params.detail ? "detail" : "turns",
+      }),
+    readSubagent: (params) => rpc("readSessionChat", params),
     subscribe: ({ onEvent, currentLimit }) => {
       eventListener = onEvent;
       if (preview) return preview.subscribe(onEvent);
-      requests.push({ kind: 'broker', method: 'subscribe', params: { limit: currentLimit?.() ?? 120, catalog: true } });
+      requests.push({
+        kind: "broker",
+        method: "subscribe",
+        params: { limit: currentLimit?.() ?? 120, catalog: true },
+      });
       return () => {
         eventListener = undefined;
-        requests.push({ kind: 'broker', method: 'unsubscribe', params: {} });
+        requests.push({ kind: "broker", method: "unsubscribe", params: {} });
       };
     },
-    reconnect: () => requests.push({ kind: 'broker', method: 'reconnect', params: {} }),
-    send: (text, imagePaths, draftVersion) => rpc('sendSessionChatMessage', { text, imagePaths, draftVersion }),
-    sendKey: (key) => rpc('sendSessionChatMessage', { key }),
-    interrupt: () => rpc('interruptSessionChat'),
-    answerPrompt: (params) => rpc('answerSessionChatPrompt', params),
-    queuePrompt: (params) => rpc('queueSessionChatPrompt', params),
-    updateQueuedPrompt: (params) => rpc('updateSessionChatQueuedPrompt', params),
-    removeQueuedPrompt: (params) => rpc('removeSessionChatQueuedPrompt', params),
-    reorderQueue: (params) => rpc('reorderSessionChatQueue', params),
-    sendQueuedPrompt: (params) => rpc('sendSessionChatQueuedPrompt', params),
-    setDraft: (params) => rpc('setSessionChatDraft', params),
-    rewindSessionChat: (params) => rpc('rewindSessionChat', params),
-    loadImage: (params) => rpc('readSessionChatImage', params),
+    reconnect: () =>
+      requests.push({ kind: "broker", method: "reconnect", params: {} }),
+    send: (text, imagePaths, draftVersion) =>
+      rpc("sendSessionChatMessage", { text, imagePaths, draftVersion }),
+    sendKey: (key) => rpc("sendSessionChatMessage", { key }),
+    interrupt: () => rpc("interruptSessionChat"),
+    answerPrompt: (params) => rpc("answerSessionChatPrompt", params),
+    queuePrompt: (params) => rpc("queueSessionChatPrompt", params),
+    updateQueuedPrompt: (params) =>
+      rpc("updateSessionChatQueuedPrompt", params),
+    removeQueuedPrompt: (params) =>
+      rpc("removeSessionChatQueuedPrompt", params),
+    reorderQueue: (params) => rpc("reorderSessionChatQueue", params),
+    sendQueuedPrompt: (params) => rpc("sendSessionChatQueuedPrompt", params),
+    setDraft: (params) => rpc("setSessionChatDraft", params),
+    rewindSessionChat: (params) => rpc("rewindSessionChat", params),
+    loadImage: (params) => rpc("readSessionChatImage", params),
   };
   controller = new ChatComputation((lifecycle) => {
     const chat = computeSessionChat(
@@ -717,10 +901,11 @@ function startController(config: { clientId: string; initialSnapshot?: any; init
         transport,
         clientId: config.clientId,
         onDeliveredDrafts: (deliveries) => {
-          if (deliveries.length) void composer('deliveries', { deliveries }).catch(() => {});
+          if (deliveries.length)
+            void composer("deliveries", { deliveries }).catch(() => {});
         },
       },
-      lifecycle
+      lifecycle,
     );
     const controls = computeNativeChatControls(chat, rpc, lifecycle);
     const options = computeNativeChatOptions(
@@ -729,46 +914,69 @@ function startController(config: { clientId: string; initialSnapshot?: any; init
       rpc,
       onUnconfirmedOptions,
       controls.accounts,
-      lifecycle
+      lifecycle,
     );
     lifecycle.useEffect(() => {
-      if (chat.returnedPrompt) void action({ type: 'restoreReturned', returned: chat.returnedPrompt });
+      if (chat.returnedPrompt)
+        void action({ type: "restoreReturned", returned: chat.returnedPrompt });
     }, [chat.returnedPrompt?.id]);
     const context = computeNativeChatContext(
       chat,
       options.sessionOptions.catalog?.modelIcon,
       controls.accounts,
-      lifecycle
+      lifecycle,
     );
-    const skills = computeSessionChatSkills(transport, chat.sessionAgentId, lifecycle);
+    const skills = computeSessionChatSkills(
+      transport,
+      chat.sessionAgentId,
+      lifecycle,
+    );
     const files = computeSessionChatFiles(transport, lifecycle);
     const strip = computeSessionChatWorkingStrip(
       !controls.accountStatus.busy && chat.sessionWorking,
       controls.accountStatus.busy ? null : chat.terminalActivity,
-      lifecycle
+      lifecycle,
     );
-    const workingStrip = { ...strip, presentation: computeSessionChatActivity(strip.activity, lifecycle) };
-    return { ...chat, ...controls, ...options, ...context, ...skills, ...files, workingStrip };
+    const workingStrip = {
+      ...strip,
+      presentation: computeSessionChatActivity(strip.activity, lifecycle),
+    };
+    return {
+      ...chat,
+      ...controls,
+      ...options,
+      ...context,
+      ...skills,
+      ...files,
+      workingStrip,
+    };
   }, publish);
   controller.run();
 }
 
-async function action(command: { type: string; [key: string]: any }): Promise<void> {
+async function action(command: {
+  type: string;
+  [key: string]: any;
+}): Promise<void> {
   if (!controller) {
-    if (command.type === 'retry') start(bootConfig);
+    if (command.type === "retry") start(bootConfig);
     return;
   }
   const chat = controller.current();
-  if (command.type === 'composerScroll' || command.type === 'composerExpand') {
+  if (command.type === "composerScroll" || command.type === "composerExpand") {
     // The subagent transcript is modal: a wheel over it is not a composer gesture.
     if (subagentViewer.isOpen()) return;
     const now = Date.now();
     const previous = composerCollapsed;
     if (now - composerScrollGesture.lastEventAt > COMPOSER_SCROLL_RESET_MS)
       resetSessionChatComposerScrollGesture(composerScrollGesture);
-    if (command.type === 'composerExpand') {
+    if (command.type === "composerExpand") {
       if (command.editor)
-        suppressSessionChatComposerScrollGesture(composerScrollGesture, now, COMPOSER_SCROLL_RESET_MS);
+        suppressSessionChatComposerScrollGesture(
+          composerScrollGesture,
+          now,
+          COMPOSER_SCROLL_RESET_MS,
+        );
       composerCollapsed = false;
     } else {
       const atBottom = command.distanceToEnd <= COMPOSER_BOTTOM_THRESHOLD_PX;
@@ -783,13 +991,14 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         })
       )
         composerCollapsed = true;
-      if (!command.eligible || (command.delta < 0 && atBottom)) composerCollapsed = false;
+      if (!command.eligible || (command.delta < 0 && atBottom))
+        composerCollapsed = false;
     }
     if (previous !== composerCollapsed) publish(chat);
     return;
   }
   // Panel folds, transcript search, terminal-tail reads and the subagent viewer are pure view state: they never clear a send error.
-  if (command.type === 'rowDetails') {
+  if (command.type === "rowDetails") {
     openRowDetails = Array.isArray(command.open) ? command.open : [];
     publish(chat);
     return;
@@ -804,44 +1013,56 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
     return;
   }
   const clearedError = operationError !== undefined;
+  /** CDXC:SessionChat 2026-09-23 WHY:
+   * Restoring a rejected send persists the recovered draft through native edit/save actions. Those bookkeeping actions must preserve the refusal card, matching React's restore-then-set-error ordering in session-chat-composer.tsx.
+   */
   if (
     ![
-      'restoreSubmission',
-      'composerSelection',
-      'suggestionHighlight',
-      'measureComposer',
-      'measureContextStatus',
-    ].includes(command.type)
+      "restoreSubmission",
+      "composerSelection",
+      "suggestionHighlight",
+      "measureComposer",
+      "measureContextStatus",
+    ].includes(command.type) &&
+    command.preserveError !== true
   ) {
     operationError = undefined;
     operationErrorCode = undefined;
   }
   try {
     switch (command.type) {
-      case 'completeComposerCommand': {
+      case "completeComposerCommand": {
         const content = suggestions.nativeCommand(chat);
         if (content !== null)
-          requests.push({ kind: 'composer', method: 'insert', params: { content, caret: content.length } });
+          requests.push({
+            kind: "composer",
+            method: "insert",
+            params: { content, caret: content.length },
+          });
         break;
       }
-      case 'composerSelection':
+      case "composerSelection":
         suggestions.update(command.text, command.caret);
         break;
-      case 'suggestionKey':
-      case 'suggestionPick':
-      case 'suggestionHighlight':
-      case 'suggestionRetry':
-      case 'suggestionDismiss': {
+      case "suggestionKey":
+      case "suggestionPick":
+      case "suggestionHighlight":
+      case "suggestionRetry":
+      case "suggestionDismiss": {
         const completion = suggestions.command(command, chat);
-        if (completion && 'content' in completion)
-          requests.push({ kind: 'composer', method: 'insert', params: completion });
+        if (completion && "content" in completion)
+          requests.push({
+            kind: "composer",
+            method: "insert",
+            params: completion,
+          });
         break;
       }
       // The branch switcher's pick. The app shell owns the switch: a stopped branch is woken in place first.
-      case 'selectForkBranch':
+      case "selectForkBranch":
         requests.push({
-          kind: 'host',
-          method: 'selectForkBranch',
+          kind: "host",
+          method: "selectForkBranch",
           params: {
             projectId: command.projectId,
             sessionId: command.sessionId,
@@ -849,89 +1070,118 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           },
         });
         break;
-      case 'markdownSaveOpen':
-        markdownSave.open(nativeContextTitle() ?? '', command.markdown);
+      case "markdownSaveOpen":
+        markdownSave.open(nativeContextTitle() ?? "", command.markdown);
         break;
-      case 'markdownSaveFolder':
+      case "markdownSaveFolder":
         markdownSave.folder(command.value);
         break;
-      case 'markdownSaveName':
+      case "markdownSaveName":
         markdownSave.fileName(command.value);
         break;
-      case 'markdownSaveCancel':
+      case "markdownSaveCancel":
         markdownSave.close();
         break;
-      case 'markdownSaveSubmit':
+      case "markdownSaveSubmit":
         await markdownSave.submit();
         break;
-      case 'contextEdit':
-      case 'contextCancel':
-      case 'contextQuery':
-      case 'contextShown':
-      case 'contextStar':
-      case 'contextReorder':
-      case 'contextReset':
-      case 'contextSave':
+      case "contextEdit":
+      case "contextCancel":
+      case "contextQuery":
+      case "contextShown":
+      case "contextStar":
+      case "contextReorder":
+      case "contextReset":
+      case "contextSave":
         await nativeContextEditorCommand(
           command,
-          chat.sessionOptions.catalog?.modelIcon === 'codex' ? 'codex' : 'claude',
-          (agent, preferences) => composer('contextSave', { agent, preferences }),
-          () => publish(controller.current())
+          chat.sessionOptions.catalog?.modelIcon === "codex"
+            ? "codex"
+            : "claude",
+          (agent, preferences) =>
+            composer("contextSave", { agent, preferences }),
+          () => publish(controller.current()),
         );
         break;
-      case 'measureContextStatus':
+      case "measureContextStatus":
         if (command.available > 0)
-          contextStatusRows = balancedRowStarts(command.widths, command.available, command.separator);
+          contextStatusRows = balancedRowStarts(
+            command.widths,
+            command.available,
+            command.separator,
+          );
         break;
-      case 'contextCompact':
-        if (!chat.working) await chat.send('/compact');
+      case "contextCompact":
+        if (!chat.working) await chat.send("/compact");
         break;
       // Switch Account panel and switch-card requests (select, refresh, policy, stop recovery, retry).
-      case 'accounts':
+      case "accounts":
         await chat.requestAccounts(command.request);
         break;
-      case 'switchDraftAgent': {
+      case "switchDraftAgent": {
         if (
-          !chat.availableAgents?.some((agent) => agent.agentId === command.agentId) ||
+          !chat.availableAgents?.some(
+            (agent) => agent.agentId === command.agentId,
+          ) ||
           chat.sessionAgentId === command.agentId
         )
           break;
-        await composer('flush');
+        await composer("flush");
         try {
-          await rpc('switchDraftAgent', {
+          await rpc("switchDraftAgent", {
             agentId: command.agentId,
             ...(command.model ? { agentModel: command.model } : {}),
             ...(command.effort ? { agentEffort: command.effort } : {}),
           });
         } finally {
           chat.refresh();
-          for (const delay of [2000, 6000]) schedule(() => chat.refresh(), delay);
+          for (const delay of [2000, 6000])
+            schedule(() => chat.refresh(), delay);
         }
         break;
       }
-      case 'selectOption': {
+      case "selectOption": {
         const options = chat.sessionOptions;
-        const descriptor = [options.catalog?.model, ...options.optionDescriptors].find(
-          (entry) => entry?.id === command.descriptorId
-        );
+        const descriptor = [
+          options.catalog?.model,
+          ...options.optionDescriptors,
+        ].find((entry) => entry?.id === command.descriptorId);
         if (!descriptor) break;
         const scoped =
-          (descriptor.id === options.catalog?.model.id || descriptor.id === 'effort') &&
+          (descriptor.id === options.catalog?.model.id ||
+            descriptor.id === "effort") &&
           !!chat.modelProvider &&
           modelPickerSupportsSessionScope(chat.modelProvider);
         // Where the agent tells the two scopes apart, picking the running model again still moves it between them.
-        if (!scoped && command.value !== undefined && options.state[descriptor.id]?.value === command.value) break;
+        if (
+          !scoped &&
+          command.value !== undefined &&
+          options.state[descriptor.id]?.value === command.value
+        )
+          break;
         const delivery = command.exitPlan
-          ? { ...descriptor, dispatch: { kind: 'key' as const, key: 'shift-tab' as const, marker: '' } }
+          ? {
+              ...descriptor,
+              dispatch: {
+                kind: "key" as const,
+                key: "shift-tab" as const,
+                marker: "",
+              },
+            }
           : descriptor;
         if (
           queueSessionChatOption(delivery, command.value, {
             catalog: options.catalog,
             state: options.state,
-            queuedControls: options.catalog?.modelIcon === 'codex' || options.catalog?.modelIcon === 'claude',
+            queuedControls:
+              options.catalog?.modelIcon === "codex" ||
+              options.catalog?.modelIcon === "claude",
             quickPicker: !!chat.modelProvider,
             picker: chat.modelSelection,
-            scope: modelPickScope(chat.modelProvider, command.secondary === true),
+            scope: modelPickScope(
+              chat.modelProvider,
+              command.secondary === true,
+            ),
           })
         )
           break;
@@ -950,12 +1200,17 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
               await chat.sendKey?.(key, marker);
             },
             onPickModel:
-              chat.agent === 'codex'
+              chat.agent === "codex"
                 ? async (selection) => {
-                    await rpc('selectSessionChatModel', { ...selection });
+                    await rpc("selectSessionChatModel", { ...selection });
                   }
                 : undefined,
-            onSwitchToTerminal: () => requests.push({ kind: 'host', method: 'switchToTerminal', params: {} }),
+            onSwitchToTerminal: () =>
+              requests.push({
+                kind: "host",
+                method: "switchToTerminal",
+                params: {},
+              }),
             onSwitchingChange: (switching) => {
               optionSwitching = switching;
               publish(controller.current());
@@ -966,7 +1221,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         }
         break;
       }
-      case 'toggleModelPicker': {
+      case "toggleModelPicker": {
         if (modelPicker) {
           modelPicker.finish(false);
           break;
@@ -977,7 +1232,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           currentAgentModelCatalog(),
           chat.modelProvider,
           desired?.model || chat.sessionOptions.state.model?.value,
-          desired?.effort || chat.sessionOptions.state.effort?.value
+          desired?.effort || chat.sessionOptions.state.effort?.value,
         );
         if (!request) break;
         const sessionKey = chat.sessionOptions.sessionKey;
@@ -997,7 +1252,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
                   effort: current.sessionOptions.state.effort?.value,
                 },
                 request,
-                scope
+                scope,
               )
             ) {
               current.modelSelection.select(selection, undefined, scope);
@@ -1005,61 +1260,69 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
             modelPicker?.dispose();
             modelPicker = null;
             publish(controller.current());
-          }
+          },
         );
         if (command.size) modelPicker.measure(command.size);
         break;
       }
-      case 'modelPickerMeasure':
+      case "modelPickerMeasure":
         modelPicker?.measure(command.size);
         break;
-      case 'modelPickerPane':
+      case "modelPickerPane":
         modelPicker?.pane(command.size);
         break;
-      case 'modelPickerKey':
+      case "modelPickerKey":
         modelPicker?.key(command.key);
         break;
-      case 'modelPickerKeyUp':
+      case "modelPickerKeyUp":
         modelPicker?.release(command.key);
         break;
-      case 'modelPickerBlur':
+      case "modelPickerBlur":
         modelPicker?.blur();
         break;
-      case 'modelPickerControl':
+      case "modelPickerControl":
         modelPicker?.navigate(command.control);
         break;
-      case 'modelPickerScroll':
+      case "modelPickerScroll":
         modelPicker?.scroll(command.input);
         break;
-      case 'modelPickerModel':
+      case "modelPickerModel":
         modelPicker?.chooseModel(command.index, command.save, command.pointer);
         break;
-      case 'modelPickerEffort':
+      case "modelPickerEffort":
         modelPicker?.chooseEffort(command.index, command.save);
         break;
-      case 'modelPickerCancel':
+      case "modelPickerCancel":
         modelPicker?.finish(false);
         break;
-      case 'modelMenuView':
+      case "modelMenuView":
         // A null tab is the picker opening: stars set in other sessions since the last open arrive here.
-        if (command.tab === null) adoptModelFavorites(await composer('modelFavorites'));
+        if (command.tab === null)
+          adoptModelFavorites(await composer("modelFavorites"));
         modelMenuView = {
           tab: command.tab === undefined ? modelMenuView.tab : command.tab,
-          query: typeof command.query === 'string' ? command.query : modelMenuView.query,
+          query:
+            typeof command.query === "string"
+              ? command.query
+              : modelMenuView.query,
         };
         break;
-      case 'modelMenuFavorite':
-        adoptModelFavorites(await composer('modelFavoriteToggle', { favoriteKey: command.key }));
+      case "modelMenuFavorite":
+        adoptModelFavorites(
+          await composer("modelFavoriteToggle", { favoriteKey: command.key }),
+        );
         break;
-      case 'modelMenuPick': {
+      case "modelMenuPick": {
         const context = chat.modelMenuContext;
         if (!context) break;
-        const row = modelMenuProjection(context, modelMenuView).rows.find((entry) => entry.key === command.key);
+        const row = modelMenuProjection(context, modelMenuView).rows.find(
+          (entry) => entry.key === command.key,
+        );
         if (!row) break;
         const pick = modelMenuPick(row, context);
-        if (pick.kind === 'select') {
+        if (pick.kind === "select") {
           await action({
-            type: 'selectOption',
+            type: "selectOption",
             descriptorId: context.modelId,
             value: pick.value,
             secondary: command.secondary,
@@ -1067,14 +1330,17 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           break;
         }
         // A draft has no conversation to hand over, so another agent's model switches the draft to that agent.
-        const draftAgent = chat.availableAgents?.find((agent) => modelPickerProvider(agent.icon) === pick.provider);
+        const draftAgent = chat.availableAgents?.find(
+          (agent) => modelPickerProvider(agent.icon) === pick.provider,
+        );
         if (chat.availableAgents) {
           if (draftAgent) {
-            modelMenuView = { tab: null, query: '' };
+            modelMenuView = { tab: null, query: "" };
             // The launch line carries a model only for Claude and Codex; the other CLIs start on their own default.
-            const launchable = pick.provider === 'claude' || pick.provider === 'codex';
+            const launchable =
+              pick.provider === "claude" || pick.provider === "codex";
             await action({
-              type: 'switchDraftAgent',
+              type: "switchDraftAgent",
               agentId: draftAgent.agentId,
               ...(launchable ? { model: pick.model, effort: pick.effort } : {}),
             });
@@ -1082,36 +1348,44 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           break;
         }
         requests.push({
-          kind: 'host',
-          method: 'handoffToModel',
-          params: { provider: pick.provider, model: pick.model, effort: pick.effort },
+          kind: "host",
+          method: "handoffToModel",
+          params: {
+            provider: pick.provider,
+            model: pick.model,
+            effort: pick.effort,
+          },
         });
         break;
       }
-      case 'modelMenuTrait': {
+      case "modelMenuTrait": {
         const context = chat.modelMenuContext;
         if (!context) break;
         await action({
-          type: 'selectOption',
-          descriptorId: command.id === 'context' ? context.modelId : command.id,
+          type: "selectOption",
+          descriptorId: command.id === "context" ? context.modelId : command.id,
           value: command.value,
           exitPlan: command.exitPlan,
           secondary: command.secondary,
         });
         break;
       }
-      case 'measureComposer':
+      case "measureComposer":
         composerOverflow = fitChatComposerControls(command.measurements);
         break;
-      case 'toggleSummary':
-        summaryMode = await composer('summary', { enabled: !summaryMode });
+      case "toggleSummary":
+        summaryMode = await composer("summary", { enabled: !summaryMode });
         break;
-      case 'setVerbose':
-        verboseOverride = await composer('verbose', { enabled: command.enabled });
+      case "setVerbose":
+        verboseOverride = await composer("verbose", {
+          enabled: command.enabled,
+        });
         break;
-      case 'toggleNote': {
+      case "toggleNote": {
         if (note.open) {
-          await flushSessionNote(note, note.value, (value) => rpc('saveSessionAgentNote', { note: value }));
+          await flushSessionNote(note, note.value, (value) =>
+            rpc("saveSessionAgentNote", { note: value }),
+          );
           note.open = false;
         } else {
           note.open = true;
@@ -1119,119 +1393,183 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           note.edited = false;
           publish(chat);
           try {
-            const result = await rpc<{ note?: string }>('readSessionAgentNote');
-            note.saved = (result.note ?? '').trim();
-            if (!note.edited) note.value = result.note ?? '';
+            const result = await rpc<{ note?: string }>("readSessionAgentNote");
+            note.saved = (result.note ?? "").trim();
+            if (!note.edited) note.value = result.note ?? "";
           } finally {
             note.loading = false;
           }
         }
         break;
       }
-      case 'editNote':
+      case "editNote":
         note.edited = true;
         note.value = command.text;
         break;
-      case 'clearNote':
+      case "clearNote":
         note.edited = true;
-        note.value = '';
-      case 'saveNote':
-        await flushSessionNote(note, note.value, (value) => rpc('saveSessionAgentNote', { note: value }));
+        note.value = "";
+      case "saveNote":
+        await flushSessionNote(note, note.value, (value) =>
+          rpc("saveSessionAgentNote", { note: value }),
+        );
         break;
-      case 'attachmentsStarted':
+      case "attachmentsStarted":
         pendingAttachments++;
         break;
-      case 'attachmentsFinished':
+      case "attachmentsFinished":
         pendingAttachments = Math.max(0, pendingAttachments - 1);
         if (command.error) operationError = command.error;
         if (command.paths?.length)
-          requests.push({ kind: 'attachmentReferences', method: 'insert', params: { paths: command.paths } });
+          requests.push({
+            kind: "attachmentReferences",
+            method: "insert",
+            params: { paths: command.paths },
+          });
         break;
-      case 'attachPaths': {
+      case "attachPaths": {
         pendingAttachments++;
         publish(chat);
         try {
-          const paths = await rpc<string[]>('importNativeAttachments', { paths: command.paths });
-          requests.push({ kind: 'attachmentReferences', method: 'insert', params: { paths } });
+          const paths = await rpc<string[]>("importNativeAttachments", {
+            paths: command.paths,
+          });
+          requests.push({
+            kind: "attachmentReferences",
+            method: "insert",
+            params: { paths },
+          });
         } finally {
           pendingAttachments--;
         }
         break;
       }
-      case 'insertAttachments': {
+      case "insertAttachments": {
         let text = command.text as string;
         let caret = command.start as number;
         let end = command.end as number;
         for (const path of command.paths as string[]) {
-          const result = insertChatReference(text, nativePathReference(path, text), caret, end);
+          const result = insertChatReference(
+            text,
+            nativePathReference(path, text),
+            caret,
+            end,
+          );
           text = result.text;
           caret = result.caret;
           end = caret;
         }
-        requests.push({ kind: 'composer', method: 'insert', params: { content: text, caret } });
+        requests.push({
+          kind: "composer",
+          method: "insert",
+          params: { content: text, caret },
+        });
         break;
       }
-      case 'removeAttachment': {
-        const result = removeChatReference(command.text as string, command.start as number, command.end as number);
-        requests.push({ kind: 'composer', method: 'insert', params: { content: result.text, caret: result.caret } });
+      case "removeAttachment": {
+        const result = removeChatReference(
+          command.text as string,
+          command.start as number,
+          command.end as number,
+        );
+        requests.push({
+          kind: "composer",
+          method: "insert",
+          params: { content: result.text, caret: result.caret },
+        });
         break;
       }
-      case 'appendToDraft': {
+      case "appendToDraft": {
         // The transcript menu's Add to Chat, appended the way React's `appendText` does, caret at the end.
-        const content = sessionChatAppendDraftText(command.draft as string, command.text as string);
-        requests.push({ kind: 'composer', method: 'insert', params: { content, caret: content.length } });
+        const content = sessionChatAppendDraftText(
+          command.draft as string,
+          command.text as string,
+        );
+        requests.push({
+          kind: "composer",
+          method: "insert",
+          params: { content, caret: content.length },
+        });
         break;
       }
-      case 'refreshComposerChrome':
+      case "refreshComposerChrome":
         await composerChrome.refresh(command.sessionId ?? null);
         break;
-      case 'stash': {
+      case "stash": {
         if (!command.text?.trim()) break;
-        await rpc('saveStashedPrompt', { content: command.text });
-        requests.push({ kind: 'composerClearExpected', method: 'stash', params: { text: command.text } });
+        await rpc("saveStashedPrompt", { content: command.text });
+        requests.push({
+          kind: "composerClearExpected",
+          method: "stash",
+          params: { text: command.text },
+        });
         void composerChrome.refresh();
         break;
       }
-      case 'restoreReturned': {
-        if (await composer('claimReturned', { returnedId: command.returned.id }))
-          requests.push({ kind: 'returnedPrompt', method: 'restore', params: { text: command.returned.text } });
+      case "restoreReturned": {
+        if (
+          await composer("claimReturned", { returnedId: command.returned.id })
+        )
+          requests.push({
+            kind: "returnedPrompt",
+            method: "restore",
+            params: { text: command.returned.text },
+          });
         break;
       }
-      case 'applyReturned': {
+      case "applyReturned": {
         const content = command.current.includes(command.text)
           ? command.current
           : restoreUndeliveredChatText(command.text, command.current);
-        requests.push({ kind: 'composer', method: 'insert', params: { content } });
+        requests.push({
+          kind: "composer",
+          method: "insert",
+          params: { content },
+        });
         break;
       }
-      case 'editDraft': {
+      case "editDraft": {
         trackDraftAttachments(command.text);
-        const historyChanged = !command.history && composerHistory.index !== null;
-        if (!command.history) composerHistory = resetSessionChatComposerHistoryIndex(composerHistory);
-        await composer('write', { text: command.text, version: command.draftVersion });
+        const historyChanged =
+          !command.history && composerHistory.index !== null;
+        if (!command.history)
+          composerHistory =
+            resetSessionChatComposerHistoryIndex(composerHistory);
+        await composer("write", {
+          text: command.text,
+          version: command.draftVersion,
+        });
         if (!clearedError && !historyChanged) return;
         break;
       }
-      case 'recallHistory': {
-        if (command.direction === 'up' && composerHistory.index === null)
-          composerHistory = { entries: await composer('history'), index: null };
+      case "recallHistory": {
+        if (command.direction === "up" && composerHistory.index === null)
+          composerHistory = { entries: await composer("history"), index: null };
         const recalled =
-          command.direction === 'up'
+          command.direction === "up"
             ? recallPreviousSessionChatDraft(composerHistory)
             : recallNextSessionChatDraft(composerHistory);
         if (recalled) {
           composerHistory = recalled.history;
           suggestions.recall(recalled.draft);
-          requests.push({ kind: 'composer', method: 'history', params: { content: recalled.draft } });
+          requests.push({
+            kind: "composer",
+            method: "history",
+            params: { content: recalled.draft },
+          });
         }
         break;
       }
-      case 'send':
-      case 'queue':
-      case 'compact': {
+      case "send":
+      case "queue":
+      case "compact": {
         const blocked = sendBlockedReason(chat);
         if (blocked) {
-          requests.push({ kind: 'submissionFailed', method: command.type, params: { text: command.text } });
+          requests.push({
+            kind: "submissionFailed",
+            method: command.type,
+            params: { text: command.text },
+          });
           throw new Error(blocked);
         }
         const attempt = { cancelled: false };
@@ -1240,8 +1578,12 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         submissionAttempt = attempt;
         try {
           try {
-            await composer('write', { text: command.text, version: command.draftVersion, submitted: true });
-            await composer('flush');
+            await composer("write", {
+              text: command.text,
+              version: command.draftVersion,
+              submitted: true,
+            });
+            await composer("flush");
             await deliverChatSubmission({
               text: command.text,
               version: command.draftVersion,
@@ -1249,8 +1591,10 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
               push: chat.draft.canSync ? chat.draft.push : undefined,
               send: (text, version) =>
                 sendSessionChatOptionAware(text, version, {
-                  reconcileTypedCommand: chat.sessionOptions.reconcileTypedCommand,
-                  send: (text, version) => chat.send(text, command.imagePaths, version),
+                  reconcileTypedCommand:
+                    chat.sessionOptions.reconcileTypedCommand,
+                  send: (text, version) =>
+                    chat.send(text, command.imagePaths, version),
                   isDraft: chat.availableAgents !== null,
                   refresh: chat.refresh,
                 }),
@@ -1258,40 +1602,64 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
               cancelled: () => attempt.cancelled,
             });
           } catch (error) {
-            requests.push({ kind: 'submissionFailed', method: command.type, params: { text: command.text } });
+            requests.push({
+              kind: "submissionFailed",
+              method: command.type,
+              params: { text: command.text },
+            });
             throw error;
           }
           requests.push({
-            kind: 'draftSubmitted',
+            kind: "draftSubmitted",
             method: command.type,
             params: { text: command.text, version: command.draftVersion },
           });
-          await composer('submitted', { text: command.text, version: command.draftVersion });
+          await composer("submitted", {
+            text: command.text,
+            version: command.draftVersion,
+          });
         } finally {
           submissionAttempt = undefined;
         }
         break;
       }
-      case 'restoreSubmission':
+      case "restoreSubmission":
         requests.push({
-          kind: 'composer',
-          method: 'insert',
-          params: { content: restoreUndeliveredChatText(command.text, command.current) },
+          kind: "composer",
+          method: "insert",
+          params: {
+            content: restoreUndeliveredChatText(command.text, command.current),
+            preserveError: true,
+          },
         });
         break;
-      case 'handoff': {
-        await composer('write', { text: command.text, version: command.draftVersion });
-        await chat.draft.push(command.text, command.draftVersion);
-        const handoff = await composer('park', { text: command.text, version: command.draftVersion });
-        requests.push({
-          kind: 'draftSubmitted',
-          method: 'handoff',
-          params: { ...handoff, text: command.text, version: command.draftVersion },
+      case "handoff": {
+        await composer("write", {
+          text: command.text,
+          version: command.draftVersion,
         });
-        requests.push({ kind: 'host', method: 'draftHandoffToTerminalComplete', params: handoff });
+        await chat.draft.push(command.text, command.draftVersion);
+        const handoff = await composer("park", {
+          text: command.text,
+          version: command.draftVersion,
+        });
+        requests.push({
+          kind: "draftSubmitted",
+          method: "handoff",
+          params: {
+            ...handoff,
+            text: command.text,
+            version: command.draftVersion,
+          },
+        });
+        requests.push({
+          kind: "host",
+          method: "draftHandoffToTerminalComplete",
+          params: handoff,
+        });
         break;
       }
-      case 'receiveHandoff': {
+      case "receiveHandoff": {
         if (receivingHandoffs.has(command.handoffId)) return;
         receivingHandoffs.add(command.handoffId);
         try {
@@ -1299,28 +1667,38 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
             command.draftVersion &&
             chat.draft.synced?.consumedDrafts?.some(
               (receipt) =>
-                receipt.draftId === command.draftVersion.draftId && receipt.revision >= command.draftVersion.revision
+                receipt.draftId === command.draftVersion.draftId &&
+                receipt.revision >= command.draftVersion.revision,
             );
           if (!receivedHandoffs.has(command.handoffId) && !consumed) {
-            const result = await composer('receive', {
+            const result = await composer("receive", {
               text: command.content,
               version: command.draftVersion,
               current: command.current,
             });
-            if (result.disposition === 'conflict')
-              incomingDraft = { content: command.content, version: result.version };
-            else if (result.disposition === 'accept')
+            if (result.disposition === "conflict")
+              incomingDraft = {
+                content: command.content,
+                version: result.version,
+              };
+            else if (result.disposition === "accept")
               requests.push({
-                kind: 'draftReceived',
-                method: 'handoff',
-                params: { content: command.content, version: result.entry.version, previous: command.current },
+                kind: "draftReceived",
+                method: "handoff",
+                params: {
+                  content: command.content,
+                  version: result.entry.version,
+                  previous: command.current,
+                },
               });
             receivedHandoffs.add(command.handoffId);
           }
-          await rpc('acknowledgeSessionChatDraftHandoff', { handoffId: command.handoffId });
+          await rpc("acknowledgeSessionChatDraftHandoff", {
+            handoffId: command.handoffId,
+          });
           requests.push({
-            kind: 'host',
-            method: 'draftHandoffToChatComplete',
+            kind: "host",
+            method: "draftHandoffToChatComplete",
             params: { handoffId: command.handoffId },
           });
         } finally {
@@ -1328,49 +1706,65 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         }
         break;
       }
-      case 'dismissIncomingDraft':
+      case "dismissIncomingDraft":
         incomingDraft = null;
         break;
-      case 'useIncomingDraft':
+      case "useIncomingDraft":
         if (incomingDraft)
-          requests.push({ kind: 'composer', method: 'insert', params: { content: incomingDraft.content } });
+          requests.push({
+            kind: "composer",
+            method: "insert",
+            params: { content: incomingDraft.content },
+          });
         incomingDraft = null;
         break;
-      case 'interrupt':
+      case "interrupt":
         if (submissionAttempt) submissionAttempt.cancelled = true;
         await chat.interrupt();
         break;
-      case 'dismissNotice':
-        if (chat.terminalNotice && !chat.terminalNotice.choices?.length && !chat.terminalNotice.dialog) {
+      case "dismissNotice":
+        if (
+          chat.terminalNotice &&
+          !chat.terminalNotice.choices?.length &&
+          !chat.terminalNotice.dialog
+        ) {
           dismissedNotice = dismissedNoticeState(chat.terminalNotice);
           publish(chat);
-          dismissedNotice = await composer('dismissNotice', { notice: chat.terminalNotice });
+          dismissedNotice = await composer("dismissNotice", {
+            notice: chat.terminalNotice,
+          });
         }
         break;
-      case 'noticePrimary':
-      case 'noticeSecondary': {
+      case "noticePrimary":
+      case "noticeSecondary": {
         if (!noticeVisible(chat)) break;
-        const choices = chat.terminalNotice!.choices?.filter((choice) => choice.label.trim()) ?? [];
-        const choice = choices[command.type === 'noticePrimary' ? 0 : 1];
+        const choices =
+          chat.terminalNotice!.choices?.filter((choice) =>
+            choice.label.trim(),
+          ) ?? [];
+        const choice = choices[command.type === "noticePrimary" ? 0 : 1];
         const noticeAction = chat
           .terminalNotice!.actions?.filter(terminalNoticeActionShortcutEligible)
-          .map((action) => terminalNoticeActionAnswer(chat.terminalNotice!, action))
+          .map((action) =>
+            terminalNoticeActionAnswer(chat.terminalNotice!, action),
+          )
           .find(Boolean);
         const answer = choice
           ? terminalNoticeChoiceAnswer(chat.terminalNotice, choice.index)
-          : command.type === 'noticePrimary'
+          : command.type === "noticePrimary"
             ? noticeAction
             : null;
-        if (answer) await action({ type: 'answer', answer });
+        if (answer) await action({ type: "answer", answer });
         break;
       }
-      case 'answer':
+      case "answer":
         if (answering) break;
         answering = true;
         noticeError = undefined;
         if (
-          command.answer.kind === 'terminalChoice' ||
-          (command.answer.kind === 'terminalDialog' && typeof command.answer.choiceIndex === 'number')
+          command.answer.kind === "terminalChoice" ||
+          (command.answer.kind === "terminalDialog" &&
+            typeof command.answer.choiceIndex === "number")
         )
           answeredNoticeKey = activeNoticeKey;
         publish(chat);
@@ -1378,45 +1772,51 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           const key = promptKey;
           await chat.answerPrompt(command.answer);
           if (
-            command.answer.kind === 'approval' ||
-            command.answer.kind === 'question' ||
-            chat.terminalNotice?.kind === 'permissionPrompt'
+            command.answer.kind === "approval" ||
+            command.answer.kind === "question" ||
+            chat.terminalNotice?.kind === "permissionPrompt"
           )
             dismissedPrompt = key;
         } catch (error) {
           answeredNoticeKey = null;
-          if (command.answer.kind === 'terminalChoice' && chat.terminalNotice && !chat.terminalNotice.dialog)
+          if (
+            command.answer.kind === "terminalChoice" &&
+            chat.terminalNotice &&
+            !chat.terminalNotice.dialog
+          )
             retiredNoticeKey = `${chat.terminalNotice.kind}:${chat.terminalNotice.detectedAt}`;
           throw error;
         } finally {
           answering = false;
         }
         break;
-      case 'asyncQuestionToggle':
+      case "asyncQuestionToggle":
         asyncQuestions.toggle();
         break;
-      case 'asyncQuestionNavigate': {
+      case "asyncQuestionNavigate": {
         const state = asyncQuestions.project(
           chat.messages,
           asyncQuestionsCanSend(chat),
           chat.working,
-          chat.retiredAsyncQuestionIds
+          chat.retiredAsyncQuestionIds,
         );
-        asyncQuestions.navigate(command.direction === 'previous' ? state.previousKey : state.nextKey);
+        asyncQuestions.navigate(
+          command.direction === "previous" ? state.previousKey : state.nextKey,
+        );
         break;
       }
-      case 'asyncQuestionText':
+      case "asyncQuestionText":
         asyncQuestions.edit(command.key, () => command.text);
         break;
-      case 'asyncQuestionImagesPending':
+      case "asyncQuestionImagesPending":
         asyncQuestions.imagesPending(command.pending);
         break;
-      case 'asyncQuestionOption': {
+      case "asyncQuestionOption": {
         const state = asyncQuestions.project(
           chat.messages,
           asyncQuestionsCanSend(chat),
           chat.working,
-          chat.retiredAsyncQuestionIds
+          chat.retiredAsyncQuestionIds,
         );
         if (
           !state.disabled &&
@@ -1426,45 +1826,72 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           asyncQuestions.select(command.key, command.index);
         break;
       }
-      case 'asyncQuestionSend':
-      case 'asyncQuestionSkip':
+      case "asyncQuestionSend":
+      case "asyncQuestionSkip":
         await asyncQuestions.submit(
           chat.messages,
           asyncQuestionsCanSend(chat),
-          command.type === 'asyncQuestionSkip',
+          command.type === "asyncQuestionSkip",
           (questionId, text, skip) =>
             chat.answerPrompt(
-              skip ? { kind: 'dismissAsyncQuestion', questionId } : { kind: 'asyncQuestion', questionId, text }
+              skip
+                ? { kind: "dismissAsyncQuestion", questionId }
+                : { kind: "asyncQuestion", questionId, text },
             ),
-          chat.retiredAsyncQuestionIds
+          chat.retiredAsyncQuestionIds,
         );
         break;
-      case 'questionText': {
-        if (answering || questionTransition || questionDraftsLoading || !questionDrafts[questionIndex]) break;
-        questionDrafts[questionIndex] = { ...questionDrafts[questionIndex]!, other: command.text };
+      case "questionText": {
+        if (
+          answering ||
+          questionTransition ||
+          questionDraftsLoading ||
+          !questionDrafts[questionIndex]
+        )
+          break;
+        questionDrafts[questionIndex] = {
+          ...questionDrafts[questionIndex]!,
+          other: command.text,
+        };
         publish(chat);
-        await composer('questionWrite', {
+        await composer("questionWrite", {
           promptKey: questionContentKey,
-          answers: Object.fromEntries(questionDrafts.map((draft, index) => [index, draft])),
+          answers: Object.fromEntries(
+            questionDrafts.map((draft, index) => [index, draft]),
+          ),
         });
         break;
       }
-      case 'questionBack':
-        if (!answering && !questionTransition && !questionDraftsLoading) questionIndex = Math.max(0, questionIndex - 1);
+      case "questionBack":
+        if (!answering && !questionTransition && !questionDraftsLoading)
+          questionIndex = Math.max(0, questionIndex - 1);
         break;
-      case 'questionOption':
-      case 'questionNext': {
-        if (chat.prompt?.kind !== 'question' || answering || questionTransition || questionDraftsLoading) break;
+      case "questionOption":
+      case "questionNext": {
+        if (
+          chat.prompt?.kind !== "question" ||
+          answering ||
+          questionTransition ||
+          questionDraftsLoading
+        )
+          break;
         const question = chat.prompt.questions[questionIndex]!;
         const contentKey = questionContentKey;
-        if (command.type === 'questionOption') {
+        if (command.type === "questionOption") {
           if (!question.options[command.index]) break;
-          questionDrafts = selectQuestionOption(questionDrafts, questionIndex, question.multiSelect, command.index);
-          const answers = Object.fromEntries(questionDrafts.map((draft, index) => [index, draft]));
+          questionDrafts = selectQuestionOption(
+            questionDrafts,
+            questionIndex,
+            question.multiSelect,
+            command.index,
+          );
+          const answers = Object.fromEntries(
+            questionDrafts.map((draft, index) => [index, draft]),
+          );
           questionTransition = true;
           publish(chat);
           try {
-            await composer('questionWrite', { promptKey: contentKey, answers });
+            await composer("questionWrite", { promptKey: contentKey, answers });
           } finally {
             if (questionContentKey === contentKey) questionTransition = false;
           }
@@ -1472,23 +1899,30 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         }
         if (questionIndex < chat.prompt.questions.length - 1) questionIndex++;
         else {
-          if (!questionDrafts.some((draft) => draft.indices.length || draft.other.trim())) break;
+          if (
+            !questionDrafts.some(
+              (draft) => draft.indices.length || draft.other.trim(),
+            )
+          )
+            break;
           answering = true;
           const key = promptKey;
           const drafts = questionDrafts;
           publish(chat);
           try {
             await chat.answerPrompt({
-              kind: 'question',
+              kind: "question",
               selections: drafts.map((draft) => ({
                 indices: draft.indices,
                 ...(draft.other.trim() ? { other: draft.other.trim() } : {}),
               })),
             });
             dismissedPrompt = key;
-            await composer('questionClear', {
+            await composer("questionClear", {
               promptKey: contentKey,
-              answers: Object.fromEntries(drafts.map((draft, index) => [index, draft])),
+              answers: Object.fromEntries(
+                drafts.map((draft, index) => [index, draft]),
+              ),
             });
           } finally {
             if (questionContentKey === contentKey) answering = false;
@@ -1496,18 +1930,20 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         }
         break;
       }
-      case 'questionCancel': {
+      case "questionCancel": {
         if (answering || questionTransition || questionDraftsLoading) break;
         dismissedPrompt = promptKey;
         if (questionContentKey)
-          await composer('questionClear', {
+          await composer("questionClear", {
             promptKey: questionContentKey,
-            answers: Object.fromEntries(questionDrafts.map((draft, index) => [index, draft])),
+            answers: Object.fromEntries(
+              questionDrafts.map((draft, index) => [index, draft]),
+            ),
           });
         await chat.interrupt();
         break;
       }
-      case 'loadImage': {
+      case "loadImage": {
         /*
         The picture behind an "[Image #N](path)" reference lives on the session's machine, so GPUI
         chat cannot open it directly either: the bytes come back over the same transport React reads
@@ -1517,108 +1953,148 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         try {
           const image = await transport.loadImage!({ path: command.path });
           requests.push({
-            kind: 'chatImage',
-            method: 'loaded',
-            params: { path: command.path, base64Data: image.base64Data, mediaType: image.mediaType },
+            kind: "chatImage",
+            method: "loaded",
+            params: {
+              path: command.path,
+              base64Data: image.base64Data,
+              mediaType: image.mediaType,
+            },
           });
         } catch {
-          requests.push({ kind: 'chatImage', method: 'failed', params: { path: command.path } });
+          requests.push({
+            kind: "chatImage",
+            method: "failed",
+            params: { path: command.path },
+          });
         }
         break;
       }
-      case 'rewindOpen':
+      case "rewindOpen":
         messageActions.open(command.messageId, command.prompt, chat.agent);
         break;
-      case 'rewindCancel':
+      case "rewindCancel":
         messageActions.close();
         break;
-      case 'rewindSubmit':
+      case "rewindSubmit":
         await messageActions.submit();
         break;
-      case 'savePrompt':
+      case "savePrompt":
         await messageActions.save(command.messageId, command.prompt);
         break;
-      case 'sendKey':
-        await chat.sendKey?.(command.key, command.marker ?? '');
+      case "sendKey":
+        await chat.sendKey?.(command.key, command.marker ?? "");
         break;
-      case 'openMarkdownLink': {
+      case "openMarkdownLink": {
         const target = classifySessionChatLinkHref(command.href);
-        if (target.kind === 'file')
+        if (target.kind === "file")
           requests.push({
-            kind: 'host',
-            method: 'openFile',
-            params: { path: target.path, ...sessionChatFilePositionFromHref(command.href) },
+            kind: "host",
+            method: "openFile",
+            params: {
+              path: target.path,
+              ...sessionChatFilePositionFromHref(command.href),
+            },
           });
-        else if (target.kind === 'url')
+        else if (target.kind === "url")
           requests.push({
-            kind: 'host',
-            method: 'openLink',
+            kind: "host",
+            method: "openLink",
             params: { url: target.url, external: command.external === true },
           });
         break;
       }
-      case 'openComposerReference': {
+      case "openComposerReference": {
         // React's composer (`use-session-chat-reference-interactions.ts`) opens a pill only when its destination is a local file; a web link pill is inert.
         const target = classifySessionChatLinkHref(command.href);
-        if (target.kind === 'file')
+        if (target.kind === "file")
           requests.push({
-            kind: 'host',
-            method: 'openFile',
-            params: { path: target.path, ...sessionChatFilePositionFromHref(command.href) },
+            kind: "host",
+            method: "openFile",
+            params: {
+              path: target.path,
+              ...sessionChatFilePositionFromHref(command.href),
+            },
           });
         break;
       }
-      case 'retry':
+      case "retry":
         chat.retry();
         break;
-      case 'refresh':
+      case "refresh":
         chat.refresh();
         break;
-      case 'loadEarlier':
+      case "loadEarlier":
         chat.loadEarlier();
         break;
-      case 'retryQueue':
+      case "retryQueue":
         await chat.queue.retryPrompt(command.promptId);
         break;
-      case 'removeQueue': {
+      case "removeQueue": {
         if (command.edit) {
-          const original = chat.queue.prompts.find((prompt) => prompt.id === command.promptId);
-          if (!original || !chat.queue.capabilities.canEdit || isSessionChatQueueRowBusy(original)) break;
+          const original = chat.queue.prompts.find(
+            (prompt) => prompt.id === command.promptId,
+          );
+          if (
+            !original ||
+            !chat.queue.capabilities.canEdit ||
+            isSessionChatQueueRowBusy(original)
+          )
+            break;
           const content = await editQueuedChatPrompt({
             original: original.text,
             remove: () => chat.queue.removePrompt(command.promptId),
-            readCurrent: () => rpc<string>('readNativeComposer'),
+            readCurrent: () => rpc<string>("readNativeComposer"),
             queue: chat.queue.queuePrompt,
           });
-          requests.push({ kind: 'composer', method: 'insert', params: { content } });
+          requests.push({
+            kind: "composer",
+            method: "insert",
+            params: { content },
+          });
         } else await chat.queue.removePrompt(command.promptId);
         break;
       }
-      case 'sendQueue':
+      case "sendQueue":
         await chat.queue.sendNow(command.promptId);
         break;
-      case 'reorderQueue':
+      case "reorderQueue":
         await chat.queue.reorder(command.promptIds);
         break;
-      case 'moveQueue': {
+      case "moveQueue": {
         const prompts = chat.queue.prompts;
-        const from = prompts.findIndex((prompt) => prompt.id === command.promptId);
-        const to = prompts.findIndex((prompt) => prompt.id === command.targetId);
-        if (from >= 0 && to >= 0 && !isSessionChatQueueRowBusy(prompts[from]!)) {
-          await chat.queue.reorder(sessionChatQueuePromptIds(moveSessionChatQueueRow(prompts, from, to)));
+        const from = prompts.findIndex(
+          (prompt) => prompt.id === command.promptId,
+        );
+        const to = prompts.findIndex(
+          (prompt) => prompt.id === command.targetId,
+        );
+        if (
+          from >= 0 &&
+          to >= 0 &&
+          !isSessionChatQueueRowBusy(prompts[from]!)
+        ) {
+          await chat.queue.reorder(
+            sessionChatQueuePromptIds(
+              moveSessionChatQueueRow(prompts, from, to),
+            ),
+          );
         }
         break;
       }
-      case 'saveDraft':
+      case "saveDraft":
         trackDraftAttachments(command.content);
         await chat.draft.push(command.content, command.draftVersion);
         break;
-      case 'loadWork': {
+      case "loadWork": {
         // The failure belongs to the row that asked for it, not to the composer's error bar, so it never reaches the outer handler.
         deferredWork.set(command.id, { loading: true });
         publish(controller.current());
         try {
-          deferred.set(command.id, await readWork(transport.readHistory!, command.work));
+          deferred.set(
+            command.id,
+            await readWork(transport.readHistory!, command.work),
+          );
           deferredWork.delete(command.id);
         } catch (error) {
           deferredWork.set(command.id, {
@@ -1633,27 +2109,39 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         throw new Error(`Unknown chat action: ${command.type}`);
     }
     requests.push({
-      kind: 'actionComplete',
+      kind: "actionComplete",
       method: command.type,
       params: { requestId: command.requestId, text: command.text },
     });
   } catch (error) {
     operationErrorCode = gxserverRpcErrorCode(error);
     operationError =
-      operationErrorCode === 'sendCancelled' ? undefined : error instanceof Error ? error.message : String(error);
+      operationErrorCode === "sendCancelled"
+        ? undefined
+        : error instanceof Error
+          ? error.message
+          : String(error);
     if (
-      command.type === 'answer' &&
-      (command.answer.kind === 'terminalChoice' || command.answer.kind === 'terminalDialog')
+      command.type === "answer" &&
+      (command.answer.kind === "terminalChoice" ||
+        command.answer.kind === "terminalDialog")
     ) {
       noticeError = operationError;
       operationError = undefined;
     }
-    if (command.type === 'handoff')
-      requests.push({ kind: 'host', method: 'draftHandoffToTerminalFailed', params: { error: operationError } });
+    if (command.type === "handoff")
+      requests.push({
+        kind: "host",
+        method: "draftHandoffToTerminalFailed",
+        params: { error: operationError },
+      });
     requests.push({
-      kind: 'actionError',
+      kind: "actionError",
       method: command.type,
-      params: { requestId: command.requestId, error: operationError ?? noticeError },
+      params: {
+        requestId: command.requestId,
+        error: operationError ?? noticeError,
+      },
     });
   }
   publish(controller.current());
@@ -1666,22 +2154,22 @@ const transfers = new ChatTransfers((reason) => {
 });
 
 function brokerMessage(message: any): void {
-  if (message.kind === 'chunk') {
+  if (message.kind === "chunk") {
     const assembled = transfers.accept(message);
     if (assembled) brokerMessage(assembled);
-  } else if (message.kind === 'reset') {
+  } else if (message.kind === "reset") {
     transfers.clear();
     if (controller) controller.current().retry();
     else start(bootConfig);
-  } else if (message.kind === 'chatSettings') {
+  } else if (message.kind === "chatSettings") {
     adoptNativeChatSettings(message.settings);
-  } else if (message.kind === 'contextPreferences') {
+  } else if (message.kind === "contextPreferences") {
     adoptNativeContextPreferences(message.preferences);
-  } else if (message.kind === 'catalog') {
+  } else if (message.kind === "catalog") {
     adoptAgentModelCatalog(message.catalog);
-  } else if (message.kind === 'event') {
+  } else if (message.kind === "event") {
     eventListener?.(message.event);
-  } else if (message.kind === 'response') {
+  } else if (message.kind === "response") {
     const call = pending.get(Number(message.requestId));
     if (call) {
       pending.delete(Number(message.requestId));
@@ -1698,20 +2186,24 @@ function brokerMessage(message: any): void {
  * Offsets count UTF-16 code units, which is what a JS string index is; the host converts them.
  */
 function trackDraftAttachments(text: unknown): void {
-  if (typeof text !== 'string') return;
-  draftAttachmentCount = sessionChatComposerReferences(text).filter((reference) => reference.kind === 'image').length;
+  if (typeof text !== "string") return;
+  draftAttachmentCount = sessionChatComposerReferences(text).filter(
+    (reference) => reference.kind === "image",
+  ).length;
 }
 
 function composerReferences(text: string, includeRevealed = false) {
-  return sessionChatComposerReferences(text, includeRevealed).map((reference) => ({
-    start: reference.start,
-    end: reference.end,
-    kind: reference.kind,
-    label: reference.label,
-    path: reference.path,
-    pill: sessionChatReferencePillText(reference.label, reference.kind),
-    revealed: reference.revealed === true,
-  }));
+  return sessionChatComposerReferences(text, includeRevealed).map(
+    (reference) => ({
+      start: reference.start,
+      end: reference.end,
+      kind: reference.kind,
+      label: reference.label,
+      path: reference.path,
+      pill: sessionChatReferencePillText(reference.label, reference.kind),
+      revealed: reference.revealed === true,
+    }),
+  );
 }
 
 /**
@@ -1722,15 +2214,22 @@ function composerReferences(text: string, includeRevealed = false) {
  */
 function itemsSplice(
   previous: unknown[] | undefined,
-  next: unknown[]
-): { start: number; deleteCount: number; items: unknown[]; length: number } | undefined {
+  next: unknown[],
+):
+  | { start: number; deleteCount: number; items: unknown[]; length: number }
+  | undefined {
   if (previous === next) return undefined;
-  if (!previous) return { start: 0, deleteCount: 0, items: next, length: next.length };
+  if (!previous)
+    return { start: 0, deleteCount: 0, items: next, length: next.length };
   const limit = Math.min(previous.length, next.length);
   let start = 0;
   while (start < limit && previous[start] === next[start]) start++;
   let end = 0;
-  while (end < limit - start && previous[previous.length - 1 - end] === next[next.length - 1 - end]) end++;
+  while (
+    end < limit - start &&
+    previous[previous.length - 1 - end] === next[next.length - 1 - end]
+  )
+    end++;
   return {
     start,
     deleteCount: previous.length - start - end,
@@ -1766,13 +2265,23 @@ Object.assign(globalThis, {
     /** Diagnostic only, off unless the host asks for it: see native-host-replay.ts. */
     replay: startNativeChatRecording,
     event: (event: GxserverSessionChatEvent) => eventListener?.(event),
-    resolve(id: number, value: unknown, error?: { code?: GxserverRpcErrorCode; message: string; endpoint: string }) {
+    resolve(
+      id: number,
+      value: unknown,
+      error?: {
+        code?: GxserverRpcErrorCode;
+        message: string;
+        endpoint: string;
+      },
+    ) {
       const call = pending.get(id);
       if (!call) return;
       pending.delete(id);
       if (error)
         call.reject(
-          error.code ? new GxserverRpcError(error.code, error.message, error.endpoint) : new Error(error.message)
+          error.code
+            ? new GxserverRpcError(error.code, error.message, error.endpoint)
+            : new Error(error.message),
         );
       else call.resolve(value);
     },
@@ -1788,14 +2297,24 @@ Object.assign(globalThis, {
     take: (lastRevision: number) => {
       return JSON.stringify({
         itemsSplice: transcriptItemsSplice(),
-        minimap: sentMinimapMarkers === minimapMarkers ? undefined : (sentMinimapMarkers = minimapMarkers),
+        minimap:
+          sentMinimapMarkers === minimapMarkers
+            ? undefined
+            : (sentMinimapMarkers = minimapMarkers),
         subagentSplice: subagentItemsSplice(),
-        rowDetails: sentRowDetails === rowDetails ? undefined : JSON.parse((sentRowDetails = rowDetails)),
+        rowDetails:
+          sentRowDetails === rowDetails
+            ? undefined
+            : JSON.parse((sentRowDetails = rowDetails)),
         revision,
         snapshot: lastRevision === revision ? undefined : snapshot,
         requests: requests.splice(0),
         nextWakeMs: timers.size
-          ? Math.max(0, Math.min(...[...timers.values()].map((timer) => timer.at)) - Date.now())
+          ? Math.max(
+              0,
+              Math.min(...[...timers.values()].map((timer) => timer.at)) -
+                Date.now(),
+            )
           : null,
       });
     },

@@ -181,6 +181,7 @@ pub(crate) mod agent_cli_http;
 pub mod agent_http;
 pub mod agent_prompt_search_http;
 pub mod background_tasks;
+mod browser_tcp;
 pub mod commit_message_generation;
 pub mod http_endpoints;
 pub mod http_infra;
@@ -531,6 +532,7 @@ pub async fn run_gxserver_foreground(
     let app = Router::new()
         .route("/api/events", any(handle_events))
         .route("/api/terminal", any(handle_terminal))
+        .route("/api/browserTcp", any(browser_tcp::handle_browser_tcp))
         .fallback_service(service_fn(move |request| {
             handle_http_request(http_state.clone(), request)
         }))

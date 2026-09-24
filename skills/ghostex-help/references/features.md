@@ -239,6 +239,10 @@ button that an empty project list or empty Space shows, or by right-clicking
 the empty sidebar area) joins the Space that is open at the time and appears at
 the top of it; add a project while Other is selected to leave it out of every
 Space.
+In Add Project, select the computer whose folders you want to browse. External
+drives and other folders shows that computer's filesystem root, or its drives
+on native Windows. You can paste a Windows drive or UNC path when the selected
+computer runs native Windows, even from a Linux or macOS client.
 Right-click a Space icon for its menu: Manage (Edit Space, New Space) and
 Sleep. Sleep Inactive sleeps only the Space's sessions that are awake but
 neither working nor waiting on you. Sessions stay where they are, asleep, and
@@ -517,6 +521,9 @@ Session Chat renders the same agent session as a chat GUI: composer with
 image paste and Ctrl+G rich prompt editor, a prompt queue that sends when the
 agent stops, transcript with thinking, tool, and edit cards, subagent
 transcripts, question and approval cards, rewind, and a note per session.
+Use the paperclip to attach images, files, or folders. On Linux, choose
+**Images or files…** or **Folders…** before selecting items in the system picker;
+the terminal's attachment action offers the same choices.
 Hover a message to show its actions and the time it was sent in a row below
 it: Copy message, Reply by Annotating, and Save to md under an agent's final
 reply; Rewind to here, Save prompt, and Copy message under your own messages.
@@ -678,7 +685,8 @@ collapsed row with its path and green/red change counts. Enable Show file edit
 previews in Settings > Chat to show the first seven code lines by default.
 Long paths truncate from the start, keeping the filename visible. Click anywhere
 on the path or filename to open it in Editor or Docs, just like a file reference
-pill. Folder links in desktop chat open the folder in your system file explorer.
+pill. Local folder links in desktop chat open your system file explorer; remote
+folder links open in this computer's Code view so you can browse the remote files.
 File reference pills in the composer also open with one click using the same
 Code/Docs preferences as transcript links. Double-click a composer pill to edit
 its reference text. Right-click a file reference or file-change path for Open in
@@ -875,12 +883,21 @@ Terminals are embedded Ghostty surfaces. Font, theme, cursor, padding,
 scrollback, clipboard, and scrolling are Settings > General > Terminal rows and
 are written into a managed Ghostty config; the Ghostty settings actions row
 applies the recommended set or opens the raw config. Command-click opens links;
-Cmd+V pastes images as previewable links. Ctrl+G opens the Ghostex prompt editor
-or your machine default editor for long prompts. The Ghostex editor uses the
+Cmd+V pastes images as previewable links. On Windows and Linux, Ctrl+V or
+Ctrl+Shift+V pastes from the client computer's clipboard into the focused
+terminal, including a remote terminal. A configured hotkey using the same chord
+takes precedence. In an agent's terminal prompt, use
+Prompt Editor in the terminal toolbar, Ctrl+G on macOS, or Ctrl+Shift+G on
+Windows and Linux to open the Ghostex prompt editor or your machine default
+editor for long prompts. Remote sessions open it in that computer's Code view.
+The agent must be at its prompt and support an external editor; an idle shell
+does not provide that agent prompt-editor action. The Ghostex editor uses the
 same text editing controls as the chat composer, with F1 commands, find/replace,
 undo/redo, and image previews. Cmd+S/Ctrl+S or Ctrl+G saves and closes it; Cancel
-leaves the original prompt unchanged. Dev Servers detects localhost URLs from output and
-lists them in the ⋯ menu's Dev servers panel.
+leaves the original prompt unchanged. In remote Code, auto-save is off for prompt
+files. Save your edits, then close the prompt file to return to the agent. To
+cancel, close it without saving and choose Don't Save if asked. Dev Servers detects
+localhost URLs from output and lists them in the ⋯ menu's Dev servers panel.
 
 Terminals follow the app theme by default. Settings > General > Theme groups
 App theme, Chat theme, and Terminal theme together at the top of Settings.
@@ -1066,7 +1083,13 @@ sessions, so any client can control agents on any machine.
 - **From another computer**: Settings > Remote > Remote machines > Add a
   machine with SSH details or an Easy Connect code, then Install / Connect
   gxserver on it. The machine appears as a sidebar section with its own
-  projects and sessions; its terminals stream into the desktop app.
+  projects and sessions; its terminals stream into the desktop app. Windows,
+  Linux, and macOS clients use the connected computer's folders and shell.
+  Open Code from the view panel's + menu to edit the remote project; if prompted,
+  install the editor component first. Folder links in remote chats also browse
+  the remote folder in Code.
+  Remote localhost links open in the built-in Browser through that computer,
+  even when ordinary web links are set to open in your external browser.
 - **Web app**: a static browser build of the same workspace UI that talks to
   gxserver.
 - **CLI**: `ghostex attach <selector>` attaches to a session from any terminal,
@@ -1074,14 +1097,16 @@ sessions, so any client can control agents on any machine.
 
 Windows computers accept Android, macOS, and Linux desktop connections over SSH.
 Install Ghostex on Windows, enable SSH, and add the Windows address with your
-Windows username. The connection uses the Windows Environment selected in
-Windows Ghostex: native PowerShell with Windows folders, or the selected WSL
-distribution with Linux folders. Windows agent CLIs must be installed for native
+Windows username. Leave Advanced > Windows WSL distribution blank to use the
+Windows Environment selected in Windows Ghostex: native PowerShell with Windows
+folders (the default), or WSL with Linux folders. Enter a distribution name to
+use that WSL2 distribution instead. Windows agent CLIs must be installed for native
 PowerShell projects. After changing the Windows environment and restarting the
 Windows app, reconnect the phone or remote desktop machine to use that environment.
 The connecting computer keeps its own local environment: a Linux or macOS client
 can work with Windows paths and PowerShell sessions on the connected computer.
-Linux stores saved SSH passwords in the desktop keyring.
+Linux stores saved SSH passwords in the desktop keyring; Windows uses Windows
+Credential Manager.
 
 Related settings: Settings > Remote (all rows are user-only; open them with
 `ghostex settings open --tab remote`), `hideKeepAwakeTitlebarControl` and the

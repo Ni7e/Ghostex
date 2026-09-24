@@ -425,6 +425,21 @@ pub(crate) fn gpui_engine_terminal_spawn_config(
         env.push(("WAYLAND_DISPLAY".into(), wayland_display.to_string()));
     }
 
+    #[cfg(windows)]
+    let (program, args) = {
+        // CDXC:RemoteMachines 2026-09-23 WHY:
+        // Remote SSH uses the host's OpenSSH and credential helper even when local projects use WSL; routing this payload through WSL would lose its Windows executable paths and askpass environment.
+        let native_remote = env
+            .iter()
+            .any(|(key, value)| key == "GHOSTEX_REMOTE_SSH_CLIENT" && value == "windows");
+        env.retain(|(key, _)| key != "GHOSTEX_REMOTE_SSH_CLIENT");
+        if native_remote {
+            crate::windows_terminal_backend::native_terminal_invocation(command, cwd.as_deref())
+        } else {
+            spawn_invocation(command, cwd.as_deref())
+        }
+    };
+    #[cfg(not(windows))]
     let (program, args) = spawn_invocation(command, cwd.as_deref());
 
     TerminalSpawnConfig {

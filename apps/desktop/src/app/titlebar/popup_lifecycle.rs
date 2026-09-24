@@ -307,6 +307,36 @@ impl GhostexGpuiApp {
         }
     }
 
+    /// CDXC:Git 2026-09-23 WHY:
+    /// The Git dropdown is a separate native window. Notifying the main window leaves its menu frozen at the loading snapshot until it is reopened.
+    pub(crate) fn refresh_open_git_popup(&self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        if !self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Git) {
+            return;
+        }
+        let Some(popup) = self.titlebar_popup_window else {
+            return;
+        };
+        let content_height = self.titlebar_git_popup_content_height();
+        let bottom_limit = window.bounds().bottom() - px(8.0);
+        let _ = popup.update(cx, |popup, window, cx| {
+            let bounds = window.bounds();
+            let height = px(content_height.min(TITLEBAR_POPUP_MENU_MAX_HEIGHT))
+                .min((bottom_limit - bounds.top()).max(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT)));
+            let width = (bounds.size.width.as_f32() - TITLEBAR_POPUP_MENU_BORDER_CHROME).max(0.0);
+            let max_height = (height.as_f32() - TITLEBAR_POPUP_MENU_BORDER_CHROME).max(0.0);
+            let menu = PopupMenu::build(window, cx, |menu, _, _| {
+                self.build_gpui_titlebar_git_popup_menu(
+                    menu,
+                    width,
+                    max_height,
+                    content_height > height.as_f32(),
+                )
+            });
+            window.resize(size(bounds.size.width, height));
+            popup.replace_menu(menu, window, cx);
+        });
+    }
+
     pub(crate) fn build_gpui_titlebar_popup_content(
         &self,
         kind: GpuiTitlebarPopupKind,

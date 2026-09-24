@@ -511,22 +511,16 @@ impl GhostexGpuiApp {
         target: FocusedTerminalTextMountTarget,
         cx: &mut gpui::Context<Self>,
     ) {
-        let remote_context = match target {
-            FocusedTerminalTextMountTarget::Agents(slot_id) => self
-                .remote_prompt_editor_context_for_shell_session(slot_id.session_id)
-                .map(|(key, connection_generation)| {
-                    (slot_id.session_id, key, connection_generation)
-                }),
-            FocusedTerminalTextMountTarget::Command(_) => None,
-        };
-        if let Some((shell_session_id, key, connection_generation)) = remote_context {
+        let delivery_target = RemotePromptEditorDeliveryTarget::NativeTerminal(target);
+        if let Some((key, connection_generation)) =
+            self.remote_prompt_editor_context_for_delivery_target(delivery_target)
+        {
             cx.spawn(async move |this, cx| {
                 let _ = this.update_in(cx, |this, window, cx| {
                     this.queue_remote_prompt_editor_request(
-                        shell_session_id,
                         &key,
                         connection_generation,
-                        RemotePromptEditorDeliveryTarget::NativeTerminal(target),
+                        delivery_target,
                         window,
                         cx,
                     );

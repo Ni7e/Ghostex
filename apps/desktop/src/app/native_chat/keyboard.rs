@@ -15,6 +15,30 @@ pub(super) fn register(cx: &mut gpui::App) {
         return;
     }
     cx.set_global(ComposerKeysRegistered);
+    // CDXC:SessionChat 2026-09-23 SEE-ALSO:
+    // React's session-chat-lexical-input.tsx uses the primary modifier with Home/End for document movement and Shift selection. The native input only supplies macOS document-arrow defaults.
+    cx.bind_keys([
+        gpui::KeyBinding::new(
+            "secondary-home",
+            gpui_component::input::MoveToStart,
+            Some("NativeChat > Input"),
+        ),
+        gpui::KeyBinding::new(
+            "secondary-end",
+            gpui_component::input::MoveToEnd,
+            Some("NativeChat > Input"),
+        ),
+        gpui::KeyBinding::new(
+            "secondary-shift-home",
+            gpui_component::input::SelectToStart,
+            Some("NativeChat > Input"),
+        ),
+        gpui::KeyBinding::new(
+            "secondary-shift-end",
+            gpui_component::input::SelectToEnd,
+            Some("NativeChat > Input"),
+        ),
+    ]);
     cx.bind_keys(
         [
             ("enter", "enter"),
