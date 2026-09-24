@@ -108,10 +108,13 @@ const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 /// `ZMX_REFLOW_QUIET` — merging the daemon's post-claim dump AND the agent
 /// TUI's SIGWINCH redraw into one paint — or at `ZMX_REFLOW_CAP` at the
 /// latest. The quiet window must outlast the gap between the daemon's dump
-/// and the TUI's own redraw: the dump alone shows the daemon's ghostty reflow
-/// of the old width (long border lines wrap), and only the TUI redraw draws
-/// them at the real width.
-const ZMX_REFLOW_QUIET: Duration = Duration::from_millis(100);
+/// and the TUI's own redraw (the dump alone shows the daemon's ghostty reflow
+/// of the old width, where long border lines wrap), AND the workarea's double
+/// layout pass on a session switch: the pane lays the incoming session out at
+/// one height first and settles to its final height ~150ms later, and each
+/// layout runs the full claim-dump-redraw pipeline. A hold that settles
+/// between the two passes paints the first pass's frame — the garbage frame.
+const ZMX_REFLOW_QUIET: Duration = Duration::from_millis(250);
 const ZMX_REFLOW_CAP: Duration = Duration::from_millis(400);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 5.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 24.0;
