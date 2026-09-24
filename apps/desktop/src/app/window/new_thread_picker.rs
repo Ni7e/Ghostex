@@ -707,21 +707,29 @@ impl GpuiNewThreadPickerWindow {
     and Backspace propagate to the field whenever the picker has no use for
     them, so cursor editing still works.
     */
+    /*
+    CDXC:AgentLauncher 2026-09-24 WHY:
+    A capture-phase action keeps propagating unless its listener stops it, and the single-line field registers no Up, Down, or Tab handler. An unstopped Up or Down was therefore re-dispatched through every other matching binding and the retried native keystroke (the selection jumped several rows) and finally reported unhandled, so AppKit beeped. Every key the picker uses stops propagation.
+    */
     fn on_move_up(&mut self, _: &MoveUp, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         self.move_selection(-1, cx);
     }
 
     fn on_move_down(&mut self, _: &MoveDown, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         self.move_selection(1, cx);
     }
 
     fn on_enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         if let Some(row) = self.selected_row() {
             self.activate(row, window, cx);
         }
     }
 
     fn on_escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         if self.scope.is_some() {
             self.leave_scope(window, cx);
         } else {
@@ -731,6 +739,7 @@ impl GpuiNewThreadPickerWindow {
 
     /// Tab: open the highlighted Claude or Codex agent's account list.
     fn on_tab(&mut self, _: &IndentInline, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         if self.scope.is_none() {
             if let Some(PickerRow::Agent(index)) = self.selected_row() {
                 self.enter_scope(index, window, cx);
@@ -742,6 +751,7 @@ impl GpuiNewThreadPickerWindow {
         if self.scope.is_none() {
             if let Some(PickerRow::Agent(index)) = self.selected_row() {
                 if self.agents[index].provider().is_some() {
+                    cx.stop_propagation();
                     self.enter_scope(index, window, cx);
                     return;
                 }
@@ -752,6 +762,7 @@ impl GpuiNewThreadPickerWindow {
 
     fn on_move_left(&mut self, _: &MoveLeft, window: &mut Window, cx: &mut Context<Self>) {
         if self.scope.is_some() {
+            cx.stop_propagation();
             self.leave_scope(window, cx);
             return;
         }
@@ -760,6 +771,7 @@ impl GpuiNewThreadPickerWindow {
 
     fn on_backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.scope.is_some() && self.query.is_empty() {
+            cx.stop_propagation();
             self.leave_scope(window, cx);
             return;
         }

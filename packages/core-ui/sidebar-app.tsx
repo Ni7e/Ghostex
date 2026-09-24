@@ -2935,6 +2935,7 @@ export function SidebarApp({
       // Host-owned like Back/Forward: the native bell and the sidebar runtime act on the id.
       action.kind === 'notificationFeed' ||
       action.kind === 'openCommandsPanel' ||
+      action.kind === 'createAgentSession' ||
       action.kind === 'openNewThreadPalette' ||
       action.kind === 'renameActiveSession' ||
       action.kind === 'runActionSlot' ||

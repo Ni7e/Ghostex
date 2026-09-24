@@ -63,6 +63,11 @@ pub(crate) fn gpui_migrated_hotkey_for_action<'a>(
     {
         return default_key;
     }
+    // The New Thread picker gave Cmd+Shift+T to New Terminal / New Agent Session, mirroring
+    // retiredDefaultKeys in packages/shared/ghostex-hotkeys.ts.
+    if action_id == "openNewThreadPalette" && key.trim().eq_ignore_ascii_case("cmd+shift+t") {
+        return default_key;
+    }
     // CDXC:PromptSearch 2026-08-24: retired Alt+F default, mirroring
     // retiredDefaultKeys in packages/shared/ghostex-hotkeys.ts.
     if action_id == "openFindPrompts" && key.trim().eq_ignore_ascii_case("alt+f") {
@@ -98,6 +103,53 @@ pub(crate) fn gpui_migrated_hotkey_for_action<'a>(
         return default_key;
     }
     key
+}
+
+const NEW_SESSION_PRIMARY_KEY: &str = "cmd+t";
+const NEW_SESSION_SECONDARY_KEY: &str = "cmd+shift+t";
+
+/// The chord New Agent Session or New Terminal resolves to while the two hold Cmd+T and
+/// Cmd+Shift+T, in either order: the Default interface decides which one gets Cmd+T. `None`
+/// leaves every other action, and a pair the user rebound, on its own chord.
+/// SEE-ALSO: `applyNewSessionHotkeyLayout` in packages/shared/ghostex-hotkeys.ts (CDXC:Hotkeys 2026-09-24).
+pub(crate) fn gpui_new_session_hotkey_layout(
+    action_id: &str,
+    settings: &serde_json::Map<String, serde_json::Value>,
+) -> Option<&'static str> {
+    if !matches!(action_id, "createAgentSession" | "createSession") {
+        return None;
+    }
+    let hotkeys = settings
+        .get("hotkeys")
+        .and_then(serde_json::Value::as_object);
+    let persisted = |id: &str| {
+        hotkeys
+            .and_then(|hotkeys| hotkeys.get(id))
+            .and_then(serde_json::Value::as_str)
+            .map(|key| key.trim().to_ascii_lowercase())
+    };
+    let agent_key = persisted("createAgentSession");
+    let agent_persisted = agent_key.is_some();
+    let agent_key = agent_key.unwrap_or_else(|| NEW_SESSION_PRIMARY_KEY.to_string());
+    let mut terminal_key =
+        persisted("createSession").unwrap_or_else(|| NEW_SESSION_SECONDARY_KEY.to_string());
+    // A map saved before New Agent Session existed still has New Terminal on its old Cmd+T default.
+    if !agent_persisted && terminal_key == NEW_SESSION_PRIMARY_KEY {
+        terminal_key = NEW_SESSION_SECONDARY_KEY.to_string();
+    }
+    let pair = [agent_key.as_str(), terminal_key.as_str()];
+    if !pair.contains(&NEW_SESSION_PRIMARY_KEY) || !pair.contains(&NEW_SESSION_SECONDARY_KEY) {
+        return None;
+    }
+    let terminal_first = settings
+        .get("preferredAgentInterface")
+        .and_then(serde_json::Value::as_str)
+        == Some("terminal");
+    Some(if (action_id == "createAgentSession") != terminal_first {
+        NEW_SESSION_PRIMARY_KEY
+    } else {
+        NEW_SESSION_SECONDARY_KEY
+    })
 }
 
 pub(crate) fn gpui_platform_hotkey_for_action<'a>(action_id: &str, key: &'a str) -> &'a str {
@@ -256,10 +308,11 @@ pub(crate) fn gpui_key_binding_from_shared_hotkey<A: Action>(
 /// overlay from this table. Kept in lockstep with the TypeScript source by
 /// packages/shared/gpui-hotkey-defaults-parity.test.ts.
 pub(crate) const GPUI_DEFAULT_GHOSTEX_HOTKEYS: &[(&str, &str)] = &[
-    ("createSession", "cmd+t"),
+    ("createAgentSession", "cmd+t"),
+    ("createSession", "cmd+shift+t"),
     ("openCommandPalette", "cmd+shift+p"),
     ("openSessionSearchPalette", "cmd+p"),
-    ("openNewThreadPalette", "cmd+shift+t"),
+    ("openNewThreadPalette", "cmd+alt+t"),
     ("openCommandsPanel", "f12"),
     ("openSettings", "cmd+,"),
     ("openExtensions", ""),
@@ -505,6 +558,7 @@ pub(crate) fn gpui_configured_hotkey_action_id_for_native_text(
             _ => default_key,
         };
         let key = gpui_migrated_hotkey_for_action(action_id, key, default_key);
+        let key = gpui_new_session_hotkey_layout(action_id, snapshot.object()).unwrap_or(key);
         if normalized_gpui_hotkey_text(key).as_deref() == Some(hotkey_text.as_str()) {
             return Some((*action_id).to_string());
         }
@@ -566,8 +620,9 @@ pub(crate) fn gpui_titlebar_view_hotkey_index(action_id: &str) -> Option<usize> 
     (1..=9).contains(&slot).then(|| slot - 1)
 }
 
-/// Resolve labels through the same settings, defaults, and migrations as native key bindings.
-pub(crate) fn gpui_configured_hotkey_label(action_id: &str) -> Option<String> {
+/// The chord an action is bound to, in the shared "+" syntax, resolved through the same
+/// settings, defaults, and migrations as native key bindings. `None` when it has no valid chord.
+pub(crate) fn gpui_configured_hotkey_key(action_id: &str) -> Option<String> {
     let (_, default_key) = GPUI_DEFAULT_GHOSTEX_HOTKEYS
         .iter()
         .find(|(id, _)| *id == action_id)?;
@@ -580,9 +635,16 @@ pub(crate) fn gpui_configured_hotkey_label(action_id: &str) -> Option<String> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or(default_key);
     let key = gpui_migrated_hotkey_for_action(action_id, key, default_key);
+    let key = gpui_new_session_hotkey_layout(action_id, snapshot.object()).unwrap_or(key);
     let key = gpui_platform_hotkey_for_action(action_id, key);
     gpui_keystroke_from_shared_hotkey(key)?;
-    Some(terminal_element::terminal_overlay_hotkey_chord_label(key))
+    Some(key.to_string())
+}
+
+/// Resolve labels through the same settings, defaults, and migrations as native key bindings.
+pub(crate) fn gpui_configured_hotkey_label(action_id: &str) -> Option<String> {
+    let key = gpui_configured_hotkey_key(action_id)?;
+    Some(terminal_element::terminal_overlay_hotkey_chord_label(&key))
 }
 
 #[cfg(target_os = "macos")]
@@ -631,7 +693,8 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
     }
     // CDXC:AgentLauncher 2026-09-09 WHY:
     // The New Thread picker targets the active project, not the focused surface, so its chord must win from every responder (sidebar, Browser, Session Chat, workareas) the same way the model picker does; otherwise it only works while an Agents terminal has focus.
-    if action_id == "openNewThreadPalette" {
+    // New Agent Session starts the last-used agent in the active project, the picker's first row.
+    if matches!(action_id, "openNewThreadPalette" | "createAgentSession") {
         return true;
     }
     // CDXC:Workarea 2026-09-21 WHY:
@@ -766,6 +829,7 @@ pub(crate) fn gpui_configured_hotkey_key_bindings_from_settings() -> Vec<KeyBind
             _ => default_key,
         };
         let key = gpui_migrated_hotkey_for_action(action_id, key, default_key);
+        let key = gpui_new_session_hotkey_layout(action_id, snapshot.object()).unwrap_or(key);
         push_binding(action_id, gpui_platform_hotkey_for_action(action_id, key));
     }
     // Persisted ids beyond the mirrored default table keep binding as before
@@ -840,7 +904,10 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         if action_id == "openModelPicker" {
-            return self.request_focused_session_model_picker(cx);
+            return self.request_focused_session_model_picker(window, cx);
+        }
+        if self.run_new_session_hotkey(action_id, window, cx) {
+            return true;
         }
         self.handle_gpui_app_modal_sidebar_command(
             serde_json::json!({

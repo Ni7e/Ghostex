@@ -470,6 +470,8 @@ pub struct GhostexGpuiApp {
     /// Tabs opened by project-header agent launches that are still waiting for their created session.
     pub(crate) agent_launch_placeholders:
         std::collections::VecDeque<super::sidebar_agent_launch_placeholder::AgentLaunchPlaceholder>,
+    /// Launcher-opened chats still empty; closed once the user leaves them (new_agent_session.rs).
+    pub(crate) untouched_agent_chats: Vec<super::new_agent_session::UntouchedAgentChat>,
     pub(crate) agents_chat_reconcile_scheduled: bool,
     pub(crate) native_chat_views:
         HashMap<TerminalSessionId, Entity<super::native_chat::state::NativeChatView>>,

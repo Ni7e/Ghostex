@@ -54,6 +54,7 @@ pub(crate) mod native_chat;
 pub(crate) mod native_kanban;
 pub(crate) mod native_service;
 pub(crate) mod native_sidebar;
+pub(crate) mod new_agent_session;
 pub(crate) mod new_thread_picker_lifecycle;
 pub(crate) mod os_integration;
 pub(crate) mod panel_motion;

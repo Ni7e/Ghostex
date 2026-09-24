@@ -272,6 +272,7 @@ impl GhostexGpuiApp {
                 session_chat_paused_generations: HashSet::new(),
                 native_chat_pool_pass_scheduled: false,
                 agent_launch_placeholders: Default::default(),
+                untouched_agent_chats: Vec::new(),
                 agents_chat_reconcile_scheduled: false,
                 native_chat_views: HashMap::new(),
                 session_chat_broker_endpoints: HashMap::new(),

@@ -55,7 +55,7 @@ function focusDirectionIconName(direction: 'down' | 'left' | 'right' | 'up'): st
 
 /** Port of the `BuiltInCommandIcon` branch for hotkey-backed rows. */
 export function hotkeyActionIconName(action: ghostexHotkeyAction): string {
-  if (action.kind === 'createSession') return 'plus';
+  if (action.kind === 'createSession' || action.kind === 'createAgentSession') return 'plus';
   if (action.kind === 'openCommandsPanel') return 'terminal-2';
   if (action.kind === 'openSettings') return 'settings';
   if (action.kind === 'openHotkeys') return 'keyboard';

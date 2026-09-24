@@ -13,7 +13,7 @@ describe('normalizeghostexHotkeySettings', () => {
      * Directional pane focus must avoid plain Cmd+Arrow so terminal prompts
      * and modal prompt editors keep native text navigation.
      */
-    expect(DEFAULT_ghostex_HOTKEYS.createSession).toBe('cmd+t');
+    expect(DEFAULT_ghostex_HOTKEYS.createSession).toBe('cmd+shift+t');
     /**
      * CDXC:CommandPalette 2026-06-13-10:26:
      * Cmd+Shift+P should remain the shared default for the command palette so
@@ -185,7 +185,7 @@ describe('normalizeghostexHotkeySettings', () => {
         openBrowserPane: 'ctrl+shift+b',
       })
     ).toMatchObject({
-      createSession: 'cmd+t',
+      createSession: 'cmd+shift+t',
       focusLeft: 'cmd+alt+left',
       focusNextGroup: '',
       focusNextSession: 'ctrl+tab',

@@ -1003,7 +1003,7 @@ function BuiltInCommandIcon({ command }: { command: BuiltInPaletteCommand }) {
   }
 
   const action = command.definition.action;
-  if (action.kind === 'createSession') {
+  if (action.kind === 'createSession' || action.kind === 'createAgentSession') {
     return <IconPlus aria-hidden='true' />;
   }
   if (action.kind === 'openCommandsPanel') {

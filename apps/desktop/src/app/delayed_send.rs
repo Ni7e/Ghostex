@@ -2116,6 +2116,10 @@ impl GhostexGpuiApp {
                     self.toggle_gpui_new_thread_picker(cx);
                     return;
                 }
+                if action_id == "createAgentSession" {
+                    self.start_new_agent_session(cx);
+                    return;
+                }
                 /*
                 CDXC:FocusMode 2026-06-25-15:01:
                 The shared command palette posts focused-session commands as `runGhostexHotkeyAction`. Handle command-pane Sleep/Wake/Close focused-session ids directly in GPUI before modal routing so command-palette rows operate on the shell-focused command tab instead of no-oping or trying to open another modal.
@@ -2160,7 +2164,7 @@ impl GhostexGpuiApp {
                     return;
                 }
                 if action_id == "openModelPicker" {
-                    self.request_focused_session_model_picker(cx);
+                    self.request_focused_session_model_picker(window, cx);
                     return;
                 }
                 if action_id == "toggleChatView" {

@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 /// The picker's window root inside the app: it answers the New Thread hotkey
-/// (a second Cmd+Shift+T closes the picker) around the kit-only picker view,
+/// (a second press closes the picker) around the kit-only picker view,
 /// which cannot name the app's action types itself.
 pub(crate) struct GpuiNewThreadPickerShell {
     picker: Entity<GpuiNewThreadPickerWindow>,
@@ -69,7 +69,7 @@ fn new_thread_picker_agent_from_hud(value: &Value) -> Option<NewThreadPickerAgen
 
 /// The sidebar HUD agent buttons in dropdown order, with the last-used agent
 /// moved to the front so it is the preselected row.
-fn order_new_thread_picker_agents(
+pub(crate) fn order_new_thread_picker_agents(
     hud_agents: &[Value],
     primary_agent_id: Option<&str>,
 ) -> Vec<NewThreadPickerAgent> {
@@ -179,7 +179,7 @@ fn new_thread_picker_accounts(state: &Value) -> Vec<NewThreadPickerAccount> {
 }
 
 impl GhostexGpuiApp {
-    /// Cmd+Shift+T toggles the picker: a second press while it is open closes it.
+    /// The New Thread hotkey toggles the picker: a second press while it is open closes it.
     pub(crate) fn toggle_gpui_new_thread_picker(&mut self, cx: &mut gpui::Context<Self>) {
         if self.new_thread_picker_visible {
             self.close_gpui_new_thread_picker(cx);
@@ -389,20 +389,8 @@ impl GhostexGpuiApp {
                 agent_id,
                 account_id,
             } => {
-                let mut message = json!({
-                    "agentId": agent_id,
-                    "type": "runSidebarAgent",
-                });
-                if let Some(account_id) = account_id {
-                    message["accountId"] = json!(account_id);
-                }
-                self.sidebar_primary_agent_launcher_id = Some(agent_id);
                 self.release_gpui_new_thread_picker_window(cx);
-                if self.sidebar.is_some() {
-                    self.stage_agent_launch_placeholder(&message, cx);
-                    self.focus_staged_chat_after_picker(cx);
-                }
-                self.dispatch_gpui_sidebar_host_message(message, cx);
+                self.launch_agent_in_active_project(agent_id, account_id, cx);
             }
             NewThreadPickerCommand::OpenBrowser => {
                 self.dispatch_gpui_sidebar_host_message(

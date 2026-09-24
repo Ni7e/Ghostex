@@ -124,6 +124,12 @@ impl GhostexGpuiApp {
         {
             self.agents_chat_mode_sessions.insert(shell_session_id);
             self.stage_native_chat_launch(shell_session_id, &project_id, agent_id, name, icon, cx);
+            self.track_untouched_agent_chat(
+                shell_session_id,
+                project_id.clone(),
+                agent_id.to_string(),
+                cx,
+            );
         }
         let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id) else {
             return;

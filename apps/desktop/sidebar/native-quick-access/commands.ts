@@ -259,7 +259,9 @@ export function quickAccessCommandPopulations(petOverlayEnabled: boolean): {
   projectActions: PaletteCommand[];
 } {
   const state = sidebarStore.getState();
-  const hotkeys = normalizeghostexHotkeySettings(state.hud.settings?.hotkeys);
+  const hotkeys = normalizeghostexHotkeySettings(state.hud.settings?.hotkeys, {
+    preferredAgentInterface: state.hud.settings?.preferredAgentInterface,
+  });
   const hidden = hiddenWorkareaCommandIds();
   const paneActionIds = new Set<string>(PANE_ACTION_COMMAND_IDS);
   const toHotkeyCommand = (definition: ghostexHotkeyDefinition): PaletteCommand => {
