@@ -4,7 +4,7 @@
  * User: the strip is reordered by dragging; whatever sits to the right of the chevron is always shown on hover, whatever sits to its left is hidden until the chevron is clicked. Turning the chevron off shows every enabled button at once.
  * User: the default strip is Tag, Park, Sleep, chevron, Close: only Close shows at rest, and the chevron reveals the other three. Fork, Split Right and Delayed Send are deliberately not offered (too rare to earn a slot).
  * User: a button that is enabled here is hidden from the session's main context menu, whichever side of the chevron it is on, so each action lives in exactly one of the two places.
- * SEE-ALSO: packages/core-ui/session-card-content.tsx, packages/core-ui/sortable-session-card.tsx, packages/core-ui/settings-modal/session-card-hover-actions-field.tsx.
+ * SEE-ALSO: packages/core-ui/session-card-content.tsx, packages/core-ui/settings-modal/session-card-hover-actions-field.tsx.
  */
 export const SESSION_CARD_HOVER_ACTIONS = [
   'rename',

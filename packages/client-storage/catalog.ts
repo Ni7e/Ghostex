@@ -81,13 +81,6 @@ export const storageCatalog = Object.freeze({
     'ghostex.gitCommitModal.diffPreferences.v1',
     objectCodec
   ),
-  themeHistory: define(
-    'themeHistory',
-    'Recent project colors',
-    core + 'workspace-theme-color-history.ts',
-    'ghostex-workspace-theme-color-history',
-    stringListCodec
-  ),
   hiddenItems: define(
     'hiddenItems',
     'Sidebar visibility',
@@ -117,13 +110,6 @@ export const storageCatalog = Object.freeze({
     'ghostex.accountSetupOwner',
     textCodec,
     { policy: 'protected' }
-  ),
-  importIntro: define(
-    'importIntro',
-    'Import introduction',
-    core + 'sidebar-app/import-sessions-card.tsx',
-    'ghostex.sidebar.import-sessions-intro-seen.v1',
-    boolean
   ),
   machineTab: define(
     'machineTab',

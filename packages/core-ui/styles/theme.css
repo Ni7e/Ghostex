@@ -197,7 +197,7 @@ body[data-sidebar-theme='plain-light'],
   --ghostex-tooltip-strong-foreground: #18181b;
   --ghostex-tooltip-border: rgba(0, 0, 0, 0.14);
   --ghostex-tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
-  /* CDXC:Theming 2026-09-22 SEE-ALSO: the light chrome colour comes from the Light theme preset or custom contrast/tint (packages/shared/ghostex-settings/titlebar-color.ts, published by sidebar-app/lifecycle-effects.ts); #f4f4f5 is the Light Gray default and the pre-hydration paint. apps/desktop/src/app/helpers/titlebar.rs resolves the same colour natively. */
+  /* CDXC:Theming 2026-09-22 SEE-ALSO: the light chrome colour comes from the Light theme preset or custom contrast/tint (packages/shared/ghostex-settings/titlebar-color.ts); its React publisher was the sidebar deleted on 2026-09-24, so React pages paint the #f4f4f5 Light Gray default. apps/desktop/src/app/helpers/titlebar.rs resolves the same colour natively. */
   --app-background: var(--custom-sidebar-titlebar-light-background-color, #f4f4f5);
   --app-modal-background: #ffffff;
   --app-dropdown-background: #ffffff;

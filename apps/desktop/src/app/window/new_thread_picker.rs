@@ -1,13 +1,13 @@
-//! Native GPUI New Thread picker (Cmd+Shift+T), the desktop twin of the React
-//! `NewThreadPalette` in packages/core-ui/new-thread-palette.tsx.
+//! Native GPUI New Thread picker (Cmd+Shift+T). Its React twin, `NewThreadPalette` in
+//! packages/core-ui/new-thread-palette.tsx, was deleted with the React web app on 2026-09-24.
 //!
 //! CDXC:AgentLauncher 2026-09-09 DECISION:
-//! User: the desktop New Thread picker (Cmd+Shift+T) is drawn natively in GPUI so it opens instantly and is sized to its rows (up to twelve agents plus the Browser and Terminal rows, then it scrolls); the web app keeps the React palette because it is React-based.
+//! User: the desktop New Thread picker (Cmd+Shift+T) is drawn natively in GPUI so it opens instantly and is sized to its rows (up to twelve agents plus the Browser and Terminal rows, then it scrolls).
 //! It mirrors the project-header agent dropdown: every agent with its account count and chat badge, the last-used agent first and preselected, typing filters, Up/Down move, Enter starts, Tab or Right on Claude or Codex opens that provider's account list (Left, Backspace on an empty query, or Esc goes back), Esc closes. The highlighted row uses the sidebar's focused-session chrome and is never bolded.
 //!
 //! CDXC:AppModal 2026-09-16 DECISION:
 //! User: "please fix this modal, also please ensure that we use the gpui components that we created in the gpui app and we're not using the older modals": the picker takes its colours from the shared native modal kit palette in both appearances. It used dark-only white tints that vanished on the light theme (search border, key hints, divider, white agent logos) while the highlighted row stayed black.
-//! SEE-ALSO: packages/core-ui/new-thread-palette.tsx and packages/core-ui/styles/new-thread-palette.css (the React twin), packages/core-ui/accounts/agent-launcher-menu.tsx (the dropdown this mirrors), apps/desktop/src/app/window/native_modal_kit.rs (the shared palette), apps/desktop/src/app/new_thread_picker_lifecycle.rs (open, close, preload, data), apps/desktop/src/bin/native_modal_demo.rs (standalone preview).
+//! SEE-ALSO: apps/desktop/src/app/native_sidebar/agent_launcher_menu.rs (the dropdown this mirrors), apps/desktop/src/app/window/native_modal_kit.rs (the shared palette), apps/desktop/src/app/new_thread_picker_lifecycle.rs (open, close, preload, data), apps/desktop/src/bin/native_modal_demo.rs (standalone preview).
 //!
 //! This module depends only on the kit, gpui and gpui-component so the preview binary can include it with `#[path]`.
 use super::native_modal_kit::*;

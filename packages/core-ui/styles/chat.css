@@ -1849,44 +1849,6 @@ Rendering this one glyph a size up lines its ink up with its neighbours.
   width: 9px;
 }
 
-/*
- * Terminal-surface bottom bar (packages/core-ui/chat/session-terminal-action-bar.tsx).
- * The horizontal inset is the chat composer's total content inset — the
- * composer wrapper's `px-4` plus the composer's own 1px border and `px-4` —
- * so the view toggle lands on the same x whichever surface is showing. It is
- * plain CSS rather than an arbitrary Tailwind utility because the bar renders
- * outside the chat scope, against the pre-generated shadcn sheet.
- */
-.ghostex-terminal-action-bar {
-  padding-inline: 33px;
-}
-
-/* Same 6px corners as Chat Send, scaled with the 24px control (was 8px on 32px).
-   Two classes so this beats the app-wide `button { border-radius: 0 }` reset
-   when the bar is not inside the chat scope. */
-.ghostex-terminal-action-bar .ghostex-terminal-action-bar-accent {
-  border-radius: 6px;
-  height: 24px;
-  min-height: 24px;
-  min-width: 24px;
-  width: 24px;
-}
-
-.ghostex-terminal-action-bar .ghostex-terminal-action-bar-accent svg {
-  height: 13.5px;
-  width: 13.5px;
-}
-
-/* The inline field a host action with `input` (Rename) swaps its control row
-   for, on both surfaces — the composer footer's dots menu and this bar. One
-   width for both so the field looks the same whichever surface it opens on.
-   Plain CSS rather than Tailwind's `w-48` because that utility is absent from
-   the checked-in shadcn sheet, which would ship the field at zero width. */
-.ghostex-chat-host-action-input,
-.ghostex-terminal-action-bar-input {
-  width: 12rem;
-}
-
 /* --- Session note panel (CDXC:SessionNotes 2026-08-24) ---------------- */
 
 /* Wears the composer's own surface tokens one notch quieter: it is a sibling of

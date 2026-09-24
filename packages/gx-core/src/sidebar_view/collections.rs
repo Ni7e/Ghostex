@@ -81,7 +81,7 @@ impl CollectionsState {
     /// daemon's map.
     ///
     /// CDXC:Projects 2026-09-20 WHY:
-    /// The sidebar seeds its collections from this key and shows them until the daemon's first document arrives, pushing them up rather than dropping them (`sidebar-app.tsx`, first adoption). A list built from the daemon alone would show no collections, no colours and another top-level order for the whole window between a cold start and that first echo, so the same seed is read here. From the first document on, the daemon is authoritative, an empty one included: the sidebar writes every adopted document straight back to this key.
+    /// The sidebar seeds its collections from this key and shows them until the daemon's first document arrives, pushing them up rather than dropping them (the deleted React sidebar's `sidebar-app.tsx`, first adoption). A list built from the daemon alone would show no collections, no colours and another top-level order for the whole window between a cold start and that first echo, so the same seed is read here. From the first document on, the daemon is authoritative, an empty one included: the sidebar writes every adopted document straight back to this key.
     pub fn from_local_json(value: &Value) -> Self {
         let collections = value
             .get("collections")

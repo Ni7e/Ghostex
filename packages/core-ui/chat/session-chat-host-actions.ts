@@ -1,9 +1,7 @@
 // The per-session action contract a host hands to the chat surfaces. It is a
-// types-only module because both the chat composer's dots menu
-// (session-chat-composer-actions.tsx) and the terminal surface's bottom bar
-// (session-terminal-action-bar.tsx) consume it, and hosts that only build the
-// object (chat-main.tsx, the web session chat host) should not pull either
-// component into their bundle.
+// types-only module because the chat composer's dots menu
+// (session-chat-composer-actions.tsx) consumes it, and hosts that only build the
+// object should not pull that component into their bundle.
 
 /** One row of a submenu host action (see `SessionChatHostAction.items`). */
 export interface SessionChatHostActionItem {

@@ -3,7 +3,7 @@
  * User: Snooze offers 1 hour, 3 hours, Tomorrow and Next week. A snoozed session moves to a Snoozed section below Parked and is always put to sleep there; when the wake time passes it returns to its ordinary section.
  * Snooze reuses gxserver's server-owned `snoozedUntil` lifecycle (`/api/snoozeSession`), so every client and the CLI see the same wake time and the daemon's sweep publishes the return.
  * "Tomorrow" and "Next week" wake at 9:00 local time (next day, next Monday) rather than a fixed offset, so a snooze set at night does not wake in the middle of the following night.
- * SEE-ALSO: server/src/session_lifecycle.rs, packages/core-ui/sidebar-app/project-session-section-state.ts, packages/shared/active-sessions-sort.ts.
+ * SEE-ALSO: server/src/session_lifecycle.rs, packages/shared/active-sessions-sort.ts.
  */
 export const SESSION_SNOOZE_PRESETS = ['oneHour', 'threeHours', 'tomorrow', 'nextWeek'] as const;
 

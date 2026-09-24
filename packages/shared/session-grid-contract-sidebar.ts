@@ -2448,7 +2448,7 @@ export type SidebarToExtensionMessage =
       /**
        * CDXC:Projects 2026-09-16 DECISION:
        * User: closing a project in a Space stays in that Space and selects a non-sleeping session from the next project in the list.
-       * SidebarApp resolves that session from the rows the user sees (see sidebar-app/close-project-successor.ts) and the host focuses it BEFORE parking the project, so the active project never falls back to one outside the Space.
+       * The sidebar resolves that session from the rows the user sees (packages/gx-core/src/sidebar_view/close_successor.rs) and the host focuses it BEFORE parking the project, so the active project never falls back to one outside the Space.
        */
       successorSessionId?: string;
     }

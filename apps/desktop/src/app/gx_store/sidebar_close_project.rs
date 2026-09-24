@@ -15,7 +15,7 @@
 //! successor from, and `dispatch_native_sidebar_ui` drops the command before it gets here.
 //!
 //! SEE-ALSO: packages/gx-core/src/sidebar_view/close_successor.rs,
-//! packages/core-ui/sidebar-app/close-project-successor.ts,
+//! the deleted React sidebar's `close-project-successor.ts`,
 //! apps/desktop/sidebar/gxserver-runtime/projects-and-commands.ts (`closeProjectForGroup`),
 //! packages/gx-core/examples/close_project_successor.rs.
 

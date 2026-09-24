@@ -10,7 +10,7 @@ type DraftSession = {
  * User: new sessions lead Sessions for 10 minutes, then move into a collapsed-by-default DRAFTS section below Pinned and above Sessions if they contain text and have not been sent yet.
  * User: pinning a draft moves it into Pinned, retaining its unsent text.
  * This replaces keeping drafts at the top of Sessions indefinitely; empty sessions stay in Sessions.
- * SEE-ALSO: packages/shared/active-sessions-sort.ts, packages/core-ui/sidebar-app/project-session-section-state.ts.
+ * SEE-ALSO: packages/shared/active-sessions-sort.ts.
  */
 export const NEW_SESSION_PRIORITY_MS = 10 * 60 * 1_000;
 
