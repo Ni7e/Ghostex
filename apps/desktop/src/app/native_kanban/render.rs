@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use super::palette::KanbanPalette;
-use super::state::{KanbanLoadState, KanbanPanel};
+use super::state::KanbanPanel;
 use crate::GhostexGpuiApp;
 use crate::app::model::TitlebarMode;
 
@@ -110,18 +110,9 @@ impl GhostexGpuiApp {
             (derived.nothing_matches, derived.filter_count)
         };
         let state = &self.native_kanban;
-        let loading_first = !state.initial_load_done
-            && matches!(
-                state.load_state,
-                Some(KanbanLoadState::Loading | KanbanLoadState::Idle)
-            );
-        let status = if loading_first {
-            Some("Loading board…")
-        } else if nothing_matches {
-            Some("No tickets match the search or filters.")
-        } else {
-            None
-        };
+        // The first load draws skeleton cards in the lanes instead of a status line.
+        let status = (nothing_matches && !state.loading_first())
+            .then_some("No tickets match the search or filters.");
         let panel = match self.native_kanban.panel.as_ref() {
             Some(KanbanPanel::Ticket(form)) => {
                 Some(self.render_native_kanban_ticket_panel(form, &p, window, cx))

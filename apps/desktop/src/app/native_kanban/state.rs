@@ -197,6 +197,15 @@ impl NativeKanbanState {
         };
     }
 
+    /// The board's first load has not answered yet, so its lanes show skeleton cards.
+    pub(crate) fn loading_first(&self) -> bool {
+        !self.initial_load_done
+            && matches!(
+                self.load_state,
+                Some(KanbanLoadState::Loading | KanbanLoadState::Idle)
+            )
+    }
+
     pub(crate) fn ticket(&self, ticket_id: &str) -> Option<&BoardTicket> {
         self.tickets
             .iter()
