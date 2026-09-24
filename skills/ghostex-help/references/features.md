@@ -57,8 +57,9 @@ has no tabs yet. Closing it leaves your sessions at full width. The header itsel
 carries the project breadcrumb, Start, Open and Commit, the **⋯** button (Ask
 Ghostex, Tips & Tricks, Resources, Dev servers, Extensions and Customize), and the
 command terminal toggle. **Hide sidebar** and the chat-icon **Toggle Agents Panel**
-button beside it (it hides or shows the Agents Panel while a view is open, the same
-thing Expand side panel does, and leaves the sidebar alone) sit at the top left of the
+button beside it (it hides or shows the Agents Panel while the side panel is open,
+even on the "Open a view" picker, the same thing Expand side panel does, and leaves the
+sidebar alone) sit at the top left of the
 sidebar, and move to the start of the header while the sidebar is hidden, so they
 stay in the same spot. The sidebar's top row also moves the window when you drag
 it. When an update is available, a download button
@@ -99,12 +100,21 @@ focuses its name field.
   sessions keep running) and Merge All Panes, or drag it to move that session
   onto another pane's edge (a new split) or its middle (it takes that pane's
   place), and the pane it left closes. Each pane can show the raw terminal or
-  Session Chat. Cmd+T creates a session, Cmd+D splits.
+  Session Chat. Cmd+T starts a new chat with the agent you used last and
+  Cmd+Shift+T opens a new terminal; when Default view for compatible agents
+  (`preferredAgentInterface`) is Terminal the two keys swap. In a browser tab
+  Cmd+T opens another browser tab, and in the Commands pane or Terminal view it
+  opens another terminal tab there. Cmd+D splits.
+  A new chat that you leave without typing anything closes on its own, so empty
+  sessions do not pile up in the sidebar, and pressing Cmd+T again while one is
+  open takes you back to it. Once you type or send something it stays like any
+  other session.
   Cmd+Option+Arrow moves focus between the session panes and the Commands pane;
   it skips the view panel.
-  Cmd+Shift+T opens the New Thread picker: type to filter the configured
+  Cmd+Option+T opens the New Thread picker: type to filter the configured
   agents (last used first), Browser, or Terminal, press Enter to start it in
   the active project, and press Tab on Claude or Codex to pick an account.
+  Hotkeys: `createAgentSession`, `createSession`, `openNewThreadPalette`.
 - **Code**: the built-in VS Code based editor (code-server). Opens files from
   chat links, `ghostex edit <file>`, and Open In. Optional Use VS Code settings
   reuses the local VS Code configuration.
@@ -143,6 +153,19 @@ focuses its name field.
   remote, including in worktrees. No URL setup is needed. It appears when a GitHub
   repository is available and supports opening links in new Browser tabs just like
   Linear and Jira. Settings > Extensions controls visibility (`githubViewTabHidden`).
+- **Sentry, Figma, Vercel, Supabase, GitHub Actions, PostHog, and Custom Website**:
+  disabled by default. Enable the views you want in **Settings > Extensions**, then
+  open one from the **+** menu and paste its home URL, just like Linear. Use any
+  project page, design, dashboard, workflow, or filtered view; Custom Website can
+  open any HTTP or HTTPS website. The saved home opens automatically for that
+  project. Worktrees follow their parent unless you choose a different home, and
+  previously used sites are offered when setting up another project. Right-click
+  the view tab and choose **Modify home URL for…** to change it. Middle-click or
+  Cmd-click (Ctrl-click on Windows/Linux) links to open background Browser tabs.
+  GitHub Actions has its own chosen URL, separate from the automatic GitHub view.
+  Visibility settings: `sentryViewTabHidden`, `figmaViewTabHidden`,
+  `vercelViewTabHidden`, `supabaseViewTabHidden`, `githubActionsViewTabHidden`,
+  `posthogViewTabHidden`, `customWebsiteViewTabHidden`. Homes: `projectWebsiteViews`.
 - **Storybook**: the built-in component workshop appears in the view picker and
   **+** menu only when the project has Storybook. Press S in the picker to open it.
   Ghostex runs the project’s `build:storybook`, `build-storybook`, or
@@ -356,6 +379,10 @@ where they are while you open, change and close views.
   mode. The sidebar is the only scroller, and a project's header stays pinned
   at the top while you scroll through its rows. Setting:
   `projectSessionListCollapsedCount`.
+- Drag a session onto another section of its project (its heading or any row
+  in it) to move it there: Pinned pins it, Sessions unpins and unparks it, and
+  Parked parks it. While you drag, an empty Pinned, Sessions or Parked section
+  shows its heading so you can drop onto it.
 - Sidebar section headings (Pinned, Sessions, Drafts, Parked, and
   Snoozed) show an orange dot when a session is working, a blue dot when
   a session is done, and a pink dot when an agent is waiting for an answer,
@@ -460,8 +487,10 @@ is saved in ZCode's own session store once its session row exists (after the
 first prompt), and ZCode's automatic naming will not replace it. Before that,
 the rename is saved only in Ghostex and ZCode's later automatic naming may
 replace it.
-Fork starts the new session as `Fork: <original name>` and saves that name
-through the agent's own rename command so it survives reopening the conversation.
+Fork (a session's right-click menu, or More actions in its chat) opens the new
+session beside the original and switches to it. It starts as
+`Fork: <original name>` and saves that name through the agent's own rename
+command so it survives reopening the conversation.
 Once a conversation has forks, a small branch button in the chat's top right
 lists every session that shares the earlier history, including the thread you
 forked away from, and switches to the one you pick; a stopped branch is resumed
@@ -531,6 +560,11 @@ Hover a message to show its actions and the time it was sent in a row below
 it: Copy message, Reply by Annotating, and Save to md under an agent's final
 reply; Rewind to here, Save prompt, and Copy message under your own messages.
 Hover the time to see the full date.
+The chat box edits like VS Code: Up on the first line jumps to the start and
+Down on the last line to the end, Option+Up/Down moves the current line,
+Option+Shift+Up/Down duplicates it, Cmd+Shift+K deletes it, Cmd+L selects it,
+and with nothing selected Cmd+X cuts the whole line and Cmd+C copies it (Alt and
+Ctrl on Windows and Linux).
 Type `/` in the chat box to browse the agent's built-in commands. In Cursor
 chats, `/compact` summarizes the conversation to reduce context, just like
 `/summarize`.
@@ -599,8 +633,7 @@ ongoing scroll momentum so the conversation settles at the bottom. This takes
 priority over paragraph selection or adding a cursor in the composer; rebind or
 clear Scroll Chat to Bottom in Settings > Hotkeys (`scrollChatToBottom`).
 On mobile, choose Codex models and effort directly from the chat box dropdowns,
-including before sending the first message in a new draft. Mobile does not offer
-the Quick picker. Model, effort, and mode choices wait until the agent can apply
+including before sending the first message in a new draft. Model, effort, and mode choices wait until the agent can apply
 them. The connected computer needs a Ghostex version with
 `ghostex select-session-chat-model <selector> --model <model> --effort <effort> --defer --json`;
 the same command accepts `--mode <mode>` and `--fast-mode on|off`.
@@ -683,7 +716,9 @@ has tool calls, click its text or the chevron beside it to expand the tools dire
 under that message. Its full text and formatting stay visible when collapsed;
 links and code controls keep their own actions. Verbose mode opens these tools
 by default (`sessionChatVerboseMode`). File writes and code
-edits appear outside the tool groups while the agent works. When a turn shows
+edits appear outside the tool groups while the agent works. As soon as the agent
+finishes a turn, its tool work folds away under "Worked for Xs" above the final
+reply; click that line to open or close it. When a turn shows
 "Worked for", all its file changes are grouped in a collapsed "N files changed"
 section directly below it. Older history loads with completed turns already
 collapsed, so you can scroll through prompts and answers without passing through
@@ -699,10 +734,15 @@ pill. Folder links in desktop chat open the folder in your system file explorer.
 File reference pills in the composer also open with one click using the same
 Code/Docs preferences as transcript links. Double-click a composer pill to edit
 its reference text. Right-click a file reference or file-change path for Open in
-Code, Open in Docs (Markdown, HTML, and Excalidraw), Copy Path, or Open File/Folder
-Location. Open File/Folder Location appears directly below the path-copy actions
+Code, Open in Docs (Markdown, HTML, and Excalidraw), Copy Path, or the location row.
+In chat the location row names what the path is (Open File Location, Open Folder
+Location, Open Image Location, Open Video Location); elsewhere it reads Open File/Folder
+Location. It appears directly below the path-copy actions
 in chat, Git changed files, and Docs menus, and opens
 the location in the machine’s file manager. It requires a local desktop path.
+Videos, audio files, and PDFs added to a chat are labelled Video #1, Audio #1, or PDF #1,
+and clicking one (or choosing Open Video from its menu) opens it in the system's default
+app on macOS, Windows, and Linux instead of the code editor.
 Right-click an opened chat image preview to close it. Click the picture itself to step
 through three zoom levels, the last one showing it pixel for pixel, and once more to return
 it to the fitted size; the cursor shows whether the next click still zooms.
@@ -744,10 +784,22 @@ window (chart bars) and Fast mode (bolt). Clicking the context window or Fast
 mode button switches it; the reasoning button opens a short list to the side. A
 button the current model has no choice for is dimmed: reasoning and context
 window read Default, and Fast mode reads Off. Auto, where an agent offers it,
-always sits at the top of that agent's list. Type to filter the list, move
-with the arrow keys and press Enter, or press Cmd+1 to Cmd+9 to pick one of the
-first nine rows. Click a row's star to keep that model on the Favorites tab;
-hover the eye that appears on a row to read what that model is for.
+always sits at the top of that agent's list. Click a row's star to keep that
+model on the Favorites tab; hover the info icon that appears on a row to read
+what that model is for. In a session that has started, a model from another
+agent shows a handoff icon (and that agent's tab a small badge): picking it
+hands the conversation off to that agent instead of changing this session's
+model. With more than one signed-in Claude or Codex account, an Account
+button beside Fast mode shows the account in use and opens the list to switch.
+
+The Model & Effort Picker shortcut (Option+P by default on macOS) opens the same
+picker from the keyboard, and pressing it again closes it. Type to filter the
+list; Up and Down move through the models and then the bottom buttons; Left and
+Right change the highlighted model's reasoning level, which the reasoning button
+shows; Tab and Shift+Tab move through the Favorites and agent tabs. Enter uses the highlighted model and level in
+this session, Shift+Enter saves them as the agent's default, and Cmd+1 to Cmd+9
+jump the highlight to one of the first nine rows without applying it. Escape closes it
+without changing anything. The key reminder along the bottom lists these.
 
 Clicking a model or a reasoning level applies it to this session and saves it as
 the agent's default for new sessions. Right-clicking applies it to this session
@@ -762,11 +814,11 @@ that agent already selected; confirm it and the new session starts on the model
 and reasoning level you picked (Claude and Codex; for other agents choose the
 model in the new session). You can still choose a different agent in the dialog.
 
-The Model & Effort Picker (Option+P by default on macOS) commits the same two
-ways: Enter saves the choice as the agent's default, and Shift+Enter applies it
-to this session only. Use in this session is available for Claude only: Codex's
-own model picker always writes the choice to its configuration file, so on a
-Codex session that action is greyed out and Enter sets the default.
+In terminal view, an agent terminal's bottom bar shows the same model pill after
+the session id; click it or press Option+P to open the same picker there, and
+its choices apply to the terminal session the same way. Turn this off with Model
+picker in terminal view (`showQuickModelPickerInTerminal`) to leave the shortcut
+to the terminal.
 
 A choice that cannot be applied says so at the top of the model menu, under Not
 applied, with the reason. The usual reason is that the agent's own model list
@@ -983,8 +1035,14 @@ and reply reference automatically. Use `--body-file` for multiline messages,
 `--interrupt` for an urgent correction, or `--queue` to leave the message
 waiting until the current turn finishes. A queued message waits as long as that
 turn does, so send normally unless the point is to have the next task ready for
-an agent whose final message you have already read. `agents close
+an agent whose final message you have already read. If Ghostex cannot deliver
+a queued message, the row stays in the recipient's queue marked Not delivered
+with Retry and Delete, and the sending agent gets a note saying so. `agents close
 <session-ref>` ends that session, including any unfinished work. `ghostex read-session-chat` and `ghostex read-text` read replies.
+An agent can also read or search any other thread, including a sleeping one:
+`ghostex read-session-chat <session> --all --format text` prints the whole
+conversation, and `--grep "<words>" --context 1` finds where a topic came up.
+`<session>` can be any id from the sidebar's Copy Details, or the title.
 On older versions without `agents`, use the existing commands below.
 
 Cross-agent orchestration also works through the `$ghostex-cli` skill. For
@@ -1005,7 +1063,7 @@ Cross-agent orchestration also works through the `$ghostex-cli` skill. For
    worker is created; a reused linked worker keeps its existing model and effort.
    Model and effort overrides require a single agent launch command, without
    shell operators, command substitutions, comments, or line continuations.
-3. The Agents Orchestration skill (`$ghostex-agents-orchestration`, installed
+3. The Ghostex Agents skill (`$ghostex-agents`, installed
    from Settings > Integrations or `ghostex agents-orchestration install-skill`)
    teaches an agent to read `ghostex agents --help` and `ghostex --help`, then
    launch other agents with the model and effort you ask for, message them to
@@ -1084,8 +1142,9 @@ sessions, so any client can control agents on any machine.
   machine with SSH details or an Easy Connect code, then Install / Connect
   gxserver on it. The machine appears as a sidebar section with its own
   projects and sessions; its terminals stream into the desktop app.
-- **Web app**: a static browser build of the same workspace UI that talks to
-  gxserver.
+- **Web app**: the desktop's sidebar, chat and terminal running in a browser
+  and talking to gxserver; it is built from a Ghostex source checkout with
+  `bun run start:web` and is not part of the installed app.
 - **CLI**: `ghostex attach <selector>` attaches to a session from any terminal,
   including over SSH.
 
@@ -1209,12 +1268,13 @@ docs directory), `hideProjectHeaderDiffStats`,
   button to close the current dropdown and open that one in a single click.
   Clicking outside, including in
   Session Chat, closes usage dropdowns and Tips. More model
-  limits starts collapsed. Click the Codex reset
-  count to see each reset's expiry date. Redeem a reset opens a Codex terminal
-  in the active project's folder, shows it under that project in the sidebar,
-  and redeems the reset expiring soonest for the selected account. The project
-  and account must be on the same computer. If Codex needs attention or the
-  reset cannot be confirmed, continue in that chat. Shared history stays visible
+  limits starts collapsed. Codex and Claude meters both show a Rate limit
+  resets row when the provider has granted the account free resets (for
+  Claude, promotions such as a model-launch reset). Click the count to list
+  each reset with its expiry date, click Use beside one, then Reset to confirm:
+  Ghostex uses that reset right away, without opening a terminal, and the
+  limits refresh in the dropdown. Using a reset can't be undone; if your usage
+  doesn't need a reset yet, nothing is used. Shared history stays visible
   below: today's, yesterday's, and the last 30 days' token totals with a daily
   trend. History combines conversations across accounts of the same provider
   on that computer, counts shared copies once, and includes cached tokens.
