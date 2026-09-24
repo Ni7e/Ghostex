@@ -821,6 +821,16 @@ impl GhostexGpuiApp {
         for session_id in &visible_session_ids {
             self.ensure_native_chat(*session_id, cx);
         }
+        // CDXC:SessionChat 2026-09-24 WHY:
+        // A parked chat view keeps applying state without repainting (notify_if_shown), so its
+        // cached paint is from whenever it was last visible. Without a notify on the parked →
+        // visible transition, a session switch's first frame is that stale paint and the
+        // follow-tail reposition lands frames later — the flicker of switching between chats.
+        for session_id in visible_session_ids.difference(&self.native_chat_visible_sessions) {
+            if let Some(view) = self.native_chat_views.get(session_id) {
+                view.update(cx, |_, cx| cx.notify());
+            }
+        }
         self.dismiss_native_chat_windows_leaving_view(&visible_session_ids, cx);
         self.native_chat_visible_sessions = visible_session_ids.clone();
         self.resume_visible_native_chat_runtimes(cx);
