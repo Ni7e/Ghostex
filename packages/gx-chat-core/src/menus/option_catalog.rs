@@ -401,6 +401,19 @@ impl SessionOptionCatalog {
     pub fn has_picker_effort(&self) -> bool {
         matches!(self.options, CatalogOptions::Codex { .. })
     }
+
+    /// Whether a model pick may leave the effort out and let the agent keep its own level.
+    ///
+    /// CDXC:SessionChat 2026-09-25 WHY:
+    /// Claude Code keeps one saved effort level across model switches, including through a model
+    /// with no levels (Haiku), and gxserver types no `/effort` for an empty effort. When the chat
+    /// does not know a level the new model offers (none is detected on Haiku), a model pick sends
+    /// no effort rather than the model's first level: falling back to the first level sent
+    /// `/effort low` on the way back from Haiku to Sonnet and overwrote the Medium the user had
+    /// picked. Codex's picker needs an effort with every model, so it keeps the fallback.
+    pub fn agent_keeps_effort(&self) -> bool {
+        matches!(self.options, CatalogOptions::Claude { .. })
+    }
 }
 
 /// `sortDescriptors`: category order, stable within a category.
