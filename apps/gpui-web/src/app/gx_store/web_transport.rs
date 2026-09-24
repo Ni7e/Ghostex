@@ -115,7 +115,7 @@ pub(crate) async fn rpc_envelope(endpoint: &GxserverEndpoint, path: &str, params
     Ok(envelope["result"].take())
 }
 
-/// Opens `/api/events`. Browsers cannot set headers on a WebSocket, so the token rides the query string, as it does for the React web app. The returned socket must be kept alive by the caller.
+/// Opens `/api/events`. Browsers cannot set headers on a WebSocket, so the token rides the query string. The returned socket must be kept alive by the caller.
 pub(crate) fn open_events(
     endpoint: &GxserverEndpoint,
     events: UnboundedSender<StreamEvent>,

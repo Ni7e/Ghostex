@@ -13,8 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check out the shared web client
-        run: git submodule update --init --depth 1 apps/web
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0

@@ -272,8 +272,7 @@ export const gpuiSidebarRuntimeWorkspaceGroupMethods = {
   local write-through with server forwards suppressed while a push is pending,
   and a per-machine remote path that never merges into the local catalog).
   The wire contract is `GxserverCustomSessionTagsState` in
-  packages/shared/gxserver-protocol.ts; the web host mirrors this in
-  apps/web/src/sidebar-runtime/sidebar-runtime.ts.
+  packages/shared/gxserver-protocol.ts.
   */
   queueCustomSessionTagsServerSync(this: GpuiSidebarRuntime, state: GxserverCustomSessionTagsState): void {
     this.latestCustomSessionTagsUpdate = state;

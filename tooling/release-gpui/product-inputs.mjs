@@ -80,7 +80,7 @@ export const IGNORED_FOR_RELEASE = Object.freeze([
     path: '.dependencies/ghostty-patches',
     why: 'Source-sync overlay only; release jobs compile the already-patched tracked ghostty tree.',
   },
-  { path: 'apps/web', why: 'Web app; released separately, never part of a GPUI release artifact.' },
+  { path: 'apps/gpui-web', why: 'GPUI web build; built from a checkout with `bun run web:build`, never part of a GPUI release artifact.' },
   {
     path: 'apps/mobile/views/chat',
     why: 'Mobile chat bundle source; consumed by the mobile submodule build, not by release jobs.',

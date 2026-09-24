@@ -1,6 +1,6 @@
 # Ghostex GPUI in the browser (experiment)
 
-The desktop app's native GPUI UI, compiled to wasm32 and drawn into a `<canvas>` by `gpui_web` (WebGPU, WebGL2 fallback) from the Zed fork in `.dependencies/zed`. It talks to gxserver directly from the page, the same way the React web app does.
+The desktop app's native GPUI UI, compiled to wasm32 and drawn into a `<canvas>` by `gpui_web` (WebGPU, WebGL2 fallback) from the Zed fork in `.dependencies/zed`. It talks to gxserver directly from the page. It is the only web app: the React one (`apps/web`) was deleted on 2026-09-24, and `ghostex web` serves this build.
 
 Status on 2026-09-22: the sidebar, the chat view and the terminal are the desktop's own source files running in Chrome against live gxserver data.
 
@@ -20,11 +20,14 @@ Not run against live sessions, on purpose: sending a chat message, Sleep and Wak
 cargo install wasm-bindgen-cli --version 0.2.125 --locked   # must match the wasm-bindgen in Cargo.lock
 # needs Zig 0.16 (the repo's Zig) for the first build, and bun
 
-# gxserver must be running, and `ghostex web` must be serving on 127.0.0.1:4173 (it hands the page the daemon URL and token)
-cd apps/gpui-web
-./build-wasm.sh --release                                  # ~2 min cold; the debug build works but is 100 MB and slow
-../../node_modules/.bin/vite --config www/vite.config.js   # http://localhost:4174
+# gxserver must be running. From the repository root:
+bun run start:web        # builds the wasm (release, ~2 min cold) and the page into www/dist, then serves it with `ghostex web` on http://127.0.0.1:4173
+
+# for iterating, keep `ghostex web --no-open` running (the page's bootstrap hands it the daemon URL and token), then:
+bun run web:dev          # rebuilds the wasm and starts Vite on http://localhost:4174, which proxies the bootstrap to :4173
 ```
+
+`./build-wasm.sh` without `--release` gives a debug build that works but is 100 MB and slow.
 
 - `http://localhost:4174/?session=<projectId>:<sessionId>&surface=terminal` opens a session directly (ids as in its zmx name, `S90-<projectId>-<sessionId>`).
 - `?chatDebug` logs every chat runtime output to the console.
@@ -88,7 +91,7 @@ All are no-ops for native builds; `cargo check --bins` of the desktop crate pass
 - The header breadcrumb is empty for a session whose row the sidebar is not drawing (a compact list, a deep link).
 - Colour emoji draw as a missing glyph; SVGs with `color(display-p3 ...)` fills fall back to black in resvg.
 - The terminal has no context menu, and Cmd+C / Cmd+V go through gpui_web's clipboard, which cannot read outside a paste event.
-- A terminal attached here is a visible zmx client with its own grid, like the React web app's, so a desktop pane showing the same session reflows while both are open.
+- A terminal attached here is a visible zmx client with its own grid, so a desktop pane showing the same session reflows while both are open.
 - Sidebar commands not handled yet log `sidebar command not handled on web yet` (close, fork, pin, tags, snooze, drag and drop, rename, project actions). `gx-core` already plans most of them.
 - Settings are empty (`shared_settings::install` is never called), so the chat uses its defaults for theme, zoom and width.
 

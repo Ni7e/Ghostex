@@ -6,19 +6,14 @@ Join the Discord: https://discord.gg/df7b3G92CS
 
 ### Web app source
 
-The browser app lives in [maddada/ghostex-web](https://github.com/maddada/ghostex-web),
-pinned here as the `apps/web` submodule. Initialize it before running the web commands:
+The browser app is `apps/gpui-web`: the desktop's own GPUI source compiled to wasm. Build it and
+serve it from the Ghostex root (gxserver must be running):
 
 ```sh
-git submodule update --init -- apps/web
-bun install --frozen-lockfile
-bun run web:typecheck
-bun run web:build
+bun run start:web
 ```
 
-Run these commands from the Ghostex root. The web app uses this checkout's shared UI,
-contracts, and Bun dependencies. Commit and push web changes inside `apps/web` first,
-then commit the updated submodule pointer here.
+Its README covers the toolchain it needs (`wasm-bindgen-cli`, Zig 0.16) and the dev server.
 
 ### Building from source
 
