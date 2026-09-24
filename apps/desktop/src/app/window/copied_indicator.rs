@@ -1,14 +1,19 @@
-//! The "Copied!" bubble every clipboard write in the app shows at the pointer.
+//! The "Copied!" feedback every clipboard write in the app shows: the clicked control's tooltip,
+//! or a bubble at the pointer.
 
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Context, Global, IntoElement,
+    AnyView, AnyWindowHandle, App, AppContext as _, Bounds, Context, Global, IntoElement,
     ParentElement as _, Pixels, Point, Render, Styled as _, Window, WindowBackgroundAppearance,
     WindowBounds, WindowKind, WindowOptions, div, point, px, size,
 };
-use gpui_component::ActiveTheme as _;
+use gpui_component::{ActiveTheme as _, Root, tooltip::Tooltip};
 use std::time::Duration;
 use web_time::Instant;
 
+/// How long a clicked control's tooltip reads "Copied!" before its own text comes back.
+const TOOLTIP_FLASH: Duration = Duration::from_millis(1000);
+/// How far GPUI's pointer may be from the OS pointer and still count as the same place.
+const POINTER_TOLERANCE: f32 = 2.0;
 /// How long the bubble stays fully visible.
 const HOLD: Duration = Duration::from_millis(900);
 /// How long it takes to fade out after that.
@@ -74,9 +79,13 @@ impl Render for CopiedIndicatorView {
     }
 }
 
-/// CDXC:Clipboard 2026-09-22 DECISION:
+/// CDXC:Clipboard 2026-09-24 DECISION:
 /// User: "We need to add copy indicators for every place that you copy in the app. We need to show
-/// a small tooltip whenever they copy that appears on screen that says 'Copied!'". The bubble is
+/// a small tooltip whenever they copy that appears on screen that says 'Copied!'". Then, because
+/// the bubble clashed with the copy button's own tooltip: "make the tooltip say 'Copied!' for a bit
+/// instead of having a different element do this". So a copy from a control that has a tooltip
+/// turns that tooltip into "Copied!" for a moment and shows no bubble; every other copy (menus,
+/// keyboard, terminal selection, toasts, React pages) shows the bubble. The bubble is
 /// its own non-activating popup window above the pointer, not an element in the window that copied:
 /// copies happen from the main window, from chat menus and pickers, from app modals and from toasts,
 /// and from React pages inside CEF views (through the copy-sound bridge message), and one popup
@@ -88,6 +97,9 @@ pub(crate) fn show_copied_indicator(cx: &mut App) {
         let Some(pointer) = pointer_position(cx) else {
             return;
         };
+        if flash_clicked_tooltip(pointer, cx) {
+            return;
+        }
         if !cx.has_global::<CopiedIndicator>() {
             cx.set_global(CopiedIndicator::default());
         }
@@ -169,6 +181,41 @@ pub(crate) fn show_copied_indicator(cx: &mut App) {
     });
 }
 
+/// Turns the tooltip of the control under the pointer in the active window into "Copied!", trying
+/// gpui-component's managed tooltips (the trigger just pressed) before GPUI's own. False when no
+/// such control is there, including when GPUI's idea of the pointer is stale because the click
+/// went to a CEF or terminal view that takes the mouse events.
+fn flash_clicked_tooltip(pointer: Point<Pixels>, cx: &mut App) -> bool {
+    let Some(handle) = cx.active_window() else {
+        return false;
+    };
+    handle
+        .update(cx, |_, window, cx| {
+            let gpui_pointer = window_pointer(window);
+            if (gpui_pointer.x - pointer.x).abs() > px(POINTER_TOLERANCE)
+                || (gpui_pointer.y - pointer.y).abs() > px(POINTER_TOLERANCE)
+            {
+                return false;
+            }
+            Root::flash_pressed_tooltip(window, cx, TOOLTIP_FLASH, copied_tooltip)
+                || window.flash_hovered_tooltip(TOOLTIP_FLASH, copied_tooltip, cx)
+        })
+        .unwrap_or(false)
+}
+
+fn copied_tooltip(window: &mut Window, cx: &mut App) -> AnyView {
+    Tooltip::new("Copied!").build(window, cx)
+}
+
+/// GPUI's last pointer position in `window`, in the global space [`pointer_position`] returns.
+fn window_pointer(window: &Window) -> Point<Pixels> {
+    let bounds = window.bounds();
+    // The window's frame includes a system titlebar where it has one; content coordinates start
+    // under it.
+    let titlebar = (bounds.size.height - window.viewport_size().height).max(px(0.0));
+    bounds.origin + point(px(0.0), titlebar) + window.mouse_position()
+}
+
 /// The pointer in the same global space window frames are given in: points from the top-left
 /// corner of the primary display.
 fn pointer_position(cx: &mut App) -> Option<Point<Pixels>> {
@@ -183,13 +230,7 @@ fn pointer_position(cx: &mut App) -> Option<Point<Pixels>> {
     }
     let window = cx.active_window()?;
     window
-        .update(cx, |_, window, _| {
-            let bounds = window.bounds();
-            // The window's frame includes a system titlebar where it has one; content coordinates
-            // start under it.
-            let titlebar = (bounds.size.height - window.viewport_size().height).max(px(0.0));
-            bounds.origin + point(px(0.0), titlebar) + window.mouse_position()
-        })
+        .update(cx, |_, window, _| window_pointer(window))
         .ok()
 }
 
