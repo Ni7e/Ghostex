@@ -554,8 +554,14 @@ jobs:
           printf 'ZIG=%s\nGHOSTEX_ZIG=%s\n' \
             "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" \
             "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" >> "$GITHUB_ENV"
+      # Same pinned-toolchain install as release-gpui-gxserver.yml.
       - name: Install Rust musl targets
-        run: tooling/release-gpui/retry.sh 3 5 -- rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+        working-directory: server
+        run: |
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          tooling_retry="$GITHUB_WORKSPACE/tooling/release-gpui/retry.sh"
+          "$tooling_retry" 3 5 -- rustup toolchain install "$toolchain" --profile minimal
+          "$tooling_retry" 3 5 -- rustup target add --toolchain "$toolchain" x86_64-unknown-linux-musl aarch64-unknown-linux-musl
       - name: Install JavaScript dependencies
         run: tooling/release-gpui/retry.sh 3 5 -- bun install --frozen-lockfile
       - name: Prepare source dependencies
@@ -633,8 +639,14 @@ jobs:
           printf 'ZIG=%s\nGHOSTEX_ZIG=%s\n' \
             "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" \
             "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" >> "$GITHUB_ENV"
+      # Same pinned-toolchain install as release-gpui-gxserver.yml.
       - name: Install Rust musl targets
-        run: tooling/release-gpui/retry.sh 3 5 -- rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+        working-directory: server
+        run: |
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          tooling_retry="$GITHUB_WORKSPACE/tooling/release-gpui/retry.sh"
+          "$tooling_retry" 3 5 -- rustup toolchain install "$toolchain" --profile minimal
+          "$tooling_retry" 3 5 -- rustup target add --toolchain "$toolchain" x86_64-unknown-linux-musl aarch64-unknown-linux-musl
       - name: Install JavaScript dependencies
         run: tooling/release-gpui/retry.sh 3 5 -- bun install --frozen-lockfile
       - name: Prepare source dependencies
