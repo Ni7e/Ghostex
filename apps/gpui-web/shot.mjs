@@ -2,7 +2,7 @@
 // Drives the page in headless Chrome over the DevTools protocol (no dependencies): waits in real time so the gxserver WebSocket can deliver, prints the page's console, and saves a screenshot.
 // usage: node shot.mjs <out.png> [--wait ms] [--size WxH] [--url url] [--click x,y]... [--type text] [--key Enter]
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,7 +21,6 @@ for (let i = 0; i < args.length; i += 2) {
 const wait = Number(option('--wait', 4000));
 const [width, height] = option('--size', '1280x800').split('x').map(Number);
 const url = option('--url', 'http://localhost:4174/');
-const port = 9300 + Math.floor(Math.random() * 500);
 
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -37,14 +36,16 @@ function chromeBinary() {
   return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 }
 
+// CDXC:WebGpui 2026-09-24 WHY: A random port in 9300-9799 could land on Ghostex's own CEF DevTools port (9333-9343); Chrome then failed to bind and this script drove the user's live app instead, loading a Storybook story into the Add Project modal. Chrome picks a free port and reports it in its own profile, so only the Chrome we spawned is reachable.
+const profileDir = mkdtempSync(join(tmpdir(), 'gpui-web-shot-'));
 const chrome = spawn(
   chromeBinary(),
   [
     '--headless=new',
     '--enable-unsafe-webgpu',
     '--use-angle=metal',
-    `--remote-debugging-port=${port}`,
-    `--user-data-dir=${mkdtempSync(join(tmpdir(), 'gpui-web-shot-'))}`,
+    '--remote-debugging-port=0',
+    `--user-data-dir=${profileDir}`,
     `--window-size=${width},${height}`,
     'about:blank',
   ],
@@ -57,6 +58,7 @@ try {
   for (let attempt = 0; attempt < 50 && !target; attempt++) {
     await sleep(200);
     try {
+      const port = readFileSync(join(profileDir, 'DevToolsActivePort'), 'utf8').split('\n')[0];
       const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
       target = targets.find((entry) => entry.type === 'page');
     } catch {}

@@ -75,6 +75,13 @@ pub(crate) fn window_glass_active_for(_window: Option<gpui::AnyWindowHandle>) ->
 
 pub(crate) const WINDOW_GLASS_MENU_ALPHA: f32 = 0.78;
 
+/// Never reached with glass off; the sidebar's glass tint has no meaning without glass.
+pub(crate) fn sidebar_glass_tint() -> gpui::Hsla {
+    gpui::transparent_black()
+}
+
+pub(crate) fn sync_overlay_window_glass(_window: &gpui::Window, _main_origin: gpui::Point<gpui::Pixels>) {}
+
 /// The sidebar's opaque fill, which is what the desktop draws with glass off.
 pub(crate) fn sidebar_chrome_fill(_glass: bool, angle: f32) -> gpui::Background {
     crate::app::helpers::sidebar_chrome_gradient_fill(angle)
