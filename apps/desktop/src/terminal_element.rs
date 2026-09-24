@@ -103,9 +103,12 @@ gpui::actions!(
 pub(crate) const TERMINAL_KEY_CONTEXT: &str = "GhostexGpuiTerminal";
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 /// How long the previous frame may stand in for a displayed zmx viewer after a
-/// resize-and-claim before the local reflow is shown after all. The daemon's
-/// post-claim refresh normally lands (and ends the hold) well inside this.
-const ZMX_REFLOW_HOLD: Duration = Duration::from_millis(250);
+/// resize-and-claim. The hold ends once PTY output has been quiet for
+/// `ZMX_REFLOW_QUIET` — merging the daemon's post-claim dump and the agent
+/// TUI's SIGWINCH redraw into one paint — or at `ZMX_REFLOW_CAP` at the
+/// latest.
+const ZMX_REFLOW_QUIET: Duration = Duration::from_millis(50);
+const ZMX_REFLOW_CAP: Duration = Duration::from_millis(300);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 5.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 24.0;
 /// Extra pointer room beside the track that keeps a revealed bar up while the
@@ -583,6 +586,14 @@ pub type TerminalContextMenuHandler = Box<dyn Fn(Point<Pixels>, bool, &mut Windo
 /// sound here, and the standalone demo binary installs nothing.
 pub type TerminalCopyHandler = Box<dyn Fn(&mut App)>;
 
+/// The armed reflow hold of a displayed zmx viewer: which arm this is, when it
+/// must end regardless of output, and when the last PTY output landed.
+struct ZmxReflowHold {
+    token: u64,
+    deadline: web_time::Instant,
+    last_output: Option<web_time::Instant>,
+}
+
 /// Entity that owns a live terminal: the P1b model, the latest snapshot, and
 /// the shaped-row cache. Rendered by [`TerminalElement`]; its own `Render`
 /// impl just emits that element so `cx.notify()` re-renders naturally.
@@ -652,11 +663,11 @@ pub struct TerminalView {
     /// A parked terminal sits at the zmx resting grid, so the first prepaint of a displayed slot resizes it and claims the grid, and the daemon resizes the session. A held "next tab" key passed one such terminal per key repeat. While the app holds the claim (the selection is still moving, app/gx_store/burst.rs) the prepaint keeps the parked grid and claims nothing; the app releases the hold when the selection settles, and the next prepaint resizes and claims once.
     zmx_grid_claim_held: bool,
     /// CDXC:Zmx 2026-09-24 WHY:
-    /// Resizing a displayed zmx viewer used to paint the local VT reflow immediately, and the daemon's post-claim refresh then overwrote it a few frames later with the authoritative grid; the two reflows diverge (loop.zig handleVisibility), so every sidebar toggle registered as a flicker.
-    /// While a hold token is armed, the prepaint that resizes and claims keeps the previous frame on screen, and the first PTY wakeup — or the expiry timer it spawns, for a dead or slow daemon — swaps the refreshed frame in.
+    /// Resizing a displayed zmx viewer used to paint the local VT reflow immediately, and the daemon's post-claim refresh then overwrote it a few frames later with the authoritative grid; the two reflows diverge (loop.zig handleVisibility), so every sidebar toggle registered as a flicker. Ending the hold at the first output was still two paints, because the daemon's dump and the agent TUI's SIGWINCH redraw arrive as separate bursts and differ.
+    /// While a hold is armed, the prepaint that resizes and claims keeps the previous frame on screen, wakeups only record output times, and the frame swaps once the output has been quiet for `ZMX_REFLOW_QUIET` (no dump came, or the bursts are over) or at `ZMX_REFLOW_CAP`.
     /// Terminals without zmx visibility claims keep the immediate refresh.
-    zmx_reflow_hold: Option<u64>,
-    /// Monotonic token distinguishing the hold the current expiry timer armed from a newer one.
+    zmx_reflow_hold: Option<ZmxReflowHold>,
+    /// Monotonic token distinguishing the hold the current timers armed from a newer one.
     zmx_reflow_hold_seq: u64,
     /// CDXC:Terminal 2026-09-18 WHY:
     /// Every PTY wakeup used to refresh the grid snapshot and notify, and gpui redraws the whole window on any notify, so a hidden agent terminal streaming output behind its chat view redrew the window on every chunk.
@@ -864,6 +875,13 @@ impl TerminalView {
     /// at the zmx resting width; the next prepaint of a displayed slot
     /// resizes back to the real bounds. Cancels a pending visible announce:
     /// a parked terminal must not claim the grid.
+    ///
+    /// CDXC:Zmx 2026-09-24 WHY:
+    /// Parking does not refresh the painted snapshot: the frame keeps the last
+    /// displayed content, and on redisplay that frame stands in while the
+    /// visible claim round-trips. Refreshing here used to replace it with the
+    /// resting-width grid, so a tab switch showed wide clipped text until the
+    /// settle — its own flicker.
     pub fn resize_grid(&mut self, cols: u16, rows: u16, cx: &mut Context<Self>) {
         self.pending_zmx_visible_announce = false;
         self.zmx_reflow_hold = None;
@@ -871,8 +889,6 @@ impl TerminalView {
             return;
         }
         let _ = self.model.resize_grid(cols, rows);
-        self.row_cache.clear();
-        self.refresh_snapshot();
         cx.notify();
     }
 
@@ -1030,12 +1046,21 @@ impl TerminalView {
                 let drawn_recently = self
                     .last_prepaint
                     .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1));
-                // Output applied after a resize-and-claim is the daemon's
-                // authoritative grid: the reflow hold's job is done. The
-                // grid was resized while the previous frame stood in, so the
-                // cached row layouts belong to the old geometry.
-                if self.zmx_reflow_hold.take().is_some() {
-                    self.row_cache.clear();
+                if self.zmx_reflow_hold.is_some() {
+                    // Holding the previous frame across a resize-and-claim:
+                    // record the output time and stay silent. The daemon's
+                    // dump and the agent TUI's SIGWINCH redraw arrive as
+                    // separate bursts; painting between them is the flicker.
+                    // Titles still sync so the sidebar stays current.
+                    if let Some(hold) = self.zmx_reflow_hold.as_mut() {
+                        hold.last_output = Some(web_time::Instant::now());
+                    }
+                    let token = self.zmx_reflow_hold.as_ref().map(|hold| hold.token);
+                    self.sync_title_and_pwd(cx);
+                    if let Some(token) = token {
+                        self.spawn_zmx_reflow_check(token, ZMX_REFLOW_QUIET, cx);
+                    }
+                    return;
                 }
                 if self.displayed || drawn_recently {
                     self.refresh_snapshot();
@@ -1067,6 +1092,46 @@ impl TerminalView {
                 }
             }
         }
+    }
+
+    /// Schedule a settled-check for the reflow hold `token`: stale timers of
+    /// superseded holds no-op there, and a check that fires early (output
+    /// landed inside the quiet window) just reschedules itself.
+    fn spawn_zmx_reflow_check(&self, token: u64, after: Duration, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(after).await;
+            let _ = this.update(cx, |view, cx| {
+                view.end_zmx_reflow_hold_if_settled(token, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// End the reflow hold `token` once it has settled: no PTY output for
+    /// `ZMX_REFLOW_QUIET` (the daemon dump and the TUI redraw are both in) or
+    /// the `ZMX_REFLOW_CAP` deadline hit. One swap, old geometry to final.
+    fn end_zmx_reflow_hold_if_settled(&mut self, token: u64, cx: &mut Context<Self>) {
+        let Some(hold) = self.zmx_reflow_hold.as_ref() else {
+            return;
+        };
+        if hold.token != token {
+            return;
+        }
+        let settled = web_time::Instant::now() >= hold.deadline
+            || hold
+                .last_output
+                .is_none_or(|at| at.elapsed() >= ZMX_REFLOW_QUIET);
+        if !settled {
+            self.spawn_zmx_reflow_check(token, ZMX_REFLOW_QUIET, cx);
+            return;
+        }
+        self.zmx_reflow_hold = None;
+        // The grid was resized while the previous frame stood in, so the
+        // cached row layouts belong to the old geometry.
+        self.row_cache.clear();
+        self.snapshot_stale = false;
+        self.refresh_snapshot();
+        cx.notify();
     }
 
     /// Re-read title/pwd from the terminal and emit only actual changes.
@@ -2458,7 +2523,10 @@ impl TerminalView {
     ) -> TerminalLayout {
         self.terminal_bounds = Some(bounds);
         self.last_prepaint = Some(web_time::Instant::now());
-        if self.snapshot_stale {
+        // While a reflow hold is armed the stale flag stays set: the hold-end
+        // refresh below supersedes it, and refreshing here would paint the
+        // mid-settle grid the hold exists to cover.
+        if self.snapshot_stale && self.zmx_reflow_hold.is_none() {
             self.snapshot_stale = false;
             self.refresh_snapshot();
         }
@@ -2540,24 +2608,18 @@ impl TerminalView {
                 crate::terminal_model::zmx_client_visible_sequence(rows, cols).as_bytes(),
             );
             if hold_reflow {
-                // The claim is out; the daemon's full-screen refresh ends the
-                // hold from `handle_event`. The timer is the liveness bound
-                // for a dead or stalled daemon: show the local reflow then.
+                // The claim is out. The hold ends when output goes quiet (the
+                // dump and the TUI redraw have both landed) or at the cap;
+                // wakeups re-arm the quiet check.
                 self.zmx_reflow_hold_seq += 1;
-                let hold = self.zmx_reflow_hold_seq;
-                self.zmx_reflow_hold = Some(hold);
-                cx.spawn(async move |this, cx| {
-                    cx.background_executor().timer(ZMX_REFLOW_HOLD).await;
-                    let _ = this.update(cx, |view, cx| {
-                        if view.zmx_reflow_hold == Some(hold) {
-                            view.zmx_reflow_hold = None;
-                            view.row_cache.clear();
-                            view.refresh_snapshot();
-                            cx.notify();
-                        }
-                    });
-                })
-                .detach();
+                let token = self.zmx_reflow_hold_seq;
+                self.zmx_reflow_hold = Some(ZmxReflowHold {
+                    token,
+                    deadline: web_time::Instant::now() + ZMX_REFLOW_CAP,
+                    last_output: None,
+                });
+                self.spawn_zmx_reflow_check(token, ZMX_REFLOW_QUIET, cx);
+                self.spawn_zmx_reflow_check(token, ZMX_REFLOW_CAP, cx);
             }
         }
 
