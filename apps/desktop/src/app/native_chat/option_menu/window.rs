@@ -352,6 +352,8 @@ impl ChatOptionMenu {
         );
         let menu = cx.entity();
         let parent = self.parent;
+        #[cfg(target_os = "linux")]
+        let owner = self.source;
         let accounts_customize = rows.first().is_some_and(|row| row["customize"] == true);
         self.opening = true;
         // Under window glass the menu's window blurs what is behind it, rounded to the card.
@@ -368,6 +370,8 @@ impl ChatOptionMenu {
             let result = cx.open_window(
                 WindowOptions {
                     kind: crate::app::window::popup_frame::child_window_kind(),
+                    #[cfg(target_os = "linux")]
+                    x11_parent: Some(owner),
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     display_id,
                     titlebar: None,

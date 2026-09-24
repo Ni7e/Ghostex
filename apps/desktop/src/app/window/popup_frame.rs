@@ -2,9 +2,13 @@ use gpui::Window;
 
 /// CDXC:PlatformSupport 2026-09-23 WHY:
 /// Windows menus and borderless child dialogs must be tool popups. Normal app windows are eligible for FancyZones' last-zone placement, which moved both the chat model menu and Add Worktree dialog to the main window's top-left despite correct requested bounds.
+/// CDXC:PlatformSupport 2026-09-24 WHY:
+/// Linux tiling managers need transient ownership before mapping; borderless Normal windows still tile. Floating preserves outside-click dismissal and session switching, which Dialog would block. Each Linux caller supplies x11_parent explicitly.
 pub(crate) fn child_window_kind() -> gpui::WindowKind {
     if cfg!(target_os = "windows") {
         gpui::WindowKind::PopUp
+    } else if cfg!(target_os = "linux") {
+        gpui::WindowKind::Floating
     } else {
         gpui::WindowKind::Normal
     }

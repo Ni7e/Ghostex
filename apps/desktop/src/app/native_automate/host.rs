@@ -83,6 +83,8 @@ impl GhostexGpuiApp {
             context.remote_target = self.gpui_remote_gxserver_request_target(remote_machine_id);
         }
         let host = AutomateHostInfo {
+            #[cfg(target_os = "linux")]
+            window: window.window_handle(),
             main_window_bounds: self.main_window_bounds,
             display_id: self.main_window_display_id,
             palette: self.gpui_native_modal_palette(),
