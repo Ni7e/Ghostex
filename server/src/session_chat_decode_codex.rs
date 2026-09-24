@@ -185,8 +185,12 @@ fn codex_event_message(
             SessionChatRole::System,
             vec![text_block(INTERRUPTED_STATUS_TEXT)],
         )),
-        Some("user_message") => extract_string(payload.get("message"))
-            .map(|text| transcript_message(SessionChatRole::User, vec![text_block(text)])),
+        Some("user_message") => extract_string(payload.get("message")).map(|text| {
+            transcript_message(
+                SessionChatRole::User,
+                vec![text_block(codex_question_reply_text(&text).unwrap_or(text))],
+            )
+        }),
         Some("agent_message") => extract_string(payload.get("message"))
             .map(|text| transcript_message(SessionChatRole::Assistant, vec![text_block(text)])),
         /*
@@ -325,7 +329,16 @@ fn codex_event_message(
                 Some("AgentMessage") => SessionChatRole::Assistant,
                 _ => return None,
             };
-            let blocks = codex_item_content_blocks(item.get("content"));
+            let mut blocks = codex_item_content_blocks(item.get("content"));
+            if role == SessionChatRole::User {
+                for block in &mut blocks {
+                    if let SessionChatBlock::Text { text } = block {
+                        if let Some(framed) = codex_question_reply_text(text) {
+                            *text = framed;
+                        }
+                    }
+                }
+            }
             if blocks.is_empty() {
                 return None;
             }
@@ -365,6 +378,28 @@ fn codex_event_message(
         }
         _ => None,
     }
+}
+
+/// CDXC:SessionChat 2026-09-24 WHY:
+/// Codex 0.156 records an answer to an asynchronous question as a `<send_user_message_question_reply>` JSON envelope instead of 0.154's `> title\n\nanswer` text. Reframing it here keeps the chat bubble readable and lets every client retire the answered question by the same prefix.
+fn codex_question_reply_text(text: &str) -> Option<String> {
+    let body = text
+        .trim()
+        .strip_prefix("<send_user_message_question_reply>")?
+        .strip_suffix("</send_user_message_question_reply>")?;
+    let replies: Vec<Value> = serde_json::from_str(body.trim()).ok()?;
+    let framed: Vec<String> = replies
+        .iter()
+        .filter_map(|reply| {
+            let question = reply.get("question")?.as_str()?;
+            let answer = reply.get("answer")?.as_str()?;
+            Some(format!(
+                "{}{answer}",
+                crate::session_chat_async_questions::answer_prefix(question)
+            ))
+        })
+        .collect();
+    (!framed.is_empty()).then(|| framed.join("\n\n"))
 }
 
 fn codex_user_shell_marker(tag: &str, body: &str) -> String {
