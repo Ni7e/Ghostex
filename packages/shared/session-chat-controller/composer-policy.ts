@@ -20,6 +20,29 @@ export function sessionChatSendBlockedReason(state: {
   return null;
 }
 
+/**
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: changing the model (and accepting Claude's confirmation) must never stop the next message
+ * from sending; show the message as sent and apply it in the background. So a block that clears on
+ * its own (an answer still being applied, a mode or model switch, an account switch) holds the send
+ * instead of refusing it: the echo appears at once and the message reaches the agent when
+ * `sessionChatSendBlockedReason` clears. Only a block that needs the user (another device holds
+ * input, the conversation is open elsewhere, a question waiting for an answer) still refuses with
+ * the red toast. This supersedes the mode-switch case of the 2026-09-03 toast decision.
+ */
+export function sessionChatSendRefusedReason(state: {
+  canSend: boolean;
+  conversationLocked: boolean;
+  terminalChoicePending: boolean;
+  noticeCardVisible: boolean;
+}): string | null {
+  if (!state.canSend) return 'Input is held by another device.';
+  if (state.conversationLocked)
+    return 'This conversation is open elsewhere. Use Continue here or close it in the other app and retry.';
+  if (state.terminalChoicePending && state.noticeCardVisible) return 'Answer the question above first.';
+  return null;
+}
+
 export const DESKTOP_SESSION_CHAT_PLACEHOLDER =
   'Press Enter to send a message and Tab to Queue.\nUse @ to mention a file and $ for using skills.';
 

@@ -9,6 +9,7 @@ import {
 import { sessionChatAccountIndicator } from '@/packages/shared/session-chat-presentation/option-pills';
 import {
   sessionChatSendBlockedReason,
+  sessionChatSendRefusedReason,
   sessionChatComposerPlaceholder,
 } from '@/packages/shared/session-chat-controller/composer-policy';
 import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
@@ -1294,13 +1295,20 @@ export function SessionChatView({
   reason as `sendBlockedReason`, keeps the draft editable, dims Send, and
   raises a red toast with this sentence when a send is attempted.
   */
-  const composerSendBlockedReason = sessionChatSendBlockedReason({
+  const composerSendHeld =
+    sessionChatSendBlockedReason({
+      canSend,
+      accountSwitchBusy: accountSwitch.busy,
+      conversationLocked: !!chat.terminalNotice?.conversationLock,
+      terminalChoicePending,
+      noticeCardVisible,
+      sessionOptionSwitching,
+    }) !== null;
+  const composerSendBlockedReason = sessionChatSendRefusedReason({
     canSend,
-    accountSwitchBusy: accountSwitch.busy,
     conversationLocked: !!chat.terminalNotice?.conversationLock,
     terminalChoicePending,
     noticeCardVisible,
-    sessionOptionSwitching,
   });
   /*
   CDXC:SessionChat 2026-09-02:
@@ -1377,10 +1385,10 @@ export function SessionChatView({
   const reconcileTypedCommand = sessionOptions.reconcileTypedCommand;
   const isDraft = draftAgents !== null;
   const send = useCallback(
-    async (text: string, draftVersion?: SessionChatDraftVersion): Promise<void> => {
+    async (text: string, draftVersion?: SessionChatDraftVersion, hold?: () => Promise<void>): Promise<void> => {
       await sendSessionChatOptionAware(text, draftVersion, {
         reconcileTypedCommand,
-        send: (text, version) => chatSend(text, undefined, version),
+        send: (text, version) => chatSend(text, undefined, version, hold),
         isDraft,
         refresh: chatRefresh,
       });
@@ -1965,6 +1973,7 @@ export function SessionChatView({
                               agentTasks={chat.agentTasks}
                               {...(diagnosticLog ? { diagnosticLog } : {})}
                               sendBlockedReason={composerSendBlockedReason}
+                              sendHeld={composerSendHeld}
                               draftSync={chat.draft}
                               isWorking={chat.working}
                               key={sessionKey}

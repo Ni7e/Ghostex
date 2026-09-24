@@ -56,6 +56,27 @@ pub fn send_blocked_reason(state: &SendGate) -> Option<&'static str> {
     None
 }
 
+/// Why a send is refused outright, or `None` when it may go (at once or once the gate clears).
+///
+/// CDXC:SessionChat 2026-09-24 SEE-ALSO:
+/// Port of `sessionChatSendRefusedReason` in `composer-policy.ts`, which holds the user's decision
+/// that a block which clears on its own (an answer still being applied, a mode or model switch, an
+/// account switch) holds the send instead of refusing it. Only these blocks need the user.
+pub fn send_refused_reason(state: &SendGate) -> Option<&'static str> {
+    if !state.can_send {
+        return Some("Input is held by another device.");
+    }
+    if state.conversation_locked {
+        return Some(
+            "This conversation is open elsewhere. Use Continue here or close it in the other app and retry.",
+        );
+    }
+    if state.terminal_choice_pending && state.notice_card_visible {
+        return Some("Answer the question above first.");
+    }
+    None
+}
+
 /// What the composer shows instead of its own placeholder, or `None` to keep it.
 pub fn composer_placeholder(
     can_send: bool,

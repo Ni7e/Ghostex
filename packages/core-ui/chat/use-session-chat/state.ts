@@ -279,7 +279,13 @@ export interface UseSessionChatResult {
   earlierPageCursor: number;
   loadingEarlier: boolean;
   loadEarlier: () => void;
-  send: (text: string, imagePaths?: string[], draftVersion?: SessionChatDraftVersion) => Promise<void>;
+  /** `hold`, when given, is awaited after the echo is drawn and before the message leaves. */
+  send: (
+    text: string,
+    imagePaths?: string[],
+    draftVersion?: SessionChatDraftVersion,
+    hold?: () => Promise<void>
+  ) => Promise<void>;
   /**
    * Raw keystroke injection for agent-owned TUI controls. Undefined when the
    * host transport cannot deliver keys, so callers hide the control instead

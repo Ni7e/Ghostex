@@ -11,8 +11,8 @@ use serde_json::Value;
 use crate::composer::host_actions::composer_host_actions;
 use crate::composer::layout::{can_collapse_composer, CollapseGate};
 use crate::composer::policy::{
-    composer_placeholder, send_blocked_reason, SendGate, DESKTOP_COMPOSER_PLACEHOLDER,
-    STOP_BUTTON_COOLDOWN_MS,
+    composer_placeholder, send_blocked_reason, send_refused_reason, SendGate,
+    DESKTOP_COMPOSER_PLACEHOLDER, STOP_BUTTON_COOLDOWN_MS,
 };
 use crate::composer::queue::{
     is_queue_row_busy, queue_capabilities, queue_row_preview, QUEUE_LONG_PRESS_MS,
@@ -95,7 +95,7 @@ pub fn document(state: &ChatState, _context: &ChatContext, into: &mut Document) 
 
     let card_visible = notice_visible(state);
     let choice_pending = terminal_choice_pending(state, notice.as_ref());
-    into.send_blocked_reason = send_blocked(state, _context);
+    into.send_blocked_reason = send_refused(state);
     into.composer_placeholder = composer_placeholder(
         true,
         choice_pending,
@@ -174,6 +174,21 @@ pub fn send_blocked(state: &ChatState, _context: &ChatContext) -> Option<String>
         terminal_choice_pending: terminal_choice_pending(state, notice.as_ref()),
         notice_card_visible: notice_visible(state),
         session_option_switching: option_switching(state),
+    })
+    .map(str::to_string)
+}
+
+/// Why a send is refused outright, or `None`; a send that is only blocked is held instead.
+pub fn send_refused(state: &ChatState) -> Option<String> {
+    let notice = TerminalNotice::parse(state.session.terminal_notice.as_ref());
+    send_refused_reason(&SendGate {
+        can_send: true,
+        conversation_locked: notice
+            .as_ref()
+            .is_some_and(|notice| notice.conversation_lock.is_some()),
+        terminal_choice_pending: terminal_choice_pending(state, notice.as_ref()),
+        notice_card_visible: notice_visible(state),
+        ..SendGate::default()
     })
     .map(str::to_string)
 }

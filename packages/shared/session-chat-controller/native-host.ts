@@ -35,7 +35,7 @@ import { modelPickScope, modelPickerSupportsSessionScope } from '../session-chat
 import { modelMenuPick, modelMenuProjection } from './model-menu';
 import { adoptModelFavorites } from './model-favorites';
 import { modelPickerProvider } from '../session-chat-presentation/model-picker-request';
-import type { ModelMenuTabId } from '../session-chat-presentation/model-menu';
+import { modelMenuTraitPicksModel, type ModelMenuTabId } from '../session-chat-presentation/model-menu';
 import { adoptAgentModelCatalog } from '../agent-model-catalog-state';
 import { computeNativeChatOptions, nativeOptionPersistence } from './native-options';
 import {
@@ -55,6 +55,7 @@ import { computeNativeChatControls } from './native-controls';
 import {
   SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS,
   sessionChatSendBlockedReason,
+  sessionChatSendRefusedReason,
   sessionChatComposerPlaceholder,
   DESKTOP_SESSION_CHAT_PLACEHOLDER,
 } from './composer-policy';
@@ -336,6 +337,44 @@ function sendBlockedReason(state: NativeChatState): string | null {
   });
 }
 
+function sendRefusedReason(state: NativeChatState): string | null {
+  const notice = state.terminalNotice;
+  return sessionChatSendRefusedReason({
+    canSend: true,
+    conversationLocked: !!notice?.conversationLock,
+    terminalChoicePending:
+      !!notice &&
+      !!(notice.choices?.length || notice.dialog || notice.conversationLock) &&
+      `${notice.kind}:${notice.detectedAt}` !== retiredNoticeKey,
+    noticeCardVisible: noticeVisible(state),
+  });
+}
+
+/** Sends waiting for `sendBlockedReason` to clear; each answers whether it is done waiting. */
+const heldSends = new Set<(state: NativeChatState) => boolean>();
+
+function releaseHeldSends(state: NativeChatState): void {
+  for (const settle of [...heldSends]) if (settle(state)) heldSends.delete(settle);
+}
+
+/** Resolves once the send gate is clear, or rejects when Escape cancelled the send. */
+function holdUntilSendable(attempt: { cancelled: boolean }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const settle = (state: NativeChatState): boolean => {
+      if (attempt.cancelled) {
+        reject(
+          new GxserverRpcError('sendCancelled', 'The session chat send was cancelled.', '/api/sendSessionChatMessage')
+        );
+        return true;
+      }
+      if (sendBlockedReason(state) !== null) return false;
+      resolve();
+      return true;
+    };
+    if (!settle(controller.current())) heldSends.add(settle);
+  });
+}
+
 function asyncQuestionsCanSend(state: NativeChatState): boolean {
   const notice = state.terminalNotice;
   const terminalChoicePending =
@@ -417,7 +456,13 @@ function publish(state: NativeChatState): void {
         });
   }
   presentation.setWorkingDirectory(transport?.presentation?.getSnapshot().workingDirectory);
-  const projection = presentation.update(state.messages, state.transcriptWorking, summaryMode, deferred, detailRevision);
+  const projection = presentation.update(
+    state.messages,
+    state.transcriptWorking,
+    summaryMode,
+    deferred,
+    detailRevision
+  );
   transcriptItems = projection.items;
   minimapMarkers = projection.minimap;
   subagentItems = subagentViewer.transcriptItems();
@@ -579,7 +624,7 @@ function publish(state: NativeChatState): void {
     operationErrorCode: operationErrorCode ?? null,
     pendingAttachments,
     optionDispatchId,
-    sendBlockedReason: sendBlockedReason(state),
+    sendBlockedReason: sendRefusedReason(state),
     composerPlaceholder:
       sessionChatComposerPlaceholder({
         canSend: true,
@@ -631,6 +676,7 @@ function publish(state: NativeChatState): void {
     deferredWork: Object.fromEntries(deferredWork),
   };
   revision++;
+  releaseHeldSends(state);
 }
 
 function start(config: {
@@ -1052,7 +1098,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         }
         await action({
           type: 'selectOption',
-          descriptorId: command.id === 'context' ? context.modelId : command.id,
+          descriptorId: modelMenuTraitPicksModel(command.id) ? context.modelId : command.id,
           value: command.value,
           exitPlan: command.exitPlan,
           secondary: command.secondary,
@@ -1188,10 +1234,10 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       case 'send':
       case 'queue':
       case 'compact': {
-        const blocked = sendBlockedReason(chat);
-        if (blocked) {
+        const refused = sendRefusedReason(chat);
+        if (refused) {
           requests.push({ kind: 'submissionFailed', method: command.type, params: { text: command.text } });
-          throw new Error(blocked);
+          throw new Error(refused);
         }
         const attempt = { cancelled: false };
         // The draft leaves with its pictures; a refusal re-inserts the text and counts them again.
@@ -1206,15 +1252,16 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
               version: command.draftVersion,
               mode: command.type,
               push: chat.draft.canSync ? chat.draft.push : undefined,
-              send: (text, version) =>
+              send: (text, version, hold) =>
                 sendSessionChatOptionAware(text, version, {
                   reconcileTypedCommand: chat.sessionOptions.reconcileTypedCommand,
-                  send: (text, version) => chat.send(text, command.imagePaths, version),
+                  send: (text, version) => chat.send(text, command.imagePaths, version, hold),
                   isDraft: chat.availableAgents !== null,
                   refresh: chat.refresh,
                 }),
               queue: chat.queue.queuePrompt,
               cancelled: () => attempt.cancelled,
+              hold: () => holdUntilSendable(attempt),
             });
           } catch (error) {
             requests.push({ kind: 'submissionFailed', method: command.type, params: { text: command.text } });
@@ -1300,6 +1347,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         break;
       case 'interrupt':
         if (submissionAttempt) submissionAttempt.cancelled = true;
+        releaseHeldSends(chat);
         await chat.interrupt();
         break;
       case 'dismissNotice':

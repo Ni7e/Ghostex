@@ -220,11 +220,12 @@ export function computeSessionChat(
       // Keep the chosen options' evidence ordering, but allow the seed read to fill stats omitted by a newer terminal capture.
       const codexStatus = nextOptions.codexStatus ?? detected.codexStatus ?? current?.codexStatus;
       const claudeStatus = nextOptions.claudeStatus ?? detected.claudeStatus ?? current?.claudeStatus;
+      const cursorStatus = nextOptions.cursorStatus ?? detected.cursorStatus ?? current?.cursorStatus;
       const contextUsage = nextOptions.contextUsage ?? detected.contextUsage ?? current?.contextUsage;
       const next =
-        !codexStatus && !claudeStatus && !contextUsage
+        !codexStatus && !claudeStatus && !cursorStatus && !contextUsage
           ? nextOptions
-          : { ...nextOptions, codexStatus, claudeStatus, contextUsage };
+          : { ...nextOptions, codexStatus, claudeStatus, cursorStatus, contextUsage };
       selectedOptionsRef.current = next;
       setSelectedOptions(next);
       transport.presentation?.update({ selectedOptions: next });
@@ -1506,7 +1507,12 @@ export function computeSessionChat(
   }, [hasMore, loadEarlier, loadingEarlier, transcript, transport]);
 
   const send = useCallback(
-    async (text: string, imagePaths?: string[], draftVersion?: SessionChatDraftVersion): Promise<void> => {
+    async (
+      text: string,
+      imagePaths?: string[],
+      draftVersion?: SessionChatDraftVersion,
+      hold?: () => Promise<void>
+    ): Promise<void> => {
       const classification = classifySessionChatSend(text, commandCatalog);
       let pendingId: string | null = null;
       let commandMarkerSentAt: number | null = null;
@@ -1555,6 +1561,7 @@ export function computeSessionChat(
         );
       }
       try {
+        await hold?.();
         const receipt = await transport.send(text, imagePaths, draftVersion);
         if (receipt?.queuedPromptId && pendingId !== null) {
           const id = pendingId;

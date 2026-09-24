@@ -168,6 +168,9 @@ pub struct Submission {
     pub refresh_after_send: bool,
     /// This is a `handoff`: the draft is parked for the terminal rather than delivered.
     pub handoff: bool,
+    /// The head delivery phase is waiting for the send gate to clear. A send has already drawn its
+    /// echo or marker, so the phase resumes without drawing it again.
+    pub awaiting_gate: bool,
 }
 
 impl ComposerState {

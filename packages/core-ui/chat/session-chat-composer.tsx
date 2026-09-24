@@ -293,6 +293,12 @@ export interface SessionChatComposerProps {
    * purpose: nothing may make the text box read-only.
    */
   sendBlockedReason?: string | null;
+  /**
+   * A block that clears on its own (a model or mode switch, an answer still being applied) is in
+   * effect. Sending is not refused: the message is echoed at once and delivered when this turns
+   * false (see `sessionChatSendRefusedReason`).
+   */
+  sendHeld?: boolean;
   isWorking: boolean;
   /** Session activity may differ from the transcript's held working state. */
   workingStatus?: SessionChatWorkingStripProps;
@@ -337,7 +343,12 @@ export interface SessionChatComposerProps {
   onRequestFiles?: () => void;
   /** True while the host is listing files for the "@" picker. */
   filesLoading?: boolean;
-  onSend: (text: string, draftVersion?: SessionChatDraftVersion) => void | Promise<void>;
+  /** `hold` is awaited after the echo is drawn and before the message leaves. */
+  onSend: (
+    text: string,
+    draftVersion?: SessionChatDraftVersion,
+    hold?: () => Promise<void>
+  ) => void | Promise<void>;
   /**
    * Reads the session's terminal screen for the `composerNotReady` refusal
    * notice (see session-chat-composer-not-ready.tsx) and, polled, for the
@@ -594,6 +605,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       scrollCollapseEnabled = false,
       onScrollCollapsedChange,
       sendBlockedReason = null,
+      sendHeld = false,
       sendOnEnter = true,
       sessionKey,
       sessionNoteActive = false,
@@ -716,8 +728,32 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const pendingSavedPromptRef = useRef('');
     const sendInFlightRef = useRef(false);
     const sendAttemptRef = useRef<{ cancelled: boolean } | null>(null);
+    const sendHeldRef = useRef(sendHeld);
+    sendHeldRef.current = sendHeld;
+    /** Sends waiting for `sendHeld` to clear; each answers whether it is done waiting. */
+    const heldSendsRef = useRef(new Set<(unmounted: boolean) => boolean>());
+    const releaseHeldSends = (unmounted = false): void => {
+      for (const settle of [...heldSendsRef.current]) if (settle(unmounted)) heldSendsRef.current.delete(settle);
+    };
+    useEffect(() => releaseHeldSends(), [sendHeld]);
+    useEffect(() => () => releaseHeldSends(true), []);
+    /** Resolves once sending may proceed, or rejects when Escape cancelled it or the composer went away. */
+    const holdUntilSendable = (attempt: { cancelled: boolean }): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const settle = (unmounted: boolean): boolean => {
+          if (attempt.cancelled || unmounted) {
+            reject(new GxserverRpcError('sendCancelled', 'The session chat send was cancelled.', '/api/sendSessionChatMessage'));
+            return true;
+          }
+          if (sendHeldRef.current) return false;
+          resolve();
+          return true;
+        };
+        if (!settle(false)) heldSendsRef.current.add(settle);
+      });
     const onInterrupt = (): void => {
       if (sendAttemptRef.current) sendAttemptRef.current.cancelled = true;
+      releaseHeldSends();
       interruptAgent();
     };
     /** Newest draft stamp already applied or dismissed here (never re-offered). */
@@ -1352,6 +1388,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         send: onSend,
         queue: compactQueue?.queuePrompt,
         cancelled: () => attempt.cancelled,
+        hold: () => holdUntilSendable(attempt),
         phase: (phase) => {
           sendPhase = phase;
           if (phase === 'deliverMessage') traceDraft('deliveryBegin', { sent: sessionChatDraftFingerprint(text) });
@@ -1489,6 +1526,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
             text: stored, version: submittedDraft.version, mode: 'queue',
             push: draftSync?.canSync ? draftSync.push : undefined,
             send: onSend, queue: controller.queuePrompt,
+            hold: () => holdUntilSendable({ cancelled: false }),
           });
           try {
             recordSentSessionChatMessage(text, sessionKey);
