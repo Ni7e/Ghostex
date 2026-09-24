@@ -104,11 +104,14 @@ pub(crate) const TERMINAL_KEY_CONTEXT: &str = "GhostexGpuiTerminal";
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 /// How long the previous frame may stand in for a displayed zmx viewer after a
 /// resize-and-claim. The hold ends once PTY output has been quiet for
-/// `ZMX_REFLOW_QUIET` — merging the daemon's post-claim dump and the agent
+/// `ZMX_REFLOW_QUIET` — merging the daemon's post-claim dump AND the agent
 /// TUI's SIGWINCH redraw into one paint — or at `ZMX_REFLOW_CAP` at the
-/// latest.
-const ZMX_REFLOW_QUIET: Duration = Duration::from_millis(50);
-const ZMX_REFLOW_CAP: Duration = Duration::from_millis(300);
+/// latest. The quiet window must outlast the gap between the daemon's dump
+/// and the TUI's own redraw: the dump alone shows the daemon's ghostty reflow
+/// of the old width (long border lines wrap), and only the TUI redraw draws
+/// them at the real width.
+const ZMX_REFLOW_QUIET: Duration = Duration::from_millis(100);
+const ZMX_REFLOW_CAP: Duration = Duration::from_millis(400);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 5.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 24.0;
 /// Extra pointer room beside the track that keeps a revealed bar up while the
