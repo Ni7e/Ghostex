@@ -1595,6 +1595,7 @@ impl GhostexGpuiApp {
             }),
         );
         self.activate_preferred_agents_chat_launch_intent(shell_session_id, cx);
+        self.adopt_preferred_chat_view_on_selection(shell_session_id, cx);
         // CDXC:Workarea 2026-09-20 WHY:
         // Selecting a session focuses its pane in the Agents column and leaves the view panel alone;
         // it used to have to choose between the companion and switching the whole workarea.
@@ -1830,6 +1831,7 @@ impl GhostexGpuiApp {
             }
         };
         self.activate_preferred_agents_chat_launch_intent(session_id, cx);
+        self.adopt_preferred_chat_view_on_selection(session_id, cx);
         {
             self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
             self.set_sidebar_focus_border_handoff_target(session_id);

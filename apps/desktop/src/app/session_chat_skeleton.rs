@@ -1,39 +1,25 @@
-use crate::app::helpers::ThrottledAnimationExt as _;
 use crate::app::native_chat::appearance::ChatAppearance;
 use crate::*;
 use gpui::{
     AnyElement, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _, div, px,
-    relative,
 };
 use serde::Deserialize;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+/// The part of the shared skeleton geometry the GPUI skeletons still read.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TranscriptSkeleton {
-    top_padding: f32,
-    row_gap: f32,
-    bar_height: f32,
-    bar_gap: f32,
-    bubble_height: f32,
-    bubble_radius: f32,
     tint: f32,
     pulse_ms: u64,
     pulse_min_opacity: f32,
-    rows: Vec<SkeletonRow>,
 }
 
-#[derive(Deserialize)]
-struct SkeletonRow {
-    role: String,
-    widths: Vec<f32>,
-}
-
-/// CDXC:SessionChat 2026-09-19 SEE-ALSO:
-/// The geometry is the shared packages/shared/session-chat-presentation/transcript-skeleton.json that React's
-/// SessionChatLoadingState and the chat view's own transcript skeleton draw; the pane draws it here only while there
-/// is no chat view yet, because a chat view draws its own skeleton above its real composer.
+/// CDXC:SessionChat 2026-09-24 SEE-ALSO:
+/// The shared packages/shared/session-chat-presentation/transcript-skeleton.json that React's SessionChatLoadingState
+/// draws; the GPUI chat no longer draws transcript skeleton rows (native_chat/transcript_reveal.rs), and only its tint
+/// and pulse are still read here, by the other GPUI skeletons.
 static SKELETON: LazyLock<TranscriptSkeleton> = LazyLock::new(|| {
     serde_json::from_str(include_str!(
         "../../../../packages/shared/session-chat-presentation/transcript-skeleton.json"
@@ -73,6 +59,7 @@ impl GhostexGpuiApp {
 
 /// CDXC:SessionChat 2026-09-23 DECISION:
 /// User: never show a transcript skeleton alone; keep the composer and status line at the bottom while the session is still being mapped. A mounted chat owns the editable input; this brief pre-view state reserves the same regions, including while a held next-tab key defers mounting.
+/// Since the 2026-09-24 decision in native_chat/transcript_reveal.rs the transcript area above them stays empty: no skeleton rows, the chat fades in once ready.
 fn session_chat_skeleton(p: &ChatAppearance, glass: bool) -> AnyElement {
     let s = p.scale;
     div()
@@ -88,6 +75,7 @@ fn session_chat_skeleton(p: &ChatAppearance, glass: bool) -> AnyElement {
         } else {
             p.background
         })
+        // The transcript area stays empty: the chat view fades its transcript in (transcript_reveal.rs).
         .child(
             div()
                 .id("session-chat-pane-skeleton")
@@ -95,12 +83,7 @@ fn session_chat_skeleton(p: &ChatAppearance, glass: bool) -> AnyElement {
                 .aria_label("Loading conversation…")
                 .w_full()
                 .flex_1()
-                .min_h_0()
-                .overflow_hidden()
-                .max_w(px(768.0 * s))
-                .px(px(16.0 * s))
-                .pt(px(SKELETON.top_padding * s))
-                .child(skeleton_rows(p)),
+                .min_h_0(),
         )
         .child(
             div().w_full().max_w(px(768.0 * s)).flex_shrink_0()
@@ -121,65 +104,4 @@ fn session_chat_skeleton(p: &ChatAppearance, glass: bool) -> AnyElement {
                 .child(crate::app::native_chat::context_meter::status_line_skeleton(p)),
         )
         .into_any_element()
-}
-
-/// A right-hand prompt bubble, then a few lines of reply, repeated, pulsing like React's.
-fn skeleton_rows(p: &ChatAppearance) -> AnyElement {
-    let s = p.scale;
-    let fill = p.foreground.opacity(SKELETON.tint);
-    let rows = div()
-        .w_full()
-        .flex()
-        .flex_col()
-        .gap(px(SKELETON.row_gap * s))
-        .children(SKELETON.rows.iter().map(|row| {
-            if row.role == "user" {
-                div().w_full().flex().justify_end().child(
-                    div()
-                        .w(relative(row.widths.first().copied().unwrap_or(0.4)))
-                        .h(px(SKELETON.bubble_height * s))
-                        .rounded(px(SKELETON.bubble_radius * s))
-                        .bg(fill),
-                )
-            } else {
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap(px(SKELETON.bar_gap * s))
-                    .children(row.widths.iter().map(|width| {
-                        div()
-                            .w(relative(*width))
-                            .h(px(SKELETON.bar_height * s))
-                            .rounded_full()
-                            .bg(fill)
-                    }))
-            }
-        }));
-    if crate::app::helpers::gpui_macos_reduce_motion_enabled() {
-        return rows.into_any_element();
-    }
-    let min = SKELETON.pulse_min_opacity;
-    rows.with_throttled_animation(
-        "session-chat-pane-skeleton-pulse",
-        Duration::from_millis(SKELETON.pulse_ms),
-        move |rows, frame| {
-            let dip = ease_in_out(if frame < 0.5 {
-                frame * 2.0
-            } else {
-                (1.0 - frame) * 2.0
-            });
-            rows.opacity(1.0 - (1.0 - min) * dip)
-        },
-    )
-    .into_any_element()
-}
-
-/// CSS `ease-in-out` over a unit interval.
-fn ease_in_out(t: f32) -> f32 {
-    if t < 0.5 {
-        2.0 * t * t
-    } else {
-        1.0 - (-2.0 * t + 2.0).powi(2) / 2.0
-    }
 }

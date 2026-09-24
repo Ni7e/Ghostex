@@ -15,15 +15,26 @@ use gpui::{
 use serde_json::{Value, json};
 use std::time::Duration;
 
-const REVEAL_MS: u64 = 200;
+const REVEAL_MS: u64 = 250;
 
 /// Whether the transcript is being held back, and which reveal its fade belongs to.
-#[derive(Default)]
 pub(crate) struct TranscriptReveal {
-    /// The last transcript render drew the loading hold.
+    /// Nothing of this transcript has been drawn since the view was created or last drew the
+    /// loading hold, so the next content fades in.
     held: bool,
     /// Bumped each time content replaces a hold, so the next session's content fades in afresh.
     generation: Option<u64>,
+}
+
+impl Default for TranscriptReveal {
+    /// A new view fades its first content in too: the pane showed the pre-view placeholder
+    /// (session_chat_skeleton.rs) until it existed, often with the transcript already read.
+    fn default() -> Self {
+        Self {
+            held: true,
+            generation: None,
+        }
+    }
 }
 
 impl NativeChatView {
@@ -87,8 +98,8 @@ impl NativeChatView {
             Some(generation) => region
                 .with_animation(
                     gpui::ElementId::NamedInteger("chat-transcript-reveal".into(), generation),
-                    Animation::new(Duration::from_millis(REVEAL_MS))
-                        .with_easing(gpui::ease_out_quint()),
+                    // Not ease-out-quint: that is ~95% opaque a third of the way in, which reads as a pop.
+                    Animation::new(Duration::from_millis(REVEAL_MS)).with_easing(gpui::ease_in_out),
                     |region, delta| region.opacity(delta),
                 )
                 .into_any_element(),

@@ -1,7 +1,7 @@
 //! The composer footer's Terminal View button doubles as the agent CLI's
-//! readiness light and shows the bottom of that screen on hover. Both come from
-//! the session-scoped terminal-tail read the `composerNotReady` card uses; the
-//! read happens only on hover or focus, never on a background timer.
+//! readiness light. It comes from the session-scoped terminal-tail read the
+//! `composerNotReady` card uses; the read happens only on hover or focus, never
+//! on a background timer.
 //!
 //! Only a measured verdict tints the glyph: `unknown`, an unreadable screen and
 //! the time before the first hover keep the inherited footer color, because the
@@ -9,7 +9,7 @@
 //! sends fine. Colors match `.ghostex-chat-footer-control[data-terminal-ready]`
 //! in packages/core-ui/styles/chat.css.
 
-use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use super::{appearance::ChatAppearance, state::NativeChatView};
 use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -18,6 +18,7 @@ use gpui::{
 use serde_json::json;
 
 impl NativeChatView {
+    /// CDXC:SessionChat 2026-09-24 DECISION: The user asked for the Terminal View button's hover tooltip (the "Agent CLI Preview" with the readiness reason and screen tail) to stop showing; it is commented out rather than deleted.
     pub(super) fn render_terminal_view_button(
         &self,
         p: &ChatAppearance,
@@ -29,18 +30,18 @@ impl NativeChatView {
             Some("notReady") => Some(gpui::rgb(0xf0a3a3)),
             _ => None,
         };
-        let preview = text(tail, "preview");
-        let reason = text(tail, "reason");
-        let tooltip = [
-            Some("Agent CLI Preview".to_string()),
-            Some("Click to Switch to Terminal View".to_string()),
-            Some(reason).filter(|reason| !reason.is_empty()),
-            Some(preview).filter(|preview| !preview.is_empty()),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("\n\n");
+        // let preview = text(tail, "preview");
+        // let reason = text(tail, "reason");
+        // let tooltip = [
+        //     Some("Agent CLI Preview".to_string()),
+        //     Some("Click to Switch to Terminal View".to_string()),
+        //     Some(reason).filter(|reason| !reason.is_empty()),
+        //     Some(preview).filter(|preview| !preview.is_empty()),
+        // ]
+        // .into_iter()
+        // .flatten()
+        // .collect::<Vec<_>>()
+        // .join("\n\n");
         div()
             .id("terminalView")
             .role(gpui::Role::Button)
@@ -58,11 +59,10 @@ impl NativeChatView {
                     .size(px(16.0 * p.scale))
                     .text_color(tint.map_or(p.primary, |color| color.into())),
             )
-            .tooltip(move |window, cx| {
-                gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
-            })
-            // The tooltip's own open delay is longer than the read, so hovering is enough
-            // to have the current screen ready by the time the preview appears.
+            // .tooltip(move |window, cx| {
+            //     gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
+            // })
+            // Hovering still reads the terminal tail so the glyph's readiness tint stays current.
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                 if *hovered {
                     this.invoke(json!({"type":"terminalTailHover"}), cx);
