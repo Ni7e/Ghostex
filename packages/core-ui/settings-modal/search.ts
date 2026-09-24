@@ -277,7 +277,7 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
           {
             key: 'chatBrain',
             title: 'Chat brain',
-            subtitle: 'Which engine runs the chat. Leave this on QuickJS; the Rust engine is still in development.',
+            subtitle: 'Which engine runs the chat. Rust is the default; switch back to QuickJS only if a chat misbehaves, then tell us.',
             options: CHAT_BRAIN_OPTIONS.map((option) => ({ label: option.label, value: option.value })),
           },
           {

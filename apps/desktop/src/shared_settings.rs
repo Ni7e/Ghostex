@@ -194,24 +194,25 @@ pub enum SharedSettingsAutoSleepTarget {
 
 /// Which chat brain a chat view creates.
 ///
-/// CDXC:SessionChat 2026-09-22 WHY:
-/// Temporary. The chat's rules exist twice while the brain moves from the TypeScript bundle running
-/// in QuickJS (`packages/shared/session-chat-controller/`) to the Rust core
-/// (`packages/gx-chat-core/`, hosted by `src/app/gx_chat/`). `QuickJs` is the shipped brain and the
-/// default; `Rust` runs the new host instead and creates no QuickJS chat runtime. Both this enum
-/// and the `chatBrain` setting behind it are deleted with the TypeScript brain.
+/// CDXC:SessionChat 2026-09-24 DECISION:
+/// User: after the hand test in the VM passed, make Rust the default chat engine now; QuickJS stays
+/// reachable through this setting until the TypeScript brain is deleted. Supersedes the 2026-09-22
+/// note that made QuickJS the default. `Rust` runs `src/app/gx_chat/` on `packages/gx-chat-core/`
+/// and creates no QuickJS chat runtime; `QuickJs` is the previous brain
+/// (`packages/shared/session-chat-controller/`). Both this enum and the `chatBrain` setting behind
+/// it are deleted with the TypeScript brain.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SharedChatBrain {
-    #[default]
     QuickJs,
+    #[default]
     Rust,
 }
 
 impl SharedChatBrain {
     pub fn from_settings_value(value: Option<&str>) -> Self {
         match value {
-            Some("rust") => Self::Rust,
-            _ => Self::QuickJs,
+            Some("quickjs") => Self::QuickJs,
+            _ => Self::Rust,
         }
     }
 }

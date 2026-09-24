@@ -83,7 +83,7 @@ export function DebuggingSettingsTab({
               {visible('controls', 'chatBrain') ? (
                 <SelectField
                   dependent
-                  description='Which engine runs the chat. Leave this on QuickJS; the Rust engine is still in development.'
+                  description='Which engine runs the chat. Rust is the default; switch back to QuickJS only if a chat misbehaves, then tell us.'
                   label='Chat brain'
                   options={CHAT_BRAIN_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
                   value={settings.chatBrain}

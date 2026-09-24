@@ -7764,21 +7764,21 @@
     {
       "key": "chatBrain",
       "title": "Chat brain",
-      "subtitle": "Which engine runs the chat. Leave this on QuickJS; the Rust engine is still in development.",
+      "subtitle": "Which engine runs the chat. Rust is the default; switch back to QuickJS only if a chat misbehaves, then tell us.",
       "tab": "debugging",
       "tabTitle": "Debugging",
       "section": "controls",
       "sectionTitle": "Debug controls",
       "type": "enum",
-      "default": "quickjs",
+      "default": "rust",
       "options": [
         {
-          "label": "QuickJS (shipped)",
-          "value": "quickjs"
+          "label": "Rust",
+          "value": "rust"
         },
         {
-          "label": "Rust (in development)",
-          "value": "rust"
+          "label": "QuickJS (previous engine)",
+          "value": "quickjs"
         }
       ],
       "agentWritable": true

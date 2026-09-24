@@ -321,8 +321,8 @@ export const CHAT_BRAIN_OPTIONS: ReadonlyArray<{
   label: string;
   value: ChatBrain;
 }> = [
-  { label: 'QuickJS (shipped)', value: 'quickjs' },
-  { label: 'Rust (in development)', value: 'rust' },
+  { label: 'Rust', value: 'rust' },
+  { label: 'QuickJS (previous engine)', value: 'quickjs' },
 ];
 
 export const PROMPT_EDITOR_BACKEND_OPTIONS: ReadonlyArray<{
