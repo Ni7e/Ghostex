@@ -1171,6 +1171,18 @@ impl TerminalModel {
         scroll_terminal_delta(terminal, delta);
     }
 
+    /// Current scrollbar state (viewport position, in rows) without consuming
+    /// snapshot dirty state.
+    pub fn scrollbar(&mut self) -> Result<VtScrollbar, VtError> {
+        let mut terminal = self.terminal.lock().expect("terminal lock poisoned");
+        let Some(terminal) = terminal.as_mut() else {
+            return Err(VtError {
+                code: ffi::GHOSTTY_INVALID_VALUE,
+            });
+        };
+        terminal.scrollbar()
+    }
+
     /// Read every scrollback row without changing the user's final viewport.
     /// The terminal lock stays held so output cannot reorder absolute rows
     /// during the scan. Render-state snapshots are page-sized; walk them from

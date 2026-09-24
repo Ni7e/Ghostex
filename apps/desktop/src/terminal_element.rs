@@ -669,6 +669,10 @@ pub struct TerminalView {
     zmx_reflow_hold: Option<ZmxReflowHold>,
     /// Monotonic token distinguishing the hold the current timers armed from a newer one.
     zmx_reflow_hold_seq: u64,
+    /// CDXC:Zmx 2026-09-24 WHY:
+    /// Parking a hidden viewer reflows its local grid to the resting width, and the redisplay reflow anchors at the bottom, so a viewer scrolled up into scrollback redisplayed at the wrong scroll level for a few frames until the next sync caught up — the flicker a session switch shows.
+    /// The grid size, viewport offset, and bottom-anchor flag are saved before the park reflow; the redisplay settle restores them once the grid is back at the display size.
+    parked_viewport: Option<(u16, u16, u64, bool)>,
     /// CDXC:Terminal 2026-09-18 WHY:
     /// Every PTY wakeup used to refresh the grid snapshot and notify, and gpui redraws the whole window on any notify, so a hidden agent terminal streaming output behind its chat view redrew the window on every chunk.
     /// A parked or chat-mode terminal only marks its snapshot stale; the next prepaint of a displayed slot takes the fresh frame. Titles and pwd still sync so the sidebar stays current.
@@ -803,6 +807,7 @@ impl TerminalView {
             zmx_grid_claim_held: false,
             zmx_reflow_hold: None,
             zmx_reflow_hold_seq: 0,
+            parked_viewport: None,
             displayed: true,
             snapshot_stale: false,
             last_prepaint: None,
@@ -888,8 +893,36 @@ impl TerminalView {
         if (cols, rows) == self.model.size() {
             return;
         }
+        // Save the viewport in the grid it belongs to: the redisplay settle
+        // restores it once the grid is back at this size (CDXC:Zmx above).
+        self.parked_viewport = self.model.scrollbar().ok().map(|sb| {
+            let (grid_cols, grid_rows) = self.model.size();
+            (
+                grid_cols,
+                grid_rows,
+                sb.offset,
+                sb.offset + sb.len >= sb.total,
+            )
+        });
         let _ = self.model.resize_grid(cols, rows);
         cx.notify();
+    }
+
+    /// Re-apply the viewport saved when the viewer parked, once the grid is
+    /// back at the size it was parked from. A bottom-anchored viewer is left
+    /// alone: following the bottom is the natural state there.
+    fn restore_parked_viewport_if_roundtrip(&mut self) {
+        let Some((grid_cols, grid_rows, offset, at_bottom)) = self.parked_viewport else {
+            return;
+        };
+        if (grid_cols, grid_rows) != self.model.size() {
+            return;
+        }
+        self.parked_viewport = None;
+        if at_bottom {
+            return;
+        }
+        self.model.scroll_viewport_to_row(offset);
     }
 
     pub fn paste_requires_confirmation(&mut self, text: &str) -> bool {
@@ -1127,7 +1160,10 @@ impl TerminalView {
         }
         self.zmx_reflow_hold = None;
         // The grid was resized while the previous frame stood in, so the
-        // cached row layouts belong to the old geometry.
+        // cached row layouts belong to the old geometry. The viewport restore
+        // must land before the refresh: the settled frame is the first one
+        // the user sees after the hold, and it has to be at the right scroll.
+        self.restore_parked_viewport_if_roundtrip();
         self.row_cache.clear();
         self.snapshot_stale = false;
         self.refresh_snapshot();
@@ -2592,6 +2628,7 @@ impl TerminalView {
                 let _ = self.model.resize(cols, rows, cell_width_px, cell_height_px);
             }
             if !hold_reflow {
+                self.restore_parked_viewport_if_roundtrip();
                 self.row_cache.clear();
                 self.refresh_snapshot();
             }
