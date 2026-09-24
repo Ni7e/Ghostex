@@ -2,6 +2,18 @@
 
 Longer procedures live in the tracked `ai/` folder; each section below names its reference file and when to read it. `docs/` is gitignored local material and never holds agent rules.
 
+### Where a fix or feature belongs (decide before you edit)
+
+Fix the place where the wrong decision is made, not the place where the symptom shows. Ask first: would the web build, the mobile app, the `ghostex` CLI or a remote client hit the same problem? If yes, the fix does not belong in one app's UI. Stop at the first layer that can own the change:
+
+1. **gxserver** (`server/src/`, Rust only; the old TypeScript gxserver is gone): anything about an agent session: what is typed into its terminal, reading its screen, hooks, activity, transcripts, lifecycle, git and worktrees, settings, CLI verbs. One change covers every client.
+2. **Session daemons**: zmx (macOS, Linux, Windows WSL) and wmx (native Windows, PowerShell) change together; Ghostex startup and paths stay in gxserver.
+3. **Rust cores**: `packages/gx-core` (sidebar), `packages/gx-chat-core` (chat brain, which mobile will use through UniFFI), `packages/gx-protocol` (wire types).
+4. **Renderers** (`native_chat/`, `native_sidebar/`, `native_kanban/`, `native_automate/`): layout and input only; `apps/gpui-web` compiles the same files.
+5. **Host glue** (`apps/desktop/src/app/gx_chat/`, `gx_store/`): platform I/O only.
+
+Chat rules go only into `gx-chat-core`, never also into the TypeScript chat brain. Start no new work in React chat, the React Kanban/Automate pages, or the QuickJS app runtime (bug fixes only). When a fix lands higher than a layer that could own it, say why in your report. Full guide with examples: `ai/where-to-fix.md`.
+
 ### General notes
 
 - Multiple sub-agents work in this repository at the same time. Files changing around your code is normal; get your work done without affecting or breaking theirs.
@@ -39,7 +51,7 @@ Ghostex/
 ├── server/            # gxserver crate (binaries: gxserver, ghostex)
 ├── packages/
 │   ├── shared/        # cross-app contracts + logic
-│   ├── core-ui/       # the shared React app UI (sidebar, chat, find, settings, assets)
+│   ├── core-ui/       # the shared React UI (chat, find, settings, modals, assets)
 │   ├── components/    # shadcn primitives (ui/) + utils.ts
 │   ├── find/          # Rust prompt-history search (crate ghostex-find)
 │   └── paths/         # Rust path resolution (crate ghostex-paths)
@@ -69,7 +81,7 @@ Extension source, manifests, schemas, publishing tools, and example extensions l
 - `tasks-placeholder.tsx` (+ `project-board/`) is the Kanban surface, loaded through `apps/desktop/sidebar/kanban-main.tsx`.
 - `project-board-shared.ts` and `combined-sidebar-mode.ts` are shared logic consumed by those pages.
 
-Shared gxserver logic lives in `packages/shared/` (for example `gxserver-presentation-cache.ts`); the desktop runtime client is `apps/desktop/sidebar/gxserver-runtime.ts` (+ `gxserver-runtime/`), and the GPUI web build talks to gxserver from Rust (`apps/gpui-web/src/app/gx_store/`). The React web app was deleted on 2026-09-24; `packages/core-ui/` is the React UI still used by the desktop's CEF pages and the mobile views, and its React sidebar (`sidebar-app.tsx`) is no longer mounted anywhere. The desktop sidebar is native Rust (`apps/desktop/src/app/native_sidebar/` for the renderer, `apps/desktop/src/app/gx_store/` for the store that feeds it), the TypeScript sidebar page and its `index.html` entry were deleted on 2026-09-21, and what is left of the desktop's QuickJS service is `apps/desktop/sidebar/service/`, `gxserver-runtime/`, `native-quick-access/`, `session-chat-runtime/` and `sidebar-store-feed.ts`.
+Shared gxserver logic lives in `packages/shared/` (for example `gxserver-presentation-cache.ts`); the desktop runtime client is `apps/desktop/sidebar/gxserver-runtime.ts` (+ `gxserver-runtime/`), and the GPUI web build talks to gxserver from Rust (`apps/gpui-web/src/app/gx_store/`). The React web app was deleted on 2026-09-24; `packages/core-ui/` is the React UI still used by the desktop's CEF pages and the mobile views, and the React sidebar that lived there (`sidebar-app.tsx` and its cards, sections and stories) was deleted with it; find it in git history when a native port cites it. The desktop sidebar is native Rust (`apps/desktop/src/app/native_sidebar/` for the renderer, `apps/desktop/src/app/gx_store/` for the store that feeds it), the TypeScript sidebar page and its `index.html` entry were deleted on 2026-09-21, and what is left of the desktop's QuickJS service is `apps/desktop/sidebar/service/`, `gxserver-runtime/`, `native-quick-access/`, `session-chat-runtime/` and `sidebar-store-feed.ts`.
 
 ### Repository Search Routing
 
@@ -139,16 +151,16 @@ rg -n "pattern" apps/desktop/src apps/desktop/sidebar packages/core-ui packages/
 
 gxserver installs the bundled skills under `skills/` by downloading them from this repository's `main` branch (verified against git blob shas, app-bundle copy as the offline source) and refreshes installed skills that differ from `main` on every start (`server/src/agent_skills_remote.rs`, `server/src/agent_skills.rs`). So a push to `main` touching `skills/**` reaches every installed Ghostex on its next start: treat skill edits as customer-facing and never push a half-finished skill. A skill must keep working with the CLI verbs of the oldest release still in use; when it needs a new verb, say so in the skill text and prefer `ghostex guide` over copying details in. `bundled_cli_skill_assets` in `apps/desktop/scripts/build-macos-app.sh` still needs every skill name for offline installs. `GHOSTEX_AGENT_SKILLS_REMOTE=off` (or `gxserver agent-skills install --offline` for one command) turns the download off; use it when testing local skill edits so a Reinstall does not fetch `main` over them.
 
-### Chat parity across GPUI and React
+### Chat: one Rust brain, native renderers
 
-This section is about CHAT only. The sidebar left it on 2026-09-21: its behaviour is Rust (`packages/gx-core/` for the rules, `apps/desktop/src/app/gx_store/` for the store, `apps/desktop/src/app/native_sidebar/` for the renderer), and the only half still in QuickJS is the gxserver runtime that feeds it (`apps/desktop/sidebar/gxserver-runtime/`). Chat is NOT being ported: that is the user's decision.
+The sidebar's behaviour is Rust (`packages/gx-core/` for the rules, `apps/desktop/src/app/gx_store/` for the store, `apps/desktop/src/app/native_sidebar/` for the renderer); the only half still in QuickJS is the gxserver runtime that feeds it (`apps/desktop/sidebar/gxserver-runtime/`). Chat follows the same shape. Port plan and status: `docs/2026-09-21/rust-chat/PLAN.md`.
 
-- Desktop chat is GPUI only (`apps/desktop/src/app/native_chat/`); the desktop app no longer ships the React `chat.html` page or a setting to switch renderers. React chat (`packages/core-ui/chat/`) remains for mobile.
-- Chat behaviour runs in shared TypeScript through QuickJS on desktop. Its rendering, background controllers, subscriptions, timers, and persistence must work without a CEF page.
-- Put chat behaviour in `packages/shared/session-chat-controller/` and transcript presentation decisions in `packages/shared/session-chat-presentation/`. React and GPUI must consume the same rules for messages, streaming, tool grouping, questions, approvals, drafts, queues, errors, and settings. Platform adapters own I/O; renderers own layout and input.
-- Every chat feature, bug fix, setting, interaction, or visual change updates both `packages/core-ui/chat/` and `apps/desktop/src/app/native_chat/` in the same change, and a shared change is checked in both consumers. Never declare one implementation complete while the other has different behaviour or missing controls.
+- Chat rules (messages, streaming, tool grouping, questions, approvals, drafts, queues, errors, settings, transcript presentation) go only into `packages/gx-chat-core/`. User decision 2026-09-24: do not also patch the TypeScript chat brain (`packages/shared/session-chat-controller/`, `packages/shared/session-chat-presentation/`) that desktop still runs while the `chatBrain` setting is `quickjs`; a fix in the core waits for the switch to `rust`.
+- Drawing changes go in `apps/desktop/src/app/native_chat/`, which renders the core's document; `apps/gpui-web` compiles the same files. Keep the document's JSON contract described in `packages/gx-chat-core/src/lib.rs`. Chat must work without a CEF page: rendering, background work, subscriptions, timers and persistence.
+- Mobile uses the Rust chat core: native React Native views fed by `gx-chat-core` through UniFFI (user decision 2026-09-21). React chat (`packages/core-ui/chat/`, `apps/mobile/views/chat/`) is going away; add no features or parity work there.
+- A chat bug about the session itself (what reaches the terminal, what the agent's screen shows, what the transcript records) is a gxserver fix, not a chat-core fix, so it works for every client at once.
 - Keep shared storage ownership, validation, budgets, revision checks, and recovery rules in `packages/client-storage/`. Native persistence uses the native adapter and must preserve existing saved data when migrating from browser storage.
-- Preserve exact visual and functional parity, including theme, font, zoom, transcript width, verbose/simple modes, file previews, keyboard controls, scrolling, and composer actions. Verify the native result with computer use, compare it with the retained React implementation at matching settings and viewport sizes, and report any unverified interaction explicitly.
+- Preserve the chat's theme, font, zoom, transcript width, verbose/simple modes, file previews, keyboard controls, scrolling and composer actions. Verify the result in the GPUI chat and report any unverified interaction explicitly.
 - **Test the GPUI chat in a browser (Ghostex web GPUI), not the user's window.** `apps/gpui-web` compiles the desktop's own `native_chat/`, sidebar and terminal files (symlinked) to wasm against the live gxserver. Run `bun run web:build` and `ghostex web --dist-dir "$PWD/apps/gpui-web/www/dist" --no-open` (the built page and its bootstrap on :4173), or keep that running and use `bun run web:dev` for the Vite dev server on :4174, and open `http://localhost:4174/?session=<projectId>:<sessionId>` (or :4173 for the built page). If desktop changes broke its build, add the missing symlinks or web stand-ins as its README describes. Drive a throwaway agent with `ghostex create-agent`, `ghostex send-session-chat-message` and `answer-session-chat-prompt`, and read its terminal with the bundle's `zmx history <zmxName>`. The page is a canvas: `node shot.mjs out.png --url … --click x,y --type …` clicks and screenshots headlessly; cua-driver `browser_click` refs land on the accessibility mirror, and foreground clicks or typing steal the user's keystrokes.
 
 ### Never generate fallbacks when the right solution is to correct the behaviour itself
