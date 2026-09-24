@@ -1241,7 +1241,7 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.sidebar, 'showProjectIcons') ? (
                               <ToggleField
                                 checked={draft.showProjectIcons}
-                                description='Show project artwork or a folder or worktree icon beside project names.'
+                                description='Show project artwork or a square with the project’s first letter beside project names.'
                                 label='Show project icons'
                                 {...getSettingModificationProps('showProjectIcons')}
                                 onChange={(checked) => updateDraft('showProjectIcons', checked)}

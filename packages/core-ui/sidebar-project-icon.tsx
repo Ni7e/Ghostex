@@ -1,4 +1,4 @@
-import { IconFolder, IconFolderOpen, IconGitBranch } from '@tabler/icons-react';
+import { useState } from 'react';
 import {
   normalizeDiscoveredProjectIconDataUrl,
   resolveWorkspaceProjectIconDataUrl,
@@ -24,17 +24,28 @@ export function SidebarProjectIcon({
   title,
   tooltipDelay,
 }: SidebarProjectIconProps) {
-  const imageDataUrl = resolveWorkspaceProjectIconDataUrl({ icon, iconDataUrl });
-  if (imageDataUrl) {
+  const [failedImage, setFailedImage] = useState<string>();
+  const imageDataUrl = resolveWorkspaceProjectIconDataUrl({
+    icon,
+    iconDataUrl,
+  });
+  if (imageDataUrl && failedImage !== imageDataUrl) {
     return (
       <AppTooltip content={title} delay={tooltipDelay}>
-        <img alt='' aria-hidden='true' className='sidebar-project-icon' data-icon-variant='image' src={imageDataUrl} />
+        <img
+          alt=''
+          aria-hidden='true'
+          className='sidebar-project-icon'
+          data-icon-variant='image'
+          src={imageDataUrl}
+          onError={() => setFailedImage(imageDataUrl)}
+        />
       </AppTooltip>
     );
   }
 
   const discovered = normalizeDiscoveredProjectIconDataUrl(discoveredIconDataUrl);
-  if (discovered) {
+  if (discovered && failedImage !== discovered && !imageDataUrl) {
     return (
       <AppTooltip content={title} delay={tooltipDelay}>
         <img
@@ -43,6 +54,7 @@ export function SidebarProjectIcon({
           className='sidebar-project-icon'
           data-icon-variant='discovered'
           src={discovered}
+          onError={() => setFailedImage(discovered)}
         />
       </AppTooltip>
     );
@@ -58,16 +70,31 @@ export function SidebarProjectIcon({
     );
   }
 
-  const FallbackIcon =
-    fallback === 'worktree' ? IconGitBranch : fallback === 'folder-open' ? IconFolderOpen : IconFolder;
+  /**
+   * CDXC:Icons 2026-09-24 DECISION:
+   * User: when a project has no favicon, show a square with the first letter of its name instead of the folder icon.
+   */
   return (
-    <FallbackIcon
+    <span
       aria-hidden='true'
       className='sidebar-project-icon'
       data-fallback-kind={fallback}
-      data-icon-variant='glyph'
-      size={16}
-      stroke={1.8}
-    />
+      data-icon-variant='initial'
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 16,
+        height: 16,
+        borderRadius: 3,
+        background: 'color-mix(in srgb, currentColor 12%, transparent)',
+        fontSize: 10,
+        fontWeight: 600,
+        lineHeight: '16px',
+        flexShrink: 0,
+      }}
+    >
+      {Array.from(title.trim())[0]?.toUpperCase() || '?'}
+    </span>
   );
 }
