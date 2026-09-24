@@ -25,7 +25,7 @@ describe('default prompt agent settings source', () => {
     expect(modalHostSource).toContain('const isSettingsModal = isSettingsModalKind(activeModal);');
     expect(modalHostSource).toContain('const isSettingsRenderable = isSettingsModal && hasNativeSettingsHydrated;');
     expect(modalHostSource).toContain(
-      'const isFirstLaunchSetupRenderable = isFirstLaunchSetupModal && hasNativeSettingsHydrated;'
+      'const isFirstLaunchSetupRenderable =\n    isFirstLaunchSetupModal && hasNativeSettingsHydrated;'
     );
     expect(modalHostSource).toContain('(!isFirstLaunchSetupModal || isFirstLaunchSetupRenderable)');
   });

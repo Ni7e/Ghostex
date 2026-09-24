@@ -130,7 +130,7 @@ describe('gpui/sidebar/gxserver-runtime rename handlers', () => {
   test('handles both rename messages', () => {
     expect(gpuiRuntimeDispatchSource).toContain("case 'promptRenameWorktreeForGroup':");
     expect(gpuiRuntimeDispatchSource).toContain("case 'confirmRenameWorktree':");
-    expect(gpuiRuntimeWorktreeSource).toContain('async promptRenameWorktreeForGroup(this: GpuiSidebarRuntime,');
+    expect(gpuiRuntimeWorktreeSource).toContain('async promptRenameWorktreeForGroup(\n    this: GpuiSidebarRuntime,');
     expect(gpuiRuntimeWorktreeSource).toContain('async confirmRenameWorktree(\n    this: GpuiSidebarRuntime,');
   });
 
@@ -143,10 +143,12 @@ describe('gpui/sidebar/gxserver-runtime rename handlers', () => {
     const confirm = sourceBetweenIn(
       gpuiRuntimeWorktreeSource,
       'async confirmRenameWorktree(\n    this: GpuiSidebarRuntime,',
-      'async promptDeleteRemoteWorktreeForGroup(this: GpuiSidebarRuntime,'
+      'async promptDeleteRemoteWorktreeForGroup(\n    this: GpuiSidebarRuntime,'
     );
 
-    expect(confirm).toContain("'/api/renameWorktreeProject'");
+    expect(confirm).toContain('"/api/renameWorktreeProject"');
+    expect(confirm).not.toContain('action: "move"');
+    expect(confirm).not.toContain('action: "renameBranch"');
     expect(confirm).not.toContain("action: 'move'");
     expect(confirm).not.toContain("action: 'renameBranch'");
   });
@@ -162,7 +164,7 @@ describe('gpui/sidebar/gxserver-runtime rename handlers', () => {
     const confirm = sourceBetweenIn(
       gpuiRuntimeWorktreeSource,
       'async confirmRenameWorktree(\n    this: GpuiSidebarRuntime,',
-      'async promptDeleteRemoteWorktreeForGroup(this: GpuiSidebarRuntime,'
+      'async promptDeleteRemoteWorktreeForGroup(\n    this: GpuiSidebarRuntime,'
     );
     expect(confirm).toContain('gpuiWorktreeRenameUserVisibleErrorMessage(error)');
     expect(confirm).not.toContain('gpuiWorktreeUserVisibleErrorMessage(error)');
@@ -191,9 +193,9 @@ describe('gpui/sidebar/gxserver-runtime rename handlers', () => {
 
 describe('native/sidebar/modal-host.tsx rename modal', () => {
   test('registers the modal kind, its fit-height selector, and its open arm', () => {
-    expect(modalHostSource).toContain("renameWorktree: '.worktree-rename-modal-shadcn'");
-    expect(modalHostSource).toContain("message.modal === 'renameWorktree'");
+    expect(modalHostSource).toContain('renameWorktree: ".worktree-rename-modal-shadcn"');
+    expect(modalHostSource).toContain('message.modal === "renameWorktree"');
     expect(modalHostSource).toContain('worktreeRenameDraft?: WorktreeRenameModalDraft');
-    expect(modalHostSource).toContain("type: 'confirmRenameWorktree'");
+    expect(modalHostSource).toContain('type: "confirmRenameWorktree"');
   });
 });
