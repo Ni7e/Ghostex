@@ -26,6 +26,7 @@ function mergeOptions(
     ...chosen,
     codexStatus: chosen.codexStatus ?? incoming.codexStatus ?? current?.codexStatus,
     claudeStatus: chosen.claudeStatus ?? incoming.claudeStatus ?? current?.claudeStatus,
+    cursorStatus: chosen.cursorStatus ?? incoming.cursorStatus ?? current?.cursorStatus,
     contextUsage: chosen.contextUsage ?? incoming.contextUsage ?? current?.contextUsage,
   };
 }

@@ -189,6 +189,26 @@ pub struct CodexStatus {
     pub time_to_first_token_ms: Option<f64>,
 }
 
+/// `SessionChatCursorStatus`: Cursor's statusline payload and the session
+/// checkout's git state (`server/src/session_chat_cursor_status.rs`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CursorStatus {
+    pub version: Option<String>,
+    pub current_dir: Option<String>,
+    pub project_dir: Option<String>,
+    pub worktree: Option<String>,
+    pub output_style: Option<String>,
+    pub total_output_tokens: Option<f64>,
+    pub autorun: Option<bool>,
+    pub max_mode: Option<bool>,
+    pub branch: Option<String>,
+    pub lines_added: Option<f64>,
+    pub lines_removed: Option<f64>,
+    pub pr_number: Option<f64>,
+    pub pr_state: Option<String>,
+}
+
 /// One usage window of a saved account.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -248,6 +268,7 @@ pub struct ContextDetailStatus {
     pub pr: Option<PullRequestInfo>,
     // The chat's own additions.
     pub codex: Option<CodexStatus>,
+    pub cursor: Option<CursorStatus>,
     pub account: Option<AgentAccount>,
     /// The context meter's used share (42%).
     pub context_used_percent: Option<String>,
@@ -277,6 +298,7 @@ pub struct DetectedOptions {
     /// The rest of Claude's statusline payload the chat can show.
     pub claude_status: Option<ClaudeStatus>,
     pub codex_status: Option<CodexStatus>,
+    pub cursor_status: Option<CursorStatus>,
 }
 
 /// Claude's own statusline payload, the part the rows read.
@@ -295,6 +317,41 @@ pub struct ClaudeStatus {
     pub project_dir: Option<String>,
     pub current_dir: Option<String>,
     pub pr: Option<PullRequestInfo>,
+}
+
+/// `cursorCommonStatus`: Cursor's values under the Claude field names the shared rows read.
+fn cursor_common_status(cursor: &CursorStatus) -> ContextDetailStatus {
+    let repo_name = cursor.project_dir.as_deref().and_then(|dir| {
+        dir.trim_end_matches(['/', '\\'])
+            .rsplit(['/', '\\'])
+            .next()
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+    });
+    ContextDetailStatus {
+        version: cursor.version.clone(),
+        current_dir: cursor.current_dir.clone(),
+        project_dir: cursor.project_dir.clone(),
+        output_style: cursor.output_style.clone(),
+        total_output_tokens: cursor.total_output_tokens,
+        repo: repo_name.map(|name| RepoInfo {
+            name: Some(name),
+            ..RepoInfo::default()
+        }),
+        cost: (cursor.lines_added.is_some() || cursor.lines_removed.is_some()).then(|| {
+            ClaudeCost {
+                lines_added: cursor.lines_added,
+                lines_removed: cursor.lines_removed,
+                ..ClaudeCost::default()
+            }
+        }),
+        pr: cursor.pr_number.map(|number| PullRequestInfo {
+            number: Some(number),
+            review_state: cursor.pr_state.clone(),
+            ..PullRequestInfo::default()
+        }),
+        ..ContextDetailStatus::default()
+    }
 }
 
 /// `resolveContextDetailStatus`.
@@ -333,7 +390,11 @@ pub fn resolve_context_detail_status(
                 None => ContextDetailStatus::default(),
             }
         }
-        ContextDetailsAgent::Codex | ContextDetailsAgent::Cursor => {
+        ContextDetailsAgent::Cursor => options
+            .and_then(|options| options.cursor_status.as_ref())
+            .map(cursor_common_status)
+            .unwrap_or_default(),
+        ContextDetailsAgent::Codex => {
             let request = codex.as_ref().and_then(|codex| codex.last_request);
             ContextDetailStatus {
                 version: codex.as_ref().and_then(|codex| codex.version.clone()),
@@ -355,6 +416,10 @@ pub fn resolve_context_detail_status(
         }
     };
     status.codex = codex.clone();
+    status.cursor = match agent {
+        ContextDetailsAgent::Cursor => options.and_then(|options| options.cursor_status.clone()),
+        _ => None,
+    };
     status.account = account
         .filter(|account| account.provider == agent.as_str())
         .cloned();

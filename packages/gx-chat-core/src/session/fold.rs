@@ -270,7 +270,12 @@ pub fn merge_options_detail(
     };
     let mut merged = chosen.clone();
     let mut spread = false;
-    for key in ["codexStatus", "claudeStatus", "contextUsage"] {
+    for key in [
+        "codexStatus",
+        "claudeStatus",
+        "cursorStatus",
+        "contextUsage",
+    ] {
         let value = present(chosen.get(key))
             .or_else(|| present(incoming.get(key)))
             .or_else(|| current.and_then(|current| present(current.get(key))));

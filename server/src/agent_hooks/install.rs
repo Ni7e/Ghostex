@@ -32,7 +32,7 @@ use super::resolution::{
     text_contains_ghostex_owned_hook_command,
 };
 use super::statusline::{
-    claude_statusline_is_current, register_claude_statusline, unregister_claude_statusline,
+    claude_statusline_is_current, register_claude_statusline, unregister_statusline,
 };
 
 pub(crate) fn uninstall_agent_hook(
@@ -67,6 +67,15 @@ pub(crate) fn uninstall_agent_hook(
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
+                // CDXC:AgentHooks 2026-09-24 WHY: Cursor's statusLine lives in
+                // its own file and leaves with the hooks, restoring the user's.
+                if definition.agent_id == "cursor" {
+                    if let Some(path) =
+                        super::cursor_statusline::remove_cursor_statusline(&config_path)?
+                    {
+                        removed_paths.push(path_string(&path));
+                    }
+                }
                 if remove_json_hook(&config_path, definition, &command)? {
                     removed_paths.push(path_string(&config_path));
                     if remove_codex_hook_trust_entries(&config_path, &codex_trust_keys)? {
@@ -195,7 +204,7 @@ pub(crate) fn remove_json_hook(
     // CDXC:AgentHooks 2026-09-03 WHY: the statusLine Ghostex registered (or
     // wrapped) leaves with the hooks, restoring the user's own command.
     if definition.agent_id == "claude" {
-        changed |= unregister_claude_statusline(&mut data);
+        changed |= unregister_statusline(&mut data);
     }
     if !changed {
         return Ok(false);
@@ -490,6 +499,8 @@ fn inspect_json_hook_config(
         definition.agent_id != "claude" || claude_statusline_is_current(&data, hook_paths);
     // CDXC:AgentHooks 2026-09-03 WHY: a Codex footer that hides the
     // model reads as updateRequired so Update Hooks (or daemon repair) lists it.
+    let cursor_statusline_current = definition.agent_id != "cursor"
+        || super::cursor_statusline::cursor_statusline_is_current(config_path, hook_paths);
     let codex_status_line_current = definition.agent_id != "codex"
         || codex_status_line_names_model(&super::codex_trust::codex_config_path_for_hooks(
             config_path,
@@ -505,6 +516,7 @@ fn inspect_json_hook_config(
             )
             && codex_interrupt_timeout_current
             && claude_statusline_current
+            && cursor_statusline_current
             && codex_status_line_current
             && (definition.agent_id != "zcode"
                 || data.pointer("/hooks/enabled") == Some(&json!(true))),
@@ -812,6 +824,14 @@ pub(crate) fn install_agent_hook(
                         push_unique_path(&mut installed_paths, path_string(&config_toml));
                     }
                 }
+                if definition.agent_id == "cursor" {
+                    if let Some(path) = super::cursor_statusline::ensure_cursor_statusline(
+                        &config_path,
+                        hook_paths,
+                    )? {
+                        push_unique_path(&mut installed_paths, path_string(&path));
+                    }
+                }
             }
             Ok(installed_paths)
         }
@@ -896,6 +916,14 @@ pub(crate) fn repair_agent_hook_paths(
                     let config_toml = super::codex_trust::codex_config_path_for_hooks(&config_path);
                     if ensure_codex_status_line_names_model(&config_toml)? {
                         push_unique_path(&mut repaired_paths, path_string(&config_toml));
+                    }
+                }
+                if definition.agent_id == "cursor" {
+                    if let Some(path) = super::cursor_statusline::ensure_cursor_statusline(
+                        &config_path,
+                        hook_paths,
+                    )? {
+                        push_unique_path(&mut repaired_paths, path_string(&path));
                     }
                 }
             }

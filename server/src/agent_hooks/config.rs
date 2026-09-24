@@ -144,6 +144,8 @@ pub(crate) struct HookPaths {
     /// The Claude Code `statusLine` command Ghostex installs beside the notify
     /// hook (CDXC:AgentHooks 2026-09-03, `statusline.rs`).
     pub(crate) statusline_hook_path: PathBuf,
+    /// The Cursor CLI `statusLine` command beside it (CDXC:AgentHooks 2026-09-24).
+    pub(crate) cursor_statusline_hook_path: PathBuf,
     pub(crate) respect_config_environment: bool,
 }
 
@@ -166,6 +168,9 @@ impl HookPaths {
             hook_state_directory: paths.app_state_dir.join("agent-hooks"),
             notify_hook_path: paths.app_data_dir.join("hooks/agent-shell-notify.sh"),
             statusline_hook_path: paths.app_data_dir.join("hooks/agent-statusline.sh"),
+            cursor_statusline_hook_path: paths
+                .app_data_dir
+                .join("hooks/cursor-agent-statusline.sh"),
             respect_config_environment: isolated_home_dir.is_none(),
         }
     }
@@ -181,6 +186,10 @@ impl HookPaths {
                 .join(".ghostex")
                 .join("hooks")
                 .join("agent-statusline.sh"),
+            cursor_statusline_hook_path: home_dir
+                .join(".ghostex")
+                .join("hooks")
+                .join("cursor-agent-statusline.sh"),
             home_dir,
             respect_config_environment: false,
         }

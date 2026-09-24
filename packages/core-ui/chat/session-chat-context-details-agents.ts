@@ -6,6 +6,7 @@ import type {
   SessionChatClaudeStatus,
   SessionChatCodexStatus,
   SessionChatCodexTokens,
+  SessionChatCursorStatus,
   SessionChatDetectedOptions,
 } from '@/packages/shared/session-chat';
 import {
@@ -71,10 +72,15 @@ export type AdditionalContextDetailRowId =
   | 'accountResets'
   | 'accountUsageUpdated'
   | 'accountUsageStatus'
-  | 'accountSessions';
+  | 'accountSessions'
+  | 'branch'
+  | 'worktree'
+  | 'maxMode'
+  | 'autorun';
 
 export interface ContextDetailStatus extends SessionChatClaudeStatus {
   codex?: SessionChatCodexStatus;
+  cursor?: SessionChatCursorStatus;
   account?: AgentAccount;
   /** The context meter's used share (42%). */
   contextUsedPercent?: string;
@@ -90,30 +96,34 @@ export function resolveContextDetailStatus(
   account?: AgentAccount
 ): ContextDetailStatus {
   const codex = agent === 'codex' ? options?.codexStatus : undefined;
+  const cursor = agent === 'cursor' ? options?.cursorStatus : undefined;
   const usage = resolveSessionChatContextMeterUsage(options?.contextUsage, agent === 'codex');
   const request = codex?.lastRequest;
   const common =
     agent === 'claude'
       ? options?.claudeStatus
-      : {
-          version: codex?.version,
-          currentDir: codex?.currentDir,
-          totalOutputTokens: codex?.totalTokens?.outputTokens,
-          lastRequest: request
-            ? {
-                inputTokens:
-                  request.inputTokens === undefined
-                    ? undefined
-                    : Math.max(0, request.inputTokens - (request.cachedInputTokens ?? 0)),
-                outputTokens: request.outputTokens,
-                cacheReadTokens: request.cachedInputTokens,
-                cacheWriteTokens: request.cacheWriteInputTokens,
-              }
-            : undefined,
-        };
+      : agent === 'cursor'
+        ? cursorCommonStatus(cursor)
+        : {
+            version: codex?.version,
+            currentDir: codex?.currentDir,
+            totalOutputTokens: codex?.totalTokens?.outputTokens,
+            lastRequest: request
+              ? {
+                  inputTokens:
+                    request.inputTokens === undefined
+                      ? undefined
+                      : Math.max(0, request.inputTokens - (request.cachedInputTokens ?? 0)),
+                  outputTokens: request.outputTokens,
+                  cacheReadTokens: request.cachedInputTokens,
+                  cacheWriteTokens: request.cacheWriteInputTokens,
+                }
+              : undefined,
+          };
   return {
     ...common,
     codex,
+    cursor,
     account: account?.provider === agent ? account : undefined,
     modelName: options?.model?.label ?? codex?.model,
     effortName: options?.effort?.label ?? codex?.effort,
@@ -122,6 +132,27 @@ export function resolveContextDetailStatus(
       usage && usage.usedTokens !== null
         ? `${formatSessionChatContextTokens(usage.usedTokens)}${usage.windowSize === null ? '' : `/${formatSessionChatContextTokens(usage.windowSize)}`}`
         : undefined,
+  };
+}
+
+/** Cursor's values under the Claude field names the shared rows read. */
+function cursorCommonStatus(cursor: SessionChatCursorStatus | undefined): SessionChatClaudeStatus {
+  if (!cursor) return {};
+  const repoName = cursor.projectDir
+    ?.replace(/[\\/]+$/u, '')
+    .split(/[\\/]/u)
+    .pop();
+  return {
+    version: cursor.version,
+    currentDir: cursor.currentDir,
+    projectDir: cursor.projectDir,
+    outputStyle: cursor.outputStyle,
+    totalOutputTokens: cursor.totalOutputTokens,
+    ...(repoName ? { repo: { name: repoName } } : {}),
+    ...(cursor.linesAdded !== undefined || cursor.linesRemoved !== undefined
+      ? { cost: { linesAdded: cursor.linesAdded, linesRemoved: cursor.linesRemoved } }
+      : {}),
+    ...(cursor.prNumber !== undefined ? { pr: { number: cursor.prNumber, reviewState: cursor.prState } } : {}),
   };
 }
 
@@ -514,5 +545,46 @@ export const SHARED_CONTEXT_DETAIL_ROWS: readonly SessionChatContextDetailRowDef
     description: 'Number of Ghostex sessions assigned to this saved account',
     recommended: false,
     value: ({ status }) => (status.account ? String(status.account.sessionCount) : null),
+  },
+];
+
+/** CDXC:SessionChatDetectedOptions 2026-09-24 DECISION:
+ * User: Cursor's rows come from what Cursor hands its statusline command plus the checkout's git state, never only the model and effort.
+ * Values carry their own words (Max Mode on, auto-run off) because a starred row stands alone in the status line.
+ */
+export const CURSOR_CONTEXT_DETAIL_ROWS: readonly SessionChatContextDetailRowDefinition[] = [
+  {
+    id: 'branch',
+    group: 'session',
+    label: 'Branch',
+    description: 'The checked-out git branch',
+    recommended: true,
+    value: ({ status }) => status.cursor?.branch ?? null,
+  },
+  {
+    id: 'worktree',
+    group: 'session',
+    label: 'Worktree',
+    description: 'The Cursor worktree this session runs in',
+    recommended: true,
+    value: ({ status }) => status.cursor?.worktree ?? null,
+  },
+  {
+    id: 'maxMode',
+    group: 'session',
+    label: 'Max Mode',
+    description: 'Whether Max Mode is on',
+    recommended: true,
+    value: ({ status }) =>
+      status.cursor?.maxMode === undefined ? null : status.cursor.maxMode ? 'Max Mode on' : 'Max Mode off',
+  },
+  {
+    id: 'autorun',
+    group: 'session',
+    label: 'Auto-run',
+    description: 'Whether Cursor runs commands without asking',
+    recommended: true,
+    value: ({ status }) =>
+      status.cursor?.autorun === undefined ? null : status.cursor.autorun ? 'auto-run on' : 'auto-run off',
   },
 ];

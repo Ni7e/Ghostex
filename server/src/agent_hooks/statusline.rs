@@ -41,6 +41,59 @@ use super::probing::{expand_home_path, io_error, now_iso, path_string, temp_path
 /// session id.
 pub const CLAUDE_STATUSLINE_STATE_DIRECTORY: &str = "claude-statusline";
 
+/// Directory under the hook state directory holding one payload per Cursor
+/// session id.
+pub const CURSOR_STATUSLINE_STATE_DIRECTORY: &str = "cursor-statusline";
+
+/*
+CDXC:AgentHooks 2026-09-24 DECISION:
+User: Cursor gets the same statusline wrapper as Claude, so its chat status line
+and More details can show what Cursor hands its statusline command (context,
+output tokens, version, Max Mode, auto-run, worktree, folder) instead of only
+what its footer prints. Cursor's `statusLine` lives in `~/.cursor/cli-config.json`
+with Claude's `{type, command, padding}` shape and pipes a Claude-like JSON
+payload, so one mechanism serves both: each agent has its own script (the Cursor
+one passes `--agent cursor`), payload directory and fallback line, and a user's
+own command is wrapped and still renders the footer.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatuslineAgent {
+    Claude,
+    Cursor,
+}
+
+impl StatuslineAgent {
+    fn from_arg(value: Option<&str>) -> Self {
+        match value {
+            Some("cursor") => Self::Cursor,
+            _ => Self::Claude,
+        }
+    }
+
+    fn state_directory(self) -> &'static str {
+        match self {
+            Self::Claude => CLAUDE_STATUSLINE_STATE_DIRECTORY,
+            Self::Cursor => CURSOR_STATUSLINE_STATE_DIRECTORY,
+        }
+    }
+
+    pub(crate) fn script_path(self, hook_paths: &HookPaths) -> &Path {
+        match self {
+            Self::Claude => &hook_paths.statusline_hook_path,
+            Self::Cursor => &hook_paths.cursor_statusline_hook_path,
+        }
+    }
+
+    /// Extra arguments the script passes to `gxserver agent-statusline`. Claude's
+    /// stays empty so its installed script is unchanged.
+    fn runtime_arguments(self) -> &'static str {
+        match self {
+            Self::Claude => "",
+            Self::Cursor => " --agent cursor",
+        }
+    }
+}
+
 /// Payloads older than this are removed when a new session's file is created.
 const CLAUDE_STATUSLINE_PAYLOAD_RETENTION: Duration = Duration::from_secs(14 * 24 * 60 * 60);
 
@@ -51,8 +104,9 @@ const CLAUDE_STATUSLINE_PAYLOAD_RETENTION: Duration = Duration::from_secs(14 * 2
 pub(crate) fn build_statusline_hook_script(
     executable: &str,
     hook_state_directory: &Path,
+    agent: StatuslineAgent,
 ) -> String {
-    format!(
+    let script = format!(
         r#"#!/bin/bash
 # {STATUSLINE_HOOK_MARKER} v{STATUSLINE_HOOK_VERSION}
 # Claude Code statusLine command installed by Ghostex. Claude pipes its status
@@ -63,29 +117,54 @@ INPUT="$(cat)"
 DEFAULT_HOOK_STATE_DIR={hook_state_directory}
 HOOK_STATE_DIR="${{GHOSTEX_AGENT_HOOK_STATE_DIR:-$DEFAULT_HOOK_STATE_DIR}}"
 if [ -n "${{1:-}}" ]; then
-  printf '%s' "$INPUT" | {executable} agent-statusline "$HOOK_STATE_DIR" >/dev/null 2>&1 || true
+  printf '%s' "$INPUT" | {executable} agent-statusline "$HOOK_STATE_DIR"{arguments} >/dev/null 2>&1 || true
   printf '%s' "$INPUT" | /bin/sh -c "$1"
   exit 0
 fi
-printf '%s' "$INPUT" | {executable} agent-statusline "$HOOK_STATE_DIR" --render 2>/dev/null
+printf '%s' "$INPUT" | {executable} agent-statusline "$HOOK_STATE_DIR"{arguments} --render 2>/dev/null
 exit 0
 "#,
         executable = shell_quote(executable),
         hook_state_directory = shell_quote(&path_string(hook_state_directory)),
-    )
+        arguments = agent.runtime_arguments(),
+    );
+    match agent {
+        StatuslineAgent::Claude => script,
+        StatuslineAgent::Cursor => script
+            .replace("# Claude Code statusLine", "# Cursor CLI statusLine")
+            .replace("Claude pipes", "Cursor pipes"),
+    }
 }
 
+/// Writes both agents' statusline scripts.
 pub(crate) fn install_statusline_hook(hook_paths: &HookPaths) -> Result<(), DomainStateError> {
-    if let Some(parent) = hook_paths.statusline_hook_path.parent() {
-        fs::create_dir_all(parent).map_err(io_error)?;
-    }
     fs::create_dir_all(&hook_paths.hook_state_directory).map_err(io_error)?;
     let executable = std::env::current_exe()
         .ok()
         .map(|path| path_string(&path))
         .unwrap_or_else(|| "gxserver".to_string());
-    let script = build_statusline_hook_script(&executable, &hook_paths.hook_state_directory);
-    write_executable_notify_hook(&hook_paths.statusline_hook_path, &script)
+    for agent in [StatuslineAgent::Claude, StatuslineAgent::Cursor] {
+        let path = agent.script_path(hook_paths);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(io_error)?;
+        }
+        let script =
+            build_statusline_hook_script(&executable, &hook_paths.hook_state_directory, agent);
+        write_executable_notify_hook(path, &script)?;
+    }
+    Ok(())
+}
+
+/// Both agents' statusline scripts are current.
+pub(crate) fn are_statusline_hooks_current(hook_paths: &HookPaths) -> bool {
+    [StatuslineAgent::Claude, StatuslineAgent::Cursor]
+        .into_iter()
+        .all(|agent| {
+            is_statusline_hook_current(
+                hook_paths,
+                &super::probing::read_file_text(agent.script_path(hook_paths)),
+            )
+        })
 }
 
 pub(crate) fn is_statusline_hook_current(hook_paths: &HookPaths, contents: &str) -> bool {
@@ -100,14 +179,19 @@ pub(crate) fn is_statusline_hook_current(hook_paths: &HookPaths, contents: &str)
         .any(|line| line == state_directory_assignment)
 }
 
-fn statusline_script_token(hook_paths: &HookPaths) -> String {
-    shell_quote(&path_string(&hook_paths.statusline_hook_path))
+fn statusline_script_token(script: &Path) -> String {
+    shell_quote(&path_string(script))
+}
+
+/// The Claude `statusLine.command` Ghostex writes.
+pub(crate) fn statusline_command(hook_paths: &HookPaths, wrapped: Option<&str>) -> String {
+    agent_statusline_command(&hook_paths.statusline_hook_path, wrapped)
 }
 
 /// The `statusLine.command` Ghostex writes: the script alone, or the script
 /// with the user's original command as its single argument.
-pub(crate) fn statusline_command(hook_paths: &HookPaths, wrapped: Option<&str>) -> String {
-    let script = statusline_script_token(hook_paths);
+fn agent_statusline_command(script: &Path, wrapped: Option<&str>) -> String {
+    let script = statusline_script_token(script);
     match wrapped {
         Some(wrapped) => format!("{script} {}", shell_quote(wrapped)),
         None => script,
@@ -159,17 +243,28 @@ fn statusline_entry_command(entry: &Map<String, Value>) -> Option<&str> {
 
 /// Ghostex's statusline is registered with the current script path.
 pub(crate) fn claude_statusline_is_current(data: &Value, hook_paths: &HookPaths) -> bool {
-    statusline_entry(data)
-        .and_then(statusline_entry_command)
-        .is_some_and(|command| {
-            command == statusline_command(hook_paths, None)
-                || command.starts_with(&format!("{} ", statusline_script_token(hook_paths)))
-        })
+    statusline_is_current(data, &hook_paths.statusline_hook_path)
 }
 
 /// Point Claude's `statusLine` at the Ghostex script, wrapping any user
 /// command already there. Returns whether the settings changed.
 pub(crate) fn register_claude_statusline(data: &mut Value, hook_paths: &HookPaths) -> bool {
+    register_statusline(data, &hook_paths.statusline_hook_path)
+}
+
+/// `statusLine` runs `script`, bare or wrapping a user command.
+pub(crate) fn statusline_is_current(data: &Value, script: &Path) -> bool {
+    statusline_entry(data)
+        .and_then(statusline_entry_command)
+        .is_some_and(|command| {
+            command == agent_statusline_command(script, None)
+                || command.starts_with(&format!("{} ", statusline_script_token(script)))
+        })
+}
+
+/// Point `statusLine` at `script`, wrapping any user command already there.
+/// Returns whether the settings changed.
+pub(crate) fn register_statusline(data: &mut Value, script: &Path) -> bool {
     let Some(object) = data.as_object_mut() else {
         return false;
     };
@@ -186,7 +281,7 @@ pub(crate) fn register_claude_statusline(data: &mut Value, hook_paths: &HookPath
         Some(command) => Some(command.to_string()),
         None => None,
     };
-    let next_command = statusline_command(hook_paths, wrapped.as_deref());
+    let next_command = agent_statusline_command(script, wrapped.as_deref());
     if existing.as_deref() == Some(next_command.as_str()) {
         return false;
     }
@@ -201,7 +296,7 @@ pub(crate) fn register_claude_statusline(data: &mut Value, hook_paths: &HookPath
 
 /// Restore the wrapped user command, or drop the entry Ghostex created.
 /// Returns whether the settings changed.
-pub(crate) fn unregister_claude_statusline(data: &mut Value) -> bool {
+pub(crate) fn unregister_statusline(data: &mut Value) -> bool {
     let Some(object) = data.as_object_mut() else {
         return false;
     };
@@ -239,6 +334,16 @@ pub fn claude_statusline_payload_path(
     hook_state_directory: &Path,
     session_id: &str,
 ) -> Option<PathBuf> {
+    statusline_payload_path(hook_state_directory, StatuslineAgent::Claude, session_id)
+}
+
+/// Path of the stored payload for one agent session id, when the id is safe to
+/// use as a file name.
+pub fn statusline_payload_path(
+    hook_state_directory: &Path,
+    agent: StatuslineAgent,
+    session_id: &str,
+) -> Option<PathBuf> {
     let session_id = session_id.trim();
     if session_id.is_empty()
         || session_id.len() > 128
@@ -251,7 +356,7 @@ pub fn claude_statusline_payload_path(
     }
     Some(
         hook_state_directory
-            .join(CLAUDE_STATUSLINE_STATE_DIRECTORY)
+            .join(agent.state_directory())
             .join(format!("{session_id}.json")),
     )
 }
@@ -268,7 +373,16 @@ pub fn read_claude_statusline_payload(
     hook_state_directory: &Path,
     session_id: &str,
 ) -> Option<ClaudeStatuslinePayload> {
-    let path = claude_statusline_payload_path(hook_state_directory, session_id)?;
+    read_statusline_payload(hook_state_directory, StatuslineAgent::Claude, session_id)
+}
+
+/// The stored statusLine payload for one agent session.
+pub fn read_statusline_payload(
+    hook_state_directory: &Path,
+    agent: StatuslineAgent,
+    session_id: &str,
+) -> Option<ClaudeStatuslinePayload> {
+    let path = statusline_payload_path(hook_state_directory, agent, session_id)?;
     let text = fs::read_to_string(&path).ok()?;
     let data = read_json_object(&text);
     let payload = data.get("payload")?.as_object()?.clone();
@@ -293,6 +407,12 @@ pub fn run_statusline_hook(args: Vec<String>) -> Result<(), DomainStateError> {
             .unwrap_or("~/.ghostexterm"),
     );
     let render = args.iter().skip(1).any(|arg| arg == "--render");
+    let agent = StatuslineAgent::from_arg(
+        args.iter()
+            .position(|arg| arg == "--agent")
+            .and_then(|index| args.get(index + 1))
+            .map(String::as_str),
+    );
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let payload = serde_json::from_str::<Value>(&input)
@@ -300,12 +420,16 @@ pub fn run_statusline_hook(args: Vec<String>) -> Result<(), DomainStateError> {
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default();
     if let Some(session_id) = payload.get("session_id").and_then(Value::as_str) {
-        if let Some(path) = claude_statusline_payload_path(&hook_state_dir, session_id) {
+        if let Some(path) = statusline_payload_path(&hook_state_dir, agent, session_id) {
             store_statusline_payload(&path, &payload)?;
         }
     }
     if render {
-        println!("{}", render_statusline(&payload));
+        let line = match agent {
+            StatuslineAgent::Claude => render_statusline(&payload),
+            StatuslineAgent::Cursor => render_cursor_statusline(&payload),
+        };
+        println!("{line}");
     }
     Ok(())
 }
@@ -451,4 +575,32 @@ pub fn render_statusline(payload: &Map<String, Value>) -> String {
         .map(|row| row.join(" | "))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/*
+CDXC:AgentHooks 2026-09-24 WHY:
+Registering a statusLine replaces Cursor's built-in footer, so with no user
+command wrapped Ghostex prints a line in the grammar `match_cursor_statusline`
+reads (`<title> · <model> <params> · <tokens> used`); the chat pills keep their
+terminal source and the footer still names the session and model.
+*/
+pub fn render_cursor_statusline(payload: &Map<String, Value>) -> String {
+    let title = payload_str(payload, &["session_name"]).unwrap_or("New Agent");
+    let model = payload_str(payload, &["model", "display_name"]).unwrap_or("Cursor");
+    let params = payload_str(payload, &["model", "param_summary"])
+        .map(|params| params.trim_matches(|ch| ch == '(' || ch == ')').trim())
+        .filter(|params| !params.is_empty() && !model.contains(*params));
+    let model = match params {
+        Some(params) => format!("{model} {params}"),
+        None => model.to_string(),
+    };
+    let tokens = payload_f64(payload, &["context_window", "total_input_tokens"]).unwrap_or(0.0);
+    let used = if tokens >= 1_000_000.0 {
+        format!("{}M", (tokens / 1_000_000.0).floor() as i64)
+    } else if tokens >= 1_000.0 {
+        format!("{}K", (tokens / 1_000.0).floor() as i64)
+    } else {
+        format!("{}", tokens.max(0.0) as i64)
+    };
+    format!("{title} \u{b7} {model} \u{b7} {used} used")
 }

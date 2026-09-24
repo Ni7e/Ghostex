@@ -18,6 +18,7 @@ export { formatSessionChatDuration } from '@/packages/core-ui/chat/session-chat-
 
 import {
   CODEX_CONTEXT_DETAIL_ROWS,
+  CURSOR_CONTEXT_DETAIL_ROWS,
   SHARED_CONTEXT_DETAIL_ROWS,
   USAGE_WINDOW_ROWS,
   type AdditionalContextDetailRowId,
@@ -403,17 +404,41 @@ const CODEX_ROWS: readonly SessionChatContextDetailRowDefinition[] = [
   ...CODEX_CONTEXT_DETAIL_ROWS,
 ];
 
-/** Cursor reports only its model, reasoning effort and context use, so its catalog is the rows that read those. */
-const CURSOR_ROW_IDS = new Set<SessionChatContextDetailRowId>([
-  'thinking',
-  'sessionName',
+/** Claude's rows Cursor also fills, from its statusline payload and the checkout's git state. */
+const CURSOR_SHARED_ROWS = new Set<SessionChatContextDetailRowId>([
+  'lines',
   'contextUsed',
   'contextTokens',
+  'totalOutputTokens',
   'model',
+  'thinking',
+  'version',
+  'sessionName',
+  'repo',
+  'folder',
+  'pr',
 ]);
-const CURSOR_ROWS: readonly SessionChatContextDetailRowDefinition[] = CODEX_ROWS.filter((row) =>
-  CURSOR_ROW_IDS.has(row.id)
-);
+/** `CURSOR_ROWS`: the shared rows in Cursor's wording, then Cursor's own. */
+const CURSOR_ROWS: readonly SessionChatContextDetailRowDefinition[] = [
+  ...SESSION_CHAT_CONTEXT_DETAIL_ROWS.filter((row) => CURSOR_SHARED_ROWS.has(row.id)).map(
+    (row): SessionChatContextDetailRowDefinition => {
+      if (row.id === 'thinking')
+        return {
+          ...row,
+          label: 'Reasoning effort',
+          description: 'The session’s reasoning effort',
+          value: ({ status }) => status.effortName ?? null,
+        };
+      if (row.id === 'version') return { ...row, label: 'Cursor version' };
+      if (row.id === 'folder') return { ...row, description: "Cursor's current working folder" };
+      if (row.id === 'totalOutputTokens') return { ...row, description: 'Everything Cursor wrote this session' };
+      if (row.id === 'lines') return { ...row, description: 'Added and removed on this branch' };
+      if (row.id === 'repo') return { ...row, description: 'The name of the project folder' };
+      return row;
+    }
+  ),
+  ...CURSOR_CONTEXT_DETAIL_ROWS,
+];
 
 const ROWS: Record<ContextDetailsAgent, readonly SessionChatContextDetailRowDefinition[]> = {
   claude: SESSION_CHAT_CONTEXT_DETAIL_ROWS,
@@ -491,7 +516,7 @@ const CHANGED_EVENT = 'ghostex-chat-context-details-changed';
 /** CDXC:SessionChatDetectedOptions 2026-09-23 DECISION:
  * User: a new install starts with the maintainer's own "More details" and status-line setup for Claude and Codex, and Reset to recommended returns to it.
  * Claude stars Account, Model limit, 5h limit, 7d limit and Repository; Codex stars Account email, 7d limit, 7d reset and Account resets. This supersedes "starred is never a default".
- * User: Cursor never shows the model or reasoning effort by default, in the status line or More details, because the chat box already shows both; it stars Context used and Context tokens.
+ * User: Cursor never shows the model or reasoning effort by default, in the status line or More details, because the chat box already shows both; its status line is Context used, Branch and Lines changed (2026-09-24, superseding Context used and Context tokens).
  */
 const RECOMMENDED_PREFERENCES: Record<ContextDetailsAgent, SessionChatContextDetailsPreferences> = {
   claude: {
@@ -507,10 +532,10 @@ const RECOMMENDED_PREFERENCES: Record<ContextDetailsAgent, SessionChatContextDet
     starredOrder: ['accountEmail', 'sevenDayLimit', 'sevenDayReset', 'accountResets'],
   },
   cursor: {
-    shown: { thinking: false, contextUsed: true, contextTokens: true },
-    starred: { contextUsed: true, contextTokens: true },
+    shown: { thinking: false, contextUsed: true, contextTokens: true, totalOutputTokens: true, pr: true },
+    starred: { contextUsed: true, branch: true, lines: true },
     order: {},
-    starredOrder: ['contextUsed', 'contextTokens'],
+    starredOrder: ['contextUsed', 'branch', 'lines'],
   },
 };
 

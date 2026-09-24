@@ -3,6 +3,7 @@ pub(crate) mod claude_retention;
 pub(crate) mod codex_status_line;
 pub(crate) mod codex_trust;
 pub mod config;
+pub(crate) mod cursor_statusline;
 pub mod event_mapping;
 mod hook_store;
 pub mod install;

@@ -454,6 +454,23 @@ export interface SessionChatCodexStatus {
   timeToFirstTokenMs?: number;
 }
 
+/** Cursor's statusline payload and the session checkout's git state, every field absent when unknown. */
+export interface SessionChatCursorStatus {
+  version?: string;
+  currentDir?: string;
+  projectDir?: string;
+  worktree?: string;
+  outputStyle?: string;
+  totalOutputTokens?: number;
+  autorun?: boolean;
+  maxMode?: boolean;
+  branch?: string;
+  linesAdded?: number;
+  linesRemoved?: number;
+  prNumber?: number;
+  prState?: string;
+}
+
 export interface SessionChatDetectedOptions {
   model?: SessionChatDetectedChoice;
   effort?: SessionChatDetectedChoice;
@@ -474,6 +491,8 @@ export interface SessionChatDetectedOptions {
   /** The rest of Claude's statusline payload the chat can show. */
   claudeStatus?: SessionChatClaudeStatus;
   codexStatus?: SessionChatCodexStatus;
+  /** What Cursor handed its statusline command plus the checkout's git state (`session_chat_cursor_status.rs`). */
+  cursorStatus?: SessionChatCursorStatus;
   /** ISO-8601 millis; compared against a pending dispatch's own timestamp. */
   detectedAt: string;
 }

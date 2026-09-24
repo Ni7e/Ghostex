@@ -894,19 +894,126 @@ pub fn codex_rows() -> Vec<RowDefinition> {
     rows
 }
 
-/// `CURSOR_ROWS`: Cursor reports only its model, reasoning effort and context use, so its catalog
-/// is the Codex rows that read those.
-pub fn cursor_rows() -> Vec<RowDefinition> {
-    codex_rows()
-        .into_iter()
-        .filter(|row| {
-            matches!(
-                row.id,
-                "thinking" | "sessionName" | "contextUsed" | "contextTokens" | "model"
-            )
-        })
-        .collect()
+/// `CURSOR_SHARED_ROWS`: Claude's rows Cursor also fills, from its statusline payload and the
+/// checkout's git state.
+fn cursor_keeps(id: &str) -> bool {
+    matches!(
+        id,
+        "lines"
+            | "contextUsed"
+            | "contextTokens"
+            | "totalOutputTokens"
+            | "model"
+            | "thinking"
+            | "version"
+            | "sessionName"
+            | "repo"
+            | "folder"
+            | "pr"
+    )
 }
+
+/// `CURSOR_ROWS`: the shared rows in Cursor's wording, then Cursor's own.
+pub fn cursor_rows() -> Vec<RowDefinition> {
+    let mut rows: Vec<RowDefinition> = claude_rows()
+        .into_iter()
+        .filter(|row| cursor_keeps(row.id))
+        .map(|row| match row.id {
+            "thinking" => RowDefinition {
+                label: "Reasoning effort",
+                description: "The session’s reasoning effort",
+                value: value_effort_name,
+                ..row
+            },
+            "version" => RowDefinition {
+                label: "Cursor version",
+                ..row
+            },
+            "folder" => RowDefinition {
+                description: "Cursor's current working folder",
+                ..row
+            },
+            "totalOutputTokens" => RowDefinition {
+                description: "Everything Cursor wrote this session",
+                ..row
+            },
+            "lines" => RowDefinition {
+                description: "Added and removed on this branch",
+                ..row
+            },
+            "repo" => RowDefinition {
+                description: "The name of the project folder",
+                ..row
+            },
+            _ => row,
+        })
+        .collect();
+    rows.extend_from_slice(CURSOR_ROWS);
+    rows
+}
+
+fn value_branch(input: &RowInput) -> Option<String> {
+    input.status.cursor.as_ref()?.branch.clone()
+}
+
+fn value_worktree(input: &RowInput) -> Option<String> {
+    input.status.cursor.as_ref()?.worktree.clone()
+}
+
+fn value_max_mode(input: &RowInput) -> Option<String> {
+    let on = input.status.cursor.as_ref()?.max_mode?;
+    Some(if on { "Max Mode on" } else { "Max Mode off" }.to_string())
+}
+
+fn value_autorun(input: &RowInput) -> Option<String> {
+    let on = input.status.cursor.as_ref()?.autorun?;
+    Some(if on { "auto-run on" } else { "auto-run off" }.to_string())
+}
+
+/// `CURSOR_CONTEXT_DETAIL_ROWS`.
+///
+/// CDXC:SessionChatDetectedOptions 2026-09-24 DECISION:
+/// User: Cursor's rows come from what Cursor hands its statusline command plus the checkout's git
+/// state, never only the model and effort. Values carry their own words (Max Mode on, auto-run
+/// off) because a starred row stands alone in the status line.
+const CURSOR_ROWS: &[RowDefinition] = &[
+    RowDefinition {
+        id: "branch",
+        group: GroupId::Session,
+        label: "Branch",
+        description: "The checked-out git branch",
+        recommended: true,
+        value: value_branch,
+        copy: None,
+    },
+    RowDefinition {
+        id: "worktree",
+        group: GroupId::Session,
+        label: "Worktree",
+        description: "The Cursor worktree this session runs in",
+        recommended: true,
+        value: value_worktree,
+        copy: None,
+    },
+    RowDefinition {
+        id: "maxMode",
+        group: GroupId::Session,
+        label: "Max Mode",
+        description: "Whether Max Mode is on",
+        recommended: true,
+        value: value_max_mode,
+        copy: None,
+    },
+    RowDefinition {
+        id: "autorun",
+        group: GroupId::Session,
+        label: "Auto-run",
+        description: "Whether Cursor runs commands without asking",
+        recommended: true,
+        value: value_autorun,
+        copy: None,
+    },
+];
 
 /// The catalog for one agent.
 pub fn context_detail_rows(agent: ContextDetailsAgent) -> Vec<RowDefinition> {

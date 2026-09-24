@@ -68,6 +68,7 @@ pub mod session_chat_decode_antigravity;
 pub mod session_chat_decode_claude;
 pub mod session_chat_decode_codex;
 pub mod session_chat_decode_cursor;
+pub mod session_chat_cursor_status;
 pub mod session_chat_decode_grok;
 pub mod session_chat_decode_hermes;
 pub mod session_chat_decode_pi;

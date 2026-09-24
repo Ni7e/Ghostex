@@ -162,7 +162,7 @@ pub struct SessionChatContextUsage {
 }
 
 impl SessionChatContextUsage {
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.used_percentage.is_none() && self.used_tokens.is_none() && self.window_size.is_none()
     }
 
@@ -205,6 +205,9 @@ pub struct SessionChatDetectedSelection {
     /// (`claude_statusline_status_value`), camelCase and absent-when-absent.
     pub claude_status: Option<Value>,
     pub codex_status: Option<Value>,
+    /// What Cursor handed its statusline command plus the checkout's git state
+    /// (`session_chat_cursor_status.rs`), camelCase and absent-when-absent.
+    pub cursor_status: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -280,6 +283,9 @@ impl SessionChatDetectedOptions {
         }
         if let Some(status) = self.selection.codex_status.as_ref() {
             map.insert("codexStatus".to_string(), status.clone());
+        }
+        if let Some(status) = self.selection.cursor_status.as_ref() {
+            map.insert("cursorStatus".to_string(), status.clone());
         }
         map.insert("detectedAt".to_string(), json!(self.detected_at));
         Value::Object(map)
@@ -381,12 +387,24 @@ pub type SessionChatOptionsChangeWatch = std::sync::Arc<dyn Fn(Option<&str>) -> 
 pub(crate) fn claude_statusline_change_watch(
     hook_state_directory: std::path::PathBuf,
 ) -> SessionChatOptionsChangeWatch {
+    statusline_change_watch(
+        hook_state_directory,
+        crate::agent_hooks::statusline::StatuslineAgent::Claude,
+    )
+}
+
+/// Fires when the agent's stored statusline payload changes.
+pub(crate) fn statusline_change_watch(
+    hook_state_directory: std::path::PathBuf,
+    agent: crate::agent_hooks::statusline::StatuslineAgent,
+) -> SessionChatOptionsChangeWatch {
     let observed: Mutex<Option<Option<std::time::SystemTime>>> = Mutex::new(None);
     Arc::new(move |agent_session_id: Option<&str>| {
         let modified = agent_session_id
             .and_then(|id| {
-                crate::agent_hooks::statusline::claude_statusline_payload_path(
+                crate::agent_hooks::statusline::statusline_payload_path(
                     &hook_state_directory,
+                    agent,
                     id,
                 )
             })
@@ -976,6 +994,7 @@ pub(crate) fn match_cursor_statusline(line: &str) -> Option<SessionChatDetectedS
         context_usage: (!context_usage.is_empty()).then_some(context_usage),
         claude_status: None,
         codex_status: None,
+        cursor_status: None,
         ..SessionChatDetectedSelection::default()
     })
 }
@@ -1064,6 +1083,7 @@ fn match_grok_segment(segment: &str) -> Option<SessionChatDetectedSelection> {
         context_usage: None,
         claude_status: None,
         codex_status: None,
+        cursor_status: None,
     })
 }
 
@@ -1160,6 +1180,7 @@ fn match_antigravity_statusline(line: &str) -> Option<SessionChatDetectedSelecti
         context_usage: None,
         claude_status: None,
         codex_status: None,
+        cursor_status: None,
     })
 }
 
@@ -1232,6 +1253,7 @@ fn match_pi_statusline(line: &str) -> Option<SessionChatDetectedSelection> {
         context_usage: None,
         claude_status: None,
         codex_status: None,
+        cursor_status: None,
     })
 }
 
@@ -1280,6 +1302,7 @@ fn match_omp_statusline(line: &str) -> Option<SessionChatDetectedSelection> {
         context_usage: None,
         claude_status: None,
         codex_status: None,
+        cursor_status: None,
     })
 }
 
@@ -1330,6 +1353,7 @@ fn match_hermes_statusline(line: &str) -> Option<SessionChatDetectedSelection> {
         context_usage: None,
         claude_status: None,
         codex_status: None,
+        cursor_status: None,
     })
 }
 
@@ -1674,6 +1698,7 @@ fn detect_session_chat_transcript_selection(
                     context_usage: None,
                     claude_status: None,
                     codex_status: None,
+                    cursor_status: None,
                 }
             }
             _ => continue,
@@ -1776,6 +1801,7 @@ fn read_session_chat_statusline_selection(
         context_usage: (!context_usage.is_empty()).then_some(context_usage),
         claude_status: claude_statusline_status_value(payload),
         codex_status: None,
+        cursor_status: None,
     };
     // CDXC:AgentProviders 2026-09-09 WHY:
     // Claude's reported usage is useful before model or effort detection succeeds; do not discard the statusline stats with an unrecognized choice.
@@ -2072,6 +2098,9 @@ fn overlay_session_chat_option_selection(
     if layer.claude_status.is_some() {
         merged.claude_status = layer.claude_status;
     }
+    if layer.cursor_status.is_some() {
+        merged.cursor_status = layer.cursor_status;
+    }
 }
 
 /// Precedence, lowest first: transcript (a turn behind), statusline payload
@@ -2098,7 +2127,8 @@ fn merge_session_chat_option_selections(
         || merged.effort.is_some()
         || merged.mode.is_some()
         || merged.context_usage.is_some()
-        || merged.claude_status.is_some())
+        || merged.claude_status.is_some()
+        || merged.cursor_status.is_some())
     .then_some(merged)
 }
 
@@ -2159,14 +2189,21 @@ pub fn detect_session_chat_terminal_state(
             )
         })
         .unwrap_or((None, None));
-    let statusline = (agent == Some(SessionChatOptionAgent::Claude))
-        .then(|| {
-            read_session_chat_statusline_selection(
+    let statusline = match agent {
+        Some(SessionChatOptionAgent::Claude) => read_session_chat_statusline_selection(
+            hook_state_directory,
+            claude_session_id.as_deref(),
+        ),
+        Some(SessionChatOptionAgent::Cursor) => {
+            crate::session_chat_cursor_status::read_cursor_statusline_selection(
+                repository,
                 hook_state_directory,
-                claude_session_id.as_deref(),
+                project_id,
+                session_id,
             )
-        })
-        .flatten();
+        }
+        _ => None,
+    };
     // CDXC:SessionChat 2026-09-03: disk, not screen, so it is read
     // whether or not the capture below succeeds.
     let tasks = crate::session_chat_agent_tasks::read_session_chat_agent_tasks(
@@ -2755,6 +2792,7 @@ mod tests {
             context_usage: None,
             claude_status: None,
             codex_status: None,
+            cursor_status: None,
         };
         let terminal = claude("Ctx Used: 1% | Opus 4.8").unwrap();
         let merged = merge_session_chat_option_selections(Some(transcript), None, Some(terminal))
@@ -2808,6 +2846,7 @@ mod tests {
                 context_usage: None,
                 claude_status: None,
                 codex_status: None,
+                cursor_status: None,
             },
             detected_at: "2026-08-01T12:00:00.000Z".to_string(),
         };
