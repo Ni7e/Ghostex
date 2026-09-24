@@ -1225,7 +1225,10 @@ impl GhostexGpuiApp {
             requested_pane_id,
             force_requested_pane_placement,
             message.placement,
-            GpuiLocalWorkspaceAttachOrigin::SidebarFocus,
+            match message.placement_target_session_id {
+                Some(_) => GpuiLocalWorkspaceAttachOrigin::Fork,
+                None => GpuiLocalWorkspaceAttachOrigin::SidebarFocus,
+            },
             cx,
         );
     }
@@ -1432,6 +1435,7 @@ impl GhostexGpuiApp {
         }
 
         let attach_started_at = Instant::now();
+        let focused_at_request = self.gx_store_focused_session();
         let open_chat_early = placement == GpuiWorkspaceTerminalFocusPlacement::Tab
             && self
                 .pending_agents_chat_launch_intents
@@ -1512,6 +1516,24 @@ impl GhostexGpuiApp {
                             return;
                         }
                     }
+                    GpuiLocalWorkspaceAttachOrigin::Fork => {
+                        // A newer focus request, a project switch, or a selection the store took
+                        // since the fork was requested wins over it. The runtime's focus copy is
+                        // not consulted: it still names the source session until it is told.
+                        let focused = this.gx_store_focused_session();
+                        if this.local_workspace_latest_focus_key.as_ref() != Some(&key)
+                            || this.agents_workspace_project_id.as_deref()
+                                != Some(key.project_id.as_str())
+                            || (focused != focused_at_request
+                                && focused.as_ref().is_none_or(|focused| {
+                                    !focused.machine.is_local()
+                                        || focused.project_id != key.project_id
+                                        || focused.session_id != key.session_id
+                                }))
+                        {
+                            return;
+                        }
+                    }
                     GpuiLocalWorkspaceAttachOrigin::SurfacedRestore => {
                         let Some(shell_session_id) =
                             this.local_workspace_session_mappings.get(&key).copied()
@@ -1588,6 +1610,7 @@ impl GhostexGpuiApp {
                             );
                         }
                         GpuiLocalWorkspaceAttachOrigin::SidebarFocus
+                        | GpuiLocalWorkspaceAttachOrigin::Fork
                         | GpuiLocalWorkspaceAttachOrigin::WakeRecovery => {
                             // A Split Right request whose tab already exists was
                             // moved into its right-hand leaf when the focus arrived;

@@ -29,6 +29,11 @@ impl GpuiLocalWorkspaceAttachIntent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GpuiLocalWorkspaceAttachOrigin {
     SidebarFocus,
+    /// A fork's focus, which names the session it was forked from as its placement target.
+    /// Completion lands it unless the user selected something else in the meantime; it does not
+    /// wait for the sidebar runtime to name the fork (CDXC:SessionFork 2026-09-24 in
+    /// gx_store/sidebar_lifecycle.rs).
+    Fork,
     SurfacedRestore,
     WakeRecovery,
     /// A keep-view focus (another project's remembered view stays up) whose
