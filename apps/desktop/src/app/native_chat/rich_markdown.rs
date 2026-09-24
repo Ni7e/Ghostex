@@ -216,7 +216,7 @@ fn is_table_delimiter_row(line: &str) -> bool {
 }
 
 /// React's `sessionChatTableToCsv`: the cells as they read, quoted only when they have to be.
-fn table_csv(source: &str) -> String {
+pub(super) fn table_csv(source: &str) -> String {
     source
         .lines()
         .filter(|line| line.contains('|') && !is_table_delimiter_row(line))
@@ -239,7 +239,7 @@ fn table_csv(source: &str) -> String {
 }
 
 /// One button in the table's toolbar.
-fn table_action(
+pub(super) fn table_action(
     id: &'static str,
     icon: &'static str,
     p: &ChatAppearance,
@@ -289,7 +289,7 @@ fn table_actions(
     let markdown = source.clone();
     let csv = source.clone();
     let open_chat = chat.clone();
-    let expand_chat = chat.clone();
+    let collapse_chat = chat.clone();
     div()
         .flex()
         .justify_end()
@@ -303,15 +303,11 @@ fn table_actions(
             p,
             move |cx| {
                 let source = source.clone();
-                let _ = open_chat.update(cx, |_, cx| {
-                    cx.emit(super::state::NativeChatEvent::Host(
-                        json!({"type":"open","modal":"markdownTable","source":source}),
-                    ));
-                });
+                let _ = open_chat.update(cx, |chat, cx| chat.open_table_preview(source, cx));
             },
         ))
         .child(table_action(
-            "expand-table",
+            "collapse-table",
             if expanded {
                 "titlebar/arrows-diagonal-minimize.svg"
             } else {
@@ -320,9 +316,8 @@ fn table_actions(
             p,
             move |cx| {
                 let key = key.clone();
-                let _ = expand_chat.update(cx, |chat, cx| {
-                    chat.set_table_expanded(key, !expanded, cx)
-                });
+                let _ = collapse_chat
+                    .update(cx, |chat, cx| chat.set_table_collapsed(key, expanded, cx));
             },
         ))
         .child(table_action(
@@ -368,25 +363,25 @@ impl NativeChatView {
         cx.notify();
     }
 
-    /// The reader expanded one table's cells to wrap, or collapsed them back to one line.
+    /// The reader collapsed one table's cells to a single clipped line, or expanded them again.
     ///
-    /// Both keep the collapsed column widths, as React pins them before it expands, so the columns
-    /// stay where the reader was looking and only the rows grow.
+    /// Both keep the same capped column widths, so the columns stay where the reader was looking
+    /// and only the rows change height.
     ///
     /// CDXC:SessionChat 2026-09-24 DECISION:
-    /// "In the GPUI chat view for the table, make collapsed cells the default." Every table starts
-    /// collapsed and only the reader expands it; a table wider than the pane scrolls sideways
-    /// either way. Supersedes the fit-to-pane toggle, which wrapped every column into the pane.
-    pub(super) fn set_table_expanded(
+    /// "Make expanded default": a collapsed table cut its cells' text off, so every table starts
+    /// with its cells wrapped and only the reader collapses one. A table wider than the pane
+    /// scrolls sideways either way. Supersedes the same day's collapsed default.
+    pub(super) fn set_table_collapsed(
         &mut self,
         key: String,
-        expanded: bool,
+        collapsed: bool,
         cx: &mut gpui::Context<Self>,
     ) {
-        if expanded {
-            self.table_expanded.insert(key);
+        if collapsed {
+            self.table_collapsed.insert(key);
         } else {
-            self.table_expanded.remove(&key);
+            self.table_collapsed.remove(&key);
         }
         self.list.remeasure();
         cx.notify();
@@ -408,14 +403,14 @@ impl NativeChatView {
         style.is_dark = !p.light;
         style.highlight_theme = Some(super::markdown_style::highlight_theme(p.light));
         // React's `--chat-table-cell-max`, min(24rem, 60cqw): one long cell cannot claim the
-        // whole row, and a narrow pane lowers the cap so a collapsed table usually just fits.
+        // whole row, and a narrow pane lowers the cap so a wide table usually just fits.
         let pane_width = f32::from(self.bounds.get().size.width);
         let mut cell_max = 384.0 * p.scale;
         if pane_width > 0.0 {
             cell_max = cell_max.min(pane_width * 0.6);
         }
         style.table_cell_max_width = Some(px(cell_max));
-        style.table_wrap_cells = self.table_expanded.contains(&id);
+        style.table_wrap_cells = !self.table_collapsed.contains(&id);
         let references = super::markdown_links::presentations(references, p);
         let header_id = id.clone();
         let wrap_id = id.clone();
@@ -492,7 +487,7 @@ impl NativeChatView {
                     .child(table_actions(
                         key.clone(),
                         source.clone(),
-                        self.table_expanded.contains(&key),
+                        !self.table_collapsed.contains(&key),
                         &cx.weak_entity(),
                         p,
                     ))

@@ -606,8 +606,8 @@ function pinMarkdownTableColumnWidths(table: HTMLTableElement): void {
  * overflow, but it throws away the column algorithm with it, so every column
  * sizes itself independently of the rows below and the result is ragged.
  *
- * Cells start collapsed, so long cells ellipsize, and the toggle wraps them.
- * Expanding measures the widest cell in each column
+ * Cells wrap by default when anything would clip, and the toggle recaps them
+ * so long cells ellipsize. Expanding measures the widest cell in each column
  * and pins that width on the header row: expanding otherwise re-runs the
  * column algorithm against wrapped text and every column jumps somewhere else,
  * which loses the reader's place.
@@ -636,18 +636,19 @@ function MarkdownTable({ children, node, ...props }: ComponentProps<'table'> & E
   const [previewSource, setPreviewSource] = useState<string>();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
+  const [userCollapsed, setUserCollapsed] = useSessionChatDisclosureState(
+    `table-collapsed:${node?.position?.start.offset ?? 0}`,
+    false
+  );
   const [expanded, setExpanded] = useSessionChatDisclosureState(
     `table-expanded:${node?.position?.start.offset ?? 0}`,
     false
   );
   /*
    * Whether this table has anything the toggle can change. A 2x2 table of
-   * short cells has nothing clipped and nothing off-screen, so it shows no
-   * toggle rather than a control that would visibly do nothing.
-   *
-   * CDXC:SessionChat 2026-09-24 DECISION:
-   * "Make collapsed cells the default." Every table starts collapsed, overflowing ones included,
-   * and only the reader expands it; the GPUI table (native_chat/rich_markdown.rs) starts the same way.
+   * short cells has nothing clipped and nothing off-screen, so it stays
+   * collapsed with no toggle rather than a control that would visibly do
+   * nothing. Overflowing tables start expanded (wrapped) instead.
    */
   const [expandable, setExpandable] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -663,7 +664,12 @@ function MarkdownTable({ children, node, ...props }: ComponentProps<'table'> & E
       const clipped = [...table.querySelectorAll('.ghostex-chat-markdown-table-cell')].some(
         (cell) => cell.scrollWidth > cell.clientWidth + 1
       );
-      setExpandable(clipped || scroller.scrollWidth > scroller.clientWidth + 1);
+      const needsToggle = clipped || scroller.scrollWidth > scroller.clientWidth + 1;
+      setExpandable(needsToggle);
+      if (needsToggle && !userCollapsed) {
+        pinMarkdownTableColumnWidths(table);
+        setExpanded(true);
+      }
     };
     measure();
     // Both, and for different reasons: the scroller changes size when the pane
@@ -672,14 +678,18 @@ function MarkdownTable({ children, node, ...props }: ComponentProps<'table'> & E
     observer.observe(scroller);
     observer.observe(table);
     return () => observer.disconnect();
-  }, [expanded]);
+  }, [expanded, setExpanded, setUserCollapsed, userCollapsed]);
 
   const toggleExpanded = useCallback((): void => {
     const table = tableRef.current;
     if (!table) return;
-    if (!expanded) pinMarkdownTableColumnWidths(table);
+    if (!expanded) {
+      pinMarkdownTableColumnWidths(table);
+    } else {
+      setUserCollapsed(true);
+    }
     setExpanded(!expanded);
-  }, [expanded, setExpanded]);
+  }, [expanded, setExpanded, setUserCollapsed, userCollapsed]);
 
   const copyTable = useCallback((format: 'csv' | 'markdown'): void => {
     const table = tableRef.current;

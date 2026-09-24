@@ -8,6 +8,7 @@ impl NativeChatView {
         let source = self.main_window?.window_id();
         let children = [
             self.image_viewer.handle.map(|handle| handle.window_id()),
+            self.table_preview.handle.map(|handle| handle.window_id()),
             self.save_markdown_window
                 .handle
                 .map(|handle| handle.window_id()),
@@ -51,6 +52,7 @@ impl NativeChatView {
 
     fn sync_pane_modal_windows(&mut self, cx: &mut Context<Self>) {
         self.sync_image_viewer_window(cx);
+        self.sync_table_preview_window(cx);
         self.sync_rewind_window(cx);
         self.sync_save_markdown_window(cx);
         self.sync_context_editor_window(cx);
@@ -60,6 +62,7 @@ impl NativeChatView {
 
     pub(super) fn pane_windows_open(&self) -> bool {
         self.image_viewer.handle.is_some()
+            || self.table_preview.handle.is_some()
             || self.save_markdown_window.handle.is_some()
             || self.rewind_window.handle.is_some()
             || self.context_editor_window.handle.is_some()
@@ -101,8 +104,14 @@ impl NativeChatView {
         let pane = self.bounds.get();
         let parent = self.config.parent_native_view;
         let scale = super::appearance::ChatAppearance::current(&self.snapshot).scale;
-        let windows: [Option<(gpui::AnyWindowHandle, Bounds<Pixels>)>; 5] = [
+        let windows: [Option<(gpui::AnyWindowHandle, Bounds<Pixels>)>; 6] = [
             self.image_viewer.handle.map(|handle| (handle.into(), pane)),
+            self.table_preview.handle.map(|handle| {
+                (
+                    handle.into(),
+                    super::table_preview::table_preview_frame(pane, scale),
+                )
+            }),
             self.save_markdown_window
                 .handle
                 .map(|handle| (handle.into(), pane)),
