@@ -341,6 +341,15 @@ pub fn filter_session_chat_returned_prompts(
     }
 }
 
+/// The transcript row of the prompt Claude handed back, for as long as the
+/// chat readers hide it.
+pub(crate) fn session_chat_returned_prompt_row(
+    project_id: &str,
+    session_id: &str,
+) -> Option<String> {
+    current(project_id, session_id)?.message_id
+}
+
 /// The retraction a follower still owes its clients, once.
 pub fn take_session_chat_returned_prompt_retraction(
     project_id: &str,

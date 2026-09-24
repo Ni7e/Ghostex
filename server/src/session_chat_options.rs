@@ -2229,7 +2229,17 @@ pub fn detect_session_chat_terminal_state(
         let remembered = crate::session_chat_trust_memory::session_folders_remembered(
             repository, project_id, session_id,
         );
-        crate::session_chat_trust_memory::decorate_trust_notice(notice, remembered);
+        let answerable = remembered
+            && screen.is_some_and(|capture| {
+                crate::session_chat_trust_memory::workspace_trust_accept_steps(
+                    agent_id,
+                    &capture.text,
+                )
+                .is_some()
+            });
+        crate::session_chat_trust_memory::decorate_trust_notice(
+            notice, remembered, answerable, project_id, session_id,
+        );
     }
     let options = merge_session_chat_option_selections(transcript, statusline, terminal)
         .map(SessionChatDetectedOptions::new);

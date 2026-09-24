@@ -57,12 +57,16 @@ fn store_path() -> std::path::PathBuf {
         .join(STORE_FILE)
 }
 
+/// One spelling per folder: `~` expanded, symlinks resolved when the folder
+/// exists (`/tmp` and `/private/tmp` are the same place on macOS, and an
+/// agent may report either as its cwd), trailing separators dropped.
 fn normalize_folder(path: &str) -> Option<String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return None;
     }
     let expanded = crate::resume_lookup::expand_home(trimmed);
+    let expanded = std::fs::canonicalize(&expanded).unwrap_or(expanded);
     let text = expanded.to_string_lossy();
     let normalized = text.trim_end_matches(['/', '\\']);
     if normalized.is_empty() {
@@ -206,12 +210,24 @@ pub fn session_folders_remembered(
 /// Applied to every trust-prompt notice in the detection funnel: an
 /// unremembered folder offers the button; a remembered one is marked for the
 /// funnel to answer and is hidden from every client while that happens.
-pub fn decorate_trust_notice(notice: &mut SessionChatTerminalNotice, remembered: bool) {
+///
+/// Hiding is only right when the funnel can actually answer: a remembered
+/// folder whose prompt has no safe keystroke (Claude's older wording), or
+/// whose last automatic accept failed, keeps its card so the user is never
+/// left with a silently stuck agent. Such a card offers no Trust and
+/// Remember button, since the folder is already remembered.
+pub fn decorate_trust_notice(
+    notice: &mut SessionChatTerminalNotice,
+    remembered: bool,
+    answerable: bool,
+    project_id: &str,
+    session_id: &str,
+) {
     if notice.kind != SESSION_CHAT_NOTICE_TRUST_PROMPT {
         return;
     }
     if remembered {
-        notice.auto_trust = true;
+        notice.auto_trust = answerable && !auto_trust_failed_recently(project_id, session_id);
         return;
     }
     if notice
@@ -380,11 +396,48 @@ pub(crate) fn auto_trust_plan(
 }
 
 static AUTO_TRUST_ATTEMPTS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+/// Sessions whose last automatic accept did not clear the prompt, with the
+/// time it failed; the funnel shows the card again for these.
+static AUTO_TRUST_FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+
+fn attempt_key(project_id: &str, session_id: &str) -> String {
+    format!("{project_id}|{session_id}")
+}
+
+fn mark_auto_trust_failed(project_id: &str, session_id: &str) {
+    if let Ok(mut failures) = AUTO_TRUST_FAILURES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        let now = Instant::now();
+        failures
+            .retain(|_, failed_at| now.duration_since(*failed_at) < AUTO_TRUST_RETRY_INTERVAL * 4);
+        failures.insert(attempt_key(project_id, session_id), now);
+    }
+}
+
+fn clear_auto_trust_failure(project_id: &str, session_id: &str) {
+    if let Ok(mut failures) = AUTO_TRUST_FAILURES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        failures.remove(&attempt_key(project_id, session_id));
+    }
+}
+
+fn auto_trust_failed_recently(project_id: &str, session_id: &str) -> bool {
+    AUTO_TRUST_FAILURES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+        .and_then(|failures| failures.get(&attempt_key(project_id, session_id)).copied())
+        .is_some_and(|failed_at| failed_at.elapsed() < AUTO_TRUST_RETRY_INTERVAL * 4)
+}
 
 /// One accept per prompt per retry interval; `false` means an attempt is
 /// still fresh and the screen has not had time to change.
 pub(crate) fn claim_auto_trust_attempt(project_id: &str, session_id: &str) -> bool {
-    let key = format!("{project_id}|{session_id}");
+    let key = attempt_key(project_id, session_id);
     let Ok(mut attempts) = AUTO_TRUST_ATTEMPTS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
@@ -425,9 +478,11 @@ pub(crate) fn dispatch_auto_trust(
             return;
         };
         let Some(steps) = workspace_trust_accept_steps(agent.as_deref(), &screen) else {
+            // The prompt left the screen between the probe and this capture
+            // (answered in the terminal, or the agent moved on): nothing to do.
             return;
         };
-        if execute_session_chat_send(
+        let sent = execute_session_chat_send(
             &project_id,
             &session_id,
             &plan.zmx_name,
@@ -435,11 +490,18 @@ pub(crate) fn dispatch_auto_trust(
             steps,
         )
         .await
-        .is_err()
-        {
-            return;
-        }
+        .is_ok();
         tokio::time::sleep(Duration::from_millis(1500)).await;
+        // A prompt that is still on screen after the accept is a failure the
+        // user has to see: the next probe shows the card again.
+        let still_prompting = capture_session_terminal_text(&plan.zmx_name)
+            .await
+            .is_some_and(|screen| trust_prompt_on_screen(agent.as_deref(), &screen));
+        if !sent || still_prompting {
+            mark_auto_trust_failed(&project_id, &session_id);
+        } else {
+            clear_auto_trust_failure(&project_id, &session_id);
+        }
         detector
             .detect(&project_id, &session_id, agent.as_deref(), true)
             .await;

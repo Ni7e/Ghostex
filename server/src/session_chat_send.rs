@@ -812,6 +812,8 @@ pub enum SessionChatSendStep {
     DriveCodexAsyncQuestion(crate::session_chat_codex_async_answer::AsyncAnswer),
     /// Stop this interrupt job if Escape would open Codex's message-editing pager.
     GuardCodexInterrupt,
+    /// Stop this interrupt job if its Escape would be Claude's double-tap rewind.
+    GuardClaudeInterrupt,
     /// Recheck the transcript pager and cross-client visibility at the front of the queue.
     CloseUnwatchedCodexTranscriptPager,
     StopLocalCommandOutput,
@@ -1682,6 +1684,14 @@ async fn run_session_chat_send_worker(
                     .await
                     {
                         outcome = Err(error);
+                        break;
+                    }
+                }
+                SessionChatSendStep::GuardClaudeInterrupt => {
+                    if !crate::session_chat_claude_interrupt::claim_claude_interrupt_escape(
+                        &project_id,
+                        &session_id,
+                    ) {
                         break;
                     }
                 }
@@ -4044,8 +4054,10 @@ pub(crate) fn handle_interrupt_session_chat_http(
     // steps) drop, then deliver ESC through the queue's new generation.
     crate::session_chat_send::cancel_session_chat_sends(&target.project_id, &target.session_id);
     let mut steps = Vec::new();
-    if session_chat_agent_for_session(&target.session).as_deref() == Some("codex") {
-        steps.push(SessionChatSendStep::GuardCodexInterrupt);
+    match session_chat_agent_for_session(&target.session).as_deref() {
+        Some("codex") => steps.push(SessionChatSendStep::GuardCodexInterrupt),
+        Some("claude") => steps.push(SessionChatSendStep::GuardClaudeInterrupt),
+        _ => {}
     }
     steps.push(SessionChatSendStep::Write(
         SESSION_CHAT_INTERRUPT.to_string(),
