@@ -37,6 +37,11 @@ pub struct ChatCore {
     published_context: ChatContext,
     /// The wake the host was last told to arm, so a [`Effect::SetTimer`] is emitted only when the
     /// earliest deadline actually moved.
+    ///
+    /// CDXC:SessionChat 2026-09-25 WHY: A `Tick` forgets it. The value is a delay, and the
+    /// backfill timer re-arms itself at 0 ms after every batch; compared with the 0 the host had
+    /// already spent, the re-arm looked unchanged, no `SetTimer` went out, and every row older than
+    /// the first batch stayed a placeholder skeleton until some unrelated event moved the wake.
     armed_wake_ms: Option<u64>,
     /// What the host was last sent, so a frame carries only the changed window.
     sent: SentFrame,
@@ -92,6 +97,11 @@ impl ChatCore {
         self.context = context;
         // Index zero of the turn's clock reads is `now_ms` itself.
         self.state.core.clock_cursor = 1;
+        // A tick is the host's timer firing, so the host holds no timer now: the wake it was told
+        // is spent, and the next one must reach it even when it is the same delay.
+        if matches!(event, Event::Tick) {
+            self.armed_wake_ms = None;
+        }
         // `dispatch` routes the event to its owner and then runs the six per-family settle hooks
         // in a fixed order, which is where every `useMemo` and `useEffect` of the TypeScript lives.
         //
