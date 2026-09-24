@@ -12,7 +12,7 @@ use crate::composer::host_actions::composer_host_actions;
 use crate::composer::layout::{can_collapse_composer, CollapseGate};
 use crate::composer::policy::{
     composer_placeholder, send_blocked_reason, send_refused_reason, SendGate,
-    DESKTOP_COMPOSER_PLACEHOLDER, STOP_BUTTON_COOLDOWN_MS,
+    DESKTOP_COMPOSER_PLACEHOLDER, STOP_BUTTON_COOLDOWN_MS, TOUCH_COMPOSER_PLACEHOLDER,
 };
 use crate::composer::queue::{
     is_queue_row_busy, queue_capabilities, queue_row_preview, QUEUE_LONG_PRESS_MS,
@@ -103,7 +103,18 @@ pub fn document(state: &ChatState, _context: &ChatContext, into: &mut Document) 
         card_visible,
         option_switching(state),
     )
-    .unwrap_or(DESKTOP_COMPOSER_PLACEHOLDER)
+    .unwrap_or(
+        if state
+            .session
+            .boot_config
+            .as_ref()
+            .is_some_and(|config| config.touch_composer)
+        {
+            TOUCH_COMPOSER_PLACEHOLDER
+        } else {
+            DESKTOP_COMPOSER_PLACEHOLDER
+        },
+    )
     .to_string();
 
     into.history_active = composer.history.is_active();

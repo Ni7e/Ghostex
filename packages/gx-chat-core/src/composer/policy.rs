@@ -15,6 +15,11 @@ pub const STOP_BUTTON_COOLDOWN_MS: u64 = 2_000;
 pub const DESKTOP_COMPOSER_PLACEHOLDER: &str =
     "Press Enter to send a message and Tab to Queue.\nUse @ to mention a file and $ for using skills.";
 
+/// What a touch composer (the phone, `StartConfig::touch_composer`) says when nothing is blocking
+/// it: React's `MOBILE_SESSION_CHAT_PLACEHOLDER` in `session-chat-composer.tsx`.
+pub const TOUCH_COMPOSER_PLACEHOLDER: &str =
+    "Tap \u{2191} to send or hold it to queue; use @ for files and $ for skills.";
+
 /// The title of the toast a blocked Send raises.
 pub const SEND_BLOCKED_TITLE: &str = "Message not sent";
 
