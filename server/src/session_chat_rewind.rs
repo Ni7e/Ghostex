@@ -707,6 +707,17 @@ impl RewindDriver<'_> {
         capture_session_terminal_text(self.zmx_name).await
     }
 
+    /// CDXC:SessionChat 2026-09-25 WHY:
+    /// After a turn Claude Code paints a suggested next prompt in its input box in faint text. The plain capture cannot tell it from typed text, so every rewind after a finished turn was refused as "the terminal composer holds unsent text". The styled capture can: the styled read calls faint text empty, and typing (or the rewind command) replaces it.
+    async fn styled_composer_is_empty(&self) -> bool {
+        crate::session_chat_send::capture_session_terminal_text_vt(self.zmx_name)
+            .await
+            .and_then(|screen| {
+                crate::session_chat_composer::session_chat_composer_input("claude", &screen)
+            })
+            .is_some_and(|input| input.is_empty())
+    }
+
     /// Polls the screen until `accept` answers `Some`, the step deadline
     /// passes, or the session's send generation is superseded.
     async fn wait_for<T>(
@@ -901,7 +912,7 @@ impl RewindDriver<'_> {
                 ),
                 _ => error,
             })?;
-        if !draft.is_empty() {
+        if !draft.is_empty() && !self.styled_composer_is_empty().await {
             if !is_restored_draft(self.project_id, self.session_id, &draft) {
                 return Err(agent_busy(
                     "The terminal composer holds unsent text, so the rewind was not started. Send it or clear it in the terminal first."

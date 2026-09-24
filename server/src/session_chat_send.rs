@@ -3818,6 +3818,31 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
             steps,
         );
     }
+    let denied_approval = kind == "approval"
+        && params
+            .get("approvalSend")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .is_empty();
+    if denied_approval {
+        if let Some(answered) = crate::agents::session_chat_prompt_setting(&target.session)
+            .as_deref()
+            .and_then(crate::session_chat::parse_stored_session_chat_prompt)
+            .filter(|prompt| {
+                matches!(
+                    prompt,
+                    crate::session_chat::SessionChatInteractivePrompt::Approval { .. }
+                )
+            })
+        {
+            crate::session_chat_interactive::retire_denied_session_chat_approval(
+                state,
+                &target.project_id,
+                &target.session_id,
+                &answered,
+            );
+        }
+    }
     /*
     CDXC:SessionChat 2026-08-21:
     The card the user just answered is a TERMINAL NOTICE, and notices only

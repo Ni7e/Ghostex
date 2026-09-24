@@ -815,6 +815,52 @@ pub fn build_session_chat_prompt_state_frame(
 // Inline sanity tests (real transcript files are skipped when absent)
 // ---------------------------------------------------------------------------
 
+/// CDXC:SessionChat 2026-09-25 WHY:
+/// Deny answers an approval card with Escape, and Claude Code reports that interrupted tool call through no hook: no PostToolUse (the tool never ran) and no Stop (interrupts skip it). The stored card therefore outlived the answer until the next finished turn, and every client that opened the chat in between (the phone reopening it, a second window) drew a live Allow/Deny card for a command that was already refused. The daemon sent that Escape itself, so it retires the card itself, only when the stored card is still the approval that was answered.
+pub(crate) fn retire_denied_session_chat_approval(
+    state: &AppState,
+    project_id: &str,
+    session_id: &str,
+    answered: &SessionChatInteractivePrompt,
+) {
+    let Ok(db) = crate::storage::open_gxserver_database(&state.paths) else {
+        return;
+    };
+    let repository = crate::domain::DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let Ok(Some(session)) = repository.get_session(project_id, session_id) else {
+        return;
+    };
+    let stored = crate::agents::session_chat_prompt_setting(&session)
+        .as_deref()
+        .and_then(parse_stored_session_chat_prompt);
+    if stored.as_ref() != Some(answered) {
+        return;
+    }
+    let mut runtime = session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let Some(activity) = runtime
+        .get_mut("agentActivity")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    activity.remove("sessionChatPrompt");
+    let update = json!({
+        "projectId": project_id,
+        "sessionId": session_id,
+        "runtimeSettings": runtime,
+    });
+    let Some(update) = update.as_object() else {
+        return;
+    };
+    if let Ok(updated) = repository.update_session(update) {
+        emit_session_chat_prompt_state_frame(state, &updated);
+    }
+}
+
 /*
 CDXC:SessionChat 2026-07-31:
 Prompt changes ride the LIVE follower stream: hook ingest reports
