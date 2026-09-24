@@ -194,10 +194,11 @@ impl ChatOptionMenuPanel {
                 if matches!(key.key.as_str(), "n" | "p") && !key.modifiers.control {
                     return true;
                 }
+                // The ends stop rather than wrap, as the picker's own list does.
                 let next = if matches!(key.key.as_str(), "up" | "p") {
-                    (cursor + choices.len() - 1) % choices.len()
+                    cursor.saturating_sub(1)
                 } else {
-                    (cursor + 1) % choices.len()
+                    (cursor + 1).min(choices.len() - 1)
                 };
                 self.selected = Some(next);
                 self.scroll.scroll_to_item(next);

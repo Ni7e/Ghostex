@@ -34,6 +34,10 @@ const AUTO_MODEL_VALUE = 'auto';
 /** The long-context twin of a model is the same row with another Context Window choice. */
 const LONG_CONTEXT_SUFFIX = '[1m]';
 const CONTEXT_LABELS = { standard: '200K', long: '1M' } as const;
+/** A catalog row named after another with this suffix is that model's fast twin (Grok 4.7 Fast). */
+const FAST_TWIN_LABEL_SUFFIX = ' Fast';
+/** The footer button that switches a model to its fast twin, where the agent has no fast-mode command. */
+const FAST_TWIN_TRAIT = 'fastModel';
 
 export interface ModelMenuTab {
   id: ModelMenuTabId;
@@ -60,6 +64,8 @@ export interface ModelMenuEntry {
   label: string;
   description?: string;
   variants: readonly ModelMenuVariant[];
+  /** The model's fast twin, which the Fast button switches to; absent where the model has none. */
+  fast?: ModelMenuVariant;
 }
 
 export interface ModelMenuEffort {
@@ -93,7 +99,7 @@ export interface ModelMenuTraitChoice {
 }
 
 export interface ModelMenuTrait {
-  /** `context` picks a model variant; anything else is the option descriptor with this id. */
+  /** `context` and `fastModel` pick a model variant (see modelMenuTraitPicksModel); anything else is the option descriptor with this id. */
   id: string;
   label: string;
   valueLabel: string | null;
@@ -113,6 +119,18 @@ function entriesFor(provider: ModelPickerProvider, catalog: SessionChatSessionOp
   const values = new Set(choices.map((choice) => choice.value));
   const entries: ModelMenuEntry[] = [];
   for (const choice of choices) {
+    /**
+     * CDXC:SessionChat 2026-09-24 DECISION:
+     * User: Grok Build's "Grok 4.7 Fast" is not a separate model in the picker; the person switches Fast mode on or off on
+     * Grok 4.7 to get the fast model. A model whose label is another's plus " Fast" folds into that row, and the footer's
+     * Fast button picks between the two.
+     */
+    if (
+      choice.label.endsWith(FAST_TWIN_LABEL_SUFFIX) &&
+      choices.some((other) => `${other.label}${FAST_TWIN_LABEL_SUFFIX}` === choice.label)
+    )
+      continue;
+    const fast = choices.find((other) => other.label === `${choice.label}${FAST_TWIN_LABEL_SUFFIX}`);
     const long = choice.value.endsWith(LONG_CONTEXT_SUFFIX);
     const base = long ? choice.value.slice(0, -LONG_CONTEXT_SUFFIX.length) : choice.value;
     if (long && values.has(base)) continue;
@@ -131,6 +149,7 @@ function entriesFor(provider: ModelPickerProvider, catalog: SessionChatSessionOp
               { value: twin, label: CONTEXT_LABELS.long },
             ]
           : [],
+      ...(fast ? { fast: { value: fast.value, label: fast.label } } : {}),
     });
   }
   return entries;
@@ -153,7 +172,8 @@ export function modelMenuEntryFor(
 ): ModelMenuEntry | undefined {
   if (!provider || !model) return undefined;
   return entries[provider]?.find(
-    (entry) => entry.value === model || entry.variants.some((variant) => variant.value === model)
+    (entry) =>
+      entry.value === model || entry.fast?.value === model || entry.variants.some((variant) => variant.value === model)
   );
 }
 
@@ -245,12 +265,16 @@ export function toggleModelMenuFavorite(favorites: readonly string[], key: strin
   return favorites.includes(key) ? favorites.filter((item) => item !== key) : [...favorites, key];
 }
 
-/** The value a row is picked with: the context window in use when the row offers it, else the catalog's default twin. */
+/**
+ * The value a row is picked with: the context window in use when the row offers it, else the catalog's default twin.
+ * A row whose fast twin is running stays on it.
+ */
 export function modelMenuPickValue(
   entry: ModelMenuEntry,
   currentModel: string | undefined,
   defaultValue: string | undefined
 ): string {
+  if (entry.fast && currentModel === entry.fast.value) return currentModel;
   if (entry.variants.length === 0) return entry.value;
   if (currentModel && entry.variants.some((variant) => variant.value === currentModel)) return currentModel;
   const long = entry.variants.find((variant) => variant.value.endsWith(LONG_CONTEXT_SUFFIX));
@@ -403,7 +427,13 @@ const TRAIT_ICONS: Record<string, ModelMenuTrait['icon']> = {
   effort: 'reasoning',
   context: 'context',
   fastMode: 'fast',
+  [FAST_TWIN_TRAIT]: 'fast',
 };
+
+/** Footer buttons whose choices are model values (the context window, a fast twin), picked through the model option. */
+export function modelMenuTraitPicksModel(id: string): boolean {
+  return id === 'context' || id === FAST_TWIN_TRAIT;
+}
 
 /**
  * CDXC:SessionChat 2026-09-21 DECISION:
@@ -495,6 +525,15 @@ export function modelMenuTraits(
   const others = params.descriptors.filter((descriptor) => !isShiftTabModeCycler(descriptor));
   const effort = others.find((descriptor) => descriptor.id === 'effort');
   const fast = others.find((descriptor) => descriptor.id === 'fastMode');
+  const fastTwin = (twin: ModelMenuVariant, base: string): Omit<ModelMenuTrait, 'icon' | 'toggle'> => ({
+    id: FAST_TWIN_TRAIT,
+    label: 'Fast mode',
+    valueLabel: model === twin.value ? 'On' : 'Off',
+    choices: [
+      { value: twin.value, label: 'On', selected: model === twin.value, isDefault: false },
+      { value: base, label: 'Off', selected: model !== twin.value, isDefault: true },
+    ],
+  });
   traits.push(
     (effort && option(effort)) || unavailable('effort', 'Reasoning', 'Default'),
     entry && entry.variants.length > 0
@@ -510,7 +549,9 @@ export function modelMenuTraits(
           })),
         }
       : unavailable('context', 'Context Window', 'Default'),
-    (fast && option(fast)) || unavailable('fastMode', 'Fast mode', detectedFastLabel(params.state))
+    (fast && option(fast)) ||
+      (entry?.fast && fastTwin(entry.fast, entry.value)) ||
+      unavailable('fastMode', 'Fast mode', detectedFastLabel(params.state))
   );
   for (const descriptor of others) {
     if (descriptor === effort || descriptor === fast) continue;
@@ -533,5 +574,6 @@ export function modelMenuPillLabels(
     .filter((trait) => (trait.id === 'effort' || trait.id === 'context') && trait.choices.length > 0)
     .map((trait) => trait.valueLabel)
     .filter((value): value is string => !!value);
-  return { label: entry?.label ?? modelLabel, suffix: parts.length > 0 ? parts.join(' · ') : null };
+  const label = entry?.fast && model === entry.fast.value ? entry.fast.label : entry?.label;
+  return { label: label ?? modelLabel, suffix: parts.length > 0 ? parts.join(' · ') : null };
 }

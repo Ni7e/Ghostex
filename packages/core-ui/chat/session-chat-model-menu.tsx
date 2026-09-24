@@ -100,6 +100,9 @@ export interface SessionChatModelMenuProps {
  */
 type FlyoutSide = 'right' | 'left' | 'above';
 
+/** The letter that toggles a footer button while the search is empty, shown in its tooltip. */
+const TRAY_KEYS: Record<string, string> = { fast: ' (F)', context: ' (C)' };
+
 /** Host rows follow the shared buttons' rule: at most two values toggle, more open the side list. */
 function toggleTarget(tray: ModelMenuTrait): ModelMenuTrait['toggle'] {
   if (tray.toggle) return tray.toggle;
@@ -270,10 +273,11 @@ export function SessionChatModelMenu({
     if (!row || projection.disabled) return;
     onPickRow(row, secondary, effort);
   };
-  /** The keyboard's pick: the row with the reasoning level Left and Right left it on. */
+  /** The keyboard's pick: the row with the reasoning level Left and Right left it on. True when it was sent. */
   const pickWithEffort = (row: ModelMenuRow | undefined, secondary: boolean) => {
-    if (!row) return;
+    if (!row || projection.disabled) return false;
     pickRow(row, secondary, row.efforts?.length ? effortFor(row) : undefined);
+    return true;
   };
   /** A two-value button applies its other value in place; a longer one opens its side list. */
   const activateTray = (index: number, secondary: boolean) => {
@@ -306,7 +310,9 @@ export function SessionChatModelMenu({
     searchRef.current?.focus();
   };
 
-  const step = (from: number, delta: number, size: number) => (size === 0 ? 0 : (from + delta + size) % size);
+  /** The ends stop rather than wrap (see the keys decision in model_menu/keys.rs). */
+  const step = (from: number, delta: number, size: number) =>
+    Math.min(Math.max(from + delta, 0), Math.max(size - 1, 0));
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const key = event.key;
     const down = key === 'ArrowDown' || (event.ctrlKey && key === 'n');
@@ -335,19 +341,27 @@ export function SessionChatModelMenu({
       if (row && next !== null) setEfforts((current) => ({ ...current, [row.key]: next }));
       else setShake((count) => count + 1);
     } else if (down || up) {
-      // The buttons are one row: Down from the last model lands on the first, and Up leaves them for the list.
+      // The buttons are one stop below the last model; the first model and the buttons are the ends.
       setActive((current) => {
-        if (current >= rows.length) return down ? 0 : Math.max(rows.length - 1, 0);
+        if (current >= rows.length) return down || rows.length === 0 ? current : rows.length - 1;
         if (down && current === rows.length - 1 && trays.length > 0) return rows.length;
-        if (up && current === 0 && trays.length > 0) return rows.length;
         return step(current, down ? 1 : -1, rows.length);
       });
     } else if ((key === 'ArrowRight' || key === 'ArrowLeft') && active >= rows.length) {
-      setActive(rows.length + step(active - rows.length, key === 'ArrowRight' ? 1 : -1, trays.length));
+      const size = trays.length;
+      setActive(rows.length + ((active - rows.length + (key === 'ArrowRight' ? 1 : -1) + size) % size));
     } else if (key === 'Enter') {
-      // Enter uses the highlighted model and level in this session; Shift+Enter saves them as the agent's default.
+      // Enter uses the highlighted model and level in this session; Shift+Enter saves them as the agent's default. Either closes the pop-up.
       if (active >= rows.length) activateTray(active - rows.length, event.shiftKey);
-      else pickWithEffort(rows[active], !event.shiftKey);
+      else if (pickWithEffort(rows[active], !event.shiftKey)) {
+        returnFocus.current = true;
+        setOpen(false);
+      }
+    } else if ((key === 'f' || key === 'c') && !view.query && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      // While the search is empty, F toggles Fast mode and C the context window; after that they are letters of it.
+      const icon = key === 'f' ? 'fast' : 'context';
+      const index = trays.findIndex((tray) => tray.icon === icon);
+      if (index >= 0) activateTray(index, false);
     } else if (key === 'Escape') {
       returnFocus.current = true;
       setOpen(false);
@@ -564,7 +578,7 @@ export function SessionChatModelMenu({
                   onMouseMove={() => setActive(rows.length + index)}
                   role='button'
                   title={[
-                    `${tray.label}${tray.valueLabel ? `: ${tray.valueLabel}` : ''}`,
+                    `${tray.label}${tray.valueLabel ? `: ${tray.valueLabel}` : ''}${TRAY_KEYS[tray.icon ?? ''] ?? ''}`,
                     scoped ? projection.scopeHint : null,
                   ]
                     .filter(Boolean)

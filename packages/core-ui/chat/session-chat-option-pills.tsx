@@ -26,6 +26,7 @@ import {
   modelPickScope,
   modelPickerSupportsSessionScope,
 } from '@/packages/shared/session-chat-presentation/model-picker';
+import { modelMenuTraitPicksModel } from '@/packages/shared/session-chat-presentation/model-menu';
 import {
   modelMenuAccounts,
   modelMenuPick,
@@ -1227,8 +1228,9 @@ export function SessionChatSessionOptionPills({
               if (!choice.selected) onSwitchAccount?.(choice.value);
               return;
             }
-            const descriptor =
-              trait.id === 'context' ? catalog.model : visibleOptions.find((entry) => entry.id === trait.id);
+            const descriptor = modelMenuTraitPicksModel(trait.id)
+              ? catalog.model
+              : visibleOptions.find((entry) => entry.id === trait.id);
             if (!descriptor || unchanged(descriptor, choice.value)) return;
             dispatch(
               choice.exitPlan ? { ...descriptor, dispatch: { kind: 'key', key: 'shift-tab', marker: '' } } : descriptor,

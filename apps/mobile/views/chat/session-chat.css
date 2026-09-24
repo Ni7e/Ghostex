@@ -77,3 +77,12 @@
 .native-sidebar-body .ghostex-chat-transcript-selection-toolbar > button + button {
   border-left: 1px solid var(--border);
 }
+
+/*
+ * CDXC:Mobile 2026-09-24 DECISION:
+ * User: remove the hotkeys shown on the mobile model picker; a phone has no Command key, so the ⌘1-⌘4 chips beside the models and the key hint row under the buttons don't make sense there.
+ */
+.ghostex-chat-model-menu .ghostex-chat-model-menu-kbd,
+.ghostex-chat-model-menu .ghostex-chat-model-menu-keys {
+  display: none;
+}

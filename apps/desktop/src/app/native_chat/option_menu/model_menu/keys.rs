@@ -12,6 +12,8 @@ struct ModelMenuKeysRegistered(Option<String>);
 impl gpui::Global for ModelMenuKeysRegistered {}
 
 pub(super) const KEY_CONTEXT: &str = "ChatModelMenu";
+/// The card's context while the search is empty, where F and C are footer shortcuts rather than text.
+pub(super) const EMPTY_QUERY_KEY_CONTEXT: &str = "ChatModelMenu model_menu_query_empty";
 
 /// The search field keeps focus the whole visit, and gpui resolves the field's own bindings
 /// (arrows, Enter, Escape) before any key listener, so the picker claims its keys as an action in
@@ -44,6 +46,14 @@ pub(super) fn register(cx: &mut gpui::App) {
         ["ChatModelMenu > Input", "ChatModelMenu"].map(|context| {
             gpui::KeyBinding::new(&key, ModelMenuKey { key: key.clone() }, Some(context))
         })
+    }));
+    // Once the search has text, F and C are letters of it.
+    cx.bind_keys(["f", "c"].into_iter().flat_map(|key| {
+        [
+            "(ChatModelMenu && model_menu_query_empty) > Input",
+            "ChatModelMenu && model_menu_query_empty",
+        ]
+        .map(|context| gpui::KeyBinding::new(key, ModelMenuKey { key: key.into() }, Some(context)))
     }));
 }
 
@@ -100,7 +110,7 @@ impl ChatOptionMenuPanel {
     /// True when the picker used the key; anything else belongs to the search field.
     ///
     /// CDXC:SessionChat 2026-09-24 DECISION:
-    /// User: the model pop-up is the one model picker and is driven from the keyboard (docs/2026-09-24/model-popup-keyboard/): Up and Down move through the models and then the footer buttons, wrapping round; Left and Right move the highlighted model's reasoning a level (a shake at either end or on a model without levels) and move along the footer; Enter uses the highlighted model and level in this session and Shift+Enter saves them as the agent's default; Cmd+1 to Cmd+9 only highlight that row and never apply it ("I should press enter to apply the model change", 2026-09-24, superseding Cmd+number picking); Tab and Shift+Tab switch agent tabs; Escape or the picker hotkey close without saving. The mouse keeps its old meaning: a click saves the default, a right-click this session only.
+    /// User: the model pop-up is the one model picker and is driven from the keyboard (docs/2026-09-24/model-popup-keyboard/): Up and Down move through the models and then the footer buttons and stop at the top and bottom instead of wrapping round ("make it not loop to the top when I press down while I'm at the bottom", 2026-09-24, superseding the wrap); Left and Right move the highlighted model's reasoning a level (a shake at either end or on a model without levels) and move along the footer; Enter uses the highlighted model and level in this session and Shift+Enter saves them as the agent's default, and either one closes the pop-up (2026-09-24); Cmd+1 to Cmd+9 only highlight that row and never apply it ("I should press enter to apply the model change", 2026-09-24, superseding Cmd+number picking); F toggles Fast mode and C the context window while the search is empty (2026-09-24), since otherwise they are letters of the search; Tab and Shift+Tab switch agent tabs; Escape or the picker hotkey close without saving. The mouse keeps its old meaning: a click saves the default, a right-click this session only.
     /// SEE-ALSO: packages/core-ui/chat/session-chat-model-menu.tsx (`onKeyDown`) answers the same keys for React.
     fn model_menu_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(state) = self.model_menu.as_mut() else {
@@ -129,15 +139,20 @@ impl ChatOptionMenuPanel {
             }
             "up" | "ctrl-p" | "down" | "ctrl-n" if count > 0 => {
                 let up = key == "up" || key == "ctrl-p";
-                // The footer is one stop on the way round: Left and Right move along its buttons.
+                // The footer is one stop below the last model (Left and Right move along its
+                // buttons); the first model and the footer are the ends.
                 state.active = if state.active >= rows {
-                    if up && rows > 0 { rows - 1 } else { 0 }
+                    if up && rows > 0 {
+                        rows - 1
+                    } else {
+                        state.active
+                    }
                 } else if up {
-                    (state.active + count - 1) % count
-                } else if state.active + 1 < rows {
+                    state.active.saturating_sub(1)
+                } else if state.active + 1 < rows || count > rows {
                     state.active + 1
                 } else {
-                    rows % count
+                    state.active
                 };
                 if state.active < rows {
                     state.last_row = state.rows()[state.active]["key"]
@@ -151,9 +166,21 @@ impl ChatOptionMenuPanel {
             "enter" | "shift-enter" => {
                 let active = state.active;
                 if active < rows {
-                    self.model_menu_pick_with_effort(active, key == "enter", cx);
+                    if self.model_menu_pick_with_effort(active, key == "enter", cx) {
+                        self.menu.update(cx, |menu, cx| menu.close(None, cx));
+                    }
                 } else {
                     self.activate_model_button(active - rows, key == "shift-enter", window, cx);
+                }
+            }
+            "f" | "c" => {
+                let icon = if key == "f" { "fast" } else { "context" };
+                let index = state
+                    .display_traits(&self.menu.read(cx).model_efforts)
+                    .iter()
+                    .position(|setting| setting["icon"] == icon);
+                if let Some(index) = index {
+                    self.activate_model_button(index, false, window, cx);
                 }
             }
             "left" | "right" if state.active >= rows => {

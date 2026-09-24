@@ -280,11 +280,14 @@
   border-top: 1px solid var(--menu-hairline);
 }
 
+/*
+ * CDXC:SessionChat 2026-09-24 SEE-ALSO: the footer layout in apps/desktop/src/app/native_chat/option_menu/model_menu/render.rs (`keeps_width`), which records the user's decision that values like "Default" and "Medium" are never cut short: Reasoning, Context Window and Fast keep their full width, and only the Account button and labelled option buttons truncate.
+ */
 .ghostex-chat-model-menu-tray-button {
   display: flex;
   height: 30px;
   min-width: 0;
-  flex: 1 1 0;
+  flex: 1 1 auto;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -293,6 +296,10 @@
   color: color-mix(in srgb, var(--foreground) 90%, transparent);
   cursor: pointer;
   font-size: 0.75rem;
+}
+
+.ghostex-chat-model-menu-tray-button:is([data-icon='reasoning'], [data-icon='context'], [data-icon='fast']) {
+  flex-shrink: 0;
 }
 
 .ghostex-chat-model-menu-tray-button[data-active] {

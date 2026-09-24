@@ -251,14 +251,14 @@ impl ChatOptionMenuPanel {
             // A click keeps its old meaning; it carries a level only when the keyboard or the Reasoning list moved one.
             .on_click(cx.listener(move |panel, _, _, cx| {
                 let effort = panel.model_menu_browsed_effort(index, cx);
-                panel.model_menu_pick(index, false, effort, cx)
+                panel.model_menu_pick(index, false, effort, cx);
             }))
             // Right-click applies the model to this session only, where the agent can.
             .on_mouse_down(
                 gpui::MouseButton::Right,
                 cx.listener(move |panel, _, _, cx| {
                     let effort = panel.model_menu_browsed_effort(index, cx);
-                    panel.model_menu_pick(index, true, effort, cx)
+                    panel.model_menu_pick(index, true, effort, cx);
                 }),
             )
             .child(body)
@@ -381,14 +381,32 @@ impl ChatOptionMenuPanel {
                 } else {
                     format!("{label}: {value}")
                 };
+                let tooltip = match setting["icon"].as_str() {
+                    Some("fast") => format!("{tooltip} (F)"),
+                    Some("context") => format!("{tooltip} (C)"),
+                    _ => tooltip,
+                };
+                // CDXC:SessionChat 2026-09-24 DECISION:
+                // User: the footer's values ("Default", "Medium") must not be cut short. Reasoning, Context Window and Fast keep their full width and grow into the spare room; only the Account button and labelled option buttons give way and truncate.
+                // SEE-ALSO: `.ghostex-chat-model-menu-tray-button` in packages/core-ui/chat/session-chat-model-menu.css.
+                let keeps_width = matches!(
+                    setting["icon"].as_str(),
+                    Some("reasoning" | "context" | "fast")
+                );
                 buttons = buttons.child(
                     div()
                         .id(("model-menu-setting", index))
                         .role(gpui::Role::MenuItem)
                         .aria_label(tooltip.clone())
                         .aria_expanded(open == Some(index))
-                        .flex_1()
-                        .min_w_0()
+                        .flex_auto()
+                        .map(|button| {
+                            if keeps_width {
+                                button.flex_shrink_0()
+                            } else {
+                                button.min_w_0()
+                            }
+                        })
                         .h(px(TRAIT_ROW_HEIGHT * scale))
                         .px(px(6.0 * scale))
                         .flex()
@@ -466,6 +484,11 @@ impl ChatOptionMenuPanel {
             window.request_animation_frame();
         }
         let input = state.input.clone();
+        let key_context = if input.read(cx).value().is_empty() {
+            super::keys::EMPTY_QUERY_KEY_CONTEXT
+        } else {
+            super::keys::KEY_CONTEXT
+        };
         let scroll = state.scroll.clone();
         let count = state.rows().len();
         let list = if count == 0 {
@@ -512,7 +535,7 @@ impl ChatOptionMenuPanel {
         };
         div()
             .id("chat-model-menu")
-            .key_context(super::keys::KEY_CONTEXT)
+            .key_context(key_context)
             .role(gpui::Role::Menu)
             .capture_action(cx.listener(Self::model_menu_key_action))
             .size_full()

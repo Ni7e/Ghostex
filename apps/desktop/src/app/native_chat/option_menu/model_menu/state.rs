@@ -279,29 +279,31 @@ impl ChatOptionMenuPanel {
         cx.notify();
     }
 
-    /// Picks row `index`. `effort` is the level the pick carries (the keyboard's, or one browsed
-    /// from the Reasoning list); `None` leaves the model's level as a plain click always did.
+    /// Picks row `index`, true when the pick was sent. `effort` is the level the pick carries (the
+    /// keyboard's, or one browsed from the Reasoning list); `None` leaves the model's level as a
+    /// plain click always did.
     pub(super) fn model_menu_pick(
         &mut self,
         index: usize,
         secondary: bool,
         effort: Option<String>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(state) = self.model_menu.as_ref() else {
-            return;
+            return false;
         };
         if state.view["disabled"] == true {
-            return;
+            return false;
         }
         let Some(key) = state.rows().get(index).map(|row| row["key"].clone()) else {
-            return;
+            return false;
         };
         let mut command = json!({"type":"modelMenuPick","key":key,"secondary":secondary});
         if let Some(effort) = effort {
             command["effort"] = effort.into();
         }
         self.model_menu_send(command, cx);
+        true
     }
 
     /// The pick the keyboard makes: the row with the level Left and Right left it on.
@@ -310,7 +312,7 @@ impl ChatOptionMenuPanel {
         index: usize,
         secondary: bool,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let effort = self.model_menu.as_ref().and_then(|state| {
             let row = state.rows().get(index)?;
             row["efforts"]
@@ -318,7 +320,7 @@ impl ChatOptionMenuPanel {
                 .is_some_and(|efforts| !efforts.is_empty())
                 .then(|| state.effort_for(row, &self.menu.read(cx).model_efforts))
         });
-        self.model_menu_pick(index, secondary, effort, cx);
+        self.model_menu_pick(index, secondary, effort, cx)
     }
 
     /// The level a mouse pick of row `index` carries: only one the keyboard or the Reasoning list moved.

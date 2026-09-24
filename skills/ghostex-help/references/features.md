@@ -610,7 +610,7 @@ box; hover the status line and click the pen after its last item to open
 Context details. Claude
 Code starts with Account, Model limit, 5h limit, 7d limit, and Repository
 starred; Codex starts with Account email, 7d limit, 7d reset, and Account
-resets; Cursor starts with Context used and Context tokens. Reset to
+resets; Cursor starts with Context used, Branch, and Lines changed. Reset to
 recommended returns to these. The status line and More details are available
 for Claude Code, Codex, and Cursor chats.
 Items without a value are hidden until their data is available again;
@@ -791,7 +791,8 @@ and along the bottom a button each for the reasoning level (brain), the context
 window (chart bars) and Fast mode (bolt). Clicking the context window or Fast
 mode button switches it; the reasoning button opens a short list to the side. A
 button the current model has no choice for is dimmed: reasoning and context
-window read Default, and Fast mode reads Off. Auto, where an agent offers it,
+window read Default, and Fast mode reads Off. Grok Build's fast model (Grok 4.7
+Fast) is not its own row: pick Grok 4.7 and switch Fast mode on or off. Auto, where an agent offers it,
 always sits at the top of that agent's list. Click a row's star to keep that
 model on the Favorites tab; hover the info icon that appears on a row to read
 what that model is for. In a session that has started, a model from another
@@ -802,10 +803,12 @@ button beside Fast mode shows the account in use and opens the list to switch.
 
 The Model & Effort Picker shortcut (Option+P by default on macOS) opens the same
 picker from the keyboard, and pressing it again closes it. Type to filter the
-list; Up and Down move through the models and then the bottom buttons; Left and
+list; Up and Down move through the models and then the bottom buttons, stopping
+at the top and bottom; Left and
 Right change the highlighted model's reasoning level, which the reasoning button
 shows; Tab and Shift+Tab move through the Favorites and agent tabs. Enter uses the highlighted model and level in
-this session, Shift+Enter saves them as the agent's default, and Cmd+1 to Cmd+9
+this session and closes the picker, Shift+Enter saves them as the agent's default,
+F switches Fast mode and C the context window while the search box is empty, and Cmd+1 to Cmd+9
 jump the highlight to one of the first nine rows without applying it. Escape closes it
 without changing anything. The key reminder along the bottom lists these.
 
@@ -1007,7 +1010,12 @@ Agent Hooks let gxserver watch agent status, questions, and
 completions for chat and notifications. Installing the Claude Code hooks also
 sets Claude Code's transcript retention (`cleanupPeriodDays`) so past
 conversations stay on disk instead of being deleted after 30 days; a value you
-set yourself is left unchanged. Agent approvals ("accept all") is a
+set yourself is left unchanged. Installing the Claude Code or Cursor hooks also
+registers a Ghostex status line command for that agent, which still runs your
+own status line script so the terminal footer looks the same; it is what feeds
+the chat's status line and More details (for Cursor: context use, output tokens,
+version, Max Mode, auto-run, worktree, plus the branch, lines changed, and pull
+request). Removing the hooks restores your own command. Agent approvals ("accept all") is a
 per-machine default with per-project overrides. Actions (Settings > Actions)
 are saved terminal commands or browser URLs shown on project headers and in
 the header’s Quick Actions button, which shows the name and icon of the Action
