@@ -76,6 +76,15 @@ impl GhostexGpuiApp {
         let gpui_engine_view = mount_slot_id
             .and_then(|slot_id| self.agents_gpui_engine_terminals.get(&slot_id.session_id))
             .map(|record| record.view.clone());
+        // CDXC:Terminal 2026-09-24 WHY:
+        // A freshly spawned engine viewer has no frame until the daemon's first dump is applied.
+        // Mounting it anyway painted an empty or partially loaded grid, and a session switch whose
+        // viewer had been retired showed that half-built state for frames before the real screen
+        // landed. The body stays on its blank terminal surface until the viewer holds a complete
+        // first frame, then mounts once. Ownership stays with the viewer the whole time.
+        let gpui_engine_ready = gpui_engine_view
+            .as_ref()
+            .is_none_or(|view| view.read(cx).has_displayable_frame());
         let gpui_engine_owns_pointer_input = gpui_engine_view.is_some();
         let gpui_engine_slot_id = mount_slot_id.filter(|_| gpui_engine_owns_pointer_input);
         let native_mount_slot_id = mount_slot_id.filter(|_| gpui_engine_view.is_none());
@@ -438,16 +447,19 @@ impl GhostexGpuiApp {
                     crate::app::render::sleeping_card::sleeping_card(None, title, click_to_wake),
                 ))
             })
-            .when_some(gpui_engine_view, |this, view| {
-                this.child(
-                    terminal_content_frame(
-                        div().size_full().child(view),
-                        terminal_horizontal_padding,
-                        terminal_vertical_padding,
-                        terminal_width_percent,
-                    ),
-                )
-            })
+            .when_some(
+                gpui_engine_view.filter(|_| gpui_engine_ready),
+                |this, view| {
+                    this.child(
+                        terminal_content_frame(
+                            div().size_full().child(view),
+                            terminal_horizontal_padding,
+                            terminal_vertical_padding,
+                            terminal_width_percent,
+                        ),
+                    )
+                },
+            )
             .when_some(native_mount_slot_id, |this, slot_id| {
                 let view = cx.entity().clone();
                 this.child({

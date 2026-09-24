@@ -1205,9 +1205,11 @@ impl TerminalView {
         self.title.as_deref()
     }
 
-    /// When this viewer last painted, for keep-alive recency decisions.
-    pub(crate) fn last_painted_at(&self) -> Option<web_time::Instant> {
-        self.last_prepaint
+    /// Whether the viewer holds a complete first frame. A freshly spawned
+    /// viewer does not until the daemon's first dump is applied; hosts gate
+    /// mounting on this so a respawn never paints an empty or partial grid.
+    pub(crate) fn has_displayable_frame(&self) -> bool {
+        self.frame.is_some()
     }
 
     /// Latest OSC 7 pwd read back from the terminal, if any.
