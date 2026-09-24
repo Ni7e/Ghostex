@@ -268,6 +268,32 @@ fn request_gxserver_body(
     body: &Value,
     flags: &Flags,
 ) -> CliResult<Value> {
+    let body = request_gxserver_envelope(target, pathname, body, flags)?;
+    let mut merged = Map::new();
+    merged.insert("ok".to_string(), Value::Bool(true));
+    if let Some(result) = body.get("result").and_then(Value::as_object) {
+        for (key, value) in result {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    merged.insert(
+        "requestId".to_string(),
+        body.get("requestId").cloned().unwrap_or(Value::Null),
+    );
+    Ok(Value::Object(merged))
+}
+
+/// The gxserver response envelope (`{ok, result, requestId, ...}`) exactly as the daemon sent it,
+/// for a caller that needs `result` untouched rather than spread into the top level.
+///
+/// A refusal is still an `Err`: [`CliError::Rpc`] keeps the daemon's body, so its `error` code
+/// survives for the caller.
+pub fn request_gxserver_envelope(
+    target: &Target,
+    pathname: &str,
+    body: &Value,
+    flags: &Flags,
+) -> CliResult<Value> {
     let _tunnel = ensure_gxserver_tunnel_for_rpc(target, flags)?;
     let timeout_ms = flags
         .number("timeout")
@@ -321,19 +347,7 @@ fn request_gxserver_body(
             })
         })));
     }
-    let body = response_body.unwrap_or_else(|| json!({}));
-    let mut merged = Map::new();
-    merged.insert("ok".to_string(), Value::Bool(true));
-    if let Some(result) = body.get("result").and_then(Value::as_object) {
-        for (key, value) in result {
-            merged.insert(key.clone(), value.clone());
-        }
-    }
-    merged.insert(
-        "requestId".to_string(),
-        body.get("requestId").cloned().unwrap_or(Value::Null),
-    );
-    Ok(Value::Object(merged))
+    Ok(response_body.unwrap_or_else(|| json!({})))
 }
 
 fn read_json_body(response: ureq::Response) -> Option<Value> {

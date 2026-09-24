@@ -23,6 +23,7 @@ pub mod rpc;
 pub mod saved_prompts;
 pub mod selector;
 mod session_chat_model;
+mod session_chat_rpc;
 mod session_chat_transcript;
 mod session_parking;
 pub mod sessions;
@@ -97,6 +98,7 @@ const HELP_GATE_EXCLUDED: &[&str] = &[
     "resources",
     "quick-actions",
     "saved-prompts",
+    "session-chat-rpc",
     "server",
     "settings",
     "tailcat",
@@ -270,6 +272,7 @@ fn is_known_command(name: &str) -> bool {
         "interrupt-session-chat",
         "handoff-session-chat-draft",
         "read-session-chat-queue",
+        "session-chat-rpc",
         "queue-session-chat-prompt",
         "update-session-chat-queued-prompt",
         "remove-session-chat-queued-prompt",
@@ -698,6 +701,7 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         handed out, never by a list position, so a phone acting on a row minutes
         later still lands on the prompt it displayed.
         */
+        "session-chat-rpc" => session_chat_rpc::session_chat_rpc_command(args),
         "read-session-chat-queue" => {
             run_bridge_action("readSessionChatQueue", Parser::SessionSelector, plain, args)
         }

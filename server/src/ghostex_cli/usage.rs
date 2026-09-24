@@ -393,6 +393,7 @@ pub fn usage() -> String {
         format_help_command("interrupt-session-chat <selector>", "Interrupt the session's running agent turn"),
         format_help_command("handoff-session-chat-draft <selector>", "Move the agent CLI's composer draft out of the terminal and print it"),
         format_help_command("read-session-chat-queue <selector> --json", "Read the session's queued chat prompts and synced composer draft"),
+        format_help_command("session-chat-rpc <method> --params-base64 <base64 json>", "Perform one session chat request for a remote chat client and print its outcome"),
         format_help_command("queue-session-chat-prompt <selector> <text>", "Queue a prompt for delivery the next time the agent stops"),
         format_help_command("update-session-chat-queued-prompt <selector> --prompt-id <id> [--text '<text>'] [--retry]", "Edit a queued prompt, or move a failed one back to queued"),
         format_help_command("remove-session-chat-queued-prompt <selector> --prompt-id <id> --json", "Delete a queued prompt and print the row that was removed"),
