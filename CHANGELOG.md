@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+## 10.2.1 - 2026-09-24
+
+**Ghostex 10.2.1 is out.** A chat fix for the Android app, seven new website views, a keyboard-driven model pop-up, chat that folds finished work away as it goes, Cmd+T for your last-used agent, sessions you can drag between Pinned, Sessions and Parked, and a large batch of chat, Windows and Linux fixes.
+
+### 📱 Android
+- **The Android app gets the fixed chat.** Update from Settings in the app to get the chat fixes and improvements in this release.
+
+### 🧭 More views beside your sessions
+- **Sentry, Figma, Vercel, Supabase, GitHub Actions, PostHog and Custom Website views.** Turn on the ones you want in Settings > Extensions, open one from the + menu and paste its home address; each project remembers its own, and Custom Website opens any site.
+- **The view picker opens and animates like a view,** its cards show one line of description with the rest on hover, and the panel toggles stay in place.
+
+### 🤖 A new model pop-up
+- **Pick a model and effort without leaving the keyboard.** The model pop-up replaces the quick picker: type to filter, Up and Down move, Left and Right change reasoning, Enter applies to this session and Shift+Enter saves it as the default; Option+P opens it on macOS.
+- **F and C switch Fast mode and the context window** while the search box is empty, and Cmd+1 to Cmd+9 jump to the first rows.
+- **Hand a conversation to another agent** by picking one of its models in a started session, and switch between signed-in Claude or Codex accounts from the Account button.
+- **The same picker in terminal view.** An agent terminal's bottom bar shows the model pill; turn it off with Model picker in terminal view.
+
+### 💬 Chat
+- **Finished work folds away.** When the agent finishes a turn its tool work folds under "Worked for Xs" above the reply; click it to open it again.
+- **Every expand and collapse animates,** and a conversation fades in when it opens instead of showing a skeleton.
+- **Tables start neat.** Wide tables wrap and scroll, and a larger preview window shows the whole table.
+- **The chat box edits like VS Code:** move, duplicate, delete and select lines with the usual shortcuts, and cut or copy the whole line with nothing selected.
+- **Messages you send while a model or mode switch is settling wait for it** instead of being refused, and queued messages that could not be delivered return to the input box with a notice.
+- **Videos, audio and PDFs in chat open in your default app.**
+- **Cursor chats show their branch and lines changed** in the status line and More details.
+- **Codex question replies read as normal answers,** and Copied! appears on the control you clicked.
+
+### 🗂 Sessions and the sidebar
+- **Cmd+T starts a chat with the agent you used last,** Cmd+Shift+T opens a terminal, and a new chat you leave empty closes by itself.
+- **Drag a session onto Pinned, Sessions or Parked** to pin, unpin or park it; an empty section shows its heading while you drag.
+- **Forking switches you to the fork,** named "Fork: <original name>".
+- **Project icons are found in nested app folders,** and projects without one show their first letter, thanks to @alp82.
+- **Drop a session that has no tab yet into the middle of a pane** to show it there.
+- **The Kanban board shows skeleton cards while it first loads,** and the split buttons in the header take the frosted glass look.
+
+### 👤 Accounts
+- **Claude reset credits in the usage panel.** See your reset credits and redeem a reset without leaving Ghostex.
+
+### 🪟 Windows and Linux
+- **Remote work between Windows, Linux and macOS is more reliable,** and Add Project can browse the selected computer's drives, including Windows paths from a Linux or macOS client.
+- **Linux dialogs stay attached to their window and open in the right place,** thanks to @alp82, and the window reports its app name correctly.
+- **Windows terminals keep their history** when a pane is resized or reattached.
+- **Linux attachments offer Images or files and Folders** before the system picker opens.
+
+### 🩹 Fixes
+- **Chat sends work on computers without the ghostex command installed;** Ghostex now installs and uses its own copy instead of opening an editor.
+- **Terminals show their complete history** when you first attach to a running session.
+- **Claude interrupts, rewinds, pasted content and trust prompts** behave correctly in chat, and Claude sessions keep their identity once a transcript is written.
+- **Codex questions asked in the background** show up and can be answered.
+- **Browser tabs load into an empty New Tab** and every tab can be closed.
+- **Cmd+F keeps the find bar focused,** the Maximize button opens the maximized chat box, chat menus show hover again, and queued message buttons show their icons.
+- **The scroll-to-bottom button no longer lingers** after its chat is gone.
+
 ## 10.2.0 - 2026-09-23
 
 **Ghostex 10.2.0 is out.** Window glass that shows your desktop, your wallpaper or a picture of your choice through the app, a new Theme page in Settings, panels that slide open and closed, a faster native Kanban board and Automate page, drag panes by their grip, and a round of Windows and Linux improvements.
