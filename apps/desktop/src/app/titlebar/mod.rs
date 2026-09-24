@@ -8,7 +8,6 @@
 // (inherent methods resolve on the type regardless of which module defines
 // them). See docs/2026-08-22/repo-restructure/SPLITS.md C1.
 mod account_reset;
-mod account_reset_flow;
 pub(crate) mod account_usage;
 pub(crate) mod action_execution;
 pub(crate) mod browser_menu;

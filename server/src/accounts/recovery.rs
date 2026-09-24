@@ -812,7 +812,6 @@ async fn deliver(state: Arc<AppState>, plan: Plan) {
                 )
                 .await
                 .map(|_| ())
-                .map_err(|e| e.message)
             })
         });
         crate::session_chat_queue::deliver_session_chat_queued_prompt(
@@ -822,6 +821,7 @@ async fn deliver(state: Arc<AppState>, plan: Plan) {
             &plan.session,
             prompt,
             &sender,
+            false,
         )
         .await
         .and_then(|d| {
