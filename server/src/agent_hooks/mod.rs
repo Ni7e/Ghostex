@@ -23,5 +23,6 @@ pub use api::{
     uninstall_agent_hooks,
 };
 pub use notify_runtime::run_notify_hook;
+pub(crate) use resolution::read_claude_hook_surface_records;
 pub(crate) use resolution::read_codex_hook_session_identities;
 pub use statusline::run_statusline_hook;

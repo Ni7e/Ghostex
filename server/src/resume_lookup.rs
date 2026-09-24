@@ -255,6 +255,11 @@ fn scan_claude_transcript(
                 names.push(custom_title.to_string());
             }
         }
+        if item_type == "ai-title" {
+            if let Some(ai_title) = item.get("aiTitle").and_then(Value::as_str) {
+                names.push(ai_title.to_string());
+            }
+        }
         if item_type == "agent-name" {
             if let Some(agent_name) = item.get("agentName").and_then(Value::as_str) {
                 names.push(agent_name.to_string());
@@ -266,8 +271,14 @@ fn scan_claude_transcript(
         if let Some(summary) = item.get("summary").and_then(Value::as_str) {
             summaries.push(summary.to_string());
         }
-        if item_type == "user" && first_user.is_empty() {
-            first_user = text_from_message(item.get("message"));
+        if item_type == "user"
+            && first_user.is_empty()
+            && item.get("isMeta").and_then(Value::as_bool) != Some(true)
+        {
+            let text = text_from_message(item.get("message"));
+            if !is_claude_local_command_text(&text) {
+                first_user = text;
+            }
         }
     }
     let project_score = if cwd_values
@@ -318,6 +329,15 @@ fn scan_claude_transcript(
         score: project_score + title_score + first_prompt_score,
         session_id,
     })
+}
+
+/// CDXC:AgentProviders 2026-09-24 WHY:
+/// Claude records slash commands and their output as `user` lines (`<command-name>`, `<local-command-stdout>`, the `isMeta` caveat) before the first typed prompt, so taking the first `user` line compared the saved first prompt against `/effort` output and never matched. Claude's automatic conversation title is stored only as `ai-title`, which is the title Ghostex shows for untitled sessions, so the title lookup reads it too.
+fn is_claude_local_command_text(text: &str) -> bool {
+    let text = text.trim_start();
+    text.starts_with("<command-name>")
+        || text.starts_with("<command-message>")
+        || text.starts_with("<local-command-")
 }
 
 /// CDXC:AgentProviders 2026-09-20 WHY:

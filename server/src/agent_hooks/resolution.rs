@@ -95,6 +95,53 @@ pub(crate) fn read_codex_hook_session_identities(
         .collect()
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ClaudeHookSurfaceRecord {
+    pub agent_session_id: String,
+    pub agent_session_path: Option<String>,
+    pub updated_at: f64,
+}
+
+/// Every Claude conversation id the hook store saw in one terminal surface, oldest first.
+pub(crate) fn read_claude_hook_surface_records(
+    paths: &GxserverPaths,
+    surface_id: &str,
+) -> Vec<ClaudeHookSurfaceRecord> {
+    let store_path = paths
+        .app_state_dir
+        .join("agent-hooks")
+        .join("claude-hook-sessions.json");
+    let data = read_json_object(&read_file_text(&store_path));
+    let Some(sessions) = data.get("sessions").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let text = |entry: &serde_json::Map<String, Value>, key: &str| {
+        entry
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let mut records: Vec<ClaudeHookSurfaceRecord> = sessions
+        .values()
+        .filter_map(Value::as_object)
+        .filter(|entry| text(entry, "surfaceId").as_deref() == Some(surface_id))
+        .filter_map(|entry| {
+            Some(ClaudeHookSurfaceRecord {
+                agent_session_id: text(entry, "sessionId")?,
+                agent_session_path: text(entry, "transcriptPath"),
+                updated_at: entry
+                    .get("updatedAt")
+                    .and_then(Value::as_f64)
+                    .unwrap_or_default(),
+            })
+        })
+        .collect();
+    records.sort_by(|left, right| left.updated_at.total_cmp(&right.updated_at));
+    records
+}
+
 pub(crate) fn provider_hook_paths(agent_id: &str, hook_paths: &HookPaths) -> Vec<PathBuf> {
     match agent_id {
         "codex" => {
