@@ -248,6 +248,10 @@ pub mod ffi {
     pub const GHOSTTY_MODE_ALT_SCROLL: GhosttyMode = 1007;
     pub const GHOSTTY_MODE_FOCUS_EVENT: GhosttyMode = 1004;
     pub const GHOSTTY_MODE_BRACKETED_PASTE: GhosttyMode = 2004;
+    /// DECSET 2026: synchronized output — the producer signals "defer painting
+    /// until the matching reset", so multi-chunk redraws never show
+    /// intermediate states.
+    pub const GHOSTTY_MODE_SYNCHRONIZED_OUTPUT: GhosttyMode = 2026;
 
     pub type GhosttyTerminalScrollViewportTag = c_int;
     pub const GHOSTTY_SCROLL_VIEWPORT_TOP: GhosttyTerminalScrollViewportTag = 0;

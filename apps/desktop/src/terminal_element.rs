@@ -680,6 +680,9 @@ pub struct TerminalView {
     first_frame_at: Option<web_time::Instant>,
     last_output_at: Option<web_time::Instant>,
     mount_gate_open: bool,
+    /// When deferral of a mid-synchronized-output refresh began (DECSET 2026),
+    /// with a 300ms bound so a lost closing marker cannot freeze the view.
+    sync_defer_started_at: Option<web_time::Instant>,
     /// CDXC:Zmx 2026-09-24 WHY:
     /// Parking a hidden viewer reflows its local grid to the resting width, and the redisplay reflow anchors at the bottom, so a viewer scrolled up into scrollback redisplayed at the wrong scroll level for a few frames until the next sync caught up — the flicker a session switch shows.
     /// The grid size, viewport offset, and bottom-anchor flag are saved before the park reflow; the redisplay settle restores them once the grid is back at the display size.
@@ -822,6 +825,7 @@ impl TerminalView {
             first_frame_at: None,
             last_output_at: None,
             mount_gate_open: false,
+            sync_defer_started_at: None,
             parked_viewport: None,
             displayed: true,
             snapshot_stale: false,
@@ -1092,6 +1096,25 @@ impl TerminalView {
         match event {
             TerminalEvent::Wakeup => {
                 self.last_output_at = Some(web_time::Instant::now());
+                // DECSET 2026: the producer wrapped a redraw in synchronized
+                // output and the close has not arrived yet, so the grid is
+                // mid-atomic-update. Defer the refresh — painting here is the
+                // garbage frame. Bounded: a lost marker must not freeze the
+                // view.
+                if self
+                    .model
+                    .mode_active(ffi::GHOSTTY_MODE_SYNCHRONIZED_OUTPUT)
+                {
+                    let defer_started = self
+                        .sync_defer_started_at
+                        .get_or_insert(web_time::Instant::now());
+                    if defer_started.elapsed() < Duration::from_millis(300) {
+                        self.snapshot_stale = true;
+                        self.sync_title_and_pwd(cx);
+                        return;
+                    }
+                }
+                self.sync_defer_started_at = None;
                 let drawn_recently = self
                     .last_prepaint
                     .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1));
