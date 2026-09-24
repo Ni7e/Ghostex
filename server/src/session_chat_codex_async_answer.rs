@@ -302,13 +302,20 @@ impl Driver<'_> {
         }
     }
 
-    async fn open(&self, title: &str) -> Result<Editor, String> {
+    /// `None` means Codex's terminal holds no pending question with this title.
+    async fn open(&self, title: &str, skipping: bool) -> Result<Option<Editor>, String> {
         let screen = capture_session_terminal_text(self.zmx_name)
             .await
             .ok_or("Could not read Codex's terminal.")?;
         if editor(&screen).is_none() {
-            let key = collapsed_binding(&screen)
-                .ok_or("Codex is not showing its pending questions. Nothing was submitted.")?;
+            let Some(key) = collapsed_binding(&screen) else {
+                // CDXC:SessionChat 2026-09-24 WHY: A card left over from an earlier Codex run has nothing to skip in the terminal. Skip retires it instead of failing with this error.
+                return if skipping {
+                    Ok(None)
+                } else {
+                    Err("Codex is not showing its pending questions. Nothing was submitted.".into())
+                };
+            };
             self.write(&key).await?;
         }
         let mut current = self.wait("the question editor opening", editor).await?;
@@ -329,7 +336,7 @@ impl Driver<'_> {
         }
         for _ in 0..100 {
             if matches_question(&current, title) {
-                return Ok(current);
+                return Ok(Some(current));
             }
             if current.position >= current.count {
                 break;
@@ -344,11 +351,19 @@ impl Driver<'_> {
                 })
                 .await?;
         }
-        Err("This question is no longer pending in Codex's terminal. Nothing was submitted.".into())
+        Ok(None)
     }
 
     async fn run(&self, answer: &AsyncAnswer) -> Result<(), String> {
-        let current = self.open(&answer.title).await?;
+        let Some(current) = self.open(&answer.title, answer.text.is_none()).await? else {
+            return match answer.text {
+                None => Ok(()),
+                Some(_) => Err(
+                    "This question is no longer pending in Codex's terminal. Nothing was submitted."
+                        .into(),
+                ),
+            };
+        };
         if let Some(text) = &answer.text {
             // Bracketed paste switches named choices to Other without a digit shortcut accidentally submitting a different answer.
             if answer.options > 0 {

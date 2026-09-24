@@ -137,7 +137,7 @@ fn refresh(state: &AppState, cursors: &mut HashMap<String, QuestionCursor>) {
         let Ok(version) = read_transcript_file_version(&path) else {
             continue;
         };
-        let started_at = async_questions_since(&session);
+        let started_at = record_process_run_start(state, &session, project_id, session_id);
         let cursor = cursors.entry(key).or_default();
         if cursor.path != path
             || cursor.started_at != started_at
@@ -260,6 +260,37 @@ fn broadcast(
 /// Turn completion and compaction do not start a new run, so questions still pending there remain answerable.
 pub(crate) fn async_questions_since(session: &Value) -> Option<i64> {
     parse_started_at(read_runtime_text(session, "sessionChatCodexStartedAt"))
+}
+
+/// CDXC:SessionChat 2026-09-24 WHY:
+/// The SessionStart hook is not a reliable run boundary: most running Codex sessions had never recorded one, and a thread resumed in another session kept none, so its old questions came back as cards and Skip failed with "Codex is not showing its pending questions". The live Codex process start is the run boundary; a later hook time (a /clear in the same process) still wins.
+fn record_process_run_start(
+    state: &AppState,
+    session: &Value,
+    project_id: &str,
+    session_id: &str,
+) -> Option<i64> {
+    let stored = async_questions_since(session);
+    let Ok((_, started)) = crate::session_chat_fleet_process::current_process(session, "codex")
+    else {
+        return stored;
+    };
+    if stored.is_some_and(|at| at >= started) {
+        return stored;
+    }
+    let at = chrono::DateTime::from_timestamp_millis(started)?
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    if let Ok(db) = open_gxserver_database(&state.paths) {
+        let changed = db.execute(
+            r#"UPDATE sessions SET runtimeSettingsJson = json_set(runtimeSettingsJson, '$.sessionChatCodexStartedAt', ?3)
+            WHERE projectId = ?1 AND sessionId = ?2"#,
+            rusqlite::params![project_id, session_id, at],
+        );
+        if changed.is_ok_and(|changed| changed > 0) {
+            let _ = broadcast(state, &db, project_id, session_id);
+        }
+    }
+    Some(started)
 }
 
 pub(crate) fn read_async_questions_since(
