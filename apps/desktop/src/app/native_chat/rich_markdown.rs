@@ -271,6 +271,48 @@ pub(super) fn table_action(
         .into_any_element()
 }
 
+/// A copy button in the table's toolbar, named for the format it copies.
+///
+/// CDXC:SessionChat 2026-09-24 DECISION:
+/// The two copy buttons "both just copy but one as csv and one as md, which isn't clear from the icons, maybe write md and csv next to the icons": both show the copy icon with the format written beside it.
+pub(super) fn table_copy_action(
+    id: &'static str,
+    format: &'static str,
+    p: &ChatAppearance,
+    click: impl Fn(&mut gpui::App) + 'static,
+) -> AnyElement {
+    let s = p.scale;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(3.0 * s))
+        .h(px(22.0 * s))
+        .px(px(5.0 * s))
+        .rounded(px(6.0 * s))
+        .chat_cursor_pointer()
+        .hover(|style| style.bg(p.border.opacity(0.7)))
+        .child(
+            svg()
+                .path("titlebar/copy.svg")
+                .size(px(14.0 * s))
+                .text_color(p.muted)
+                .flex_shrink_0(),
+        )
+        .child(
+            div()
+                .text_size(px(11.0 * s))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(p.muted)
+                .child(format),
+        )
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            click(cx)
+        })
+        .into_any_element()
+}
+
 /// The right-aligned toolbar under a table: what a reader can do with it.
 ///
 /// It keeps its row of space and fades in with the pointer, because a two-by-two
@@ -320,28 +362,18 @@ fn table_actions(
                     .update(cx, |chat, cx| chat.set_table_collapsed(key, expanded, cx));
             },
         ))
-        .child(table_action(
-            "copy-table",
-            "titlebar/copy.svg",
-            p,
-            move |cx| {
-                crate::app::helpers::gpui_copy_to_clipboard(
-                    ClipboardItem::new_string(markdown.clone()),
-                    cx,
-                );
-            },
-        ))
-        .child(table_action(
-            "copy-table-csv",
-            "titlebar/layout-columns.svg",
-            p,
-            move |cx| {
-                crate::app::helpers::gpui_copy_to_clipboard(
-                    ClipboardItem::new_string(table_csv(&csv)),
-                    cx,
-                );
-            },
-        ))
+        .child(table_copy_action("copy-table", "MD", p, move |cx| {
+            crate::app::helpers::gpui_copy_to_clipboard(
+                ClipboardItem::new_string(markdown.clone()),
+                cx,
+            );
+        }))
+        .child(table_copy_action("copy-table-csv", "CSV", p, move |cx| {
+            crate::app::helpers::gpui_copy_to_clipboard(
+                ClipboardItem::new_string(table_csv(&csv)),
+                cx,
+            );
+        }))
         .into_any_element()
 }
 

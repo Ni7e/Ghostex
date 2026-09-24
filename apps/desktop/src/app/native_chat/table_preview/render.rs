@@ -113,9 +113,9 @@ impl Render for TablePreviewWindow {
                             .flex()
                             .items_center()
                             .gap(px(2.0 * s))
-                            .child(rich_markdown::table_action(
+                            .child(rich_markdown::table_copy_action(
                                 "copy-table",
-                                "titlebar/copy.svg",
+                                "MD",
                                 &p,
                                 move |cx| {
                                     crate::app::helpers::gpui_copy_to_clipboard(
@@ -124,9 +124,9 @@ impl Render for TablePreviewWindow {
                                     );
                                 },
                             ))
-                            .child(rich_markdown::table_action(
+                            .child(rich_markdown::table_copy_action(
                                 "copy-table-csv",
-                                "titlebar/layout-columns.svg",
+                                "CSV",
                                 &p,
                                 move |cx| {
                                     crate::app::helpers::gpui_copy_to_clipboard(
