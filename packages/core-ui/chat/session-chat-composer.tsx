@@ -3,7 +3,11 @@ import { sessionChatAppendDraftText } from '@/packages/shared/session-chat-prese
 import { SESSION_CHAT_FILE_SUGGESTION_HEADING, composerSuggestions, completeComposerMention, composerNativeCommand, sessionChatSuggestionRowRadius } from '@/packages/shared/session-chat-presentation/composer-suggestions';
 import { SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS, DESKTOP_SESSION_CHAT_PLACEHOLDER } from '@/packages/shared/session-chat-controller/composer-policy';
 import { deliverChatSubmission, editQueuedChatPrompt, restoreUndeliveredChatText } from '@/packages/shared/session-chat-controller/submission';
-import { nextFileReferenceIndex, insertChatReference } from '@/packages/shared/session-chat-presentation/references';
+import {
+  nextFileReferenceIndex,
+  insertChatReference,
+  nativePathReference,
+} from '@/packages/shared/session-chat-presentation/references';
 import { classifyDraftHandoff } from '@/packages/shared/session-chat-controller/draft-handoff';
 import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { flushClientStorage } from '@/packages/client-storage';
@@ -1841,7 +1845,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const insertFileReference = (path: string): void => {
       const api = getInputApi();
       const current = api?.getValue() ?? draft;
-      insertReference(`[File #${nextFileReferenceIndex(current)}](${path})`);
+      insertReference(nativePathReference(path, current));
     };
 
     const appendFileReferences = (paths: readonly string[]): void => {
@@ -1850,8 +1854,9 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       }
       const api = getInputApi();
       const current = api?.getValue() ?? draftRef.current;
-      const firstIndex = nextFileReferenceIndex(current);
-      const references = paths.map((path, index) => `[File #${firstIndex + index}](${path})`).join('\n');
+      const references = paths
+        .reduce<string[]>((lines, path) => [...lines, nativePathReference(path, `${current}\n${lines.join('\n')}`)], [])
+        .join('\n');
       const separator = current === '' || current.endsWith('\n\n') ? '' : current.endsWith('\n') ? '\n' : '\n\n';
       const next = `${current}${separator}${references}`;
       updateDraft(next, next.length);

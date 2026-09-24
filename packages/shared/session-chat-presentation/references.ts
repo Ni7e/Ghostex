@@ -1,7 +1,14 @@
+import { sessionChatMediaKind, sessionChatPathNoun } from './reference-pills';
+
 /** Rich Prompt Editor numbering: max existing [Image #N]( in the draft, +1. */
 export function nextImageReferenceIndex(text: string): number {
+  return nextNamedReferenceIndex(text, 'Image');
+}
+
+/** Images, videos, audio, and PDFs each count on their own: max existing [<noun> #N]( in the draft, +1. */
+function nextNamedReferenceIndex(text: string, noun: string): number {
   let highest = 0;
-  for (const match of text.matchAll(/\[Image #(\d+)·?\]\(/g)) {
+  for (const match of text.matchAll(new RegExp(`\\[${noun} #(\\d+)·?\\]\\(`, 'g'))) {
     const index = Number.parseInt(match[1] ?? '', 10);
     if (Number.isFinite(index)) {
       highest = Math.max(highest, index);
@@ -44,10 +51,14 @@ export function insertChatReference(
   return { text: `${current.slice(0, start)}${inserted}${current.slice(end)}`, caret: start + inserted.length };
 }
 
+/** `[Image #N](path)`, `[Video #N](path)`, and so on, falling back to `[File #N](path)`. */
 export function nativePathReference(path: string, text: string): string {
-  return IMAGE_PATH_PATTERN.test(path)
-    ? `[Image #${nextImageReferenceIndex(text)}](${path})`
-    : `[File #${nextFileReferenceIndex(text)}](${path})`;
+  if (IMAGE_PATH_PATTERN.test(path)) return `[Image #${nextImageReferenceIndex(text)}](${path})`;
+  if (sessionChatMediaKind(path)) {
+    const noun = sessionChatPathNoun(path);
+    return `[${noun} #${nextNamedReferenceIndex(text, noun)}](${path})`;
+  }
+  return `[File #${nextFileReferenceIndex(text)}](${path})`;
 }
 
 /** CDXC:Clipboard 2026-09-23 DECISION: User: images pasted into a question answer should appear as [Image #1] and render exactly like the GPUI chat composer. */

@@ -6,11 +6,11 @@ import {
   useSessionChatHostLinks,
 } from './session-chat-links';
 import { playCopySound } from '../copy-sound';
-import { sessionChatReferenceKind } from './session-chat-reference-pills';
+import { sessionChatMediaKind, sessionChatPathNoun, sessionChatReferenceKind } from './session-chat-reference-pills';
 
 /**
- * CDXC:SessionChat 2026-09-16 DECISION:
- * User: every path-copy context menu offers Open File/Folder Location directly below Copy Path, superseding the September 12 removal.
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: every path-copy context menu offers the location row directly below Copy Path, named for what the path is (Open Video Location, Open Image Location, Open File Location, Open Folder Location) instead of the generic Open File/Folder Location. This supersedes the September 16 wording.
  * URLs offer Copy URL and opening in the embedded or external browser.
  */
 export function SessionChatReferenceMenuItems(reference: { href: string } | { filePath: string }) {
@@ -49,10 +49,18 @@ export function SessionChatReferenceMenuItems(reference: { href: string } | { fi
   if (target.kind !== 'file') return null;
   const position = 'href' in reference ? sessionChatFilePositionFromHref(reference.href) : undefined;
   const isFolder = sessionChatReferenceKind('', target.path) === 'folder';
+  const isMedia = sessionChatMediaKind(target.path) !== null;
+  const noun = sessionChatPathNoun(target.path);
   const supportsDocs = /\.(?:md|markdown|mdown|mkdn|htm|html|excalidraw)$/i.test(target.path);
   return (
     <>
-      {!isFolder && links?.openFileInCode ? (
+      {isMedia && links?.openFile ? (
+        <ContextMenuItem onClick={() => links.openFile?.(target.path)}>
+          <IconExternalLink aria-hidden='true' />
+          Open {noun}
+        </ContextMenuItem>
+      ) : null}
+      {!isFolder && !isMedia && links?.openFileInCode ? (
         <ContextMenuItem onClick={() => links.openFileInCode?.(target.path, position)}>
           <IconCode aria-hidden='true' />
           Open in Code
@@ -70,7 +78,7 @@ export function SessionChatReferenceMenuItems(reference: { href: string } | { fi
       </ContextMenuItem>
       <ContextMenuItem disabled={!links?.locateFile} onClick={() => links?.locateFile?.(target.path)}>
         <IconFolderOpen aria-hidden='true' />
-        Open File/Folder Location
+        Open {noun} Location
       </ContextMenuItem>
     </>
   );

@@ -1092,6 +1092,28 @@ impl GhostexGpuiApp {
             .extension()
             .and_then(|extension| extension.to_str())
             .map(str::to_ascii_lowercase);
+        // CDXC:SessionChat 2026-09-24 DECISION:
+        // User: clicking a video in chat opens it normally with the OS default app on macOS, Windows, and Linux, never in the code editor. Audio and PDFs follow the same rule.
+        // SEE-ALSO: `sessionChatMediaKind` in `packages/shared/session-chat-presentation/reference-pills.ts` keeps the same extension list for the labels and menu rows.
+        if requested_view.is_none()
+            && matches!(
+                extension.as_deref(),
+                Some(
+                    "3gp" | "avi" | "flv" | "m2ts" | "m4v" | "mkv" | "mov" | "mp4" | "mpeg"
+                        | "mpg" | "mts" | "ogv" | "webm" | "wmv" | "aac" | "aif" | "aiff"
+                        | "flac" | "m4a" | "mp3" | "oga" | "ogg" | "opus" | "wav" | "wma"
+                        | "pdf"
+                )
+            )
+        {
+            if gpui_open_path(&file_path).is_err() {
+                self.report_session_chat_file_open_failure(
+                    "The operating system could not open that file.",
+                    cx,
+                );
+            }
+            return;
+        }
         let settings = shared_settings::shared_sidebar_settings_snapshot();
         let document_preferred_view = match extension.as_deref() {
             Some("md" | "markdown" | "mdown" | "mkdn") => Some(settings.markdown_file_open_view()),
