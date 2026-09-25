@@ -482,13 +482,9 @@ export class GpuiSidebarRuntime {
       */
       if (
         message.type === 'renameSession' ||
-        message.type === 'scheduleDelayedSend' ||
-        message.type === 'cancelDelayedSend' ||
-        message.type === 'postponeDelayedSend' ||
         message.type === 'confirmAgentHookLaunch' ||
         message.type === 'createSession' ||
-        message.type === 'runSidebarAgent' ||
-        message.type === 'setSessionNote'
+        message.type === 'runSidebarAgent'
       ) {
         void this.handleSidebarMessage(message);
         return;
@@ -948,15 +944,6 @@ export class GpuiSidebarRuntime {
       case 'fullReloadGroup':
         await this.fullReloadWorkspaceGroup(message.groupId);
         return;
-      case 'scheduleDelayedSend':
-        await this.scheduleRemoteDelayedSend(message);
-        return;
-      case 'postponeDelayedSend':
-        await this.postponeDelayedSend(message.sessionId, message.delayMs);
-        return;
-      case 'cancelDelayedSend':
-        await this.cancelDelayedSend(message.sessionId);
-        return;
       case 'openAutomationsPage':
         /*
         CDXC:Automations 2026-07-08:
@@ -1001,9 +988,6 @@ export class GpuiSidebarRuntime {
         return;
       case 'setSessionParked':
         await this.setSessionParked(message.sessionId, message.parked);
-        return;
-      case 'setSessionNote':
-        await this.saveSessionNote(message.sessionId, message.note);
         return;
       /*
       CDXC:StateSync 2026-07-29:

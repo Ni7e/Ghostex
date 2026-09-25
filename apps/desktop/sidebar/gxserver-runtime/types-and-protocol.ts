@@ -130,14 +130,10 @@ export type GpuiSidebarHostMessage =
          * Rust since 2026-09-25: apps/desktop/src/app/gx_store/create/.)
          */
         type:
-          | 'cancelDelayedSend'
           | 'confirmAgentHookLaunch'
           | 'createSession'
           | 'renameSession'
-          | 'runSidebarAgent'
-          | 'scheduleDelayedSend'
-          | 'postponeDelayedSend'
-          | 'setSessionNote';
+          | 'runSidebarAgent';
       }
     >;
 

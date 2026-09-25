@@ -7,5 +7,6 @@ mod runtime_actions;
 pub(crate) mod shown_sessions;
 pub(crate) mod shown_sessions_report;
 pub(crate) mod session_calls;
+mod session_edits;
 mod lifecycle_requests;
 mod close_after_done;

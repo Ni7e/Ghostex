@@ -52,7 +52,6 @@ import type {
   GxserverForkSessionResult,
   GxserverProjectId,
   GxserverSessionId,
-  GxserverSessionRenameRequestResult,
   GxserverSessionTransitionResult,
 } from '@/packages/shared/gxserver-protocol';
 import type { SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
@@ -125,7 +124,6 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
   ): Promise<void>;
   setSessionParked(sessionId: string, parked: boolean): Promise<void>;
   snoozeSession(sessionId: string, snoozedUntil: string): Promise<void>;
-  saveSessionNote(sessionId: string, note: string): Promise<void>;
   runSessionLifecycleCommand(
     sessionId: string,
     path: Extract<
@@ -911,106 +909,50 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     this: GpuiSidebarRuntime,
     message: Extract<SidebarToExtensionMessage, { type: 'renameSession' }>
   ): Promise<void> {
-    const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
-    if (remoteSession) {
-      /*
-      CDXC:SessionTitles 2026-07-29:
-      Empty-title Generate Name is a local-transcript flow; a remote machine's
-      transcripts are not readable here, and a blank direct rename would erase
-      the remote title.
-      */
-      if (!message.title.trim()) {
-        return;
-      }
-      /*
-      CDXC:RemoteMachines 2026-08-12:
-      Remote agent sessions must use the same pending-metadata rename contract
-      as local sessions. The remote gxserver owns that session's zmx provider,
-      so ask it to submit the provider-specific slash command itself instead of
-      only updating sidebar metadata or trying to use GPUI's local Ghostty
-      surface bridge.
-      */
-      this.postRemoteGxserverSidebarRequest(remoteSession.machineId, '/api/requestSessionRename', {
-        ...(message.agentId ? { agentName: message.agentId } : {}),
-        projectId: remoteSession.projectId,
-        reason: 'gpui-sidebar',
-        sessionId: remoteSession.sessionId,
-        submitAgentRenameCommand: true,
-        title: message.title,
-        titleSource: 'user',
-      });
+    /*
+    Only Generate Name reaches the runtime: a plain rename, local or remote, is Rust's
+    (gx_store/terminal_lifecycle/session_edits.rs).
+    */
+    if (!message.shouldGenerateTitle) {
       return;
     }
     const reference = parseGxserverPresentationProjectSessionId(message.sessionId);
     if (!reference || !this.client) {
       return;
     }
-    if (message.shouldGenerateTitle) {
-      /*
-      CDXC:Sessions 2026-07-29:
-      Generate Name reuses the first-message auto-title UX end to end:
-      gxserver marks the session generating (the card shows the same
-      "Generating title…" chrome), summarizes the pasted text with the chosen
-      generation agent, stages the agent rename command through zmx with the
-      same delayed real Enter, and applies the generated title. The long
-      pasted text must never reach `/api/requestSessionRename` as a literal
-      title.
-      */
-      const generationAgent = this.resolveSidebarAgent(message.agentId ?? '');
-      const generationCommand = generationAgent?.command?.trim();
-      /**
-       * CDXC:SessionTitles 2026-09-15 WHY:
-       * The picker returns a launcher configuration id, but title generation needs its CLI family. Passing a custom Claude id previously selected Codex flags and ran `claude --yolo exec ...`, which exits immediately.
-       * Keep the selected configuration's command so its account and arguments survive the family resolution.
-       */
-      const generationFamily =
-        getDefaultSidebarAgentById(generationAgent?.agentId)?.agentId ??
-        getDefaultSidebarAgentByIcon(generationAgent?.icon)?.agentId;
-      try {
-        if (message.agentId && (!generationCommand || !isSessionTitleGenerationAgent(generationFamily))) {
-          throw new Error('Choose a configured agent that supports name generation.');
-        }
-        await this.client.rpc('/api/generateSessionTitle', {
-          ...(generationFamily ? { agentId: generationFamily } : {}),
-          ...(generationCommand ? { command: generationCommand } : {}),
-          projectId: reference.projectId,
-          sessionId: reference.sessionId,
-          text: message.title,
-        });
-      } catch (error) {
-        this.postSidebarActionToast('error', 'Could not generate session name', {
-          description: error instanceof Error ? error.message : String(error),
-        });
-      }
-      return;
-    }
+    /*
+    CDXC:Sessions 2026-07-29:
+    Generate Name reuses the first-message auto-title UX end to end:
+    gxserver marks the session generating (the card shows the same
+    "Generating title…" chrome), summarizes the pasted text with the chosen
+    generation agent, stages the agent rename command through zmx with the
+    same delayed real Enter, and applies the generated title. The long
+    pasted text must never reach `/api/requestSessionRename` as a literal
+    title.
+    */
+    const generationAgent = this.resolveSidebarAgent(message.agentId ?? '');
+    const generationCommand = generationAgent?.command?.trim();
     /**
      * CDXC:SessionTitles 2026-09-15 WHY:
-     * Chat view can have no mounted terminal to receive the native rename bridge, so local renames must use gxserver's queued command submission just like remote sessions.
-     * This replaces the client-side terminal staging path and keeps the current view open while the agent confirms its title through normal metadata sync.
+     * The picker returns a launcher configuration id, but title generation needs its CLI family. Passing a custom Claude id previously selected Codex flags and ran `claude --yolo exec ...`, which exits immediately.
+     * Keep the selected configuration's command so its account and arguments survive the family resolution.
      */
+    const generationFamily =
+      getDefaultSidebarAgentById(generationAgent?.agentId)?.agentId ??
+      getDefaultSidebarAgentByIcon(generationAgent?.icon)?.agentId;
     try {
-      const result = await this.client.rpc<GxserverSessionRenameRequestResult>('/api/requestSessionRename', {
-        agentName: message.agentId,
+      if (message.agentId && (!generationCommand || !isSessionTitleGenerationAgent(generationFamily))) {
+        throw new Error('Choose a configured agent that supports name generation.');
+      }
+      await this.client.rpc('/api/generateSessionTitle', {
+        ...(generationFamily ? { agentId: generationFamily } : {}),
+        ...(generationCommand ? { command: generationCommand } : {}),
         projectId: reference.projectId,
-        reason: 'gpui-sidebar',
         sessionId: reference.sessionId,
-        submitAgentRenameCommand: true,
-        title: message.title,
-        titleSource: 'user',
+        text: message.title,
       });
-      /*
-      CDXC:Sessions 2026-08-18:
-      Session cards render `displayTitle`, so patching only `title` moved the
-      row's alias without changing the text on the card. Apply gxserver's own
-      title projection instead, the same fields presentation publishes, so the
-      card, its tooltip, and the alias stay one consistent title. Agent sessions
-      keep the previous title here until the Agent CLI confirms the rename; the
-      confirmed title lands through the normal presentation delta.
-      */
-      this.patchPresentationSession(reference.projectId, reference.sessionId, result.projection);
     } catch (error) {
-      this.postSidebarActionToast('error', 'Could not rename session', {
+      this.postSidebarActionToast('error', 'Could not generate session name', {
         description: error instanceof Error ? error.message : String(error),
       });
     }
@@ -1100,49 +1042,6 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
   remote resolve from their own machine's presentation for the same reason
   `saveSessionNote` writes to its own machine's daemon.
   */
-  /*
-  CDXC:SessionNotes 2026-08-24:
-  Save (or, with an empty note, clear) this session's free-text note.
-
-  - The note is filed against the session's PROVIDER conversation id, which only
-    the daemon can resolve, so the client sends the ghostex session reference and
-    nothing else. That is also why a note survives closing the row: resuming the
-    same conversation lands on the same note.
-  - No optimistic patch. gxserver schedules a presentation delta after a
-    successful save, and that delta is what puts the note on the row; guessing
-    here would paint a note the daemon may have refused (a session that never
-    captured a conversation id has nothing to file against).
-  - A remote row routes to ITS machine's daemon, exactly like every other
-    session mutation. A daemon that predates session notes rejects the call, so
-    the failure is surfaced as a toast instead of a silently lost note.
-  */
-  async saveSessionNote(this: GpuiSidebarRuntime, sessionId: string, note: string): Promise<void> {
-    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
-    try {
-      if (remoteSession) {
-        await this.requestRemoteGxserver(remoteSession.machineId, '/api/saveSessionAgentNote', {
-          note,
-          projectId: remoteSession.projectId,
-          sessionId: remoteSession.sessionId,
-        });
-        return;
-      }
-      const reference = parseGxserverPresentationProjectSessionId(sessionId);
-      if (!reference || !this.client) {
-        return;
-      }
-      await this.client.rpc('/api/saveSessionAgentNote', {
-        note,
-        projectId: reference.projectId,
-        sessionId: reference.sessionId,
-      });
-    } catch {
-      this.postSidebarActionToast('warning', 'Could not save the session note', {
-        description: 'gxserver refused the note. This session may not have an agent conversation yet.',
-      });
-    }
-  },
-
   /*
   CDXC:StateSync 2026-07-29:
   One code path for settle/unsettle/snooze/unsnooze, local and remote.

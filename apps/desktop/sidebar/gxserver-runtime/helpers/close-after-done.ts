@@ -27,17 +27,3 @@ export function formatGpuiCloseAfterDoneCountdown(remainingMs: number): string {
   }
   return `${paddedMinutes}:${paddedSeconds}`;
 }
-
-export function formatGpuiDelayedSendDelay(delayMs: number): string {
-  const totalSeconds = Math.max(1, Math.ceil(delayMs / 1_000));
-  const hours = Math.floor(totalSeconds / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-  return [
-    hours > 0 ? `${hours}h` : undefined,
-    minutes > 0 ? `${minutes}m` : undefined,
-    seconds > 0 ? `${seconds}s` : undefined,
-  ]
-    .filter((part): part is string => part !== undefined)
-    .join(' ');
-}
