@@ -128,11 +128,11 @@ pub use crate::sidebar_accounts::{
     SessionAccounts, SessionAccountsCommand, SidebarAccountMenus, AGENT_ACCOUNTS_PATH,
     INVALID_ACCOUNTS_ANSWER, SESSION_COMPUTER_UNAVAILABLE,
 };
+pub use crate::renderer_commands::*;
 pub use crate::sidebar_drag::{
     owns_order_write_message, owns_project_move_command, owns_project_order_message,
     owns_session_move_command, plan_added_project_placement, plan_added_project_space_membership,
     plan_order_write, plan_project_move, plan_project_order_write,
-pub use crate::renderer_commands::*;
     plan_session_move, sidebar_group_membership, sidebar_project_group_order,
     AddedProjectPlacement, OrderWrite,
     OrderWritePlan, ProjectMovePlan,
