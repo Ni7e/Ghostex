@@ -1,13 +1,9 @@
-import { storageScope } from '@/packages/client-storage';
 /*
 CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
-import { GPUI_CLOSE_AFTER_DONE_STORAGE_KEY } from '../constants';
 import type { GxserverPresentationSession } from '@/packages/shared/gxserver-protocol';
-
-const clientStorage = storageScope(["closeAfterDone"]);
 
 export function isGpuiInactiveProjectPresentationSession(session: GxserverPresentationSession): boolean {
   /*
@@ -17,23 +13,6 @@ export function isGpuiInactiveProjectPresentationSession(session: GxserverPresen
   reappear in the sidebar.
   */
   return session.lifecycleState === 'running' && session.activity !== 'working' && session.activity !== 'attention';
-}
-
-export function isGpuiCloseAfterDonePresentationSessionDone(session: GxserverPresentationSession): boolean {
-  if (session.activity === 'attention') {
-    return true;
-  }
-  return session.activity !== 'working' && hasGpuiCloseAfterDoneAgentIdentity(session);
-}
-
-export function hasGpuiCloseAfterDoneAgentIdentity(session: GxserverPresentationSession): boolean {
-  return Boolean(
-    session.agentSessionId?.trim() ||
-    session.agentSessionPath?.trim() ||
-    session.agentName?.trim() ||
-    session.agentId?.trim() ||
-    session.agentIcon?.trim()
-  );
 }
 
 export function formatGpuiCloseAfterDoneCountdown(remainingMs: number): string {
@@ -61,32 +40,4 @@ export function formatGpuiDelayedSendDelay(delayMs: number): string {
   ]
     .filter((part): part is string => part !== undefined)
     .join(' ');
-}
-
-export function readStoredGpuiCloseAfterDoneSessionIds(): string[] {
-  try {
-    const raw = clientStorage.getItem(GPUI_CLOSE_AFTER_DONE_STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
-  } catch {
-    return [];
-  }
-}
-
-export function writeStoredGpuiCloseAfterDoneSessionIds(sessionIds: readonly string[]): void {
-  try {
-    if (sessionIds.length === 0) {
-      clientStorage.removeItem(GPUI_CLOSE_AFTER_DONE_STORAGE_KEY);
-      return;
-    }
-    clientStorage.setItem(GPUI_CLOSE_AFTER_DONE_STORAGE_KEY, JSON.stringify([...sessionIds]));
-  } catch {
-    // Storage availability must never gate close-after-done behavior.
-  }
 }

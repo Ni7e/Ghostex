@@ -769,7 +769,7 @@ fn resolve_row(
         row: Arc::new(session_row(
             key,
             &session,
-            inputs.host.close_after_done.get(&sidebar_id),
+            super::inputs::CloseAfterDoneInput::from_session(&session).as_ref(),
             inputs.host.local_delayed_sends.get(&sidebar_id),
             context,
         )),

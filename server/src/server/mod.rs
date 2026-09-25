@@ -182,6 +182,7 @@ pub mod agent_http;
 pub mod agent_prompt_search_http;
 pub mod background_tasks;
 mod browser_tcp;
+mod close_after_done_runtime;
 pub mod commit_message_generation;
 pub mod http_endpoints;
 pub mod http_infra;
@@ -580,6 +581,7 @@ pub async fn run_gxserver_foreground(
     let _ = crate::session_chat_queue::recover_session_chat_queue_after_restart(&paths);
     crate::accounts::recovery::start(state.clone());
     session_auto_sleep_sweep::start_session_auto_sleep_sweep(state.clone());
+    close_after_done_runtime::start_close_after_done_runtime(state.clone());
     /*
     CDXC:SessionChat 2026-08-21:
     The queue scheduler is built HERE rather than beside the other runtimes
@@ -2270,6 +2272,15 @@ async fn route_http(
         in memory with a TTL — see `session_keep_awake` — and is honored by
         `/api/sleepSession` only for automatic sweeps.
         */
+        "/api/toggleCloseAfterDone" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, db, params, _| {
+                close_after_done_runtime::toggle_close_after_done(&state, db, repository, params)
+            },
+        ),
         "/api/holdSessionsAwake" => handle_domain_http(
             &state,
             endpoint.path,

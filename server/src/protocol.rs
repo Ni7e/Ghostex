@@ -479,6 +479,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         the other session-scoped lifecycle calls next to it.
         */
         | "/api/holdSessionsAwake"
+        | "/api/toggleCloseAfterDone"
         | "/api/sleepSession"
         | "/api/wakeSession"
         | "/api/startSessionProvider"

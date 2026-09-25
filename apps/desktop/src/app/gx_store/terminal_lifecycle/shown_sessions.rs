@@ -37,6 +37,9 @@ impl GhostexGpuiApp {
         self.gx_store_send_hold_calls(calls, cx);
         if !self.gx_store.shown_sessions.renewing {
             self.gx_store.shown_sessions.renewing = true;
+            // Once per run, when the app is up: the old runtime's Close After Done set moves to
+            // the daemons (terminal_lifecycle/close_after_done.rs).
+            self.gx_store_migrate_close_after_done_storage(cx);
             cx.spawn(async move |this, cx| {
                 loop {
                     cx.background_executor()

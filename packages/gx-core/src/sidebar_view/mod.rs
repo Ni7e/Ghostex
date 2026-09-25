@@ -10,6 +10,7 @@
 
 pub(crate) mod agents;
 mod armed_actions;
+mod close_after_done;
 mod assemble;
 pub(crate) mod close_successor;
 pub(crate) mod collections;

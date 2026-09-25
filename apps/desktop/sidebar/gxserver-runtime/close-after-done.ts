@@ -3,19 +3,10 @@ CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
-import {
-  GPUI_CLOSE_AFTER_DONE_DELAY_MS,
-  GPUI_DELAYED_SEND_MAX_DELAY_MS,
-} from './constants';
+import { GPUI_DELAYED_SEND_MAX_DELAY_MS } from './constants';
 import type { GpuiSidebarRuntime } from './core';
-import {
-  formatGpuiCloseAfterDoneCountdown,
-  formatGpuiDelayedSendDelay,
-  isGpuiCloseAfterDonePresentationSessionDone,
-  writeStoredGpuiCloseAfterDoneSessionIds,
-} from './helpers/close-after-done';
+import { formatGpuiCloseAfterDoneCountdown, formatGpuiDelayedSendDelay } from './helpers/close-after-done';
 import { parseGpuiRemotePresentationSessionId } from './helpers/remote-presentation';
-import type { GpuiCloseAfterDoneTimer } from './types-and-protocol';
 import type {
   GxserverPresentationCloseAfterDoneProjection,
   GxserverPresentationDelayedSendProjection,
@@ -39,17 +30,7 @@ export interface GpuiSidebarRuntimeCloseAfterDoneMethods {
   ): Promise<void>;
   postponeDelayedSend(sessionId: string, delayMs: number): Promise<void>;
   cancelDelayedSend(sessionId: string): Promise<void>;
-  toggleCloseAfterDone(sessionId: string): void;
   findPresentationSessionRowForSidebarSessionId(sessionId: string): GxserverPresentationSession | undefined;
-  refreshCloseAfterDoneTimers(): void;
-  refreshCloseAfterDoneTimer(sessionId: string, nowMs: number): void;
-  resetCloseAfterDoneCountdown(sessionId: string, timer: GpuiCloseAfterDoneTimer): void;
-  completeCloseAfterDoneTimer(sessionId: string, expectedDeadlineAtMs: number): void;
-  clearCloseAfterDoneTimer(sessionId: string): void;
-  persistCloseAfterDoneSessionIds(): void;
-  ensureCloseAfterDoneCountdownTicker(): void;
-  stopCloseAfterDoneCountdownTickerIfIdle(): void;
-  hasActiveCloseAfterDoneCountdown(): boolean;
   getCloseAfterDoneProjection(sessionId: string): GxserverPresentationCloseAfterDoneProjection | undefined;
   getDelayedSendProjection(sessionId: string): GxserverPresentationDelayedSendProjection | undefined;
 }
@@ -186,27 +167,6 @@ export const gpuiSidebarRuntimeCloseAfterDoneMethods = {
     }
   },
 
-  toggleCloseAfterDone(this: GpuiSidebarRuntime, sessionId: string): void {
-    const session = this.findPresentationSessionRowForSidebarSessionId(sessionId);
-    if (!session) {
-      this.postSidebarActionToast('info', 'Close After Done is only available for terminal sessions.');
-      return;
-    }
-    if (this.closeAfterDoneTimersBySessionId.has(sessionId)) {
-      this.clearCloseAfterDoneTimer(sessionId);
-      this.publishPresentation('patch');
-      this.postSidebarActionToast('info', 'Close After Done canceled');
-      return;
-    }
-    this.closeAfterDoneTimersBySessionId.set(sessionId, {});
-    this.persistCloseAfterDoneSessionIds();
-    this.refreshCloseAfterDoneTimer(sessionId, Date.now());
-    this.publishPresentation('patch');
-    this.postSidebarActionToast('info', 'Close After Done enabled', {
-      description: 'Closes after Done stays visible for 3m.',
-    });
-  },
-
   findPresentationSessionRowForSidebarSessionId(
     this: GpuiSidebarRuntime,
     sessionId: string
@@ -224,133 +184,27 @@ export const gpuiSidebarRuntimeCloseAfterDoneMethods = {
     );
   },
 
-  refreshCloseAfterDoneTimers(this: GpuiSidebarRuntime): void {
-    const nowMs = Date.now();
-    for (const sessionId of [...this.closeAfterDoneTimersBySessionId.keys()]) {
-      this.refreshCloseAfterDoneTimer(sessionId, nowMs);
-    }
-  },
-
-  refreshCloseAfterDoneTimer(this: GpuiSidebarRuntime, sessionId: string, nowMs: number): void {
-    const timer = this.closeAfterDoneTimersBySessionId.get(sessionId);
-    if (!timer) {
-      return;
-    }
-    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
-    const snapshotAvailable = remoteSession
-      ? this.remotePresentations.has(remoteSession.machineId)
-      : this.presentation !== undefined;
-    if (!snapshotAvailable) {
-      this.resetCloseAfterDoneCountdown(sessionId, timer);
-      return;
-    }
-    const session = this.findPresentationSessionRowForSidebarSessionId(sessionId);
-    if (!session) {
-      this.clearCloseAfterDoneTimer(sessionId);
-      return;
-    }
-    if (!isGpuiCloseAfterDonePresentationSessionDone(session)) {
-      this.resetCloseAfterDoneCountdown(sessionId, timer);
-      return;
-    }
-    if (timer.deadlineAtMs !== undefined) {
-      this.ensureCloseAfterDoneCountdownTicker();
-      return;
-    }
-    const deadlineAtMs = nowMs + GPUI_CLOSE_AFTER_DONE_DELAY_MS;
-    const timeoutId = window.setTimeout(() => {
-      this.completeCloseAfterDoneTimer(sessionId, deadlineAtMs);
-    }, GPUI_CLOSE_AFTER_DONE_DELAY_MS);
-    this.closeAfterDoneTimersBySessionId.set(sessionId, {
-      deadlineAtMs,
-      doneSinceAtMs: nowMs,
-      timeoutId,
-    });
-    this.ensureCloseAfterDoneCountdownTicker();
-  },
-
-  resetCloseAfterDoneCountdown(this: GpuiSidebarRuntime, sessionId: string, timer: GpuiCloseAfterDoneTimer): void {
-    if (timer.timeoutId !== undefined) {
-      window.clearTimeout(timer.timeoutId);
-    }
-    this.closeAfterDoneTimersBySessionId.set(sessionId, {});
-    this.stopCloseAfterDoneCountdownTickerIfIdle();
-  },
-
-  completeCloseAfterDoneTimer(this: GpuiSidebarRuntime, sessionId: string, expectedDeadlineAtMs: number): void {
-    const timer = this.closeAfterDoneTimersBySessionId.get(sessionId);
-    if (!timer || timer.deadlineAtMs !== expectedDeadlineAtMs) {
-      return;
-    }
-    const session = this.findPresentationSessionRowForSidebarSessionId(sessionId);
-    if (!session || !isGpuiCloseAfterDonePresentationSessionDone(session)) {
-      this.resetCloseAfterDoneCountdown(sessionId, timer);
-      this.publishPresentation('patch');
-      return;
-    }
-    this.clearCloseAfterDoneTimer(sessionId);
-    void this.transitionSession(sessionId, 'close');
-  },
-
-  clearCloseAfterDoneTimer(this: GpuiSidebarRuntime, sessionId: string): void {
-    const timer = this.closeAfterDoneTimersBySessionId.get(sessionId);
-    if (timer?.timeoutId !== undefined) {
-      window.clearTimeout(timer.timeoutId);
-    }
-    this.closeAfterDoneTimersBySessionId.delete(sessionId);
-    this.persistCloseAfterDoneSessionIds();
-    this.stopCloseAfterDoneCountdownTickerIfIdle();
-  },
-
-  persistCloseAfterDoneSessionIds(this: GpuiSidebarRuntime): void {
-    writeStoredGpuiCloseAfterDoneSessionIds([...this.closeAfterDoneTimersBySessionId.keys()]);
-  },
-
-  ensureCloseAfterDoneCountdownTicker(this: GpuiSidebarRuntime): void {
-    if (this.closeAfterDoneCountdownTickerId !== undefined) {
-      return;
-    }
-    this.closeAfterDoneCountdownTickerId = window.setInterval(() => {
-      if (!this.hasActiveCloseAfterDoneCountdown()) {
-        this.stopCloseAfterDoneCountdownTickerIfIdle();
-        return;
-      }
-      this.publishPresentation('patch');
-    }, 1_000);
-  },
-
-  stopCloseAfterDoneCountdownTickerIfIdle(this: GpuiSidebarRuntime): void {
-    if (this.hasActiveCloseAfterDoneCountdown() || this.closeAfterDoneCountdownTickerId === undefined) {
-      return;
-    }
-    window.clearInterval(this.closeAfterDoneCountdownTickerId);
-    this.closeAfterDoneCountdownTickerId = undefined;
-  },
-
-  hasActiveCloseAfterDoneCountdown(this: GpuiSidebarRuntime): boolean {
-    for (const timer of this.closeAfterDoneTimersBySessionId.values()) {
-      if (timer.deadlineAtMs !== undefined) {
-        return true;
-      }
-    }
-    return false;
-  },
-
   getCloseAfterDoneProjection(
     this: GpuiSidebarRuntime,
     sessionId: string
   ): GxserverPresentationCloseAfterDoneProjection | undefined {
-    const timer = this.closeAfterDoneTimersBySessionId.get(sessionId);
-    if (!timer) {
+    /*
+    Close After Done belongs to gxserver since 2026-09-25 (server/src/close_after_done.rs): the
+    session itself says whether it is armed and, while the countdown runs, when it closes.
+    */
+    const session = this.findPresentationSessionRowForSidebarSessionId(sessionId);
+    if (session?.closeAfterDone !== true) {
       return undefined;
     }
-    if (timer.deadlineAtMs === undefined) {
+    const deadlineAt = session.closeAfterDoneDeadlineAt;
+    const deadlineAtMs = deadlineAt ? Date.parse(deadlineAt) : Number.NaN;
+    if (!deadlineAt || !Number.isFinite(deadlineAtMs)) {
       return { armed: true };
     }
-    const remainingMs = Math.max(0, timer.deadlineAtMs - Date.now());
+    const remainingMs = Math.max(0, deadlineAtMs - Date.now());
     return {
       armed: true,
-      deadlineAt: new Date(timer.deadlineAtMs).toISOString(),
+      deadlineAt,
       remainingLabel: formatGpuiCloseAfterDoneCountdown(remainingMs),
       remainingMs,
     };

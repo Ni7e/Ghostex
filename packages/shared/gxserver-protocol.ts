@@ -2807,6 +2807,9 @@ export interface GxserverPresentationSession {
   cwd?: string;
   /** Daemon-owned Delayed Send state; absent when no send is armed. */
   delayedSendDeadlineAt?: string;
+  /** Close After Done is armed (gxserver owns the timer); `closeAfterDoneDeadlineAt` while its countdown runs. */
+  closeAfterDone?: boolean;
+  closeAfterDoneDeadlineAt?: string;
   delayedSendRemainingLabel?: string;
   delayedSendRemainingMs?: number;
   /**

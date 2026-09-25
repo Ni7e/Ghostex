@@ -137,8 +137,7 @@ export type GpuiSidebarHostMessage =
           | 'runSidebarAgent'
           | 'scheduleDelayedSend'
           | 'postponeDelayedSend'
-          | 'setSessionNote'
-          | 'toggleCloseAfterDone';
+          | 'setSessionNote';
       }
     >;
 
@@ -752,10 +751,4 @@ export type GpuiPresentationProjectProjectionMetadata = {
   chatProjectIds: ReadonlySet<string>;
   hiddenProjectIds: ReadonlySet<string>;
   projectOverlays: readonly GxserverPresentationSidebarProjectOverlay[];
-};
-
-export type GpuiCloseAfterDoneTimer = {
-  deadlineAtMs?: number;
-  doneSinceAtMs?: number;
-  timeoutId?: number;
 };

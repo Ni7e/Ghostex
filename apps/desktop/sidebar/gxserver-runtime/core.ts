@@ -34,7 +34,6 @@ import {
   hasSameGpuiRuntimeSettings,
 } from './helpers/bootstrap';
 import { normalizeGpuiBrowserTabs } from './helpers/browser-tabs';
-import { readStoredGpuiCloseAfterDoneSessionIds } from './helpers/close-after-done';
 import {
   createGpuiSidebarHudState,
   hasSameGpuiCommandPaneSessions,
@@ -72,7 +71,6 @@ import type { GpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-life
 import { gpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-lifecycle-queue';
 import type {
   GpuiBrowserTabSummary,
-  GpuiCloseAfterDoneTimer,
   GpuiCommandPaneSessionSummary,
   GpuiExportTranscriptRequestContext,
   GpuiExportedTranscriptResult,
@@ -313,8 +311,6 @@ export class GpuiSidebarRuntime {
   readonly staleRemotePresentationRefreshes = new Map<string, { lastStartedAt: number; trailingTimeoutId?: number }>();
   browserTabs: GpuiBrowserTabSummary[] = [];
   client: GpuiGxserverClient | undefined;
-  closeAfterDoneCountdownTickerId: number | undefined;
-  closeAfterDoneTimersBySessionId = new Map<string, GpuiCloseAfterDoneTimer>();
   commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
   workspaceSessionDelayedSends = new Map<string, GpuiWorkspaceSessionDelayedSendSummary>();
   domainProjects: GxserverProjectDomainState[] = [];
@@ -452,9 +448,6 @@ export class GpuiSidebarRuntime {
     this.remoteGroupOrderByMachineId = readStoredGpuiRemoteGroupOrder();
     this.remoteLastSeenPresentations = this.remoteLastSeenStore.read();
     this.workspaceGroups = readStoredGpuiWorkspaceSessionGroupsState();
-    for (const sessionId of readStoredGpuiCloseAfterDoneSessionIds()) {
-      this.closeAfterDoneTimersBySessionId.set(sessionId, {});
-    }
     window.addEventListener(GPUI_SIDEBAR_REMOTE_EVENT_NAME, this.handleGpuiSidebarRemoteEvent);
     window.addEventListener(
       GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
@@ -495,8 +488,7 @@ export class GpuiSidebarRuntime {
         message.type === 'confirmAgentHookLaunch' ||
         message.type === 'createSession' ||
         message.type === 'runSidebarAgent' ||
-        message.type === 'setSessionNote' ||
-        message.type === 'toggleCloseAfterDone'
+        message.type === 'setSessionNote'
       ) {
         void this.handleSidebarMessage(message);
         return;
@@ -955,9 +947,6 @@ export class GpuiSidebarRuntime {
         return;
       case 'fullReloadGroup':
         await this.fullReloadWorkspaceGroup(message.groupId);
-        return;
-      case 'toggleCloseAfterDone':
-        this.toggleCloseAfterDone(message.sessionId);
         return;
       case 'scheduleDelayedSend':
         await this.scheduleRemoteDelayedSend(message);

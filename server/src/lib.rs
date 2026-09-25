@@ -11,6 +11,7 @@ pub mod auth;
 pub mod automations;
 pub mod board_start_work;
 pub mod cli;
+pub mod close_after_done;
 pub mod config;
 pub mod constants;
 pub mod custom_session_tags;

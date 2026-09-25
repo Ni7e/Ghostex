@@ -1650,16 +1650,11 @@ impl GhostexGpuiApp {
         let Some(key) = self.local_workspace_key_for_shell_session(shell_session_id) else {
             return false;
         };
-        self.dispatch_gpui_sidebar_host_message(
-            serde_json::json!({
-                "sessionId": gpui_combined_presentation_session_id(
-                    &key.project_id,
-                    &key.session_id,
-                ),
-                "type": "toggleCloseAfterDone",
-            }),
+        self.gx_store_toggle_close_after_done(
+            &gpui_combined_presentation_session_id(&key.project_id, &key.session_id),
             cx,
-        )
+        );
+        true
     }
 
     pub(crate) fn toggle_gpui_command_close_after_done_for_command_pane_tab(

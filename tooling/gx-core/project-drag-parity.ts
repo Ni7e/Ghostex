@@ -65,7 +65,6 @@ function buildGroups(snapshot: Json, document: Json): Json[] {
   runtime.presentation = snapshot;
   runtime.remotePresentations = new Map();
   runtime.projectDiffStatsByProjectId = new Map();
-  runtime.refreshCloseAfterDoneTimers = () => {};
   runtime.getCloseAfterDoneProjection = () => undefined;
   runtime.getDelayedSendProjection = () => undefined;
   runtime.createRemoteSidebarGroups = () => [];

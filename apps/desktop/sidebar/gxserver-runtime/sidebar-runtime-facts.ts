@@ -62,17 +62,12 @@ export function postGpuiSidebarRuntimeFactsRows(runtime: GpuiSidebarRuntime): vo
     const editor = group.projectContext?.editor;
     if (editor) projectDiffStats[editor.projectId] = editor.diffStats;
   }
-  const closeAfterDone: Record<string, unknown> = {};
-  for (const sessionId of runtime.closeAfterDoneTimersBySessionId.keys()) {
-    const projection = runtime.getCloseAfterDoneProjection(sessionId);
-    if (projection) closeAfterDone[sessionId] = projection;
-  }
   const delayedSend: Record<string, unknown> = {};
   for (const sessionId of runtime.workspaceSessionDelayedSends.keys()) {
     const projection = runtime.getDelayedSendProjection(sessionId);
     if (projection) delayedSend[sessionId] = projection;
   }
-  post({ closeAfterDone, delayedSend, kind: 'rows', projectDiffStats, version: 1 });
+  post({ delayedSend, kind: 'rows', projectDiffStats, version: 1 });
 }
 
 /** The runtime's own focus paths acknowledge attention through the Rust store's one tracker. */

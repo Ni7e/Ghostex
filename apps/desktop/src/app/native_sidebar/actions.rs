@@ -157,6 +157,9 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_close(&command, cx) {
             return;
         }
+        if self.gx_store_run_close_after_done(&command, cx) {
+            return;
+        }
         if self.gx_store_run_sidebar_fork(&command, cx) {
             return;
         }

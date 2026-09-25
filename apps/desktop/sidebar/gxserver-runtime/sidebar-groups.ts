@@ -986,7 +986,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     this: GpuiSidebarRuntime,
     presentation: GxserverPresentationSnapshot,
   ): SidebarSessionGroup[] {
-    this.refreshCloseAfterDoneTimers();
     this.pruneWorkspaceGroupAssignments(presentation);
     const projectProjection = createGpuiPresentationProjectProjectionMetadata({
       domainProjects: this.domainProjects,
