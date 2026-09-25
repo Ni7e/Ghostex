@@ -65,7 +65,7 @@ Sockets, storage and timers for one platform, and nothing else:
 
 ## Chat during the Rust port
 
-User decision 2026-09-24: chat-rule fixes and features go **only** into `packages/gx-chat-core`, plus `native_chat/` when drawing changes. Do not also patch the TypeScript chat brain (`packages/shared/session-chat-controller/`, `packages/shared/session-chat-presentation/`); a fix that lands in the core does not run on desktop until `chatBrain` switches from `quickjs` to `rust`, and that is accepted. Mobile moves to native React Native views fed by the same core through UniFFI (decision 2026-09-21, 1b), so the core is also where mobile chat behaviour goes.
+User decision 2026-09-24: chat-rule fixes and features go **only** into `packages/gx-chat-core`, plus `native_chat/` when drawing changes. Do not also patch the TypeScript chat brain (`packages/shared/session-chat-controller/`, `packages/shared/session-chat-presentation/`). The desktop runs only the core since 2026-09-25 (its QuickJS chat and the `chatBrain` setting are deleted); the TypeScript brain is left for the GPUI web build, the phone's previous web chat and the replay gate. Mobile moves to native React Native views fed by the same core through UniFFI (decision 2026-09-21, 1b), so the core is also where mobile chat behaviour goes.
 
 A chat bug that is really about the session (what reaches the terminal, what the agent's screen shows, what the transcript says) is a gxserver fix under layer 1, not a chat-core fix. It then works for every chat brain and every client immediately.
 
