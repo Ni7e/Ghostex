@@ -1146,6 +1146,7 @@ impl GhostexGpuiApp {
         {
             self.pull_workspace_session_into_focused_pane(pane_id, shell_session_id);
         }
+        let created_here = self.gx_store_is_created_attach(&key);
         self.spawn_local_workspace_attach_plan(
             key,
             attach_intent,
@@ -1154,6 +1155,7 @@ impl GhostexGpuiApp {
             message.placement,
             match message.placement_target_session_id {
                 Some(_) => GpuiLocalWorkspaceAttachOrigin::Fork,
+                None if created_here => GpuiLocalWorkspaceAttachOrigin::Fork,
                 None => GpuiLocalWorkspaceAttachOrigin::SidebarFocus,
             },
             cx,
@@ -1504,6 +1506,7 @@ impl GhostexGpuiApp {
                                 .focused_session_id
                                 .as_deref()
                                 != Some(key.session_id.as_str())
+                                && !this.gx_store_is_created_attach(&key)
                         {
                             return;
                         }

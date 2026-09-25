@@ -36,11 +36,9 @@ import {
   parseGxserverPresentationProjectGroupId,
 } from "@/packages/shared/gxserver-presentation-sidebar-projection";
 import type {
-  GxserverInstallAgentHooksResult,
   GxserverProjectDomainState,
   GxserverReadAgentHookStatusResult,
 } from "@/packages/shared/gxserver-protocol";
-import type { SidebarToExtensionMessage } from "@/packages/shared/session-grid-contract";
 import {
   DEFAULT_TERMINAL_SESSION_TITLE,
   createAgentSessionDefaultTitle,
@@ -70,15 +68,8 @@ export interface GpuiSidebarRuntimeSessionCreateMethods {
   createQuickProject(
     kind: "agent" | "terminal",
   ): Promise<GxserverProjectDomainState | undefined>;
-  createQuickTerminal(): Promise<void>;
   createQuickAgentSession(agentId: string, accountId?: string): Promise<void>;
   createSession(groupId?: string | undefined): Promise<void>;
-  createProjectTerminal(
-    message: Extract<
-      SidebarToExtensionMessage,
-      { type: "createProjectTerminal" }
-    >,
-  ): Promise<void>;
   startAgentSessionProviderAndSendPrompt(
     startProvider: () => Promise<unknown>,
     sendPrompt: (promptText: string) => Promise<unknown>,
@@ -106,12 +97,6 @@ export interface GpuiSidebarRuntimeSessionCreateMethods {
     agentId: string,
     groupId?: string | undefined,
     accountId?: string,
-  ): Promise<void>;
-  confirmAgentHookLaunch(
-    message: Extract<
-      SidebarToExtensionMessage,
-      { type: "confirmAgentHookLaunch" }
-    >,
   ): Promise<void>;
   createAgentSession(
     agentId: string,
@@ -242,21 +227,6 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
         description: "Ghostex could not create the Quick workspace.",
       });
       return undefined;
-    }
-  },
-
-  async createQuickTerminal(this: GpuiSidebarRuntime): Promise<void> {
-    /*
-    CDXC:AgentLauncher 2026-07-11:
-    Match macOS createNativeChat: create and focus a new projectless chat
-    workspace first, then create its initial running terminal through the
-    ordinary gxserver session path.
-    */
-    const project = await this.createQuickProject("terminal");
-    if (project) {
-      await this.createSession(
-        createGxserverPresentationProjectGroupId(project.projectId),
-      );
     }
   },
 
@@ -417,69 +387,6 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     }
     if (createdProjectId && createdSessionId) {
       this.focusLocalWorkspaceSession(createdProjectId, createdSessionId);
-    }
-  },
-
-  async createProjectTerminal(
-    this: GpuiSidebarRuntime,
-    message: Extract<
-      SidebarToExtensionMessage,
-      { type: "createProjectTerminal" }
-    >,
-  ): Promise<void> {
-    /*
-    CDXC:PlatformSupport 2026-07-26:
-    The project-heading terminal button is an explicit project-scoped create
-    request. On Windows, keep the WSL gxserver create and attach sequence in
-    the Rust host by posting only the clicked local project id. The native host
-    then reuses the same atomic path as GPUI New Terminal. Remote project
-    headings also stay host-owned: posting the bounded project reference lets
-    Rust use one create/start/attach operation instead of making CEF create a
-    row and then serially wake it before the native tab can appear. Local
-    macOS/Linux projects and generic subgroup creation keep their existing
-    flows.
-    */
-    const groupId = message.groupId;
-    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
-    if (remoteGroup) {
-      if (
-        !this.postRemoteProjectNativeAction(
-          "openRemoteProjectTerminal",
-          remoteGroup,
-          message,
-        )
-      ) {
-        this.postRemoteToast("warning", "Remote session failed", {
-          description: "Ghostex could not create that remote terminal.",
-        });
-      }
-      return;
-    }
-    const projectId = parseGxserverPresentationProjectGroupId(groupId);
-    const isWindowsHost =
-      typeof navigator !== "undefined" && /Windows/iu.test(navigator.userAgent);
-    if (!isWindowsHost) {
-      await this.createSession(groupId);
-      return;
-    }
-    const postCreate = window.ghostexGpui?.postCreateProjectTerminal;
-    if (!projectId || typeof postCreate !== "function") {
-      this.postSidebarActionToast("warning", "Terminal unavailable");
-      return;
-    }
-    try {
-      const accepted = postCreate(
-        JSON.stringify({
-          projectId,
-          type: "ghostex.gpui.sidebar.createProjectTerminal",
-          version: 1,
-        }),
-      );
-      if (!accepted) {
-        this.postSidebarActionToast("warning", "Terminal unavailable");
-      }
-    } catch {
-      this.postSidebarActionToast("warning", "Terminal unavailable");
     }
   },
 
@@ -673,79 +580,6 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       modal: "agentHooksRequired",
       type: "open",
     });
-  },
-
-  async confirmAgentHookLaunch(
-    this: GpuiSidebarRuntime,
-    message: Extract<
-      SidebarToExtensionMessage,
-      { type: "confirmAgentHookLaunch" }
-    >,
-  ): Promise<void> {
-    const agent = this.resolveSidebarAgent(message.agentId);
-    const agentName = agent?.name ?? message.agentId;
-    if (!message.installHooks) {
-      this.postSidebarActionToast("warning", `Install hooks for ${agentName}`, {
-        description:
-          "Install and approve the hooks in order for Chat View to work correctly. Resuming and working/done indicators also require hooks.",
-      });
-      await this.createAgentSessionFromSidebarLaunch(
-        message.agentId,
-        message.groupId,
-        message.accountId,
-      );
-      return;
-    }
-
-    const remoteGroup = message.groupId
-      ? parseGpuiRemotePresentationGroupId(message.groupId)
-      : undefined;
-    let result: GxserverInstallAgentHooksResult;
-    try {
-      result = remoteGroup
-        ? await this.requestRemoteGxserver<GxserverInstallAgentHooksResult>(
-            remoteGroup.machineId,
-            "/api/installAgentHooks",
-            { agentIds: [message.hookAgentId] },
-            { timeoutMs: 120_000 },
-          )
-        : await this.client!.rpc<GxserverInstallAgentHooksResult>(
-            "/api/installAgentHooks",
-            {
-              agentIds: [message.hookAgentId],
-            },
-          );
-    } catch {
-      this.postSidebarActionToast(
-        "error",
-        `Could not install ${agentName} hooks`,
-        {
-          description: "Open Settings > Agents > Agent Hooks and try again.",
-        },
-      );
-      return;
-    }
-
-    const installed = result.agents.some(
-      (row) =>
-        row.agentId === message.hookAgentId && row.status === "installed",
-    );
-    if (!installed) {
-      this.postSidebarActionToast(
-        "error",
-        `Could not install ${agentName} hooks`,
-        {
-          description:
-            "Open Settings > Agents > Agent Hooks to review the hook status.",
-        },
-      );
-      return;
-    }
-    await this.createAgentSessionFromSidebarLaunch(
-      message.agentId,
-      message.groupId,
-      message.accountId,
-    );
   },
 
   /**

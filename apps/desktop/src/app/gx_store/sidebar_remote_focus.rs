@@ -254,7 +254,7 @@ impl GhostexGpuiApp {
 
     /// `resolveEffectivePreferredAgentInterface`'s inputs, read off the shared settings document
     /// the same way every other reader of the Default Agent View reads them.
-    fn gx_store_preferred_interface_settings(&self) -> PreferredInterfaceSettings {
+    pub(super) fn gx_store_preferred_interface_settings(&self) -> PreferredInterfaceSettings {
         let snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let settings = snapshot.object();
         // The whole override map rather than one lookup: which agent the row has is the planner's

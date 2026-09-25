@@ -118,22 +118,13 @@ export type GpuiSidebarHostMessage =
       SidebarToExtensionMessage,
       {
         /*
-         * CDXC:SessionNotes 2026-08-24:
-         * `setSessionNote` joins this list for the same reason `renameSession`
-         * is on it: the note editor is an app-modal window, so its confirm
-         * arrives through Rust rather than from the sidebar page itself.
-         *
-         * CDXC:AgentLauncher 2026-09-09 WHY:
-         * `runSidebarAgent` and `createSession` join it for the New Thread
-         * picker, another app-modal window whose launches must land in this
-         * runtime's active-project handlers. (Its Browser row is answered in
-         * Rust since 2026-09-25: apps/desktop/src/app/gx_store/create/.)
+         * CDXC:AgentLauncher 2026-09-25 WHY:
+         * The New Thread picker's launches, the Hooks Required dialog's answer and
+         * every other create are answered in Rust
+         * (apps/desktop/src/app/gx_store/create/), so only the rename confirm is
+         * left on this list.
          */
-        type:
-          | 'confirmAgentHookLaunch'
-          | 'createSession'
-          | 'renameSession'
-          | 'runSidebarAgent';
+        type: 'renameSession';
       }
     >;
 

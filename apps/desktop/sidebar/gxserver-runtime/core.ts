@@ -480,12 +480,7 @@ export class GpuiSidebarRuntime {
       the terminal. Route exactly these known command types to the runtime's
       own sidebar-message handler instead.
       */
-      if (
-        message.type === 'renameSession' ||
-        message.type === 'confirmAgentHookLaunch' ||
-        message.type === 'createSession' ||
-        message.type === 'runSidebarAgent'
-      ) {
+      if (message.type === 'renameSession') {
         void this.handleSidebarMessage(message);
         return;
       }
@@ -872,24 +867,6 @@ export class GpuiSidebarRuntime {
       case 'focusSession':
         await this.focusSession(message.sessionId, message);
         this.postSidebarSessionFocusConfirmation(message.sessionId);
-        return;
-      case 'createSession':
-        await this.createSession();
-        return;
-      case 'createSessionInGroup':
-        await this.createSession(message.groupId);
-        return;
-      case 'createProjectTerminal':
-        await this.createProjectTerminal(message);
-        return;
-      case 'createChat':
-        await this.createQuickTerminal();
-        return;
-      case 'runSidebarAgent':
-        await this.requestAgentSessionLaunch(message.agentId, message.groupId, message.accountId);
-        return;
-      case 'confirmAgentHookLaunch':
-        await this.confirmAgentHookLaunch(message);
         return;
       case 'runSidebarCommand': {
         /*

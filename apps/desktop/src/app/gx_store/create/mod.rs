@@ -6,8 +6,11 @@
 //! the two browser opens and the Find Prompts shortcut, which only ever looped back into Rust;
 //! `projects` a project's Remove and Close.
 
+mod agent;
 mod browser;
 mod claim;
+mod focus_created;
 mod projects;
+mod terminal;
 
 pub(crate) use claim::CreateHost;

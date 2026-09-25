@@ -24,6 +24,8 @@ pub(crate) struct CreateHost {
     pub(super) counters: CreateCounters,
     /// A browser open waiting for the project switch it has to follow (browser.rs).
     pub(super) pending_browser_open: Option<super::browser::PendingBrowserOpen>,
+    /// Sessions a create here just made, whose attach is the create's own (focus_created.rs).
+    pub(super) created_attaches: super::focus_created::CreatedAttaches,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -33,6 +35,13 @@ pub(crate) struct CreateCounters {
     pub(super) find_prompts: u64,
     pub(super) project_removes: u64,
     pub(super) project_closes: u64,
+    pub(super) terminal_creates: u64,
+    pub(super) agent_launches: u64,
+    pub(super) hook_dialogs: u64,
+    pub(super) created_focuses: u64,
+    /// Created sessions not placed into their user-made group because the groups document had
+    /// not been read yet.
+    pub(super) placements_unread: u64,
 }
 
 impl GhostexGpuiApp {
@@ -70,6 +79,11 @@ impl GhostexGpuiApp {
         message: &Value,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        // The host message door also made the launched agent the launcher's highlighted one.
+        if message.get("type").and_then(Value::as_str) == Some("runSidebarAgent") {
+            self.gx_store_run_sidebar_agent_message(message, cx);
+            return true;
+        }
         self.gx_store_answer_create_message(message, cx)
     }
 
@@ -86,6 +100,12 @@ impl GhostexGpuiApp {
         match command_type {
             "openBrowserChat" => {
                 self.gx_store_open_quick_browser_tab(cx);
+                true
+            }
+            // Quick Access "Quick Terminal" and the command palette, dropped here before
+            // (ledger H009).
+            "createChat" => {
+                self.gx_store_create_quick_terminal(cx);
                 true
             }
             _ => false,
@@ -110,6 +130,38 @@ impl GhostexGpuiApp {
             }
             Some("searchPreviousSessionsByText") => {
                 self.gx_store_open_find_prompts(cx);
+                true
+            }
+            // The empty-sidebar double-click and the New Thread picker's Terminal name no group:
+            // the active one takes it (`createSession(groupId = this.activeGroupId)`).
+            Some("createSession") => {
+                self.gx_store_create_terminal(None, cx);
+                true
+            }
+            Some("createSessionInGroup") => {
+                let group_id = message.get("groupId").and_then(Value::as_str);
+                self.gx_store_create_terminal(group_id, cx);
+                true
+            }
+            Some("createProjectTerminal") => {
+                self.gx_store_create_project_terminal(message, cx);
+                true
+            }
+            Some("createChat") => {
+                self.gx_store_create_quick_terminal(cx);
+                true
+            }
+            Some("runSidebarAgent") => {
+                let Some(agent_id) = message.get("agentId").and_then(Value::as_str) else {
+                    return true;
+                };
+                let group_id = message.get("groupId").and_then(Value::as_str);
+                let account_id = message.get("accountId").and_then(Value::as_str);
+                self.gx_store_request_agent_launch(agent_id, group_id, account_id, cx);
+                true
+            }
+            Some("confirmAgentHookLaunch") => {
+                self.gx_store_confirm_agent_hook_launch(message, cx);
                 true
             }
             Some("updateCustomSessionTags") => {
