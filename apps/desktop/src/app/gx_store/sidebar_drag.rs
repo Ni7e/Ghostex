@@ -173,6 +173,10 @@ impl GhostexGpuiApp {
                 } => self.gx_store_call_session_order(project, session_ids, cx),
                 OrderWrite::ActivateSubgroup { project, group_id } => {
                     self.gx_store.sidebar_drag.activations += 1;
+                    // A remote project's group is also the runtime's `activeGroupId`, which its
+                    // remote tab list is read from (gx-core order_write.rs, CDXC:Sessions 2026-09-25).
+                    let remote_group = (!project.machine.is_local())
+                        .then(|| ghostex_gx_core::encode_workspace_subgroup_id(&project, &group_id));
                     let output = self.gx_store.core.handle(
                         Event::Intent(Intent::FocusSubgroup { project, group_id }),
                         super::host::now_ms(),
@@ -181,6 +185,25 @@ impl GhostexGpuiApp {
                         self.gx_store.sidebar_list.note_changes(&output.changes);
                         self.gx_store_update_sidebar_list(cx);
                     }
+                    if let Some(group_id) = remote_group {
+                        self.dispatch_native_sidebar_command(
+                            json!({ "type": "focusGroup", "groupId": group_id }),
+                            cx,
+                        );
+                    }
+                }
+                OrderWrite::RemoteProjectOrder { machine_id, state } => {
+                    // `requestRemoteGxserver`'s default timeout; the machine's own stream brings
+                    // the order back into the store, as it brought it to the runtime's copy.
+                    self.start_gpui_remote_sidebar_rpc(
+                        &machine_id,
+                        "/api/updateWorkspaceSessionGroups",
+                        Some(json!({ "state": state })),
+                        std::time::Duration::from_secs(20),
+                        crate::app::remote_conn::sidebar_rpc::GpuiRemoteSidebarRpcMode::Awaited,
+                        cx,
+                    )
+                    .detach();
                 }
                 OrderWrite::Toast { level, title } => {
                     self.gx_store.sidebar_drag.toasts += 1;

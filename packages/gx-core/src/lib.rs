@@ -174,7 +174,9 @@ pub use crate::sidebar_view::{
     TagPresentation, UnavailableState,
     WorktreeView, LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
 };
-pub use crate::workspace_groups::{CustomTagsPush, CustomTagsPushEffect};
+pub use crate::workspace_groups::{
+    owns_group_command, plan_group_command, CustomTagsPush, CustomTagsPushEffect, GroupCommandPlan,
+};
 pub use crate::workspace_groups::{
     workspace_groups_hand_back_script, workspace_groups_request_script, AdoptOutcome,
     ProjectWorkspaceGroups,

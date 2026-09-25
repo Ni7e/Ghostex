@@ -47,6 +47,10 @@ impl GhostexGpuiApp {
         let Some(message) = command.get("message") else {
             return false;
         };
+        // New Group, Rename and Close Group (gx_store/workspace_groups/group_commands.rs).
+        if self.gx_store_run_group_command(command, message, cx) {
+            return true;
+        }
         self.gx_store_answer_create_message(message, cx)
     }
 

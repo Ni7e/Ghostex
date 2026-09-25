@@ -2297,6 +2297,9 @@ async function compareDrag([outDir, ...flags]: string[]) {
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
+  // Since F4 of the app runtime port (2026-09-25) a remote row is answered in Rust as well, so a
+  // hand-off is now a case the old runtime would have to perform and nothing performs any more.
+  if (handOffs > 0) differences.push(`${handOffs} cases were handed to the old runtime (${handOffsWithWork} with work)`);
   for (const difference of differences.slice(0, 20)) console.log(`  ${difference}`);
   if (differences.length > 20) console.log(`  … and ${differences.length - 20} more`);
   const measured: [string, number][] = [
@@ -2307,8 +2310,6 @@ async function compareDrag([outDir, ...flags]: string[]) {
     ['orderCalls', orderCalls],
     ['creates', creates],
     ['limitToasts', limitToasts],
-    ['handOffs', handOffs],
-    ['handOffsWithWork', handOffsWithWork],
     ['silentDrops', silentDrops],
     ['membershipChecks', membershipGroups],
     ['drawnDiffers', drawnDiffers],

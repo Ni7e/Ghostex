@@ -22,6 +22,7 @@
 // First, so the client-storage adapter finds a `Storage` before any module reads one.
 import { resetBrowserStorage } from './browser-shim';
 import { GpuiSidebarRuntime } from '@/apps/desktop/sidebar/gxserver-runtime/core';
+import { frozenHandleWorkspaceGroupMessage, frozenWorkspaceGroupEditMethods } from './workspace-groups-edits-frozen';
 import { reorderNativeSidebar } from '@/tooling/gx-core/sidebar-page-frozen/reorder';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import { parseGpuiWorkspaceSessionGroupsState } from '@/apps/desktop/sidebar/workspace-session-groups';
@@ -30,7 +31,7 @@ type Json = Record<string, any>;
 
 /** The shipped projection, as the runtime builds it for the sidebar store. */
 function buildGroups(snapshot: Json, document: Json): Json[] {
-  const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+  const runtime = Object.assign(Object.create(GpuiSidebarRuntime.prototype), frozenWorkspaceGroupEditMethods) as Json;
   runtime.workspaceGroups = parseGpuiWorkspaceSessionGroupsState(document);
   runtime.domainProjects = [];
   runtime.recentProjects = [];
@@ -127,7 +128,7 @@ async function runOrderWrite(
   message: Json
 ): Promise<{ document: Json; writes: Json[] }> {
   const writes: Json[] = [];
-  const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+  const runtime = Object.assign(Object.create(GpuiSidebarRuntime.prototype), frozenWorkspaceGroupEditMethods) as Json;
   runtime.workspaceGroups = parseGpuiWorkspaceSessionGroupsState(document);
   runtime.domainProjects = [];
   runtime.recentProjects = [];
@@ -157,7 +158,7 @@ async function runOrderWrite(
     },
   };
 
-  await runtime.handleSidebarMessage(message);
+  await frozenHandleWorkspaceGroupMessage(runtime, message);
   if (message.type === 'createGroupFromSession' && runtime.activeGroupId)
     writes.push({
       write: 'activateSubgroup',

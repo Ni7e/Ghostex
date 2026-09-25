@@ -31,6 +31,7 @@
  */
 import { resetBrowserStorage } from './browser-shim';
 import { GpuiSidebarRuntime } from '@/apps/desktop/sidebar/gxserver-runtime/core';
+import { frozenWorkspaceGroupEditMethods } from './workspace-groups-edits-frozen';
 import {
   createGpuiWorkspaceSessionSubgroupId,
   parseGpuiWorkspaceSessionGroupsState,
@@ -90,7 +91,7 @@ export function runWorkspaceGroupsRoundTrip(
 ): { steps: RoundTripStep[]; handBacks: number; parked: number; appEdits: number } {
   resetBrowserStorage();
   const posts: Json[] = [];
-  const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+  const runtime = Object.assign(Object.create(GpuiSidebarRuntime.prototype), frozenWorkspaceGroupEditMethods) as Json;
   runtime.workspaceGroups = parseGpuiWorkspaceSessionGroupsState(start);
   runtime.presentation = undefined;
   runtime.activeProjectId = undefined;

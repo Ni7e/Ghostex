@@ -7,7 +7,6 @@ changed. See `core.ts` for how the runtime's methods are re-attached.
 import type { GpuiWorkspaceSessionGroupsState } from '../workspace-session-groups';
 import {
   createEmptyGpuiWorkspaceSessionGroupsState,
-  parseGpuiWorkspaceSessionSubgroupId,
   readStoredGpuiWorkspaceSessionGroupsState,
 } from '../workspace-session-groups';
 import type { GpuiSidebarRuntimeAppShotAndMiscMethods } from './app-shot-and-misc';
@@ -1117,30 +1116,14 @@ export class GpuiSidebarRuntime {
       case 'unsnoozeSession':
         await this.runSessionLifecycleCommand(message.sessionId, '/api/unsnoozeSession', {});
         return;
+      /*
+       * CDXC:Sessions 2026-09-25 WHY:
+       * A user-made group's order, New Group, Rename, Close Group, Move to New Group, a session
+       * dropped into a group and the project order are all Rust's (gx-core workspace_groups/ and
+       * sidebar_drag/, a remote row's included), so only a project group's session order is left.
+       */
       case 'syncSessionOrder':
-        if (parseGpuiWorkspaceSessionSubgroupId(message.groupId)) {
-          this.syncWorkspaceSubgroupSessionOrder(message.groupId, message.sessionIds);
-          return;
-        }
         await this.syncSessionOrder(message.groupId, message.sessionIds);
-        return;
-      case 'createGroup':
-        this.createWorkspaceGroup(message.groupId);
-        return;
-      case 'createGroupFromSession':
-        this.createWorkspaceGroupFromSession(message.sessionId);
-        return;
-      case 'renameGroup':
-        this.renameWorkspaceGroup(message.groupId, message.title);
-        return;
-      case 'closeGroup':
-        await this.closeWorkspaceGroup(message.groupId);
-        return;
-      case 'moveSessionToGroup':
-        this.moveSessionToWorkspaceGroup(message);
-        return;
-      case 'syncGroupOrder':
-        await this.syncWorkspaceGroupOrder(message.groupIds);
         return;
       /*
       CDXC:Projects 2026-09-21 WHY:
