@@ -51,6 +51,8 @@ import {
   lightThemeCards,
   windowGlassForTransparency,
   windowGlassAvailable,
+  windowGlassPicturesAvailable,
+  windowGlassRestartNote,
   themeContrastChoiceIndex,
   themeContrastPatch,
   transparencyStrengthFromSettings,
@@ -284,7 +286,7 @@ export function ThemeSettingsTab({
             {windowGlassAvailable() && visible('windowGlass') ? (
               <ToggleField
                 checked={glassOn}
-                description='Let your desktop show softly through the window in dark mode. Always glass is under Advanced.'
+                description={`Let your desktop show softly through the window in dark mode. Always glass is under Advanced.${windowGlassRestartNote()}`}
                 label='Enable Transparency'
                 {...getSettingModificationProps('windowGlass')}
                 advanced={false}
@@ -517,7 +519,7 @@ export function ThemeSettingsTab({
               <SettingsSection title='Glass'>
                 {visible('windowGlass') ? (
                   <SelectField
-                    description='When the blurred desktop shows through the window. Glass in dark mode is what the Enable Transparency switch turns on.'
+                    description={`When the blurred desktop shows through the window. Glass in dark mode is what the Enable Transparency switch turns on.${windowGlassRestartNote()}`}
                     label='Window glass'
                     {...getSettingModificationProps('windowGlass')}
                     onChange={(value) => updateDraft('windowGlass', value as WindowGlassMode)}
@@ -525,7 +527,7 @@ export function ThemeSettingsTab({
                     value={draft.windowGlass}
                   />
                 ) : null}
-                {glassOn && visible('windowGlassSource') ? (
+                {glassOn && windowGlassPicturesAvailable() && visible('windowGlassSource') ? (
                   <SelectField
                     dependent
                     description='Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose.'
@@ -537,6 +539,7 @@ export function ThemeSettingsTab({
                   />
                 ) : null}
                 {glassOn &&
+                windowGlassPicturesAvailable() &&
                 (draft.windowGlassSource === 'wallpaper' || draft.windowGlassSource === 'customImage') &&
                 visible('windowGlassImagePlacement') ? (
                   <SelectField
@@ -549,7 +552,10 @@ export function ThemeSettingsTab({
                     value={draft.windowGlassImagePlacement}
                   />
                 ) : null}
-                {glassOn && draft.windowGlassSource === 'customImage' && visible('windowGlassImageDark') ? (
+                {glassOn &&
+                windowGlassPicturesAvailable() &&
+                draft.windowGlassSource === 'customImage' &&
+                visible('windowGlassImageDark') ? (
                   <TextField
                     browseLabel='Choose image'
                     dependent
@@ -566,7 +572,10 @@ export function ThemeSettingsTab({
                     value={draft.windowGlassImageDark}
                   />
                 ) : null}
-                {glassOn && draft.windowGlassSource === 'customImage' && visible('windowGlassImageLight') ? (
+                {glassOn &&
+                windowGlassPicturesAvailable() &&
+                draft.windowGlassSource === 'customImage' &&
+                visible('windowGlassImageLight') ? (
                   <TextField
                     browseLabel='Choose image'
                     dependent

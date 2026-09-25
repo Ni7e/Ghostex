@@ -378,9 +378,11 @@ fn main() {
                 None,
             ),
         };
+        let main_window_background = window_glass_background_appearance();
+        crate::app::helpers::note_main_window_background(main_window_background);
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
-            window_background: window_glass_background_appearance(),
+            window_background: main_window_background,
             display_id,
             window_min_size: Some(size(
                 px(GPUI_WINDOW_FRAME_MIN_WIDTH),

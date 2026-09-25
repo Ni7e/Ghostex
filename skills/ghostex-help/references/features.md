@@ -1381,13 +1381,16 @@ accent color (status highlights, accent text, advanced-setting markers) has no
 setting of its own: it follows the dark theme's tint hue, and a neutral tint
 keeps the sky-blue accent.
 Window glass lets the blurred desktop show through the sidebar, the work area,
-terminals, and chat on macOS. The Enable Transparency switch turns it on as Glass in
+terminals, and chat on macOS and Windows. The Enable Transparency switch turns it on as Glass in
 dark mode (the default), which uses glass in dark mode and stays opaque in light
 mode, or off as Always opaque; Advanced > Glass also offers Always glass, which
 forces glass in both.
 Docs, Kanban, the browser, and the code editor stay opaque. Turning on Reduce
-transparency in the macOS accessibility settings always makes the window opaque.
-Glass shows picks what the glass blurs: Desktop and windows (the default) shows everything behind Ghostex. Wallpaper only shows just your desktop wallpaper, so other windows never show through; built-in wallpapers such as Sequoia or the aerials show as a still picture of that wallpaper, and a solid color wallpaper shows everything behind the window. Custom image shows a picture you choose instead, one for dark mode and one for light mode (Glass image for dark mode and Glass image for light mode, each with a Choose image button); a mode with no picture shows everything behind the window. For Wallpaper only and Custom image, Glass picture position picks Moves with the window (the default: the picture covers the window and moves with it) or Stays with the desktop (the picture stays put while the window moves over it, and can trail the window while you drag it) (`windowGlassSource`, `windowGlassImagePlacement`, `windowGlassImageDark`, `windowGlassImageLight`).
+transparency in the macOS accessibility settings, or turning off Transparency effects
+in Windows Settings > Personalization > Colors, always makes the window opaque. On
+Windows, turning glass on takes effect the next time Ghostex starts, the corners of
+menus and pop-ups follow Windows' own rounding, and notifications keep solid cards.
+Glass shows (macOS only) picks what the glass blurs: Desktop and windows (the default) shows everything behind Ghostex. Wallpaper only shows just your desktop wallpaper, so other windows never show through; built-in wallpapers such as Sequoia or the aerials show as a still picture of that wallpaper, and a solid color wallpaper shows everything behind the window. Custom image shows a picture you choose instead, one for dark mode and one for light mode (Glass image for dark mode and Glass image for light mode, each with a Choose image button); a mode with no picture shows everything behind the window. For Wallpaper only and Custom image, Glass picture position picks Moves with the window (the default: the picture covers the window and moves with it) or Stays with the desktop (the picture stays put while the window moves over it, and can trail the window while you drag it) (`windowGlassSource`, `windowGlassImagePlacement`, `windowGlassImageDark`, `windowGlassImageLight`).
 While glass is on, four sliders tune it, each in dark mode and in light mode: Sidebar tint and Work area tint set how much of the desktop each area hides, independently, so either can be the darker one; lower shows more of your desktop.
 Keep Awake (Power)
 prevents sleep while agents work.

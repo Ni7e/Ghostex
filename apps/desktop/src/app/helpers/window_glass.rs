@@ -154,8 +154,8 @@ fn load_glass_alpha(source: &AtomicU8) -> f32 {
 /// CDXC:Theming 2026-09-23 DECISION:
 /// User: the whole desktop window can be frosted glass that shows the blurred desktop behind it, as its own setting rather than part of a theme. Automatic (the default) is frosted in dark mode and opaque in light mode, where glass has the weakest text contrast; Frosted and Opaque force one look.
 ///
-/// CDXC:Theming 2026-09-23 WHY:
-/// Only macOS gets a blurred backdrop here (Linux compositors cannot promise a blur, so glass there would expose the raw desktop), and the system Reduce Transparency setting always wins.
+/// CDXC:Theming 2026-09-25 DECISION:
+/// User: "let's enable transparency on windows please also if possible. like it works on mac exactly." Glass runs on macOS and Windows; the system setting that turns transparency off always wins (Reduce Transparency on macOS, Transparency effects on Windows). Linux stays opaque: its compositors cannot promise a blur, so glass there would expose the raw desktop.
 ///
 /// Returns whether the resolved state changed.
 pub(crate) fn refresh_window_glass(object: &serde_json::Map<String, serde_json::Value>) -> bool {
@@ -199,8 +199,10 @@ pub(crate) fn refresh_window_glass(object: &serde_json::Map<String, serde_json::
     let source = object
         .get("windowGlassSource")
         .and_then(serde_json::Value::as_str);
+    // The wallpaper and custom-image backdrops exist only in the macOS window backend; Settings
+    // offers them only there.
     WINDOW_GLASS_WALLPAPER.store(
-        matches!(source, Some("wallpaper" | "customImage")),
+        cfg!(target_os = "macos") && matches!(source, Some("wallpaper" | "customImage")),
         Ordering::Relaxed,
     );
     WINDOW_GLASS_PICTURE_FOLLOWS_SCREEN.store(
@@ -223,7 +225,9 @@ pub(crate) fn refresh_window_glass(object: &serde_json::Map<String, serde_json::
         images.dark = image("windowGlassImageDark");
         images.light = image("windowGlassImageLight");
     }
-    let active = cfg!(target_os = "macos") && wanted && !system_reduces_transparency();
+    let active = cfg!(any(target_os = "macos", target_os = "windows"))
+        && wanted
+        && !system_reduces_transparency();
     WINDOW_GLASS_ACTIVE.swap(active, Ordering::Relaxed) != active
 }
 
@@ -232,13 +236,55 @@ fn system_reduces_transparency() -> bool {
     unsafe { GhostexGpuiAccessibilityDisplayShouldReduceTransparency() == 1 }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows' Settings > Personalization > Colors > Transparency effects, off.
+#[cfg(target_os = "windows")]
+fn system_reduces_transparency() -> bool {
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    let key: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\0"
+        .encode_utf16()
+        .collect();
+    let value: Vec<u16> = "EnableTransparency\0".encode_utf16().collect();
+    let mut data: u32 = 1;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&mut data as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    status == 0 && data == 0
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn system_reduces_transparency() -> bool {
     false
 }
 
+/// Whether the main window was created on a backend that can show glass. On Windows a window's
+/// per-pixel alpha is fixed when it is created (it either presents through DirectComposition or
+/// through an opaque redirection surface), so a main window opened opaque stays opaque until the
+/// app restarts, and glass turned off later keeps working because an opaque fill needs no alpha.
+static MAIN_WINDOW_CAN_SHOW_GLASS: AtomicBool = AtomicBool::new(true);
+
+/// Records the background the main window is being created with. Call right before it opens.
+///
+/// CDXC:Theming 2026-09-25 WHY:
+/// The Windows main window hosts windowed CEF pages as child HWNDs, which is why it normally opens on the opaque redirection surface; only a main window opened with glass uses DirectComposition (`ensure_child_composited_by_dwm` in src/cef/windows.rs keeps its CEF children visible there). Turning glass on while the app runs on Windows would draw the translucent tints over an opaque surface, so it waits for the next launch instead.
+pub(crate) fn note_main_window_background(appearance: WindowBackgroundAppearance) {
+    MAIN_WINDOW_CAN_SHOW_GLASS.store(
+        !cfg!(target_os = "windows") || appearance != WindowBackgroundAppearance::Opaque,
+        Ordering::Relaxed,
+    );
+}
+
 pub(crate) fn window_glass_active() -> bool {
     WINDOW_GLASS_ACTIVE.load(Ordering::Relaxed)
+        && MAIN_WINDOW_CAN_SHOW_GLASS.load(Ordering::Relaxed)
 }
 
 pub(crate) fn window_glass_active_in(window: &Window) -> bool {

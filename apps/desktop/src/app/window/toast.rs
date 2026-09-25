@@ -410,10 +410,18 @@ pub(crate) fn gpui_app_toast_close_button_icon_color() -> Hsla {
     rgb(0xffffff).opacity(0.90).into()
 }
 
+/// Whether toasts sit on their own blurred window.
+///
+/// CDXC:Theming 2026-09-25 WHY:
+/// Frosted toasts need their window's blur limited to the cards (`set_background_blur_region`), so the gaps between toasts and the close button's outset stay clear. Windows can only confine a window's blur by clipping the window itself, which would cut the hover close button, so on Windows toasts keep their solid tinted cards while the rest of the app is glass.
+pub(crate) fn toast_window_glass() -> bool {
+    cfg!(target_os = "macos") && window_glass_active()
+}
+
 impl Render for GpuiAppToastWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         let hovered_toast_id = self.hovered_toast_id.clone();
-        let glass = window_glass_active();
+        let glass = toast_window_glass();
         let light = chrome_uses_light_appearance();
         // Each card reports its painted frame here so the blurred background covers the cards
         // themselves and not the gaps or the close buttons' outset.

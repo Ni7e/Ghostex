@@ -23,6 +23,7 @@ import {
   transparencyStrengthFromSettings,
   transparencyStrengthPatch,
   windowGlassAvailable,
+  windowGlassRestartNote,
   windowGlassForTransparency,
 } from '../../settings-modal/theme-simple-controls';
 import { Cta, Eyebrow, FootActions, Heading, Icon, Spinner, Sub, Toggle } from '../primitives';
@@ -254,10 +255,18 @@ function LookCard({
     const patch: Partial<NonNullable<PanelProps['props']['settings']>> = {
       windowGlass: windowGlassForTransparency(settings.windowGlass, turningOn),
     };
+    const notes: string[] = [];
     if (turningOn && !settings.sidebarTheme.startsWith('dark')) {
       patch.sidebarTheme = 'dark-2';
       setScheme('dark');
-      toast('Switched to Dark appearance so the transparency shows');
+      notes.push('Switched to Dark appearance so the transparency shows.');
+    }
+    const restartNote = windowGlassRestartNote().trim();
+    if (turningOn && restartNote) {
+      notes.push(restartNote);
+    }
+    if (notes.length > 0) {
+      toast(notes.join(' '));
     }
     onUpdate(patch);
   };

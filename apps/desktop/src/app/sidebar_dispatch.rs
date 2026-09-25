@@ -51,6 +51,12 @@ impl GhostexGpuiApp {
             .saved_settings_json
             .clone();
         let system_is_light = refresh_gpui_system_appearance(cx);
+        // Windows sends no event this app hears when Transparency effects is switched, so the
+        // settings poll re-reads it (macOS reports Reduce Transparency through its accessibility
+        // notification instead).
+        if cfg!(target_os = "windows") && refresh_window_glass(settings.object()) {
+            cx.notify();
+        }
         if self.system_color_scheme_is_light != system_is_light {
             self.system_color_scheme_is_light = system_is_light;
             self.notify_native_chat_views(cx);
