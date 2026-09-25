@@ -216,6 +216,7 @@ impl GhostexGpuiApp {
         // connected edge and is retired on every other one, which leaves the machine's rows on
         // screen as stale rather than dropping them.
         self.gx_store_sync_remote_clients(true, cx);
+        self.remote_reconnect_on_status(remote_machine_id, state, cx);
         if state == GpuiRemoteGxserverConnectState::Connected.wire_status_state() {
             self.attach_surfaced_remote_workspace_terminals(remote_machine_id, cx);
         }

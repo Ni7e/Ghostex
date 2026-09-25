@@ -4,7 +4,6 @@ Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
 import {
-  GPUI_REMOTE_MACHINE_RECONNECT_DELAYS_MS,
   GPUI_SIDEBAR_DEFAULT_CLIENT_ID,
   GPUI_STALE_REMOTE_PRESENTATION_REFRESH_COOLDOWN_MS,
 } from './constants';
@@ -57,12 +56,6 @@ reports as a circular base type. `gpuiSidebarRuntimeRemoteMachineMethodsShapeChe
 at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeRemoteMachineMethods {
-  connectSavedRemoteMachinesOnStartup(): void;
-  reconcileRemoteMachineRetryTargets(): void;
-  reconnectRemoteMachine(remoteMachineId: string, installApproved: boolean, automatic?: boolean): void;
-  scheduleRemoteReconnect(remoteMachineId: string): void;
-  clearRemoteReconnectTimeout(remoteMachineId: string): void;
-  resetRemoteReconnect(remoteMachineId: string): void;
   requestRemoteGxserver<TResult = unknown>(
     remoteMachineId: string,
     path: GxserverEndpointPath,
@@ -145,153 +138,6 @@ export interface GpuiSidebarRuntimeRemoteMachineMethods {
 }
 
 export const gpuiSidebarRuntimeRemoteMachineMethods = {
-  connectSavedRemoteMachinesOnStartup(this: GpuiSidebarRuntime): void {
-    /*
-    CDXC:RemoteMachines 2026-07-21:
-    Rust-owned SSH tunnels are process-local and therefore never survive an
-    app restart. Reconnect every saved machine after React has mounted its
-    message-source listener so cached last-seen rows become live again and the
-    header receives the normal connecting/connected status sequence. Reuse the
-    explicit reconnect bridge; renderer code still sends only the saved id and
-    never receives SSH details or tokens. Startup attempts enter the same
-    lifecycle reconnect manager used after sleep/wake, so retryable failures
-    back off without exhausting a launch-only budget.
-    */
-    if (this.didConnectSavedRemoteMachinesOnStartup || this.runtimeSettings?.settings === undefined) {
-      return;
-    }
-    this.didConnectSavedRemoteMachinesOnStartup = true;
-    const settings = createGpuiSidebarSettings(this.runtimeSettings);
-    const enabledMachines = settings.remoteMachines.filter(isRemoteMachineEnabledInSidebar);
-    this.enabledRemoteMachineIdsForReconnect = new Set(enabledMachines.map((machine) => machine.id));
-    for (const machine of enabledMachines) {
-      this.reconnectRemoteMachine(machine.id, false, true);
-    }
-  },
-
-  reconcileRemoteMachineRetryTargets(this: GpuiSidebarRuntime): void {
-    if (!this.didConnectSavedRemoteMachinesOnStartup) {
-      return;
-    }
-    const enabledRemoteMachineIds = new Set(
-      createGpuiSidebarSettings(this.runtimeSettings)
-        .remoteMachines.filter(isRemoteMachineEnabledInSidebar)
-        .map((machine) => machine.id)
-    );
-    const retryMachineIds = new Set([
-      ...this.remoteReconnectAttempts.keys(),
-      ...this.remoteReconnectInFlight,
-      ...this.remoteReconnectTimeouts.keys(),
-    ]);
-    for (const machineId of retryMachineIds) {
-      if (enabledRemoteMachineIds.has(machineId)) {
-        continue;
-      }
-      this.resetRemoteReconnect(machineId);
-    }
-    for (const machineId of enabledRemoteMachineIds) {
-      if (this.enabledRemoteMachineIdsForReconnect.has(machineId)) {
-        continue;
-      }
-      this.reconnectRemoteMachine(machineId, false, true);
-    }
-    this.enabledRemoteMachineIdsForReconnect = enabledRemoteMachineIds;
-  },
-
-  reconnectRemoteMachine(
-    this: GpuiSidebarRuntime,
-    remoteMachineId: string,
-    installApproved: boolean,
-    automatic = false
-  ): void {
-    const normalizedMachineId = normalizeNonEmptyString(remoteMachineId);
-    if (!normalizedMachineId) {
-      return;
-    }
-    if (!automatic) {
-      this.resetRemoteReconnect(normalizedMachineId);
-    } else if (this.remoteReconnectInFlight.has(normalizedMachineId)) {
-      return;
-    }
-    this.clearRemoteReconnectTimeout(normalizedMachineId);
-    this.remoteReconnectInFlight.add(normalizedMachineId);
-    try {
-      postAppModalHostMessage(
-        {
-          automatic,
-          installApproved,
-          remoteMachineId: normalizedMachineId,
-          type: 'reconnectRemoteMachine',
-        },
-        'GPUISidebarRemoteMachines:reconnect'
-      );
-      this.messageSource.postMessage({
-        machineId: normalizedMachineId,
-        state: 'connecting',
-        type: 'remoteMachineStatus',
-      });
-    } catch {
-      this.remoteReconnectInFlight.delete(normalizedMachineId);
-      this.scheduleRemoteReconnect(normalizedMachineId);
-      if (!automatic) {
-        this.postRemoteToast('warning', 'Remote connect unavailable', {
-          description: 'GPUI could not reach the native remote-machine bridge.',
-        });
-      }
-    }
-  },
-
-  scheduleRemoteReconnect(this: GpuiSidebarRuntime, remoteMachineId: string): void {
-    const normalizedMachineId = normalizeNonEmptyString(remoteMachineId);
-    if (
-      !normalizedMachineId ||
-      this.remoteReconnectInFlight.has(normalizedMachineId) ||
-      this.remoteReconnectTimeouts.has(normalizedMachineId)
-    ) {
-      return;
-    }
-    const isStillSaved = createGpuiSidebarSettings(this.runtimeSettings).remoteMachines.some(
-      (machine) => machine.id === normalizedMachineId && isRemoteMachineEnabledInSidebar(machine)
-    );
-    if (!isStillSaved) {
-      this.resetRemoteReconnect(normalizedMachineId);
-      return;
-    }
-    const retryAttempts = this.remoteReconnectAttempts.get(normalizedMachineId) ?? 0;
-    const delay =
-      GPUI_REMOTE_MACHINE_RECONNECT_DELAYS_MS[
-        Math.min(retryAttempts, GPUI_REMOTE_MACHINE_RECONNECT_DELAYS_MS.length - 1)
-      ];
-    const timeout = window.setTimeout(() => {
-      this.remoteReconnectTimeouts.delete(normalizedMachineId);
-      const remainsSaved = createGpuiSidebarSettings(this.runtimeSettings).remoteMachines.some(
-        (machine) => machine.id === normalizedMachineId && isRemoteMachineEnabledInSidebar(machine)
-      );
-      if (!remainsSaved) {
-        this.resetRemoteReconnect(normalizedMachineId);
-        return;
-      }
-      this.remoteReconnectAttempts.set(normalizedMachineId, retryAttempts + 1);
-      this.reconnectRemoteMachine(normalizedMachineId, false, true);
-    }, delay);
-    this.remoteReconnectTimeouts.set(normalizedMachineId, timeout);
-  },
-
-  clearRemoteReconnectTimeout(this: GpuiSidebarRuntime, remoteMachineId: string): void {
-    const timeout = this.remoteReconnectTimeouts.get(remoteMachineId);
-    if (timeout === undefined) {
-      return;
-    }
-    window.clearTimeout(timeout);
-    this.remoteReconnectTimeouts.delete(remoteMachineId);
-  },
-
-  resetRemoteReconnect(this: GpuiSidebarRuntime, remoteMachineId: string): void {
-    this.clearRemoteReconnectTimeout(remoteMachineId);
-    this.remoteReconnectAttempts.delete(remoteMachineId);
-    this.remoteReconnectInFlight.delete(remoteMachineId);
-  },
-
   requestRemoteGxserver<TResult = unknown>(
     this: GpuiSidebarRuntime,
     remoteMachineId: string,
@@ -684,7 +530,17 @@ export const gpuiSidebarRuntimeRemoteMachineMethods = {
     writeStoredGpuiRemoteRecentProjects(this.remoteRecentProjectsByMachineId);
     this.activeGroupId = createGpuiRemotePresentationGroupId(remoteReference.machineId, remoteReference.projectId);
     if (!this.remotePresentations.has(remoteReference.machineId)) {
-      this.reconnectRemoteMachine(remoteReference.machineId, false);
+      // A manual connect: Rust's connect door resets the reconnect ladder for it
+      // (apps/desktop/src/app/remote_conn/reconnect_ladder.rs).
+      postAppModalHostMessage(
+        {
+          automatic: false,
+          installApproved: false,
+          remoteMachineId: remoteReference.machineId,
+          type: 'reconnectRemoteMachine',
+        },
+        'GPUISidebarRemoteMachines:reconnect'
+      );
     }
     this.publishRemotePresentationPatch();
   },

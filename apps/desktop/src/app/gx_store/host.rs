@@ -93,6 +93,8 @@ pub(crate) struct GxStoreHost {
     /// Shared with the client thread, which quotes it as `lastRevision` when it subscribes.
     held_revision: Arc<AtomicI64>,
     pub(super) counters: GxStoreCounters,
+    /// The remote machines' start-up connect and reconnect ladder (remote_conn/reconnect_ladder.rs).
+    pub(crate) remote_reconnect: crate::app::remote_conn::reconnect_ladder::RemoteReconnectLadder,
     /// CLI renderer commands the local client handed over in the last pump, performed right after
     /// it (renderer_commands/).
     pending_renderer_commands: Vec<ghostex_gx_core::protocol::RendererCommand>,
@@ -379,6 +381,7 @@ impl GhostexGpuiApp {
         // A machine may already have connected before the store came up, and the machine tabs are
         // built here whether or not one has.
         self.gx_store_sync_remote_clients(true, cx);
+        self.remote_reconnect_on_launch(cx);
         if self.gx_store.transport == next {
             return;
         }

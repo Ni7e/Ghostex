@@ -170,6 +170,7 @@ impl GhostexGpuiApp {
             ) != SourceCodeServerRuntimeSettings::from_sidebar_runtime_settings(&next_snapshot);
 
         self.sidebar_runtime_settings_snapshot = next_snapshot.clone();
+        self.remote_reconnect_sync_with_settings(cx);
         if let Some(sidebar) = self.sidebar.clone() {
             let next_snapshot = next_snapshot.clone();
             sidebar.update(cx, |surface, _| {

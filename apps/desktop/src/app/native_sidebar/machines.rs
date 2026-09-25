@@ -34,7 +34,7 @@ impl GhostexGpuiApp {
                     .when(index > 0, |row| row.border_l_1().border_color(appearance.foreground.opacity(0.12)))
                     .when(selected, |row| row.bg(appearance.selected)).hover(|row| row.bg(appearance.hover))
                     .child(div().id(format!("native-machine-connect-{id}")).flex_shrink_0().child(glyph)
-                        .when(id != "local" && machine.state != "connected" && !busy, |icon| icon.on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_command(json!({"type": "reconnectRemoteMachine", "remoteMachineId": reconnect}), cx); }))))
+                        .when(id != "local" && machine.state != "connected" && !busy, |icon| icon.on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.remote_reconnect_from_sidebar(&reconnect, cx); }))))
                     .child(div().min_w_0().text_ellipsis().child(machine.label.clone()))
                     /*
                     CDXC:Sidebar 2026-09-25 DECISION:

@@ -21,9 +21,6 @@ import type { GpuiSidebarRuntimeCloseAfterDoneMethods } from './close-after-done
 import { gpuiSidebarRuntimeCloseAfterDoneMethods } from './close-after-done';
 import {
   GPUI_REMOTE_MACHINE_PRESENTATION_CLEAR_STATES,
-  GPUI_REMOTE_MACHINE_RECONNECT_PROGRESS_STATES,
-  GPUI_REMOTE_MACHINE_RECONNECT_STOP_STATES,
-  GPUI_REMOTE_MACHINE_RETRY_STATES,
   GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
   GPUI_SIDEBAR_REMOTE_EVENT_NAME,
 } from './constants';
@@ -435,9 +432,6 @@ export class GpuiSidebarRuntime {
   remoteLastSeenPresentations = new Map<string, GxserverPresentationSnapshot>();
   remoteLastSeenStore = new GpuiRemoteLastSeenStore();
   remoteLastSeenPersistTimeoutId: number | undefined;
-  remoteReconnectAttempts = new Map<string, number>();
-  remoteReconnectInFlight = new Set<string>();
-  remoteReconnectTimeouts = new Map<string, number>();
   remoteRecentProjectsByMachineId = new Map<string, GxserverRecentProjectDomainState[]>();
   remoteGroupOrderByMachineId = new Map<string, string[]>();
   revision = 0;
@@ -465,8 +459,6 @@ export class GpuiSidebarRuntime {
   trustedExistingWorktreeList: GpuiTrustedExistingWorktreeList | undefined;
   visibleSessionIds = new Set<string>();
   didAutoMaterializeStartupSession = false;
-  didConnectSavedRemoteMachinesOnStartup = false;
-  enabledRemoteMachineIdsForReconnect = new Set<string>();
   workspaceGroups: GpuiWorkspaceSessionGroupsState = createEmptyGpuiWorkspaceSessionGroupsState();
   lastForwardedRemoteSidebarProjectCollectionsJsonByMachineId = new Map<string, string>();
   lastForwardedRemoteSidebarSpacesJsonByMachineId = new Map<string, string>();
@@ -500,7 +492,6 @@ export class GpuiSidebarRuntime {
       this.startFromBootstrap(bootstrap);
     }
     this.startGitPollingDriver();
-    window.setTimeout(() => this.connectSavedRemoteMachinesOnStartup(), 0);
   }
 
   installGpuiBridgeCallbacks(): void {
@@ -761,8 +752,6 @@ export class GpuiSidebarRuntime {
     gpuiBridge.onRuntimeSettingsChanged = (runtimeSettings) => {
       const didChange = !hasSameGpuiRuntimeSettings(this.runtimeSettings, runtimeSettings);
       this.runtimeSettings = runtimeSettings;
-      this.connectSavedRemoteMachinesOnStartup();
-      this.reconcileRemoteMachineRetryTargets();
       if (!didChange) {
         return;
       }
@@ -782,17 +771,6 @@ export class GpuiSidebarRuntime {
     }
     if (remoteEvent.type === 'remoteMachineStatus') {
       this.messageSource.postMessage(remoteEvent);
-      if (remoteEvent.state === 'connected') {
-        this.resetRemoteReconnect(remoteEvent.machineId);
-      } else if (GPUI_REMOTE_MACHINE_RECONNECT_PROGRESS_STATES.has(remoteEvent.state)) {
-        this.remoteReconnectInFlight.add(remoteEvent.machineId);
-        this.clearRemoteReconnectTimeout(remoteEvent.machineId);
-      } else if (GPUI_REMOTE_MACHINE_RETRY_STATES.has(remoteEvent.state)) {
-        this.remoteReconnectInFlight.delete(remoteEvent.machineId);
-        this.scheduleRemoteReconnect(remoteEvent.machineId);
-      } else if (GPUI_REMOTE_MACHINE_RECONNECT_STOP_STATES.has(remoteEvent.state)) {
-        this.resetRemoteReconnect(remoteEvent.machineId);
-      }
       if (GPUI_REMOTE_MACHINE_PRESENTATION_CLEAR_STATES.has(remoteEvent.state)) {
         this.remotePresentations.delete(remoteEvent.machineId);
         // A queued stale-revision refetch is for a cache this just dropped, and
@@ -1126,9 +1104,6 @@ export class GpuiSidebarRuntime {
         return;
       case 'promptRenameWorktreeForGroup':
         await this.promptRenameWorktreeForGroup(message.groupId);
-        return;
-      case 'reconnectRemoteMachine':
-        this.reconnectRemoteMachine(message.remoteMachineId, message.installApproved === true);
         return;
       case 'removeProject':
         await this.removeProject(message.projectId);

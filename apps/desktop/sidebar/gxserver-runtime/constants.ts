@@ -4,10 +4,7 @@ Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
 import type { GxserverGitAction } from "@/packages/shared/gxserver-protocol";
-import type {
-  SidebarRemoteMachineStatusMessage,
-  SidebarTheme,
-} from "@/packages/shared/session-grid-contract";
+import type { SidebarTheme } from "@/packages/shared/session-grid-contract";
 import type { SidebarGitAction } from "@/packages/shared/sidebar-git";
 
 export const GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS = 20;
@@ -332,37 +329,6 @@ export const GPUI_DELAYED_SEND_MIN_DELAY_MS = 60_000;
 export const GPUI_DELAYED_SEND_MAX_DELAY_MS = 2_147_483_647;
 
 export const GPUI_REMOTE_MACHINE_STATUS_MESSAGE_MAX_CHARS = 300;
-export const GPUI_REMOTE_MACHINE_RECONNECT_DELAYS_MS = [
-  2_000, 5_000, 15_000, 30_000, 60_000,
-] as const;
-
-export const GPUI_REMOTE_MACHINE_RETRY_STATES = new Set<
-  SidebarRemoteMachineStatusMessage["state"]
->([
-  "disconnected",
-  "failed",
-  "keychainFailed",
-  "presentationStreamFailed",
-  "presentationSubscribeFailed",
-  "sshFailed",
-  "tokenUnavailable",
-  "tunnelFailed",
-]);
-
-export const GPUI_REMOTE_MACHINE_RECONNECT_PROGRESS_STATES = new Set<
-  SidebarRemoteMachineStatusMessage["state"]
->(["connecting", "downloadingRemoteServerPackage", "installing"]);
-
-export const GPUI_REMOTE_MACHINE_RECONNECT_STOP_STATES = new Set<
-  SidebarRemoteMachineStatusMessage["state"]
->([
-  "installApprovalRequired",
-  "installFailed",
-  "invalid",
-  "unsupported",
-  "unsupportedRemotePlatform",
-]);
-
 export const GPUI_REMOTE_MACHINE_STATUS_STATES = new Set([
   "connecting",
   "connected",
