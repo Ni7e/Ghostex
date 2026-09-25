@@ -20,7 +20,6 @@ import {
   parseGpuiRemotePresentationGroupId,
   parseGpuiRemotePresentationProjectId,
 } from './helpers/remote-presentation';
-import { normalizeGpuiWorktreeParentProjectId } from './helpers/worktrees';
 import type {
   GpuiRemoteProjectReference,
   GpuiRemoteProjectScope,
@@ -81,14 +80,6 @@ export interface GpuiSidebarRuntimeRemoteMachineMethods {
   upsertRemotePresentationProject(remoteMachineId: string, nextProject: GxserverPresentationProject): void;
   removeRemotePresentationProject(remoteMachineId: string, projectId: string): void;
   remoteMachineName(machineId: string): string | undefined;
-  resolveRemoteWorktreeFamilyParentProjectFromPresentation(
-    sourceProject: GpuiRemoteProjectScope
-  ): GpuiRemoteProjectScope | undefined;
-  isTrustedRemoteExistingWorktreeKey(worktreeKey: string, sourceProject: GpuiRemoteProjectScope): boolean;
-  resolveRemoteWorktreeMutationProject(
-    remoteMachineId: string,
-    project: GxserverPresentationProject | undefined
-  ): Promise<GxserverPresentationProject>;
   refreshRemotePresentationFromGxserver(remoteMachineId: string): Promise<void>;
   scheduleStaleRemotePresentationRefresh(remoteMachineId: string): void;
   forgetStaleRemotePresentationRefresh(remoteMachineId: string): void;
@@ -330,60 +321,6 @@ export const gpuiSidebarRuntimeRemoteMachineMethods = {
   remoteMachineName(this: GpuiSidebarRuntime, machineId: string): string | undefined {
     return createGpuiSidebarSettings(this.runtimeSettings).remoteMachines.find((machine) => machine.id === machineId)
       ?.name;
-  },
-
-  resolveRemoteWorktreeFamilyParentProjectFromPresentation(
-    this: GpuiSidebarRuntime,
-    sourceProject: GpuiRemoteProjectScope
-  ): GpuiRemoteProjectScope | undefined {
-    const parentProjectId = normalizeGpuiWorktreeParentProjectId(sourceProject.project.worktree);
-    if (!parentProjectId) {
-      return sourceProject;
-    }
-    const parentProject = this.remotePresentations
-      .get(sourceProject.machineId)
-      ?.projects.find((project) => project.projectId === parentProjectId);
-    return parentProject
-      ? {
-          machineId: sourceProject.machineId,
-          machineName: sourceProject.machineName,
-          project: parentProject,
-          projectId: parentProject.projectId,
-        }
-      : undefined;
-  },
-
-  isTrustedRemoteExistingWorktreeKey(
-    this: GpuiSidebarRuntime,
-    worktreeKey: string,
-    sourceProject: GpuiRemoteProjectScope
-  ): boolean {
-    const trusted = this.trustedExistingWorktreeList;
-    return Boolean(
-      trusted &&
-      trusted.remoteMachineId === sourceProject.machineId &&
-      trusted.sourceProjectId === sourceProject.projectId &&
-      trusted.worktreeKeys?.has(worktreeKey.trim())
-    );
-  },
-
-  async resolveRemoteWorktreeMutationProject(
-    this: GpuiSidebarRuntime,
-    remoteMachineId: string,
-    project: GxserverPresentationProject | undefined
-  ): Promise<GxserverPresentationProject> {
-    if (!project?.projectId) {
-      throw new Error('Remote gxserver did not return a worktree project.');
-    }
-    this.upsertRemotePresentationProject(remoteMachineId, project);
-    this.publishRemotePresentationPatch();
-    await this.refreshRemotePresentationFromGxserver(remoteMachineId).catch(() => undefined);
-    return (
-      this.findRemotePresentationProject({
-        machineId: remoteMachineId,
-        projectId: project.projectId,
-      }) ?? project
-    );
   },
 
   async refreshRemotePresentationFromGxserver(this: GpuiSidebarRuntime, remoteMachineId: string): Promise<void> {

@@ -14,6 +14,17 @@ use serde_json::Value;
 use super::rpc_types::GxRpcError;
 use crate::app::model::GpuiRemoteGxserverRequestTarget;
 
+/// The desktop's signature; `fetch` here has no time limit of its own, so the limit is not used.
+#[allow(dead_code)]
+pub(crate) async fn gx_rpc_with_timeout(
+    remote: Option<GpuiRemoteGxserverRequestTarget>,
+    path: &str,
+    params: Value,
+    _timeout: std::time::Duration,
+) -> Result<Value, GxRpcError> {
+    gx_rpc(remote, path, params).await
+}
+
 #[allow(dead_code)] // the first callers arrive with the runtime port's family commits
 pub(crate) async fn gx_rpc(
     remote: Option<GpuiRemoteGxserverRequestTarget>,

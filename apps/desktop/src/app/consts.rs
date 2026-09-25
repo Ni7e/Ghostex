@@ -321,11 +321,6 @@ pub(crate) const GPUI_TITLEBAR_GIT_MENU_BRANCH_MAX_CHARS: usize = 200;
 
 pub(crate) const GPUI_TITLEBAR_GIT_MENU_MAX_ROWS: usize = 16;
 
-pub(crate) const GPUI_SIDEBAR_TITLEBAR_GIT_ACTION_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_TITLEBAR_GIT_ACTION_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.titlebarGitAction";
-
 pub(crate) const GPUI_TITLEBAR_GIT_ACTION_REFRESH_SELECTOR: &str = "refresh";
 
 pub(crate) const GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION: u64 = 1;
@@ -380,11 +375,6 @@ pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_ID_MAX: u64 =
 
 #[cfg(target_os = "windows")]
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_MAX_CHARS: usize = 512;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceTerminalRuntimeAction";
 
 pub(crate) const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_VERSION: u64 = 1;
 

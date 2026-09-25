@@ -158,6 +158,8 @@ pub(crate) struct GxStoreHost {
     pub(super) runtime_route: super::sidebar_runtime_route::SidebarRuntimeRouteCounters,
     /// The runtime's one-way facts channel, beside the publish it is compared with.
     pub(crate) runtime_facts: super::runtime_facts::SidebarRuntimeFacts,
+    /// Git, worktrees and transcript export (family F5, gx_store/git/).
+    pub(crate) git: super::git::GitHost,
     /// The effects the app performs rather than the store (`effects.rs`).
     pub(super) app_effects: super::effects::AppEffectQueue,
     /// The sidebar HUD's sources (hud/).

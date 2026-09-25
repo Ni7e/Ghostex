@@ -8,6 +8,6 @@ pub(crate) mod web_transport;
 
 pub(crate) use host::GxStoreHost;
 #[allow(unused_imports)] // the first callers arrive with the runtime port's family commits
-pub(crate) use rpc::gx_rpc;
+pub(crate) use rpc::{gx_rpc, gx_rpc_with_timeout};
 #[allow(unused_imports)]
 pub(crate) use rpc_types::GxRpcError;

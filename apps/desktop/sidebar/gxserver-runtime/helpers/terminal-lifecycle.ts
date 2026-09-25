@@ -8,21 +8,16 @@ import {
   GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION,
 } from '../constants';
 import type {
   GpuiWorkspaceSessionAttentionAcknowledgePayload,
   GpuiWorkspaceTerminalEscapePressedPayload,
-  GpuiWorkspaceTerminalRuntimeActionPayload,
 } from '../types-and-protocol';
 import { isObjectRecord, normalizeNonEmptyString } from './records';
 import { parseGpuiRemotePresentationProjectId, parseGpuiRemotePresentationSessionId } from './remote-presentation';
 import { gpuiStatusPetActivationSessionIdAllowed } from './status-indicators';
 import { parseGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import type { GxserverSessionTransitionResult } from '@/packages/shared/gxserver-protocol';
-import { sessionChatHandoffDraft } from '@/packages/shared/session-chat-file-references';
-import { modelPickerProvider } from '@/packages/shared/session-chat-presentation/model-picker-request';
 
 export function gpuiWorkspaceTerminalTitleCommandForAgent(agentId: string): 'name' | 'rename' | 'title' {
   const normalizedAgentId = agentId.trim().toLowerCase();
@@ -33,73 +28,6 @@ export function gpuiWorkspaceTerminalTitleCommandForAgent(agentId: string): 'nam
     return 'title';
   }
   return 'rename';
-}
-
-/*
-CDXC:TranscriptExport 2026-08-20:
-The follow-up conversation's staged input, not a prompt. gxserver types this
-into the new agent's composer and never submits it, so the user writes their
-own prompt around the mention: sending anything on their behalf was rejected.
-The trailing space separates the handoff link from what
-they type next, so it must survive untrimmed all the way to the daemon.
-*/
-export function createExportedTranscriptMentionDraft(path: string, sessionTitle: string): string {
-  return sessionChatHandoffDraft(path, sessionTitle);
-}
-
-export function normalizeGpuiWorkspaceTerminalRuntimeAction(
-  value: unknown
-): GpuiWorkspaceTerminalRuntimeActionPayload | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    Object.keys(record).some(
-      (key) => !['action', 'agentId', 'projectId', 'sessionId', 'target', 'type', 'version'].includes(key)
-    )
-  ) {
-    return undefined;
-  }
-  if (
-    record.type !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE ||
-    record.version !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION
-  ) {
-    return undefined;
-  }
-  /*
-  Close, Sleep, Fork, Full Reload, Note, Switch Account and the two sleep sweeps are Rust's
-  (gx_store/terminal_lifecycle/runtime_actions.rs); only the export dialog's two actions still
-  arrive here.
-  */
-  const action = record.action === 'exportTranscript' || record.action === 'handoffToModel' ? record.action : undefined;
-  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
-  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
-  if (
-    !action ||
-    !projectId ||
-    !sessionId ||
-    !gpuiLocalWorkspaceLifecycleProjectIdAllowed(projectId) ||
-    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
-  ) {
-    return undefined;
-  }
-  if (record.agentId !== undefined) {
-    return undefined;
-  }
-  if (action === 'handoffToModel') {
-    const target = record.target as Record<string, unknown> | null | undefined;
-    const provider = typeof target?.provider === 'string' ? modelPickerProvider(target.provider) : undefined;
-    const model = normalizeNonEmptyString(target?.model)?.trim();
-    if (!provider || provider !== target?.provider || !model || typeof target?.effort !== 'string') {
-      return undefined;
-    }
-    return { action, projectId, sessionId, target: { provider, model, effort: target.effort.trim() } };
-  }
-  if (record.target !== undefined) {
-    return undefined;
-  }
-  return { action, projectId, sessionId };
 }
 
 export function normalizeGpuiWorkspaceTerminalEscapePressed(

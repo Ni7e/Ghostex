@@ -84,7 +84,6 @@ import {
   DEFAULT_TERMINAL_SESSION_TITLE,
   GRID_COLUMN_COUNT,
 } from "@/packages/shared/session-grid-contract";
-import { createDefaultSidebarGitState } from "@/packages/shared/sidebar-git";
 import { postGpuiSidebarRuntimeFactsRows } from "./sidebar-runtime-facts";
 
 /*
@@ -144,7 +143,6 @@ export interface GpuiSidebarRuntimeSidebarGroupMethods {
   withSelectedProjectActiveGroup(
     groups: SidebarSessionGroup[],
   ): SidebarSessionGroup[];
-  overlayProjectDiffStats(groups: SidebarSessionGroup[]): SidebarSessionGroup[];
   pruneWorkspaceGroupAssignments(
     presentation: GxserverPresentationSnapshot,
   ): void;
@@ -214,7 +212,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       activeProjectId: this.activeProjectId,
       commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
-      git: this.gitStateForHud(),
       groups,
       presentation,
       runtimeSettings: this.runtimeSettings,
@@ -243,8 +240,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
-    this.postTitlebarGitMenuState();
-    this.refreshGitStateForActiveProjectIfNeeded();
   },
 
   /*
@@ -303,33 +298,15 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     Dropping them wiped the session the user quit on before `autoMaterializeStartupFocusedSession` ever saw it, and the post below persisted the loss to disk, so the next launch had nothing to restore either.
     The ids are only routing hints: `ensureActiveProject` validates them against the real snapshot on hydrate, and a reconnect after a daemon restart lands on the same session instead of the first row.
     */
-    this.gitState = createDefaultSidebarGitState();
-    this.lastGitRefreshProjectId = undefined;
-    /*
-    CDXC:Git 2026-07-29:
-    gxserver went away, so nothing memoized about its projects can be trusted
-    or republished. Drop both leases and cancel any in-flight GitHub probe so a
-    reconnect starts from real probes.
-    */
-    this.gitStateMemoByProjectId.clear();
-    this.gitHubStateMemoByProjectId.clear();
-    this.gitRepoProjectIds.clear();
-    for (const timeoutId of this.gitHubProbeTimeoutIds) {
-      window.clearTimeout(timeoutId);
-    }
-    this.gitHubProbeTimeoutIds.clear();
-    this.pendingGitHubProbeProjectIds.clear();
-    this.pendingGitCommitRequests.clear();
     this.recentProjects = [];
     this.sidebarHud = undefined;
-    this.latestGroups = this.overlayProjectDiffStats([
+    this.latestGroups = [
       ...createGpuiGxserverUnavailableSidebarGroups(),
       ...this.createRemoteSidebarGroups(),
-    ]);
+    ];
     this.latestHud = createGpuiSidebarHudState({
       activeProjectId: this.activeProjectId,
       commandPaneSessions: this.commandPaneSessions,
-      git: this.gitStateForHud(),
       groups: this.latestGroups,
       runtimeSettings: this.runtimeSettings,
       domainProjects: this.domainProjects,
@@ -347,7 +324,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
-    this.postTitlebarGitMenuState();
   },
 
   publishRemotePresentationPatch(this: GpuiSidebarRuntime): void {
@@ -377,15 +353,14 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     const previousHud = this.latestHud;
     const groups = this.presentation
       ? this.createSidebarGroups(this.presentation)
-      : this.overlayProjectDiffStats([
+      : [
           ...createGpuiGxserverUnavailableSidebarGroups(),
           ...this.createRemoteSidebarGroups(),
-        ]);
+        ];
     this.latestHud = createGpuiSidebarHudState({
       activeProjectId: this.activeProjectId,
       commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
-      git: this.gitStateForHud(),
       groups,
       presentation: this.presentation,
       runtimeSettings: this.runtimeSettings,
@@ -413,8 +388,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
-    this.postTitlebarGitMenuState();
-    this.refreshGitStateForActiveProjectIfNeeded();
   },
 
   applyDomainProjectDelta(
@@ -504,7 +477,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       activeProjectId: this.activeProjectId,
       commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
-      git: this.gitStateForHud(),
       groups: this.latestGroups,
       presentation: this.presentation,
       runtimeSettings: this.runtimeSettings,
@@ -515,7 +487,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       remoteSidebarHudsByMachineId: this.remoteSidebarHuds,
       sidebarHud: this.sidebarHud,
     });
-    this.postTitlebarGitMenuState();
     if (
       !this.hasHydrated ||
       haveSameSidebarProjectionValue(previousHud, this.latestHud)
@@ -1008,10 +979,10 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
         })),
       };
     });
-    return this.overlayProjectDiffStats([
+    return [
       ...this.withQuickAutomationsOverviewGroup(localGroups),
       ...this.createRemoteSidebarGroups(),
-    ]);
+    ];
   },
 
   withQuickAutomationsOverviewGroup(
@@ -1203,34 +1174,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       return { ...group, isActive: true };
     });
     return matched ? nextGroups : groups;
-  },
-
-  overlayProjectDiffStats(
-    this: GpuiSidebarRuntime,
-    groups: SidebarSessionGroup[],
-  ): SidebarSessionGroup[] {
-    // Mirrors the macOS pre-publish overlay: header +/- counts come from the
-    // background numstat loop, keyed by the projection's editor project id
-    // (plain local ids, machine-scoped remote ids).
-    return groups.map((group) => {
-      const projectContext = group.projectContext;
-      if (!projectContext) {
-        return group;
-      }
-      const stats = this.projectDiffStatsByProjectId.get(
-        projectContext.editor.projectId,
-      );
-      if (!stats) {
-        return group;
-      }
-      return {
-        ...group,
-        projectContext: {
-          ...projectContext,
-          editor: { ...projectContext.editor, diffStats: stats },
-        },
-      };
-    });
   },
 
   /*

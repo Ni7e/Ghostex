@@ -3,9 +3,7 @@ CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
-import type { GxserverGitAction } from "@/packages/shared/gxserver-protocol";
 import type { SidebarTheme } from "@/packages/shared/session-grid-contract";
-import type { SidebarGitAction } from "@/packages/shared/sidebar-git";
 
 export const GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS = 20;
 export const GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS = 250;
@@ -36,53 +34,6 @@ remote machine. Stale deltas arrive in bursts — one per changed row — and ea
 refetch is a full presentation read across the SSH tunnel.
 */
 export const GPUI_STALE_REMOTE_PRESENTATION_REFRESH_COOLDOWN_MS = 3 * 1000;
-export const GPUI_PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS = 15 * 1000;
-/*
-CDXC:Git 2026-08-16:
-Large sidebars (100+ project rows across local and remote machines) previously
-kept the 15s cycle fixed, which meant the stagger compressed to ~100ms and the
-runtime shelled out Git probes 8-16 times per second forever. Each background
-probe is at least one subprocess-spawning gxserver RPC (a network round trip
-for remote machines), so cap the global probe rate instead: the polling cycle
-stretches so consecutive probes are never closer than this spacing.
-*/
-export const GPUI_PROJECT_DIFF_STATS_MIN_PROBE_SPACING_MS = 1000;
-/*
-CDXC:Git 2026-08-16:
-`countFileLines` sums every requested path server-side in one RPC. Batch the
-untracked-file fan-out instead of issuing one RPC per file, chunked only to
-keep a single request body bounded for repos with thousands of untracked files.
-*/
-export const GPUI_UNTRACKED_LINE_COUNT_BATCH_SIZE = 200;
-/*
-CDXC:Git 2026-07-29:
-GitHub CLI probes (`gh --version`, `gh pr view`) are the only networked calls in
-the sidebar Git fan-out, and `gh pr view` can hold a gxserver worker for many
-seconds. Background/switch-driven Git refreshes therefore publish local Git
-state first and run the GitHub probe on this delay, so the RPC burst at the
-switch instant never competes with terminal attach traffic.
-*/
-export const GPUI_SIDEBAR_GIT_HUB_DEFERRED_PROBE_DELAY_MS = 1500;
-/*
-CDXC:Git 2026-07-29:
-`GxserverGitAction` members that change the working tree, the index, or a ref.
-Running any of them invalidates that project's memoized Git state, so the memo
-can only ever serve a repository the sidebar itself has not touched since.
-*/
-export const GPUI_MUTATING_GIT_ACTIONS: ReadonlySet<string> =
-  new Set<GxserverGitAction>([
-    "addAll",
-    "checkout",
-    "checkoutNewBranch",
-    "commit",
-    "deleteLocalBranch",
-    "deleteRemoteBranch",
-    "merge",
-    "pullFastForward",
-    "push",
-    "pushSetUpstream",
-    "pushSetUpstreamCurrent",
-  ]);
 export const GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS = 400;
 export const GPUI_WORKSPACE_GROUPS_SERVER_SYNC_RETRY_DELAY_MS = 5000;
 export const GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS = 512;
@@ -160,9 +111,6 @@ export const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE =
 export const GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION = 1;
 export const GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge";
-export const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION = 1;
-export const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.workspaceTerminalRuntimeAction";
 export const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_VERSION = 1;
 export const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.sessionCompletionSound";
@@ -221,39 +169,6 @@ export const GPUI_STATUS_INDICATOR_ID_MAX_CHARS = 256;
 export const GPUI_STATUS_INDICATOR_TITLE_MAX_CHARS = 120;
 export const DEFAULT_GPUI_PROMPT_AGENT_ID = "codex";
 
-export const GPUI_BACKGROUND_COMMIT_MESSAGE_DEFAULT_AGENT_IDS = new Set([
-  "claude",
-  "codex",
-  "cursor",
-  "gemini",
-]);
-
-export const GPUI_GIT_MULTIPLE_COMMITS_PROMPT = `Please review my current changes and commit them as multiple focused commits.
-
-Commit-splitting rules:
-- Group changes by related feature, fix, or topic.
-- Do not combine unrelated work in the same commit.
-- Use file-based splitting only; do not split individual hunks.
-- Make each commit easy to revert or cherry-pick later.
-- Use clear, concise commit messages.`;
-
-export const GPUI_REMOTE_MERGE_CONFLICT_PROMPT =
-  "A direct merge into main has conflicts in this remote project. Inspect the repository state, resolve the conflicts, and commit the merge when it is correct.";
-
-export const GPUI_GIT_RELEASE_STEPS_PROMPT = `1. Push any local commits to remote.
-2. Review the commits since the last released version.
-3. Update CHANGELOG.md to mention the new changes.
-4. Publish the next minor version to the usual places we publish this app.`;
-
-export const GPUI_GIT_MULTICOMMIT_RELEASE_PROMPT = `${GPUI_GIT_MULTIPLE_COMMITS_PROMPT}
-
-After all focused commits are created:
-${GPUI_GIT_RELEASE_STEPS_PROMPT}`;
-
-export const GPUI_GIT_RELEASE_ONLY_PROMPT = `Please release this app using the usual release workflow.
-
-${GPUI_GIT_RELEASE_STEPS_PROMPT}`;
-
 export const GPUI_REMOTE_RECENT_PROJECTS_STORAGE_KEY =
   "ghostex-gpui-remote-recent-projects";
 export const GPUI_REMOTE_GROUP_ORDER_STORAGE_KEY =
@@ -268,16 +183,6 @@ export const GPUI_COMMAND_PANE_TIMER_LABEL_MAX_LENGTH = 32;
 export const GPUI_COMMAND_PANE_TIMER_REMAINING_MS_MAX = 2_147_483_647;
 export const GPUI_GXSERVER_LOCAL_COMMAND_PANE_SESSION_ID_PATTERN =
   /^G[0-9][0-9A-Za-z_-]*$/u;
-
-export const GPUI_TITLEBAR_GIT_MENU_STATE_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.titlebarGitMenuState";
-export const GPUI_TITLEBAR_GIT_MENU_STATE_MESSAGE_VERSION = 1;
-export const GPUI_TITLEBAR_GIT_ACTION_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.titlebarGitAction";
-export const GPUI_TITLEBAR_GIT_ACTION_MESSAGE_VERSION = 1;
-export const GPUI_TITLEBAR_GIT_ACTIONS: ReadonlySet<SidebarGitAction> = new Set(
-  ["commit", "push", "pr", "syncMain", "syncRemote", "multiRelease", "release"],
-);
 
 export const GPUI_PROJECT_BOARD_CONVERSATION_ACTIONS = new Set<string>([
   "appendDebugLog",

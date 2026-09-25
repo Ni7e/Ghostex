@@ -67,6 +67,7 @@ mod diagnostics_project_docs;
 mod diagnostics_remote_last_seen;
 mod diagnostics_runtime_facts;
 mod effects;
+pub(crate) mod git;
 mod host;
 mod hud;
 mod layout_persist;
@@ -141,7 +142,7 @@ pub(crate) use host::GxStoreHost;
 #[allow(unused_imports)] // the first callers arrive with the runtime port's family commits
 pub(crate) use activation_focus::{menu_bar_session_focus_id, palette_session_focus_id};
 pub(crate) use primary_launcher::read_primary_agent_launcher_id;
-pub(crate) use rpc::gx_rpc;
+pub(crate) use rpc::{gx_rpc, gx_rpc_with_timeout};
 #[allow(unused_imports)]
 pub(crate) use rpc_types::GxRpcError;
 pub(crate) use runtime_trace::{

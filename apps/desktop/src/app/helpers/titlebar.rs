@@ -3318,8 +3318,3 @@ pub(crate) fn gpui_titlebar_mode_hidden_from_settings(mode: TitlebarMode) -> boo
         })
 }
 
-pub(crate) fn gpui_titlebar_git_action_script(message: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onTitlebarGitAction==='function'){{bridge.onTitlebarGitAction(payload);}}else{{const pending=Array.isArray(bridge.pendingTitlebarGitActions)?bridge.pendingTitlebarGitActions:[];pending.push(payload);bridge.pendingTitlebarGitActions=pending;}}}})(); undefined;"
-    )
-}

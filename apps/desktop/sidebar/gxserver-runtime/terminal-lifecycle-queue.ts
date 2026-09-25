@@ -10,7 +10,6 @@ import {
   parseGpuiRemotePresentationProjectId,
   parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
-import { normalizeGpuiWorkspaceTerminalRuntimeAction } from './helpers/terminal-lifecycle';
 import { createGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 
 /*
@@ -24,7 +23,6 @@ at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeTerminalLifecycleMethods {
   handleGpuiWorkspaceTabSessionSelected(payload: unknown): void;
-  handleGpuiWorkspaceTerminalRuntimeAction(payload: unknown): Promise<void>;
 }
 
 export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
@@ -83,24 +81,6 @@ export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
       this.postLocalWorkspaceTerminalFocus(selection.projectId, selection.sessionId);
     }
     this.publishPresentation('patch');
-  },
-
-  async handleGpuiWorkspaceTerminalRuntimeAction(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
-    /*
-    Only the export dialog's two actions still arrive here; a session control's Close, Sleep,
-    Fork, Full Reload, Note and Switch Account are Rust's
-    (gx_store/terminal_lifecycle/runtime_actions.rs).
-    */
-    const request = normalizeGpuiWorkspaceTerminalRuntimeAction(payload);
-    if (!request) {
-      return;
-    }
-    const sessionId = createGxserverPresentationProjectSessionId(request.projectId, request.sessionId);
-    if (request.action === 'exportTranscript') {
-      await this.exportSessionTranscript(sessionId);
-      return;
-    }
-    await this.exportSessionTranscript(sessionId, request.target);
   },
 };
 

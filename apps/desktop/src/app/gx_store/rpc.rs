@@ -44,6 +44,17 @@ pub(crate) async fn gx_rpc(
     path: &str,
     params: Value,
 ) -> Result<Value, GxRpcError> {
+    gx_rpc_with_timeout(remote, path, params, GX_RPC_TIMEOUT).await
+}
+
+/// [`gx_rpc`] with its own time limit, for the calls the old runtime gave a longer one than the
+/// default: a commit message an agent writes, a worktree cut on the far side of a tunnel.
+pub(crate) async fn gx_rpc_with_timeout(
+    remote: Option<GpuiRemoteGxserverRequestTarget>,
+    path: &str,
+    params: Value,
+    timeout: Duration,
+) -> Result<Value, GxRpcError> {
     super::runtime_trace::trace_gx_rpc(path, &params, remote.is_some());
     let (sender, receiver) = oneshot::channel();
     let owned_path = path.to_string();
@@ -55,9 +66,9 @@ pub(crate) async fn gx_rpc(
                     &target,
                     &owned_path,
                     &params,
-                    GX_RPC_TIMEOUT,
+                    timeout,
                 ),
-                None => gxserver_post_typed_operation(&owned_path, &params, GX_RPC_TIMEOUT),
+                None => gxserver_post_typed_operation(&owned_path, &params, timeout),
             };
             let result = match response {
                 Ok((status, body)) => match serde_json::from_str::<Value>(&body) {

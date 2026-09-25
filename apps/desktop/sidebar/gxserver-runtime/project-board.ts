@@ -884,7 +884,6 @@ export const gpuiSidebarRuntimeProjectBoardMethods = {
         },
         boardProject
       );
-      this.trustedExistingWorktreeList = undefined;
       await this.refreshDomainPresentationFromClient('patch').catch(() => undefined);
       this.postWorktreeToast('success', 'Worktree started', { toastId });
       return created.session;

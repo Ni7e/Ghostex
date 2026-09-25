@@ -708,6 +708,7 @@ impl GhostexGpuiApp {
         self.project_name = titlebar_project_label_from_latest_sidebar_snapshot(
             self.latest_sidebar_project_snapshot.as_ref(),
         );
+        self.gx_store_git_active_project_changed(cx);
         self.restore_gpui_titlebar_project_selections();
         self.refresh_titlebar_actions_in_background(cx);
         self.swap_agents_workspace_for_active_project(cx);

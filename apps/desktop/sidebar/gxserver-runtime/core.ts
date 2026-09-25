@@ -24,8 +24,6 @@ import {
   GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
   GPUI_SIDEBAR_REMOTE_EVENT_NAME,
 } from './constants';
-import type { GpuiSidebarRuntimeExportTranscriptMethods } from './export-transcript';
-import { gpuiSidebarRuntimeExportTranscriptMethods } from './export-transcript';
 import type { GpuiSidebarRuntimeGitMethods } from './git';
 import { gpuiSidebarRuntimeGitMethods } from './git';
 import {
@@ -72,17 +70,11 @@ import { gpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-lifecycle
 import type {
   GpuiBrowserTabSummary,
   GpuiCommandPaneSessionSummary,
-  GpuiExportTranscriptRequestContext,
-  GpuiExportedTranscriptResult,
-  GpuiPendingGitCommitRequest,
   GpuiPendingNativeAppShotPromptInsertion,
   GpuiPendingRemoteGxserverRequest,
   GpuiPresentationSubscription,
-  GpuiProjectWorktreesResultMessage,
   GpuiRemoteSidebarHud,
-  GpuiSidebarGitHubState,
   GpuiSidebarRuntimeSettings,
-  GpuiTrustedExistingWorktreeList,
   GpuiValidatedGxserverBootstrap,
   GpuiWorkspaceSessionDelayedSendSummary,
 } from './types-and-protocol';
@@ -103,7 +95,6 @@ import type {
 } from '@/packages/shared/gxserver-protocol';
 import { NAVIGATION_HISTORY_SCOPE_GPUI } from '@/packages/shared/navigation-history/navigation-history-contract';
 import { NavigationHistoryController } from '@/packages/shared/navigation-history/navigation-history-controller';
-import type { SidebarProjectDiffStats } from '@/packages/shared/project-diff-stats';
 import type {
   ExtensionToSidebarMessage,
   SidebarGroupsChangedMessage,
@@ -117,13 +108,6 @@ import type {
   SidebarToExtensionMessage,
 } from '@/packages/shared/session-grid-contract';
 import { isSidebarCommandScope } from '@/packages/shared/sidebar-commands';
-import type { SidebarGitState } from '@/packages/shared/sidebar-git';
-import { createDefaultSidebarGitState } from '@/packages/shared/sidebar-git';
-import {
-  SIDEBAR_GIT_HUB_MEMO_TTL_MS,
-  SIDEBAR_GIT_STATE_MEMO_TTL_MS,
-  SidebarGitTtlMemo,
-} from '@/packages/shared/sidebar-git-state-memo';
 
 /*
 CDXC:StateSync 2026-06-24-11:00:
@@ -138,41 +122,11 @@ Reused SidebarApp project path actions in GPUI may send only fixed action names 
 CDXC:Projects 2026-06-24-13:49:
 Reused SidebarApp IDE-open messages in GPUI use the same pathless native project action bridge. The renderer maps group IDE opens to a Settings-owned fixed action and active workspace IDE opens to fixed VS Code/Zed action names plus gxserver project ids only; targetApp, editor commands, app names, paths, labels, URLs, and shell snippets stay out of the bridge payload so Rust owns editor selection and launch.
 
-CDXC:Worktrees 2026-06-24-18:21:
-The reused Add Worktree modal in GPUI must run local worktree create/open flows through gxserver typed endpoints instead of shelling from TypeScript or accepting arbitrary renderer paths. Remote worktree create/open must use id-scoped gxserver endpoints where the owning daemon derives target paths, branch refs, and Open Existing selections from project ids plus daemon-issued keys; do not route remote checkout paths or branch text through the renderer as authority.
-
-CDXC:Worktrees 2026-06-24-14:06:
-Open Existing prompt starts come from the reused modal's real prompt and
-visible agent selector. Blank prompts keep the project-open-only behavior, but
-a non-blank prompt must fail if the submitted agent is not configured instead
-of silently opening the worktree without starting the requested session.
-
 CDXC:ServerDaemon 2026-06-24-13:30:
 Pinned Prompts in the reused GPUI SidebarApp must hydrate and save through
 gxserver app-user-data, matching the app-modal host. Keep prompt bodies inside
 authenticated RPC payloads only; do not log them or persist them in a
 GPUI-only JSON file.
-
-CDXC:Git 2026-06-24-15:22:
-GPUI Git controls may use gxserver-owned project ids and typed Git/GitHub/Beads endpoints for status, diffs, commit, push, and direct remote sync. Commit and PR creation paths must use the reused review modal or visible gxserver agent sessions, with remote-machine actions routed through the Rust-owned saved-machine tunnel and the owning remote gxserver.
-
-CDXC:Git 2026-06-24-15:43:
-Existing pull-request browser open and changed-file IDE open are native GPUI side effects. React may send only fixed action names, gxserver project ids, and normalized project-relative file candidates from current HUD/review state; Rust must re-resolve PR URLs and changed-file membership through gxserver before launching a browser or editor.
-
-CDXC:Git 2026-06-24-15:55:
-GPUI worktree completion may run direct merge-to-main and delete-after-cleanup only from a confirmed Git review request. The renderer uses the pending machine-scoped gxserver project id plus gxserver worktree parent metadata, fixed Git action names, and `/api/deleteWorktreeProject`; renderer paths, branch text, shell snippets, command output, and modal labels are never authority for side effects.
-
-CDXC:Git 2026-06-24-16:11:
-Blank GPUI commit messages use a local gxserver generation endpoint after the reused commit modal validates the selected review files. The renderer sends only the trusted project id, review-approved relative paths, and selected prompt-agent id; gxserver stages/diffs the registered project and returns the subject/body used by the same commit pipeline.
-
-CDXC:Git 2026-06-24-16:28:
-Direct/background GPUI PR creation must complete through gxserver before the UI opens a PR or removes a worktree. Reused review confirmations commit only validated review files, push with fixed Git action names, call the sanitized `/api/createPullRequest` project-id RPC, and run delete-after cleanup only after that result confirms an open PR; visible-agent PR workflows remain non-delete because they have no gxserver-owned PR completion signal.
-
-CDXC:Git 2026-06-24-16:45:
-Visible PR-agent sessions expose gxserver lifecycle/activity only, not a trusted PR-created result. Preserve visible PR sessions for non-delete-after workflows, but route every delete-after PR request through the direct/background gxserver PR result before removing the original validated worktree.
-
-CDXC:Git 2026-06-24-17:47:
-Remote GPUI Git/GitHub/worktree actions must route through the Rust-owned saved-machine gxserver tunnel with machine-scoped project ids, reviewed file paths, fixed endpoint action names, and id-scoped worktree/branch operations only. Native side effects stay explicit: terminal focus uses remote attach, PR browser opens and copy-path use Rust revalidation, local Finder dereference remains unsupported for remote paths, and remote IDE opens require Rust-owned fixed editor support.
 
 CDXC:RemoteMachines 2026-06-24-19:06:
 Remote terminal focus and copy-attach commands may leave React only as fixed native action names plus machine-scoped remote presentation session ids. Rust owns saved-machine SSH details, gxserver attach/resume metadata, GPUI terminal launch payloads, and clipboard command construction so renderer state never carries tokens, hostnames, paths, or command text.
@@ -239,7 +193,6 @@ export class GpuiSidebarLocalMessageSource {
       | SidebarHudChangedMessage
       | SidebarOrderSyncResultMessage
       | SidebarPreviousSessionsResultMessage
-      | GpuiProjectWorktreesResultMessage
   ): void {
     this.eventTarget.dispatchEvent(
       new MessageEvent('message', {
@@ -268,20 +221,6 @@ export class GpuiSidebarRuntime {
     });
   }
 
-  titlebarGitMenuStateRetryId: number | undefined;
-  lastTitlebarGitMenuStatePayload: string | undefined;
-  gitPollingCycleTimeoutId: number | undefined;
-  gitPollingTimeoutIds = new Set<number>();
-  pendingProjectDiffRefreshProjectIds = new Set<string>();
-  projectDiffStatsByProjectId = new Map<string, SidebarProjectDiffStats>();
-  /*
-  CDXC:Git 2026-08-16:
-  Projects (plain local ids, machine-scoped remote ids) whose cwd answered
-  `isInsideWorkTree` with true. Repo-ness effectively never changes at runtime,
-  so steady-state polling skips that probe and goes straight to `diffNumstat`;
-  a failed numstat drops the entry so the next cycle re-probes from scratch.
-  */
-  gitRepoProjectIds = new Set<string>();
   activeGroupId: string | undefined;
   activeProjectId: string | undefined;
   lastNavigationHistoryStatePayload: string | undefined;
@@ -323,64 +262,14 @@ export class GpuiSidebarRuntime {
    */
   gpuiFocusStamp: number | undefined;
   gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
-  gitState: SidebarGitState = createDefaultSidebarGitState();
   hasHydrated = false;
   latestGroups: SidebarSessionGroup[] = [];
   latestHud: SidebarHudState = createGpuiSidebarHudState();
   localFirstHiddenPresentationSessionKeys = new Set<string>();
   lastAppShotTargetAt = 0;
   lastAppShotTargetSessionId: string | undefined;
-  /**
-   * Which project the active Git HUD slot currently reflects. This is a
-   * *presentation* marker, not a cache: it stops every republish of the same
-   * project from re-entering the refresh path. Cross-project freshness lives in
-   * `gitStateMemoByProjectId` below.
-   */
-  lastGitRefreshProjectId: string | undefined;
-  /*
-  CDXC:Git 2026-07-29:
-  Per-project TTL memo for the local Git fan-out. Before this existed the
-  runtime only remembered the last refreshed project, so switching A -> B -> A
-  re-ran ~10 subprocess-spawning gxserver RPCs every time and starved terminal
-  attach traffic. A switch back to a project with a fresh entry now publishes
-  the memoized state and issues zero RPCs. Explicit and forced refreshes never
-  read the memo, so manual refresh and every Git mutation still re-probe and
-  then overwrite the entry.
-  */
-  gitStateMemoByProjectId = new SidebarGitTtlMemo<SidebarGitState>({
-    ttlMs: SIDEBAR_GIT_STATE_MEMO_TTL_MS,
-  });
-  /*
-  CDXC:Git 2026-07-29:
-  GitHub CLI results get their own, much longer lease because `gh pr view` is a
-  network round trip and pull-request state changes on a human timescale. Kept
-  separate from the Git-state memo so a deferred probe landing later can be
-  overlaid onto an already-published (or already-memoized) local Git state.
-  */
-  gitHubStateMemoByProjectId = new SidebarGitTtlMemo<GpuiSidebarGitHubState>({
-    ttlMs: SIDEBAR_GIT_HUB_MEMO_TTL_MS,
-  });
-  pendingGitHubProbeProjectIds = new Set<string>();
-  gitHubProbeTimeoutIds = new Set<number>();
   pendingNativeAppShotPromptInsertions: GpuiPendingNativeAppShotPromptInsertion[] = [];
-  pendingGitCommitRequests = new Map<string, GpuiPendingGitCommitRequest>();
   pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
-  /*
-  CDXC:TranscriptExport 2026-08-20:
-  What the open Export Transcript result dialog is describing. The dialog is a
-  separate child window with no gxserver client, so it sends back only the agent
-  the user picked; the exported path and the project the export came from stay
-  here, where "Start new conversation" can create the follow-up session in the
-  same project without trusting a path posted back by a page.
-  */
-  pendingExportedTranscript: GpuiExportedTranscriptResult | undefined;
-  /*
-  CDXC:TranscriptExport 2026-08-24:
-  Which session the open Export Transcript dialog is about while the user is
-  still on the include-toggle stage; the dialog's export request carries only
-  the toggles back.
-  */
-  pendingExportTranscriptRequest: GpuiExportTranscriptRequestContext | undefined;
   presentation: GxserverPresentationSnapshot | undefined;
   previousSessionsByHistoryId = new Map<string, SidebarPreviousSessionItem>();
   projectBoardRestorableLinkChecks = new Map<
@@ -419,7 +308,6 @@ export class GpuiSidebarRuntime {
   sidebarHud: GxserverSidebarHudResponse | undefined;
   sleepingLocalSidebarSessionIds = new Set<string>();
   subscription: GpuiPresentationSubscription | undefined;
-  trustedExistingWorktreeList: GpuiTrustedExistingWorktreeList | undefined;
   visibleSessionIds = new Set<string>();
   didAutoMaterializeStartupSession = false;
   workspaceGroups: GpuiWorkspaceSessionGroupsState = createEmptyGpuiWorkspaceSessionGroupsState();
@@ -447,7 +335,6 @@ export class GpuiSidebarRuntime {
     if (bootstrap) {
       this.startFromBootstrap(bootstrap);
     }
-    this.startGitPollingDriver();
   }
 
   installGpuiBridgeCallbacks(): void {
@@ -552,21 +439,6 @@ export class GpuiSidebarRuntime {
       if (message) void this.handleSidebarMessage(message);
     };
     installGpuiWorkspaceGroupsHandBack(this);
-    gpuiBridge.onWorkspaceTerminalRuntimeAction = (payload) => {
-      void this.handleGpuiWorkspaceTerminalRuntimeAction(payload);
-    };
-    gpuiBridge.onTitlebarGitAction = (payload) => {
-      this.handleGpuiTitlebarGitAction(payload);
-    };
-    gpuiBridge.onGitCommitModalCommand = (payload) => {
-      void this.handleGpuiGitCommitModalCommand(payload);
-    };
-    gpuiBridge.onExportTranscriptModalCommand = (payload) => {
-      void this.handleGpuiExportTranscriptModalCommand(payload);
-    };
-    gpuiBridge.onWorktreeModalCommand = (payload) => {
-      this.handleGpuiWorktreeModalCommand(payload);
-    };
     gpuiBridge.onOsIntegrationCommand = (payload) => {
       void this.handleGpuiOsIntegrationCommand(payload);
     };
@@ -629,36 +501,6 @@ export class GpuiSidebarRuntime {
     for (const payload of pendingSidebarCommands) {
       const message = asGpuiSidebarCommand(payload);
       if (message) void this.handleSidebarMessage(message);
-    }
-    const pendingWorkspaceTerminalRuntimeActions = Array.isArray(gpuiBridge.pendingWorkspaceTerminalRuntimeActions)
-      ? gpuiBridge.pendingWorkspaceTerminalRuntimeActions.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceTerminalRuntimeActions) {
-      void this.handleGpuiWorkspaceTerminalRuntimeAction(payload);
-    }
-    const pendingTitlebarGitActions = Array.isArray(gpuiBridge.pendingTitlebarGitActions)
-      ? gpuiBridge.pendingTitlebarGitActions.splice(0)
-      : [];
-    for (const payload of pendingTitlebarGitActions) {
-      this.handleGpuiTitlebarGitAction(payload);
-    }
-    const pendingGitCommitModalCommands = Array.isArray(gpuiBridge.pendingGitCommitModalCommands)
-      ? gpuiBridge.pendingGitCommitModalCommands.splice(0)
-      : [];
-    for (const payload of pendingGitCommitModalCommands) {
-      void this.handleGpuiGitCommitModalCommand(payload);
-    }
-    const pendingExportTranscriptModalCommands = Array.isArray(gpuiBridge.pendingExportTranscriptModalCommands)
-      ? gpuiBridge.pendingExportTranscriptModalCommands.splice(0)
-      : [];
-    for (const payload of pendingExportTranscriptModalCommands) {
-      void this.handleGpuiExportTranscriptModalCommand(payload);
-    }
-    const pendingWorktreeModalCommands = Array.isArray(gpuiBridge.pendingWorktreeModalCommands)
-      ? gpuiBridge.pendingWorktreeModalCommands.splice(0)
-      : [];
-    for (const payload of pendingWorktreeModalCommands) {
-      this.handleGpuiWorktreeModalCommand(payload);
     }
     const pendingNativeAppShotPromptResults = Array.isArray(gpuiBridge.pendingNativeAppShotPromptResults)
       ? gpuiBridge.pendingNativeAppShotPromptResults.splice(0)
@@ -933,9 +775,6 @@ export class GpuiSidebarRuntime {
       case 'splitSessionRight':
         await this.splitSessionRight(message.sessionId);
         return;
-      case 'exportSessionTranscript':
-        await this.exportSessionTranscript(message.sessionId);
-        return;
       case 'renameSession':
         await this.renameSession(message);
         return;
@@ -995,34 +834,6 @@ export class GpuiSidebarRuntime {
           await this.updateRemoteSidebarSpaces(message.remoteMachineId, message.state);
         }
         return;
-      case 'promptDeleteWorktreeForGroup':
-        await this.promptDeleteWorktreeForGroup(message.groupId);
-        return;
-      case 'promptRenameWorktreeForGroup':
-        await this.promptRenameWorktreeForGroup(message.groupId);
-        return;
-      case 'runSidebarGitAction':
-        await this.runSidebarGitAction(message);
-        return;
-      case 'confirmSidebarGitCommit':
-        await this.confirmSidebarGitCommit(message);
-        return;
-      case 'cancelSidebarGitCommit':
-        this.pendingGitCommitRequests.delete(message.requestId);
-        this.publishHudPatch();
-        return;
-      case 'runSidebarGitMultipleCommits':
-        await this.runSidebarGitMultipleCommits(message.requestId, message.agentId);
-        return;
-      case 'confirmSidebarGitDirectMerge':
-        await this.confirmSidebarGitDirectMerge(message);
-        return;
-      case 'openSidebarGitChangedFileDiff':
-        await this.openSidebarGitChangedFileDiff(message.filePath, message.requestId);
-        return;
-      case 'openSidebarGitChangedFile':
-        await this.openSidebarGitChangedFileInIde(message);
-        return;
       default:
         this.handleUnsupportedSidebarMessage(message);
         return;
@@ -1069,7 +880,6 @@ export interface GpuiSidebarRuntime
     GpuiSidebarRuntimeAttentionMethods,
     GpuiSidebarRuntimeCloseAfterDoneMethods,
     GpuiSidebarRuntimeTerminalLifecycleMethods,
-    GpuiSidebarRuntimeExportTranscriptMethods,
     GpuiSidebarRuntimeWorkspaceGroupMethods,
     GpuiSidebarRuntimeRemoteMachineMethods,
     GpuiSidebarRuntimeAppShotAndMiscMethods,
@@ -1100,7 +910,6 @@ installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeStashedPromptJumpMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAttentionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeCloseAfterDoneMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeTerminalLifecycleMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeExportTranscriptMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeWorkspaceGroupMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeRemoteMachineMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAppShotAndMiscMethods);

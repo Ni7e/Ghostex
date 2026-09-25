@@ -20,14 +20,17 @@
 use axum::http::StatusCode;
 use serde_json::{Map, Value, json};
 
-use crate::domain::{DomainStateError, read_domain_rpc_params};
+use crate::agents::read_agent_settings;
+use crate::domain::{DomainRepository, DomainStateError, read_domain_rpc_params};
 use crate::project_git_state::{exit_code, git, list_projects, run_project_operation, stdout};
 use crate::protocol::rpc_success;
 use crate::server::{
     AppState, ProjectWorktreeOperationError, RoutedResponse,
-    checkout_project_new_branch_for_commit, domain_error_response,
-    generate_commit_message_for_project, routed_json,
+    build_commit_message_generation_shell_command, checkout_project_new_branch_for_commit,
+    domain_error_response, generate_commit_message_for_project,
+    resolve_commit_message_generation_agent, routed_json,
 };
+use crate::storage::open_gxserver_database;
 use crate::typed_operations::{TypedOperationError, create_pull_request_for_project};
 
 pub const RUN_GIT_SHIP_WORKFLOW_ENDPOINT: &str = "/api/runGitShipWorkflow";
@@ -198,6 +201,7 @@ async fn commit_changes(
         if let Some(agent_id) = &request.agent_id {
             generate.insert("agentId".to_string(), json!(agent_id));
         }
+        refuse_unsupported_generation_agent(state, project_id, &generate)?;
         let generated = generate_commit_message_for_project(state, &generate).await?;
         subject = generated
             .get("subject")
@@ -229,6 +233,33 @@ async fn commit_changes(
     if exit_code(&commit) != 0 {
         return Err(failure("Could not commit changes."));
     }
+    Ok(())
+}
+
+/// The generation agent must exist and support writing a message in the background, checked
+/// BEFORE the generation stages anything (`generateCommitMessage`'s checks in the old runtime).
+///
+/// CDXC:Git 2026-06-24-16:11:
+/// Blank commit-message generation mirrors the native background prompt support set. Built-in
+/// agents that do not expose a safe headless prompt mode fail explicitly, while configured
+/// non-default custom agents may use their stored command.
+fn refuse_unsupported_generation_agent(
+    state: &AppState,
+    project_id: &str,
+    params: &Map<String, Value>,
+) -> Result<(), DomainStateError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let project = DomainRepository::new(&db, state.metadata.server_id.as_str())
+        .get_project(project_id)?
+        .ok_or_else(|| {
+            DomainStateError::not_found(format!("Project {project_id} does not exist."))
+        })?;
+    let settings = read_agent_settings(&db)?;
+    let agent = resolve_commit_message_generation_agent(&project, params, &settings)?;
+    build_commit_message_generation_shell_command(&agent, "ghostex_GXSERVER_GIT_COMMIT_PROBE", "")?;
     Ok(())
 }
 

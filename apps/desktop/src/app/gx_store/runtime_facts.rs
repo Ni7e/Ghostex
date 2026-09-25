@@ -123,16 +123,8 @@ impl GhostexGpuiApp {
                 facts.remote_recent_projects = rows;
             }
             Some("rows") => {
-                facts.project_diff_stats = value
-                    .get("projectDiffStats")
-                    .and_then(Value::as_object)
-                    .map(|entries| {
-                        entries
-                            .iter()
-                            .map(|(id, stats)| (id.clone(), project_diff_stats(stats)))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                // A project's git numbers are the Rust poll's since the runtime port's F5
+                // (gx_store/git/poll.rs), which writes `project_diff_stats` itself.
                 facts.close_after_done = value
                     .get("closeAfterDone")
                     .and_then(Value::as_object)
@@ -243,18 +235,6 @@ impl GhostexGpuiApp {
             session_id: session_id.to_string(),
             request_id,
         });
-    }
-}
-
-fn project_diff_stats(stats: &Value) -> ProjectDiffStats {
-    let number = |key: &str| stats.get(key).and_then(Value::as_i64).unwrap_or_default();
-    let flag = |key: &str| stats.get(key).and_then(Value::as_bool) == Some(true);
-    ProjectDiffStats {
-        additions: number("additions"),
-        deletions: number("deletions"),
-        files: number("files"),
-        is_loading: flag("isLoading"),
-        is_repo: flag("isRepo"),
     }
 }
 

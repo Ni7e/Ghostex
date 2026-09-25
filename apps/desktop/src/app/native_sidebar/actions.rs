@@ -134,6 +134,8 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_accounts(&command, cx) {
             return;
         }
+        // Git, worktree and Handoff / Export menu items (gx_store/git/actions.rs).
+        if self.gx_store_run_sidebar_git(&command, cx) { return; }
         // A row on a REMOTE machine: its sleep, wake, close, fork, flags, snooze and Full Reload
         // are calls down that machine's tunnel, sent through the same function the old runtime's
         // bridge message reaches, and nothing local moves (gx_store/sidebar_remote.rs).
