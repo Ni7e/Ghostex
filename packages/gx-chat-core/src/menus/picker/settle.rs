@@ -407,7 +407,17 @@ fn settle_desired_receipt(state: &mut ChatState, context: &ChatContext) {
         }
         None => {
             if let Some((_, receipt)) = state.pickers.model_selection.dispatch_receipt.take() {
-                state.menus.options.complete(receipt, context.now_millis());
+                // CDXC:SessionChat 2026-09-25 WHY:
+                // A selection gxserver marks `failed` (a model the CLI does not list for this
+                // account) never reached the agent, and the terminal's status line does not
+                // change, so completing the receipt left the pill on the refused model for good.
+                // Rolling back returns it to what the agent last showed; the menu carries the
+                // reason as its "Not applied" row.
+                if state.pickers.model_selection.selection_error.is_some() {
+                    state.menus.options.rollback(receipt);
+                } else {
+                    state.menus.options.complete(receipt, context.now_millis());
+                }
             }
         }
         _ => {}
