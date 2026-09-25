@@ -2,7 +2,7 @@
 // Drives the page in headless Chrome over the DevTools protocol (no dependencies): waits in real time so the gxserver WebSocket can deliver, prints the page's console, and saves a screenshot.
 // usage: node shot.mjs <out.png> [--wait ms] [--size WxH] [--url url] [--click x,y]... [--type text] [--key Enter]
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -146,4 +146,6 @@ try {
   console.log(`saved ${out}`);
 } finally {
   chrome.kill();
+  // The throwaway Chrome profile is ~100 MB; without this every screenshot left one in $TMPDIR.
+  setTimeout(() => rmSync(profileDir, { recursive: true, force: true }), 500);
 }
