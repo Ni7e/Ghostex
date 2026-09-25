@@ -1,28 +1,12 @@
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 
+// The desktop's app runtime bundle, evaluated in QuickJS by packages/chat-runtime (`ServiceRuntime`).
 const outfile = process.argv[2];
-if (!outfile) throw new Error('A chat runtime output path is required.');
-const result = await build({
-  entryPoints: ['packages/shared/session-chat-controller/native-host.ts'],
-  outfile,
-  bundle: true,
-  format: 'iife',
-  platform: 'neutral',
-  target: 'es2023',
-  define: { 'process.env.NODE_ENV': '"production"' },
-  metafile: true,
-});
-for (const path of Object.keys(result.metafile.inputs)) {
-  if (/node_modules\/(react|react-dom)(\/|$)/.test(path)) {
-    throw new Error(`The native chat runtime must remain independent of React: ${path}`);
-  }
-}
-
-
+if (!outfile) throw new Error('A service runtime output path is required.');
 const service = await build({
   entryPoints: ['apps/desktop/sidebar/service/service.ts'],
-  outfile: outfile.replace(/chat-runtime\.js$/, 'service-runtime.js'),
+  outfile,
   bundle: true, format: 'iife', platform: 'neutral', target: 'es2023',
   define: { 'process.env.NODE_ENV': '"production"', 'import.meta.env.DEV': 'false' },
   mainFields: ['module', 'main'],
