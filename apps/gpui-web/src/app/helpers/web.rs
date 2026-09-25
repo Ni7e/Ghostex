@@ -87,7 +87,12 @@ pub(crate) fn sidebar_chrome_fill(_glass: bool, angle: f32) -> gpui::Background 
     crate::app::helpers::sidebar_chrome_gradient_fill(angle)
 }
 
-/// A page has no window glass, so a menu's own window keeps its solid fill.
+/// A page has no window glass, so a menu keeps its solid fill.
 pub(crate) fn popup_window_surface(color: gpui::Hsla) -> gpui::Hsla {
+    color
+}
+
+/// A page has no window glass, so a menu keeps its solid fill.
+pub(crate) fn frosted_menu_fill(color: gpui::Hsla) -> gpui::Hsla {
     color
 }
