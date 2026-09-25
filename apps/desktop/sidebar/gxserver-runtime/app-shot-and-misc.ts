@@ -103,7 +103,6 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
     originalMessage: Extract<SidebarToExtensionMessage, { type: 'runGhostexHotkeyAction' }>
   ): boolean;
   postSidebarCommandRunEnd(commandId: string, originalMessage: SidebarToExtensionMessage): boolean;
-  saveSidebarSettingsPatch(message: Extract<SidebarToExtensionMessage, { type: 'updateSettingsPatch' }>): void;
   openAppModal(modal: 'firstLaunchSetup' | 'onboarding' | 'settings' | 'watchGhostexVideo'): void;
   savePinnedPrompt(message: Extract<SidebarToExtensionMessage, { type: 'savePinnedPrompt' }>): Promise<void>;
   publishAppUserDataHydrate(): void;
@@ -673,25 +672,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
     } catch {
       this.handleUnsupportedSidebarMessage(originalMessage);
       return false;
-    }
-  },
-
-  saveSidebarSettingsPatch(
-    this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'updateSettingsPatch' }>
-  ): void {
-    /*
-    CDXC:StateSync 2026-07-29:
-    Sidebar-origin settings writes (sidebar version, Group by Project, remote
-    machine ordering) are real Settings saves, so they take the same route the
-    Settings modal uses: the app-modal host bridge installed on the GPUI sidebar
-    surface, where Rust merges the patch onto the stored snapshot and hydrates
-    every surface back. Do not persist settings inside this adapter.
-    */
-    try {
-      postAppModalHostMessage({ message, type: 'sidebarCommand' }, 'GPUISidebarActions:updateSettingsPatch');
-    } catch {
-      this.handleUnsupportedSidebarMessage(message);
     }
   },
 
