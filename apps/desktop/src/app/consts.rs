@@ -461,21 +461,6 @@ pub(crate) const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION: u6
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTabSessionSelected";
 
-pub(crate) const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.nativeAppShotCaptured";
-
-pub(crate) const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.nativeAppShotPrompt";
-
-pub(crate) const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.nativeAppShotPromptResult";
-
 pub(crate) const GPUI_SIDEBAR_REMOTE_EVENT_NAME: &str = "ghostex-gpui-sidebar-remote-event";
 
 pub(crate) const GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS: usize = 512;
@@ -489,8 +474,6 @@ pub(crate) const GPUI_TITLEBAR_OPEN_TARGET_SELECTIONS_SETTINGS_KEY: &str =
 
 pub(crate) const GPUI_TITLEBAR_ACTION_SELECTIONS_SETTINGS_KEY: &str =
     "gpuiTitlebarActionCommandByProject";
-
-pub(crate) const GPUI_NATIVE_APP_SHOT_PROMPT_MAX_CHARS: usize = 24 * 1024;
 
 pub(crate) const GPUI_SIDEBAR_VISIBLE_SESSION_IDS_MAX: usize = 64;
 

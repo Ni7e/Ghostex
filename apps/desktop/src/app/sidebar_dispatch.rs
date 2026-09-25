@@ -30,8 +30,6 @@ use gpui::Window;
 use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
-use gpui_component::WindowExt;
-use gpui_component::notification::Notification;
 
 use crate::app::consts::*;
 use crate::app::ffi::*;
@@ -1344,84 +1342,15 @@ impl GhostexGpuiApp {
         self.gx_store_run_tab_lifecycle_request(&message, cx)
     }
 
+    /// A capture from the App Shots monitor: staged in Rust (gx_store/app_shot.rs).
     #[cfg(target_os = "macos")]
     pub(crate) fn handle_gpui_native_app_shot_capture(
         &mut self,
         capture: GpuiAppShotCapture,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if self.dispatch_gpui_native_app_shot_capture(capture, cx) {
-            return;
-        }
-        window.push_notification(
-            Notification::warning("App Shot captured, but the GPUI sidebar is not ready."),
-            cx,
-        );
-        self.dispatch_gpui_app_modal_toast(
-            "warning",
-            "App Shot Failed",
-            "The GPUI sidebar is not ready to stage the App Shot.",
-            cx,
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    pub(crate) fn dispatch_gpui_native_app_shot_capture(
-        &mut self,
-        capture: GpuiAppShotCapture,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        /*
-        CDXC:AppShots 2026-06-25-23:28:
-        Native Rust owns App Shot capture, path creation, and settings reads. CEF receives only a transient first-party capture payload so the gxserver sidebar runtime can format the macOS-parity prompt, try focused/recent existing-session insertion, or create a prompt-agent session; this capture bridge must not accept renderer-provided screenshot paths, persist capture data, log app/window/path text, or become generic eval IPC.
-
-        CDXC:AppShots 2026-06-26-04:27:
-        Focused/recent App Shot staging may target a remote row only through the separate fixed prompt bridge and an already-mounted remote attach Agents surface. Capture metadata remains first-party and cannot authorize renderer paths, SSH details, URLs, tokens, commands, output, or terminal text.
-        */
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let mut payload = serde_json::Map::new();
-        payload.insert(
-            "type".to_string(),
-            serde_json::Value::String(GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_TYPE.to_string()),
-        );
-        payload.insert(
-            "version".to_string(),
-            serde_json::json!(GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION),
-        );
-        payload.insert(
-            "appName".to_string(),
-            serde_json::Value::String(capture.app_name),
-        );
-        payload.insert(
-            "imagePath".to_string(),
-            serde_json::Value::String(capture.image_path),
-        );
-        if let Some(bundle_identifier) = capture.bundle_identifier {
-            payload.insert(
-                "bundleIdentifier".to_string(),
-                serde_json::Value::String(bundle_identifier),
-            );
-        }
-        if let Some(window_title) = capture.window_title {
-            payload.insert(
-                "windowTitle".to_string(),
-                serde_json::Value::String(window_title),
-            );
-        }
-        if let Some(window_width) = capture.window_width {
-            payload.insert("windowWidth".to_string(), serde_json::json!(window_width));
-        }
-        if let Some(window_height) = capture.window_height {
-            payload.insert("windowHeight".to_string(), serde_json::json!(window_height));
-        }
-        if let Some(trigger) = capture.trigger {
-            payload.insert("trigger".to_string(), serde_json::Value::String(trigger));
-        }
-        let script = gpui_native_app_shot_capture_script(&serde_json::Value::Object(payload));
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+        self.gx_store_stage_app_shot(capture, cx);
     }
 
     /// Called after every command-pane change; returns whether a tab's summary (status, focus,

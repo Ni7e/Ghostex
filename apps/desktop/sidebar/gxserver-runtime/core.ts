@@ -57,7 +57,6 @@ import type { GpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-life
 import { gpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-lifecycle-queue';
 import type {
   GpuiBrowserTabSummary,
-  GpuiPendingNativeAppShotPromptInsertion,
   GpuiPendingRemoteGxserverRequest,
   GpuiPresentationSubscription,
   GpuiRemoteSidebarHud,
@@ -239,9 +238,6 @@ export class GpuiSidebarRuntime {
   latestGroups: SidebarSessionGroup[] = [];
   latestHud: SidebarHudState = createGpuiSidebarHudState();
   localFirstHiddenPresentationSessionKeys = new Set<string>();
-  lastAppShotTargetAt = 0;
-  lastAppShotTargetSessionId: string | undefined;
-  pendingNativeAppShotPromptInsertions: GpuiPendingNativeAppShotPromptInsertion[] = [];
   pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
   presentation: GxserverPresentationSnapshot | undefined;
   previousSessionsByHistoryId = new Map<string, SidebarPreviousSessionItem>();
@@ -328,12 +324,6 @@ export class GpuiSidebarRuntime {
     };
     gpuiBridge.onBrowserTabsChanged = applyBrowserTabs;
     applyBrowserTabs(gpuiBridge.browserTabs);
-    gpuiBridge.onNativeAppShotCaptured = (payload) => {
-      void this.handleNativeAppShotCaptured(payload);
-    };
-    gpuiBridge.onNativeAppShotPromptResult = (payload) => {
-      this.handleNativeAppShotPromptResult(payload);
-    };
     gpuiBridge.onMenuBarProjectActivation = (payload) => {
       this.handleGpuiMenuBarProjectActivation(payload);
     };
@@ -384,24 +374,6 @@ export class GpuiSidebarRuntime {
     for (const payload of pendingSidebarCommands) {
       const message = asGpuiSidebarCommand(payload);
       if (message) void this.handleSidebarMessage(message);
-    }
-    const pendingNativeAppShotPromptResults = Array.isArray(gpuiBridge.pendingNativeAppShotPromptResults)
-      ? gpuiBridge.pendingNativeAppShotPromptResults.splice(0)
-      : [];
-    for (const payload of pendingNativeAppShotPromptResults) {
-      this.handleNativeAppShotPromptResult(payload);
-    }
-    const pendingNativeAppShots = Array.isArray(gpuiBridge.pendingNativeAppShots)
-      ? gpuiBridge.pendingNativeAppShots.splice(0)
-      : [];
-    if (pendingNativeAppShots.length > 0) {
-      /*
-      CDXC:AppShots 2026-06-25-23:07:
-      Rust may deliver a native App Shot before the SidebarApp runtime finishes installing callbacks. Drain only the first-party queued capture payloads and keep them transient; do not persist app names, window titles, image paths, command text, terminal content, URLs, or side-channel metadata from this bridge.
-      */
-      for (const payload of pendingNativeAppShots) {
-        void this.handleNativeAppShotCaptured(payload);
-      }
     }
     gpuiBridge.onRuntimeSettingsChanged = (runtimeSettings) => {
       const didChange = !hasSameGpuiRuntimeSettings(this.runtimeSettings, runtimeSettings);

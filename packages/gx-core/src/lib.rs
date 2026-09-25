@@ -24,6 +24,7 @@ pub mod indicators;
 pub mod git_menu;
 mod keys;
 pub mod navigation_history;
+pub mod app_shot;
 mod notification_feed;
 mod overlay;
 mod presentation_store;

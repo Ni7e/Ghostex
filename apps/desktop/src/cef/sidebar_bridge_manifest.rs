@@ -2,7 +2,6 @@
 pub(crate) enum SidebarBridgeFunctionId {
     ActiveProjectContext,
     NativeProjectPathAction,
-    NativeAppShotPrompt,
     SidebarCommandAction,
     SidebarCommandRunEnd,
     SidebarEditableFocus,
@@ -68,8 +67,6 @@ const SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.activeProjectContext";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.nativeProjectPathAction";
-const SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.nativeAppShotPrompt";
 const SIDEBAR_COMMAND_ACTION_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.commandAction";
 const SIDEBAR_COMMAND_RUN_END_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.commandRunEnd";
 pub(crate) const SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME: &str =
@@ -104,7 +101,6 @@ const SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_PROCESS_MESSAGE_NAME: &str =
 pub(crate) const SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE: &str = "ghostexGpui";
 const SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION: &str = "postActiveProjectContext";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION: &str = "postNativeProjectPathAction";
-const SIDEBAR_NATIVE_APP_SHOT_PROMPT_JS_FUNCTION: &str = "postNativeAppShotPromptToSession";
 const SIDEBAR_COMMAND_ACTION_JS_FUNCTION: &str = "postSidebarCommandAction";
 const SIDEBAR_COMMAND_RUN_END_JS_FUNCTION: &str = "postSidebarCommandRunEnd";
 const SIDEBAR_EDITABLE_FOCUS_JS_FUNCTION: &str = "postSidebarEditableFocus";
@@ -392,7 +388,7 @@ The sidebar CEF post-function allowlist must have one Rust manifest shared by ma
 CDXC:CefRuntime 2026-06-29-14:45:
 GPUI CEF bridge names, payload budgets, and allowed app-modal/project-workarea surfaces live in this Rust manifest so the macOS browser process and helper renderer consume one ownership point. Keep sidebar, project-workarea, and app-modal handlers surface-specific; this manifest is an allowlist, not a generic IPC bus.
 */
-pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 22] = [
+pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 21] = [
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::SidebarRuntimeFacts,
         js_function_name: "postSidebarRuntimeFacts",
@@ -407,11 +403,6 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 22] 
         id: SidebarBridgeFunctionId::NativeProjectPathAction,
         js_function_name: SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION,
         process_message_name: SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::NativeAppShotPrompt,
-        js_function_name: SIDEBAR_NATIVE_APP_SHOT_PROMPT_JS_FUNCTION,
-        process_message_name: SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::SidebarCommandAction,

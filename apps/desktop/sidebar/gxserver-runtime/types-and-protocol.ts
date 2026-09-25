@@ -104,8 +104,6 @@ export type GhostexGpuiSidebarBridge = {
   onExportTranscriptModalCommand?: (payload: unknown) => void;
   onGitCommitModalCommand?: (payload: unknown) => void;
   onMenuBarProjectActivation?: (payload: unknown) => void;
-  onNativeAppShotCaptured?: (payload: unknown) => void;
-  onNativeAppShotPromptResult?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot) => void;
   /**
    * CDXC:Sidebar 2026-09-21 WHY:
@@ -146,8 +144,6 @@ export type GhostexGpuiSidebarBridge = {
   pendingExportTranscriptModalCommands?: unknown[];
   pendingGitCommitModalCommands?: unknown[];
   pendingMenuBarProjectActivations?: unknown[];
-  pendingNativeAppShotPromptResults?: unknown[];
-  pendingNativeAppShots?: unknown[];
   pendingSidebarCommands?: unknown[];
   pendingTitlebarGitActions?: unknown[];
   pendingWorktreeModalCommands?: unknown[];
@@ -160,7 +156,6 @@ export type GhostexGpuiSidebarBridge = {
   postCreateProjectTerminal?: (payload: string) => boolean;
   postGxserverPresentationFocusState?: (payload: string) => boolean;
   postGhostexHotkeyAction?: (payload: string) => boolean;
-  postNativeAppShotPromptToSession?: (payload: string) => boolean;
   postNativeProjectPathAction?: (payload: string) => boolean;
   postOpenBrowserUrl?: (payload: string) => boolean;
   postPetOverlayState?: (payload: string) => boolean;
@@ -438,12 +433,6 @@ export type GpuiPendingGitCommitRequest = {
   subject: string;
 };
 
-export type GpuiPendingNativeAppShotPromptInsertion = {
-  resolve: (ok: boolean) => void;
-  sessionId: string;
-  timeoutId: number;
-};
-
 export type GpuiTrustedGitReviewFileSelection = {
   explicit: boolean;
   filePaths: string[];
@@ -462,16 +451,6 @@ export type GpuiGxserverCreatedSessionResult = {
     projectId?: string;
     sessionId?: string;
   };
-};
-
-export type GpuiNativeAppShotCapture = {
-  appName: string;
-  bundleIdentifier?: string;
-  imagePath: string;
-  trigger?: string;
-  windowHeight?: number;
-  windowTitle?: string;
-  windowWidth?: number;
 };
 
 export type GpuiWorktreeMetadata = {

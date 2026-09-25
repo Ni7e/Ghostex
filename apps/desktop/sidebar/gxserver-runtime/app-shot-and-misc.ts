@@ -4,38 +4,17 @@ Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
 import {
-  APP_SHOT_PROMPT_INSERT_RESULT_TIMEOUT_MS,
-  APP_SHOT_RECENT_TARGET_MS,
   GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
   GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
   GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
   GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
-  GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_TYPE,
-  GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_VERSION,
   GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
   GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import { activateGpuiProject } from './project-activation';
-import {
-  formatGpuiNativeAppShotPrompt,
-  isNativeAppShotAgentSession,
-  localGxserverProjectIdForSidebarSession,
-  localGxserverSessionIdForSidebarSession,
-  nativeAppShotPromptSessionIdForSidebarSession,
-  normalizeGpuiNativeAppShotCapture,
-  normalizeGpuiNativeAppShotPromptResult,
-} from './helpers/app-shot';
-import { createGpuiSidebarSettings } from './helpers/bootstrap';
-import { normalizeNonEmptyString } from './helpers/records';
-import {
-  createGpuiRemotePresentationGroupId,
-  parseGpuiRemotePresentationProjectId,
-  parseGpuiRemotePresentationSessionId,
-} from './helpers/remote-presentation';
 import { normalizeGpuiMenuBarProjectActivation } from './helpers/status-indicators';
 import type {
-  GpuiPendingNativeAppShotPromptInsertion,
   GpuiSidebarNativeProjectPathAction,
   GpuiWorkspaceTerminalFocusPlacement,
 } from './types-and-protocol';
@@ -43,7 +22,7 @@ import { openAppModal, postAppModalHostMessage } from '@/packages/core-ui/app-mo
 import type { AppToastLevel } from '@/packages/shared/app-toast-contract';
 import { createAppToastRequest } from '@/packages/shared/app-toast-contract';
 import type { PreferredAgentInterface } from '@/packages/shared/ghostex-settings';
-import type { SidebarSessionItem, SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
+import type { SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
 import type { SidebarCommandButton } from '@/packages/shared/sidebar-commands';
 import { isSidebarCommandRunMode } from '@/packages/shared/sidebar-commands';
 
@@ -58,24 +37,6 @@ at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
   handleGpuiMenuBarProjectActivation(payload: unknown): void;
-  handleNativeAppShotCaptured(payload: unknown): Promise<void>;
-  stageNativeAppShotInAgentSession(prompt: string): Promise<{ ok: true } | { description: string; ok: false }>;
-  stageNativeAppShotInExistingAgentSession(session: SidebarSessionItem, prompt: string): Promise<boolean>;
-  resolveNativeAppShotTargetSession(): SidebarSessionItem | undefined;
-  findNativeAppShotSessionByPresentationSessionId(sessionId: string): SidebarSessionItem | undefined;
-  findNativeAppShotSessionByLocalGxserverSessionId(sessionId: string): SidebarSessionItem | undefined;
-  findNativeAppShotSessionByRemotePresentationSessionId(sessionId: string): SidebarSessionItem | undefined;
-  postNativeAppShotPromptToSession(sessionId: string, prompt: string): Promise<boolean>;
-  handleNativeAppShotPromptResult(payload: unknown): void;
-  resolvePendingNativeAppShotPromptInsertion(pending: GpuiPendingNativeAppShotPromptInsertion, ok: boolean): void;
-  rememberNativeAppShotTargetSessionId(sessionId: string): void;
-  postAppShotToast(
-    level: AppToastLevel,
-    title: string,
-    options?: {
-      description?: string;
-    }
-  ): void;
   postSidebarActionToast(level: AppToastLevel, title: string, options?: { description?: string }): void;
   postNativeProjectPathAction(
     action: GpuiSidebarNativeProjectPathAction,
@@ -108,284 +69,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
       return;
     }
     void activateGpuiProject(this, activation.projectId);
-  },
-
-  async handleNativeAppShotCaptured(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
-    const appShot = normalizeGpuiNativeAppShotCapture(payload);
-    if (!appShot) {
-      this.postAppShotToast('warning', 'App Shot Failed', {
-        description: 'Could not read the native App Shot.',
-      });
-      return;
-    }
-
-    const prompt = formatGpuiNativeAppShotPrompt(
-      appShot,
-      createGpuiSidebarSettings(this.runtimeSettings).appShotsMetadataEnabled
-    );
-    const staged = await this.stageNativeAppShotInAgentSession(prompt);
-    if (!staged.ok) {
-      this.postAppShotToast('warning', 'App Shot Failed', {
-        description: staged.description,
-      });
-      return;
-    }
-
-    this.postAppShotToast('success', 'App Shot Added', {
-      description: appShot.appName,
-    });
-  },
-
-  async stageNativeAppShotInAgentSession(
-    this: GpuiSidebarRuntime,
-    prompt: string
-  ): Promise<{ ok: true } | { description: string; ok: false }> {
-    /*
-    CDXC:AppShots 2026-06-25-23:28:
-    GPUI App Shots mirror macOS target order for local sessions: reuse the last successful local App Shot target for 60 seconds when it is still a live local agent row, otherwise use the focused/visible local agent row, and create a default prompt-agent session only when the exact local insert bridge declines. Keep command-pane, sleeping, stale, non-agent, and sidebar-only rows out of insertion.
-
-    CDXC:AppShots 2026-06-26-04:27:
-    Existing-session App Shot targeting now accepts live remote agent rows by their machine-scoped presentation session id, but only as an insertion request to Rust. React must not wake, materialize, or open remote attach tabs for App Shots; Rust may write only when that exact remote attach surface is already mounted.
-    */
-    const targetSession = this.resolveNativeAppShotTargetSession();
-    if (targetSession && (await this.stageNativeAppShotInExistingAgentSession(targetSession, prompt))) {
-      return { ok: true };
-    }
-
-    if (!this.client) {
-      return {
-        description: 'The local agent service is not ready.',
-        ok: false,
-      };
-    }
-    const project = this.activeDomainProject();
-    if (!project) {
-      return {
-        description: 'Open a project before using App Shots.',
-        ok: false,
-      };
-    }
-    const agent = this.resolveDefaultPromptAgent();
-    if (!agent?.command?.trim()) {
-      return {
-        description: 'Choose a configured default prompt agent before using App Shots.',
-        ok: false,
-      };
-    }
-
-    try {
-      const sessionId = await this.createAgentSessionForProject(project, agent, prompt);
-      this.rememberNativeAppShotTargetSessionId(sessionId);
-      return { ok: true };
-    } catch {
-      return {
-        description: 'Could not stage the App Shot in an agent session.',
-        ok: false,
-      };
-    }
-  },
-
-  async stageNativeAppShotInExistingAgentSession(
-    this: GpuiSidebarRuntime,
-    session: SidebarSessionItem,
-    prompt: string
-  ): Promise<boolean> {
-    const sessionId = nativeAppShotPromptSessionIdForSidebarSession(session);
-    if (!sessionId) {
-      return false;
-    }
-    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
-    if (remoteSession) {
-      this.setRemotePresentationSessionFocus(remoteSession);
-    } else {
-      const projectId = localGxserverProjectIdForSidebarSession(session, this.presentation);
-      if (projectId) {
-        this.focusLocalWorkspaceSession(projectId, sessionId);
-      } else {
-        this.focusedSessionId = sessionId;
-        this.visibleSessionIds = new Set([sessionId]);
-        this.postGxserverPresentationFocusState();
-      }
-    }
-    const inserted = await this.postNativeAppShotPromptToSession(sessionId, prompt);
-    if (inserted) {
-      this.rememberNativeAppShotTargetSessionId(sessionId);
-    }
-    return inserted;
-  },
-
-  resolveNativeAppShotTargetSession(this: GpuiSidebarRuntime): SidebarSessionItem | undefined {
-    const now = Date.now();
-    const recentTarget =
-      this.lastAppShotTargetSessionId && now - this.lastAppShotTargetAt <= APP_SHOT_RECENT_TARGET_MS
-        ? this.findNativeAppShotSessionByPresentationSessionId(this.lastAppShotTargetSessionId)
-        : undefined;
-    if (isNativeAppShotAgentSession(recentTarget)) {
-      return recentTarget;
-    }
-
-    const focusedSession = this.focusedSessionId
-      ? this.findNativeAppShotSessionByPresentationSessionId(this.focusedSessionId)
-      : undefined;
-    if (isNativeAppShotAgentSession(focusedSession)) {
-      return focusedSession;
-    }
-
-    for (const sessionId of this.visibleSessionIds) {
-      const visibleSession = this.findNativeAppShotSessionByPresentationSessionId(sessionId);
-      if (visibleSession?.isVisible && isNativeAppShotAgentSession(visibleSession)) {
-        return visibleSession;
-      }
-    }
-    return undefined;
-  },
-
-  findNativeAppShotSessionByPresentationSessionId(
-    this: GpuiSidebarRuntime,
-    sessionId: string
-  ): SidebarSessionItem | undefined {
-    const normalizedSessionId = normalizeNonEmptyString(sessionId);
-    if (!normalizedSessionId) {
-      return undefined;
-    }
-    if (parseGpuiRemotePresentationSessionId(normalizedSessionId)) {
-      return this.findNativeAppShotSessionByRemotePresentationSessionId(normalizedSessionId);
-    }
-    return this.findNativeAppShotSessionByLocalGxserverSessionId(normalizedSessionId);
-  },
-
-  findNativeAppShotSessionByLocalGxserverSessionId(
-    this: GpuiSidebarRuntime,
-    sessionId: string
-  ): SidebarSessionItem | undefined {
-    const normalizedSessionId = normalizeNonEmptyString(sessionId);
-    if (!normalizedSessionId || parseGpuiRemotePresentationSessionId(normalizedSessionId)) {
-      return undefined;
-    }
-    for (const group of this.latestGroups) {
-      if (group.remoteMachineContext) {
-        continue;
-      }
-      const session = group.sessions.find(
-        (candidate) => localGxserverSessionIdForSidebarSession(candidate) === normalizedSessionId
-      );
-      if (session) {
-        return session;
-      }
-    }
-    return undefined;
-  },
-
-  findNativeAppShotSessionByRemotePresentationSessionId(
-    this: GpuiSidebarRuntime,
-    sessionId: string
-  ): SidebarSessionItem | undefined {
-    const normalizedSessionId = normalizeNonEmptyString(sessionId);
-    if (!normalizedSessionId || !parseGpuiRemotePresentationSessionId(normalizedSessionId)) {
-      return undefined;
-    }
-    for (const group of this.latestGroups) {
-      if (!group.remoteMachineContext) {
-        continue;
-      }
-      const session = group.sessions.find((candidate) => candidate.sessionId === normalizedSessionId);
-      if (session) {
-        return session;
-      }
-    }
-    return undefined;
-  },
-
-  async postNativeAppShotPromptToSession(
-    this: GpuiSidebarRuntime,
-    sessionId: string,
-    prompt: string
-  ): Promise<boolean> {
-    const postPrompt = window.ghostexGpui?.postNativeAppShotPromptToSession;
-    if (typeof postPrompt !== 'function') {
-      return false;
-    }
-    const payload = JSON.stringify({
-      prompt,
-      sessionId,
-      type: GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_TYPE,
-      version: GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_VERSION,
-    });
-
-    return await new Promise<boolean>((resolve) => {
-      const pending: GpuiPendingNativeAppShotPromptInsertion = {
-        resolve,
-        sessionId,
-        timeoutId: 0,
-      };
-      pending.timeoutId = window.setTimeout(() => {
-        this.resolvePendingNativeAppShotPromptInsertion(pending, false);
-      }, APP_SHOT_PROMPT_INSERT_RESULT_TIMEOUT_MS);
-      this.pendingNativeAppShotPromptInsertions.push(pending);
-      let sent = false;
-      try {
-        sent = postPrompt(payload) === true;
-      } catch {
-        sent = false;
-      }
-      if (!sent) {
-        this.resolvePendingNativeAppShotPromptInsertion(pending, false);
-      }
-    });
-  },
-
-  handleNativeAppShotPromptResult(this: GpuiSidebarRuntime, payload: unknown): void {
-    const result = normalizeGpuiNativeAppShotPromptResult(payload);
-    if (!result) {
-      return;
-    }
-    const pending = this.pendingNativeAppShotPromptInsertions.find(
-      (candidate) => candidate.sessionId === result.sessionId
-    );
-    if (!pending) {
-      return;
-    }
-    this.resolvePendingNativeAppShotPromptInsertion(pending, result.ok);
-  },
-
-  resolvePendingNativeAppShotPromptInsertion(
-    this: GpuiSidebarRuntime,
-    pending: GpuiPendingNativeAppShotPromptInsertion,
-    ok: boolean
-  ): void {
-    const index = this.pendingNativeAppShotPromptInsertions.indexOf(pending);
-    if (index >= 0) {
-      this.pendingNativeAppShotPromptInsertions.splice(index, 1);
-    }
-    window.clearTimeout(pending.timeoutId);
-    pending.resolve(ok);
-  },
-
-  rememberNativeAppShotTargetSessionId(this: GpuiSidebarRuntime, sessionId: string): void {
-    const normalizedSessionId = normalizeNonEmptyString(sessionId);
-    if (!normalizedSessionId) {
-      return;
-    }
-    this.lastAppShotTargetSessionId = normalizedSessionId;
-    this.lastAppShotTargetAt = Date.now();
-  },
-
-  postAppShotToast(
-    this: GpuiSidebarRuntime,
-    level: AppToastLevel,
-    title: string,
-    options: {
-      description?: string;
-    } = {}
-  ): void {
-    try {
-      postAppModalHostMessage(createAppToastRequest(level, title, options.description), 'AppModals:gpuiAppShotToast');
-    } catch {
-      /*
-      CDXC:AppShots 2026-06-25-23:07:
-      App Shots user feedback must not depend on toast-host availability and must not log raw app names, window titles, image paths, project paths, command text, terminal content, URLs, or tokens when presentation is unavailable.
-      */
-    }
   },
 
   postSidebarActionToast(

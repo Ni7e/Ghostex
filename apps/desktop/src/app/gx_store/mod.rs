@@ -53,6 +53,7 @@
 //! `diagnostics.rs` writes the log lines.
 
 mod activation_focus;
+mod app_shot;
 mod added_project;
 mod attention;
 mod burst;

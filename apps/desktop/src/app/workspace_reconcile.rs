@@ -250,39 +250,13 @@ impl GhostexGpuiApp {
         }
     }
 
-    pub(crate) fn receive_sidebar_native_app_shot_prompt_payload(
-        &mut self,
-        payload: &str,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        /*
-        CDXC:AppShots 2026-06-25-23:28:
-        Existing-session App Shot insertion accepts only the fixed sidebar App Shot prompt payload: a gxserver presentation session id plus the already formatted prompt string. Rust maps that id to a live Agents shell tab, selects it through normal workspace state if needed, verifies the exact mounted Ghostty owner/runtime id, and returns only a transient boolean result to the sidebar.
-
-        CDXC:AppShots 2026-06-26-04:27:
-        Remote App Shot insertion uses the same fixed prompt bridge with a machine-scoped remote presentation session id. It may write only to an already-mounted remote attach Agents terminal in `remote_attach_sessions`; it must not wake, create, or materialize remote tabs, and it stores no prompt, path, SSH, title, URL, or terminal content.
-        */
-        let Ok(message) = gpui_sidebar_native_app_shot_prompt_from_json(payload) else {
-            return;
-        };
-        let ok = if let Some(reference) =
-            gpui_remote_attach_session_reference_from_project_id(message.session_id.as_str())
-        {
-            self.insert_native_app_shot_prompt_into_remote_agents_session(
-                &reference,
-                message.prompt.as_str(),
-                cx,
-            )
-        } else {
-            self.insert_native_app_shot_prompt_into_local_agents_session(
-                message.session_id.as_str(),
-                message.prompt.as_str(),
-                cx,
-            )
-        };
-        self.dispatch_gpui_native_app_shot_prompt_result(message.session_id.as_str(), ok, cx);
-    }
-
+    /// Types an App Shot prompt into a local Agents tab (gx_store/app_shot.rs picks the session).
+    ///
+    /// CDXC:AppShots 2026-06-25-23:28:
+    /// Existing-session App Shot insertion takes a gxserver presentation session id plus the already formatted prompt string. Rust maps that id to a live Agents shell tab, selects it through normal workspace state if needed, verifies the exact mounted Ghostty owner/runtime id, and answers only whether it wrote.
+    ///
+    /// CDXC:AppShots 2026-06-26-04:27:
+    /// Remote App Shot insertion (`insert_native_app_shot_prompt_into_remote_agents_session`) may write only to an already-mounted remote attach Agents terminal in `remote_attach_sessions`; it must not wake, create, or materialize remote tabs, and it stores no prompt, path, SSH, title, URL, or terminal content.
     pub(crate) fn insert_native_app_shot_prompt_into_local_agents_session(
         &mut self,
         session_id: &str,
@@ -396,25 +370,6 @@ impl GhostexGpuiApp {
             let _ = (reference, prompt, cx);
             false
         }
-    }
-
-    pub(crate) fn dispatch_gpui_native_app_shot_prompt_result(
-        &mut self,
-        session_id: &str,
-        ok: bool,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let message = serde_json::json!({
-            "ok": ok,
-            "sessionId": session_id,
-            "type": GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_TYPE,
-            "version": GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_VERSION,
-        });
-        let script = gpui_native_app_shot_prompt_result_script(&message);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
     pub(crate) fn set_sidebar_gxserver_remote_attach_focus_state(

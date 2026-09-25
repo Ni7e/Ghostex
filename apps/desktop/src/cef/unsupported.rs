@@ -98,7 +98,6 @@ pub type BrowserMediaAccessHandler = Rc<dyn Fn(BrowserMediaAccessRequest)>;
 pub enum SidebarBridgeEvent {
     ActiveProjectContext(String),
     NativeProjectPathAction(String),
-    NativeAppShotPrompt(String),
     SidebarCommandAction(String),
     SidebarCommandRunEnd(String),
     GhostexHotkeyAction(String),
