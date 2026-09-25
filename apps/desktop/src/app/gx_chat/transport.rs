@@ -123,6 +123,8 @@ pub(super) fn config_endpoint(config: &Value) -> Option<Endpoint> {
 
 /// What the socket read, delivered to the chat it belongs to.
 pub(super) fn receive(world: &mut World, inbound: Inbound) {
+    #[cfg(target_family = "wasm")]
+    log::info!("TMPDEBUG inbound {}", match &inbound { Inbound::Frame { frame, .. } => format!("frame {} epoch={} seq={}", frame["type"], frame["epoch"], frame["seq"]), Inbound::ModelCatalog { .. } => "catalog".to_string() });
     match inbound {
         Inbound::Frame {
             machine_id,
