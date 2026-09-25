@@ -865,8 +865,6 @@ fn write_storage(
 /// chat was closed. The document itself was never at risk, because a drain with no sink does not
 /// advance the revision and a new view reads the whole snapshot.
 pub(super) fn publish(world: &mut World, key: &str, requests: Vec<HostRequest>) {
-    #[cfg(target_family = "wasm")]
-    log::info!("TMPDEBUG publish {key} requests={:?}", requests.iter().map(|r| format!("{:?}:{}", r.kind, r.method)).collect::<Vec<_>>());
     let Some((last_revision, paused)) = world
         .sinks
         .get(key)
