@@ -477,8 +477,6 @@ pub struct GhostexGpuiApp {
         HashMap<TerminalSessionId, Entity<super::native_chat::state::NativeChatView>>,
     pub(crate) session_chat_broker_endpoints: HashMap<String, (String, String)>,
     pub(crate) session_chat_broker_epoch: Option<String>,
-    pub(crate) session_chat_shared_snapshots:
-        Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
     pub(crate) session_chat_presentations:
         Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
     pub(crate) account_switch_progress:

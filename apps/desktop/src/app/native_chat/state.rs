@@ -214,7 +214,6 @@ impl NativeChatView {
         let (wake, mut wakes) = futures::channel::mpsc::unbounded::<()>();
         let runtime = ChatRuntimeWorker::start(
             json!({"clientId":config.client_id,"machineId":config.machine_id,"projectId":config.project_id,"sessionId":config.session_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
-            super::replay_recording::recording_path(&config.project_id, &config.session_id),
             move || {
                 let _ = wake.unbounded_send(());
             },
@@ -780,8 +779,8 @@ impl NativeChatView {
                 Some("host") => self.host(request["method"].as_str().unwrap_or_default(), request["params"].clone(), cx),
                 Some("chatImage") => self.receive_chat_image(request, cx),
                 // The two arms the Rust brain's `Effect::Copy` and `Effect::Toast` ride in. The
-                // QuickJS brain pushed neither (a clipboard write only ever reached the view inside
-                // `markdownSaved`), so nothing here changes under `chatBrain: quickjs`.
+                // TypeScript brain the web build still runs pushes neither (a clipboard write only
+                // ever reaches the view inside `markdownSaved`).
                 Some("copy") => {
                     if let Some(text) = request["params"]["text"].as_str() {
                         crate::app::helpers::gpui_copy_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()), cx);

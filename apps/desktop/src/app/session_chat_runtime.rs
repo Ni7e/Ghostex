@@ -13,37 +13,6 @@ impl GhostexGpuiApp {
             .and_then(|state| state.account_key.clone())
     }
 
-    pub(crate) fn cache_session_chat_runtime_snapshot(
-        &mut self,
-        generation: u64,
-        snapshot: &serde_json::Value,
-    ) {
-        let Some(key) = self.session_chat_runtime_key(generation) else {
-            return;
-        };
-        self.session_chat_shared_snapshots
-            .retain(|(previous, _)| previous != &key);
-        if !snapshot["messages"].is_array() || snapshot.to_string().len() > 768 * 1024 {
-            return;
-        }
-        self.session_chat_shared_snapshots
-            .push((key, snapshot.clone()));
-        let excess = self.session_chat_shared_snapshots.len().saturating_sub(12);
-        self.session_chat_shared_snapshots.drain(..excess);
-    }
-
-    pub(crate) fn cached_session_chat_runtime_snapshot(
-        &self,
-        key: Option<&GpuiWorkspaceTerminalSessionKey>,
-    ) -> Option<serde_json::Value> {
-        let key = key?;
-        self.session_chat_shared_snapshots
-            .iter()
-            .rev()
-            .find(|(candidate, _)| candidate == key)
-            .map(|(_, snapshot)| snapshot.clone())
-    }
-
     /// CDXC:SessionChat 2026-09-13 WHY:
     /// Packaged chat pages have opaque file origins, so the existing sidebar owns the shared cache and sockets instead of a SharedWorker or one cache per renderer.
     /// Derive the endpoint and conversation from the native binding; a delayed page request cannot select another machine or session.
@@ -72,19 +41,10 @@ impl GhostexGpuiApp {
             self.cache_session_chat_presentation(key, &message["params"]["state"]);
             return;
         }
-        let Some(method) = message["method"].as_str().filter(|method| {
-            matches!(
-                *method,
-                "read"
-                    | "seed"
-                    | "subscribe"
-                    | "unsubscribe"
-                    | "reconnect"
-                    | "endpoint"
-                    | "adoptDrafts"
-                    | "composer"
-            )
-        }) else {
+        let Some(method) = message["method"]
+            .as_str()
+            .filter(|method| matches!(*method, "subscribe" | "unsubscribe" | "reconnect"))
+        else {
             return;
         };
         let request_id = message["requestId"].as_str().unwrap_or_default();
@@ -132,32 +92,6 @@ impl GhostexGpuiApp {
         }
         if let Some(catalog) = message["params"]["catalog"].as_bool() {
             params.insert("catalog".into(), catalog.into());
-        }
-        if method == "adoptDrafts" {
-            let Some(drafts) = message["params"]["drafts"]
-                .as_array()
-                .filter(|drafts| drafts.len() <= 1000)
-            else {
-                return;
-            };
-            if drafts.iter().any(|draft| {
-                !draft["content"].is_string()
-                    || !draft["version"]["draftId"].is_string()
-                    || draft["version"]["revision"].as_u64().is_none()
-            }) {
-                return;
-            }
-            params.insert(
-                "drafts".to_string(),
-                serde_json::Value::Array(drafts.clone()),
-            );
-        }
-        if method == "composer" {
-            let composer = &message["params"]["composer"];
-            if !composer.is_object() || composer.to_string().len() > 4 * 1024 * 1024 {
-                return;
-            }
-            params.insert("composer".into(), composer.clone());
         }
         let client_id = message["clientId"]
             .as_str()
@@ -338,11 +272,6 @@ impl GhostexGpuiApp {
         if let Some(raw) = message["raw"].as_str() {
             self.dispatch_session_chat_generation_event_raw(generation, raw.to_owned(), cx);
             return;
-        }
-        if message["cacheable"] == true {
-            if let Some(snapshot) = message.get("snapshot") {
-                self.cache_session_chat_runtime_snapshot(generation, snapshot);
-            }
         }
         self.dispatch_session_chat_generation_response(
             generation,

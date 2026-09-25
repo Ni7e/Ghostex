@@ -1,6 +1,6 @@
-//! The chat runtime in the browser: the same TypeScript controller bundle the desktop runs in QuickJS (`packages/shared/session-chat-controller/native-host.ts`), evaluated in a hidden same-origin iframe per chat, behind the same API the desktop's worker thread has.
+//! The chat runtime in the browser: the TypeScript controller bundle (`packages/shared/session-chat-controller/native-host.ts`, which the desktop ran in QuickJS until 2026-09-25 and has since replaced with `gx-chat-core`), evaluated in a hidden same-origin iframe per chat, behind the same API the desktop's chat host handle has.
 //!
-//! CDXC:WebGpui 2026-09-22 WHY: the bundle replaces `globalThis.setTimeout` and friends with virtual timers it services from `tick`, which is right inside QuickJS and would break the page (GPUI's web dispatcher is built on the real `setTimeout`). An iframe gives every chat its own global object, and calls into it stay synchronous, which the composer's per-paint `query` needs.
+//! CDXC:WebGpui 2026-09-22 WHY: the bundle replaces `globalThis.setTimeout` and friends with virtual timers it services from `tick`, which was right inside QuickJS and would break the page (GPUI's web dispatcher is built on the real `setTimeout`). An iframe gives every chat its own global object, and calls into it stay synchronous, which the composer's per-paint `query` needs.
 use serde_json::Value;
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
@@ -129,7 +129,6 @@ pub(crate) struct ChatRuntimeWorker {
 impl ChatRuntimeWorker {
     pub(crate) fn start(
         config: Value,
-        _recording: Option<std::path::PathBuf>,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         let wake = Closure::<dyn FnMut()>::new(move || wake());

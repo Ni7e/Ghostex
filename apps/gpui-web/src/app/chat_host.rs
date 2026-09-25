@@ -1,4 +1,4 @@
-//! What the page does for a chat view. On the desktop the view's broker requests cross into a second QuickJS runtime that runs `apps/desktop/sidebar/session-chat-runtime/broker.ts` (the live chat socket, drafts, options and the model catalog). That file is browser code, so here it runs in the page itself, unchanged, and this module is the relay between it and the views: the same payload the desktop's `session_chat_runtime.rs` builds, and the same two entry points for what comes back.
+//! What the page does for a chat view. On the desktop the view's broker requests cross into the QuickJS app runtime that runs `apps/desktop/sidebar/session-chat-runtime/broker.ts` (the live chat socket, drafts, options and the model catalog). That file is browser code, so here it runs in the page itself, unchanged, and this module is the relay between it and the views: the same payload the desktop's `session_chat_runtime.rs` builds, and the same two entry points for what comes back.
 use futures::StreamExt as _;
 use futures::channel::mpsc;
 use ghostex_gx_core::SessionKey;

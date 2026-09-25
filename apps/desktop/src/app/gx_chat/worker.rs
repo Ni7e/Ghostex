@@ -1,11 +1,11 @@
 //! The one background thread the Rust chat brain runs on, and the per-view handle onto it.
 //!
 //! CDXC:SessionChat 2026-09-22 WHY:
-//! ONE thread for every chat, not one per view. The QuickJS brain needs a thread each because each
-//! view owns a 96 MiB runtime; a `ChatCore` is a plain value, so twelve of them share a thread and
-//! the store's retention is a map on it. The handle keeps the same five methods
-//! `ChatRuntimeWorker` has (`call`, `call_raw`, `query`, `query_for_gesture`, `take_outputs`) so
-//! `apps/desktop/src/app/native_chat/` drives either brain through one shape.
+//! ONE thread for every chat, not one per view. The deleted QuickJS brain needed a thread each
+//! because each view owned a 96 MiB runtime; a `ChatCore` is a plain value, so twelve of them share
+//! a thread and the store's retention is a map on it. The handle keeps the five methods the web
+//! build's `ChatRuntimeWorker` has (`call`, `call_raw`, `query`, `query_for_gesture`,
+//! `take_outputs`), because `apps/desktop/src/app/native_chat/` is compiled by both.
 
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -35,8 +35,8 @@ use super::storage;
 use super::store::ChatStore;
 use super::transfers::{self, Piece};
 
-/// What a drained chat hands its view. The same two cases `ChatRuntimeOutput` has, so the view's
-/// `pump` does not care which brain produced them.
+/// What a drained chat hands its view. The desktop's `native_chat` knows it as `ChatRuntimeOutput`,
+/// the name the web build's own runtime uses for the same two cases.
 pub(crate) enum ChatHostOutput {
     Drained(Value),
     /// The host failed in a way the view should draw instead of the chat. One thing raises it: a
@@ -127,8 +127,7 @@ static NEXT_SINK: AtomicU64 = AtomicU64::new(1);
 impl ChatHostHandle {
     /// Attaches a view to the chat its config names, starting the host thread on first use.
     ///
-    /// `config` is the same object `ChatRuntimeWorker::start` takes, so the two brains are picked
-    /// from one call site.
+    /// `config` is the object `NativeChatView::start_runtime` builds for either build's runtime.
     pub(crate) fn start(mut config: Value, wake: impl Fn() + Send + Sync + 'static) -> Self {
         let commands = COMMANDS.get_or_init(spawn).clone();
         let identity = ChatIdentity::from_config(&config);
@@ -188,7 +187,7 @@ impl ChatHostHandle {
     }
 
     /// A pure helper for a per-paint caller: a busy thread answers nothing rather than stalling the
-    /// frame, which is the rule `ChatRuntimeWorker::query` wrote down.
+    /// frame, which is the rule the QuickJS worker's `query` wrote down.
     pub(crate) fn query(
         &self,
         method: &'static str,

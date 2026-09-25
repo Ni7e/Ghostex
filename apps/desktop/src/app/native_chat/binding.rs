@@ -57,7 +57,7 @@ impl GhostexGpuiApp {
             parent_native_view: self.parent_ns_view,
             client_id: format!("native-desktop-{}", std::process::id()),
             remote,
-            initial_snapshot: self.cached_session_chat_runtime_snapshot(Some(&key)),
+            initial_snapshot: None,
             initial_presentation: self.initial_session_chat_presentation(Some(&key)),
         };
         if let Some(view) = existing {
