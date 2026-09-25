@@ -932,10 +932,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
         this.getCloseAfterDoneProjection(
           createGxserverPresentationProjectSessionId(projectId, sessionId),
         ),
-      resolveDelayedSend: (projectId, sessionId) =>
-        this.getDelayedSendProjection(
-          createGxserverPresentationProjectSessionId(projectId, sessionId),
-        ),
       resolveSessionRoutingId: createGpuiSidebarSessionRoutingId,
       visibleSessionIds: this.visibleSessionIds,
     });
@@ -1326,13 +1322,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
           resolveAgentIcon: resolveGpuiSidebarAgentIcon,
           resolveCloseAfterDone: (resolvedProjectId, sessionId) =>
             this.getCloseAfterDoneProjection(
-              createGxserverPresentationProjectSessionId(
-                resolvedProjectId,
-                sessionId,
-              ),
-            ),
-          resolveDelayedSend: (resolvedProjectId, sessionId) =>
-            this.getDelayedSendProjection(
               createGxserverPresentationProjectSessionId(
                 resolvedProjectId,
                 sessionId,

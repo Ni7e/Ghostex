@@ -1518,9 +1518,7 @@ impl GhostexGpuiApp {
         if self.sidebar_agents_delayed_sends_snapshot == snapshot {
             return false;
         }
-        if !self.dispatch_gpui_sidebar_agents_delayed_sends(&sessions, cx) {
-            return false;
-        }
+        self.gx_store_set_local_delayed_sends(&sessions, cx);
         self.sidebar_agents_delayed_sends_snapshot = snapshot;
         true
     }
@@ -1653,18 +1651,6 @@ impl GhostexGpuiApp {
             return false;
         };
         let script = gpui_sidebar_command_pane_sessions_script(sessions);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
-    }
-
-    pub(crate) fn dispatch_gpui_sidebar_agents_delayed_sends(
-        &mut self,
-        sessions: &serde_json::Value,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let script = gpui_sidebar_agents_delayed_sends_script(sessions);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 

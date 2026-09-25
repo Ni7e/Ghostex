@@ -6,10 +6,7 @@ changed. See `core.ts` for how the runtime's methods are re-attached.
 import type { GpuiSidebarRuntime } from './core';
 import { formatGpuiCloseAfterDoneCountdown } from './helpers/close-after-done';
 import { parseGpuiRemotePresentationSessionId } from './helpers/remote-presentation';
-import type {
-  GxserverPresentationCloseAfterDoneProjection,
-  GxserverPresentationDelayedSendProjection,
-} from '@/packages/shared/gxserver-presentation-sidebar-projection';
+import type { GxserverPresentationCloseAfterDoneProjection } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import { parseGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import type { GxserverPresentationSession } from '@/packages/shared/gxserver-protocol';
 
@@ -25,7 +22,6 @@ at the bottom of this file is what keeps the two in step.
 export interface GpuiSidebarRuntimeCloseAfterDoneMethods {
   findPresentationSessionRowForSidebarSessionId(sessionId: string): GxserverPresentationSession | undefined;
   getCloseAfterDoneProjection(sessionId: string): GxserverPresentationCloseAfterDoneProjection | undefined;
-  getDelayedSendProjection(sessionId: string): GxserverPresentationDelayedSendProjection | undefined;
 }
 
 export const gpuiSidebarRuntimeCloseAfterDoneMethods = {
@@ -69,24 +65,6 @@ export const gpuiSidebarRuntimeCloseAfterDoneMethods = {
       deadlineAt,
       remainingLabel: formatGpuiCloseAfterDoneCountdown(remainingMs),
       remainingMs,
-    };
-  },
-
-  getDelayedSendProjection(
-    this: GpuiSidebarRuntime,
-    sessionId: string
-  ): GxserverPresentationDelayedSendProjection | undefined {
-    const delayedSend = this.workspaceSessionDelayedSends.get(sessionId);
-    if (!delayedSend) {
-      return undefined;
-    }
-    return {
-      deadlineAt: delayedSend.delayedSendDeadlineAt,
-      remainingLabel: delayedSend.delayedSendRemainingLabel,
-      remainingMs: delayedSend.delayedSendRemainingMs,
-      sendWhenAllProjectSessionsStopActive:
-        delayedSend.sendWhenAllProjectSessionsStopActive === true ? true : undefined,
-      sendWhenAgentStopsActive: delayedSend.sendWhenAgentStopsActive === true ? true : undefined,
     };
   },
 };

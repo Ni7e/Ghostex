@@ -49,6 +49,7 @@ pub(crate) struct SidebarRuntimeFacts {
     pub(super) hud: Option<Arc<Value>>,
     pub(super) project_diff_stats: HashMap<String, ProjectDiffStats>,
     pub(super) close_after_done: HashMap<String, CloseAfterDoneInput>,
+    /// This app's own Delayed Sends of workspace sessions (local_delayed_sends.rs).
     pub(super) delayed_sends: HashMap<String, DelayedSendInput>,
     /// Each remote machine's client-parked projects, in the runtime's stored order: an input of the
     /// HUD while the runtime still writes them.
@@ -132,16 +133,6 @@ impl GhostexGpuiApp {
                         entries
                             .iter()
                             .map(|(id, entry)| (id.clone(), close_after_done(entry)))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                facts.delayed_sends = value
-                    .get("delayedSend")
-                    .and_then(Value::as_object)
-                    .map(|entries| {
-                        entries
-                            .iter()
-                            .map(|(id, entry)| (id.clone(), delayed_send(entry)))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -261,22 +252,6 @@ fn close_after_done(entry: &Value) -> CloseAfterDoneInput {
         deadline_at: text(entry, "deadlineAt"),
         remaining_label: text(entry, "remainingLabel"),
         remaining_ms: entry.get("remainingMs").and_then(Value::as_i64),
-    }
-}
-
-fn delayed_send(entry: &Value) -> DelayedSendInput {
-    DelayedSendInput {
-        deadline_at: text(entry, "deadlineAt"),
-        remaining_label: text(entry, "remainingLabel"),
-        remaining_ms: entry.get("remainingMs").and_then(Value::as_i64),
-        send_when_all_project_sessions_stop_active: entry
-            .get("sendWhenAllProjectSessionsStopActive")
-            .and_then(Value::as_bool)
-            == Some(true),
-        send_when_agent_stops_active: entry
-            .get("sendWhenAgentStopsActive")
-            .and_then(Value::as_bool)
-            == Some(true),
     }
 }
 

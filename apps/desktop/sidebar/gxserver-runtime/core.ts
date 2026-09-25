@@ -36,7 +36,6 @@ import {
   createGpuiSidebarHudState,
   hasSameGpuiCommandPaneSessions,
   normalizeGpuiCommandPaneSessions,
-  normalizeGpuiWorkspaceSessionDelayedSends,
 } from './helpers/command-pane';
 import { readStoredGpuiRemoteGroupOrder, readStoredGpuiRemoteRecentProjects } from './helpers/recent-projects';
 import { normalizeNonEmptyString } from './helpers/records';
@@ -76,7 +75,6 @@ import type {
   GpuiRemoteSidebarHud,
   GpuiSidebarRuntimeSettings,
   GpuiValidatedGxserverBootstrap,
-  GpuiWorkspaceSessionDelayedSendSummary,
 } from './types-and-protocol';
 import type { GpuiSidebarRuntimeWorkspaceGroupMethods } from './workspace-groups-sync';
 import { gpuiSidebarRuntimeWorkspaceGroupMethods, installGpuiWorkspaceGroupsHandBack } from './workspace-groups-sync';
@@ -251,7 +249,6 @@ export class GpuiSidebarRuntime {
   browserTabs: GpuiBrowserTabSummary[] = [];
   client: GpuiGxserverClient | undefined;
   commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
-  workspaceSessionDelayedSends = new Map<string, GpuiWorkspaceSessionDelayedSendSummary>();
   domainProjects: GxserverProjectDomainState[] = [];
   focusedSessionId: string | undefined;
   /**
@@ -374,22 +371,6 @@ export class GpuiSidebarRuntime {
     };
     gpuiBridge.onCommandPaneSessionsChanged = applyCommandPaneSessions;
     applyCommandPaneSessions(gpuiBridge.commandPaneSessions);
-    const applyWorkspaceSessionDelayedSends = (
-      sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[] | undefined
-    ) => {
-      const next = normalizeGpuiWorkspaceSessionDelayedSends(sessions);
-      gpuiBridge.workspaceSessionDelayedSends = next;
-      const nextBySessionId = new Map(next.map((session) => [session.sessionId, session]));
-      if (JSON.stringify([...this.workspaceSessionDelayedSends.values()]) === JSON.stringify(next)) {
-        return;
-      }
-      this.workspaceSessionDelayedSends = nextBySessionId;
-      if (this.presentation) {
-        this.publishPresentation('patch');
-      }
-    };
-    gpuiBridge.onWorkspaceSessionDelayedSendsChanged = applyWorkspaceSessionDelayedSends;
-    applyWorkspaceSessionDelayedSends(gpuiBridge.workspaceSessionDelayedSends);
     gpuiBridge.onNativeAppShotCaptured = (payload) => {
       void this.handleNativeAppShotCaptured(payload);
     };

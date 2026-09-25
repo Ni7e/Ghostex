@@ -76,15 +76,6 @@ export type GpuiCommandPaneSessionSummary = {
   title?: string;
 };
 
-export type GpuiWorkspaceSessionDelayedSendSummary = {
-  delayedSendDeadlineAt?: string;
-  delayedSendRemainingLabel?: string;
-  delayedSendRemainingMs?: number;
-  sendWhenAllProjectSessionsStopActive?: boolean;
-  sendWhenAgentStopsActive?: boolean;
-  sessionId: string;
-};
-
 export type GpuiFirstPromptTitleRuntimeSettings = {
   firstPromptTitleGenerationAgent: GxserverFirstPromptTitleGenerationAgent;
   firstPromptTitleGenerationCommand?: string;
@@ -121,7 +112,6 @@ export type GhostexGpuiSidebarBridge = {
    * or chat surface alike. Auto Sleep protects these instead of guessing
    * visibility from the rows this runtime last saw selected.
    */
-  workspaceSessionDelayedSends?: readonly GpuiWorkspaceSessionDelayedSendSummary[];
   onBrowserTabsChanged?: (tabs: readonly GpuiBrowserTabSummary[]) => void;
   /**
    * CDXC:Browser 2026-08-18:
@@ -132,7 +122,6 @@ export type GhostexGpuiSidebarBridge = {
    */
   gxserverBootstrap?: GpuiGxserverBootstrap;
   onCommandPaneSessionsChanged?: (sessions: readonly GpuiCommandPaneSessionSummary[]) => void;
-  onWorkspaceSessionDelayedSendsChanged?: (sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[]) => void;
   onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
   onExportTranscriptModalCommand?: (payload: unknown) => void;
   onGitCommitModalCommand?: (payload: unknown) => void;

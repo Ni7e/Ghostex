@@ -10,5 +10,4 @@ export type {
   GhostexGpuiSidebarBridge,
   GpuiCommandPaneSessionSummary,
   GpuiGxserverBootstrap,
-  GpuiWorkspaceSessionDelayedSendSummary,
 } from './gxserver-runtime/types-and-protocol';

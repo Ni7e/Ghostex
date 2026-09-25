@@ -72,6 +72,7 @@ mod host;
 mod hud;
 mod layout_persist;
 mod primary_launcher;
+mod local_delayed_sends;
 mod local_focus;
 mod notifications;
 mod project_docs;

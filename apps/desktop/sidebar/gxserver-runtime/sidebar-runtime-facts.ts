@@ -32,22 +32,12 @@ function postRemoteRecentProjects(runtime: GpuiSidebarRuntime): void {
 }
 
 /**
- * The per-row facts the old projection carried into Rust: the armed timers this app's runtime
- * owns, keyed by sidebar session id. A project's git numbers are Rust's own poll since the app
- * runtime port's F5 (apps/desktop/src/app/gx_store/git/poll.rs).
- *
- * `remainingMs` and `remainingLabel` are derived from the host clock at the moment they are read,
- * so they are carried for the reader but are NOT what the comparison judges; `armed`, the deadline
- * and the two send-when flags are.
+ * What every publish hands over. The per-row facts are all Rust's own now (Delayed Send since the
+ * app runtime port's F2, Close After Done and the git numbers since F3 and F5), so this is the
+ * remote machines' client-parked projects alone, which the Rust HUD reads.
  */
 export function postGpuiSidebarRuntimeFactsRows(runtime: GpuiSidebarRuntime): void {
   postRemoteRecentProjects(runtime);
-  const delayedSend: Record<string, unknown> = {};
-  for (const sessionId of runtime.workspaceSessionDelayedSends.keys()) {
-    const projection = runtime.getDelayedSendProjection(sessionId);
-    if (projection) delayedSend[sessionId] = projection;
-  }
-  post({ delayedSend, kind: 'rows', version: 1 });
 }
 
 /** The runtime's own focus paths acknowledge attention through the Rust store's one tracker. */
