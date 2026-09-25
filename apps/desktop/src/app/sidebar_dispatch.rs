@@ -578,11 +578,7 @@ impl GhostexGpuiApp {
         message: serde_json::Value,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let script = gpui_workspace_folder_picked_script(&message);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+        self.gx_store_workspace_folder_picked(&message, cx)
     }
 
     /// GPUI port of the macOS OS-integration entry points
@@ -899,13 +895,7 @@ impl GhostexGpuiApp {
         message: serde_json::Value,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
-        self.gx_store_flush_old_runtime_tell(cx);
-        let script = gpui_os_integration_command_script(&message);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+        self.gx_store_run_os_integration_command(&message, cx)
     }
 
     pub(crate) fn handle_gpui_pick_repository_folder_message(

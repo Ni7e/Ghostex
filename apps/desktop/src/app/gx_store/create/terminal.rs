@@ -49,12 +49,13 @@ impl GhostexGpuiApp {
             .map(|project| project.project_id.clone())
     }
 
-    /// `createSession(groupId = this.activeGroupId)`.
+    /// `createSession(groupId = this.activeGroupId)`. The task resolves when the create has come
+    /// back, with the failure a caller that awaited it (the onboarding's first session) reports.
     pub(super) fn gx_store_create_terminal(
         &mut self,
         group_id: Option<&str>,
         cx: &mut gpui::Context<Self>,
-    ) {
+    ) -> gpui::Task<Result<(), String>> {
         let group_id = group_id
             .map(str::to_string)
             .or_else(|| self.gx_store_active_group_id());
@@ -63,6 +64,7 @@ impl GhostexGpuiApp {
         match terminal_create_target(group_id.as_deref(), active_project.as_deref()) {
             CreateTarget::Remote { project, subgroup } => {
                 self.gx_store_create_remote_terminal(project, subgroup, cx);
+                gpui::Task::ready(Ok(()))
             }
             CreateTarget::Local {
                 project_id,
@@ -76,15 +78,19 @@ impl GhostexGpuiApp {
         project_id: Option<String>,
         subgroup: Option<String>,
         cx: &mut gpui::Context<Self>,
-    ) {
+    ) -> gpui::Task<Result<(), String>> {
         if let Some(project_id) = project_id.as_deref()
             && !self.gx_store_ensure_local_project_path_available(project_id, cx)
         {
-            return;
+            return gpui::Task::ready(Ok(()));
         }
         let params = terminal_create_params(project_id.as_deref(), None);
         cx.spawn(async move |this, cx| {
             let result = gx_rpc(None, "/api/createSession", params).await;
+            let failure = result.as_ref().err().and_then(|error| {
+                (error.code.as_deref() != Some("projectPathUnavailable") || project_id.is_none())
+                    .then(|| error.message.clone())
+            });
             let _ = this.update(cx, |this, cx| match result {
                 Ok(response) => {
                     let Some((created_project, session_id)) =
@@ -121,8 +127,8 @@ impl GhostexGpuiApp {
                     }
                 }
             });
+            failure.map_or(Ok(()), Err)
         })
-        .detach();
     }
 
     fn gx_store_create_remote_terminal(
@@ -220,7 +226,7 @@ impl GhostexGpuiApp {
     pub(super) fn gx_store_create_quick_terminal(&mut self, cx: &mut gpui::Context<Self>) {
         self.gx_store_create_quick_project("terminal", cx, |this, project_id, cx| {
             let group_id = ProjectKey::local(project_id).to_sidebar_group_id();
-            this.gx_store_create_terminal(Some(&group_id), cx);
+            this.gx_store_create_terminal(Some(&group_id), cx).detach();
         });
     }
 
@@ -262,7 +268,7 @@ impl GhostexGpuiApp {
             return;
         }
         if !cfg!(target_os = "windows") {
-            self.gx_store_create_terminal(group_id, cx);
+            self.gx_store_create_terminal(group_id, cx).detach();
             return;
         }
         let Some(project) = project.filter(|project| project.machine == MachineId::Local) else {

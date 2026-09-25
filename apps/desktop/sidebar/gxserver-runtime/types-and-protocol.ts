@@ -128,7 +128,6 @@ export type GhostexGpuiSidebarBridge = {
   onMenuBarProjectActivation?: (payload: unknown) => void;
   onNativeAppShotCaptured?: (payload: unknown) => void;
   onNativeAppShotPromptResult?: (payload: unknown) => void;
-  onOsIntegrationCommand?: (payload: unknown) => void;
   onProjectBoardConversationRequest?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot) => void;
   /**
@@ -165,7 +164,6 @@ export type GhostexGpuiSidebarBridge = {
    * because DOM wheel events cannot tell a new physical swipe from the
    * previous swipe's momentum tail.
    */
-  onWorkspaceFolderPicked?: (payload: unknown) => void;
   onWorkspaceSessionAttentionAcknowledge?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;
   onWorkspaceTerminalEscapePressed?: (payload: unknown) => void;
@@ -175,13 +173,11 @@ export type GhostexGpuiSidebarBridge = {
   pendingMenuBarProjectActivations?: unknown[];
   pendingNativeAppShotPromptResults?: unknown[];
   pendingNativeAppShots?: unknown[];
-  pendingOsIntegrationCommands?: unknown[];
   pendingSidebarCommands?: unknown[];
   pendingProjectBoardConversationRequests?: unknown[];
   pendingStashedPromptSessionJumps?: unknown[];
   pendingTitlebarGitActions?: unknown[];
   pendingWorktreeModalCommands?: unknown[];
-  pendingWorkspaceFolderPicks?: unknown[];
   pendingWorkspaceSessionAttentionAcknowledgements?: unknown[];
   pendingWorkspaceTabSessionSelections?: unknown[];
   pendingWorkspaceTerminalEscapePresses?: unknown[];

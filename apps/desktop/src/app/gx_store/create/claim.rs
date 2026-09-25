@@ -42,6 +42,8 @@ pub(crate) struct CreateCounters {
     /// Created sessions not placed into their user-made group because the groups document had
     /// not been read yet.
     pub(super) placements_unread: u64,
+    pub(super) folder_picks: u64,
+    pub(super) os_integration_commands: u64,
 }
 
 impl GhostexGpuiApp {
@@ -135,12 +137,12 @@ impl GhostexGpuiApp {
             // The empty-sidebar double-click and the New Thread picker's Terminal name no group:
             // the active one takes it (`createSession(groupId = this.activeGroupId)`).
             Some("createSession") => {
-                self.gx_store_create_terminal(None, cx);
+                self.gx_store_create_terminal(None, cx).detach();
                 true
             }
             Some("createSessionInGroup") => {
                 let group_id = message.get("groupId").and_then(Value::as_str);
-                self.gx_store_create_terminal(group_id, cx);
+                self.gx_store_create_terminal(group_id, cx).detach();
                 true
             }
             Some("createProjectTerminal") => {

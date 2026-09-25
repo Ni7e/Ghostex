@@ -23,4 +23,7 @@ pub use params::{
     os_integration_command_params, queue_startup_prompt_params, remote_agent_launch_params,
     start_provider_params, terminal_create_params, AgentRecordOptions,
 };
-pub use target::{group_project, terminal_create_target, CreateTarget};
+pub use target::{
+    group_project, normalize_project_path, project_name_from_path, terminal_create_target,
+    CreateTarget,
+};

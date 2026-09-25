@@ -352,11 +352,13 @@ impl GhostexGpuiApp {
                     Some(&group_id),
                     account_id.as_deref(),
                     cx,
-                );
+                )
+                .detach();
             });
             return;
         }
-        self.gx_store_create_agent_session(agent_id, group_id, account_id, cx);
+        self.gx_store_create_agent_session(agent_id, group_id, account_id, cx)
+            .detach();
     }
 
     /// `createAgentSession(agentId, groupId = this.activeGroupId, accountId)`.
@@ -366,7 +368,7 @@ impl GhostexGpuiApp {
         group_id: Option<&str>,
         account_id: Option<&str>,
         cx: &mut gpui::Context<Self>,
-    ) {
+    ) -> gpui::Task<Result<(), String>> {
         let group_id = group_id
             .map(str::to_string)
             .or_else(|| self.gx_store_active_group_id());
@@ -376,7 +378,7 @@ impl GhostexGpuiApp {
             .filter(|project| !project.machine.is_local());
         if let Some(project) = remote {
             self.gx_store_create_remote_agent_session(agent_id, project, account_id, cx);
-            return;
+            return gpui::Task::ready(Ok(()));
         }
         // `parseGxserverPresentationProjectGroupId(groupId)` when a group was given, the active
         // project only when none was: a user-made group's id names no project here, as it did.
@@ -389,13 +391,13 @@ impl GhostexGpuiApp {
         if let Some(project_id) = project_id.as_deref()
             && !self.gx_store_ensure_local_project_path_available(project_id, cx)
         {
-            return;
+            return gpui::Task::ready(Ok(()));
         }
         let normalized = agent_id.trim().to_string();
         if cfg!(target_os = "windows") {
             let Some(project_id) = project_id.filter(|_| !normalized.is_empty()) else {
                 self.gx_store_create_toast("warning", "Agent unavailable", None, cx);
-                return;
+                return gpui::Task::ready(Ok(()));
             };
             let mut payload = json!({
                 "agentId": normalized,
@@ -408,16 +410,16 @@ impl GhostexGpuiApp {
                 payload["accountId"] = json!(account_id);
             }
             self.receive_sidebar_create_project_agent_payload(&payload.to_string(), cx);
-            return;
+            return gpui::Task::ready(Ok(()));
         }
         let hud = self.gx_store_launch_hud();
         let (Some(project_id), Some(agent)) =
             (project_id, resolve_sidebar_agent(hud.as_deref(), agent_id))
         else {
-            return;
+            return gpui::Task::ready(Ok(()));
         };
         if agent.launch_command().is_none() {
-            return;
+            return gpui::Task::ready(Ok(()));
         }
         let title_settings = first_prompt_title_runtime_settings(
             &self.gx_store_title_generation_settings(),
@@ -431,6 +433,10 @@ impl GhostexGpuiApp {
         let preferred_interface = self.gx_store_preferred_interface(&agent.agent_id);
         cx.spawn(async move |this, cx| {
             let result = gx_rpc(None, "/api/createAgentSession", params).await;
+            let failure = result.as_ref().err().and_then(|error| {
+                (error.code.as_deref() != Some("projectPathUnavailable"))
+                    .then(|| error.message.clone())
+            });
             let _ = this.update(cx, |this, cx| match result {
                 Ok(response) => {
                     let Some((created_project, session_id)) =
@@ -452,8 +458,8 @@ impl GhostexGpuiApp {
                     }
                 }
             });
+            failure.map_or(Ok(()), Err)
         })
-        .detach();
     }
 
     /// The remote half of `createAgentSession`: the machine resolves the command, a Chat-first agent

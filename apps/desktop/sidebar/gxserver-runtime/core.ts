@@ -389,9 +389,6 @@ export class GpuiSidebarRuntime {
     gpuiBridge.onWorkspaceTabSessionSelected = (payload) => {
       this.handleGpuiWorkspaceTabSessionSelected(payload);
     };
-    gpuiBridge.onWorkspaceFolderPicked = (payload) => {
-      void this.handleGpuiWorkspaceFolderPicked(payload);
-    };
     /*
     CDXC:Sidebar 2026-09-21 WHY:
     The desktop sidebar is the Rust store's, and the page that used to receive its commands and
@@ -406,15 +403,6 @@ export class GpuiSidebarRuntime {
       if (message) void this.handleSidebarMessage(message);
     };
     installGpuiWorkspaceGroupsHandBack(this);
-    gpuiBridge.onOsIntegrationCommand = (payload) => {
-      void this.handleGpuiOsIntegrationCommand(payload);
-    };
-    const pendingOsIntegrationCommands = Array.isArray(gpuiBridge.pendingOsIntegrationCommands)
-      ? gpuiBridge.pendingOsIntegrationCommands.splice(0)
-      : [];
-    for (const payload of pendingOsIntegrationCommands) {
-      void this.handleGpuiOsIntegrationCommand(payload);
-    }
     const pendingMenuBarProjectActivations = Array.isArray(gpuiBridge.pendingMenuBarProjectActivations)
       ? gpuiBridge.pendingMenuBarProjectActivations.splice(0)
       : [];
@@ -455,12 +443,6 @@ export class GpuiSidebarRuntime {
       for (const payload of pendingWorkspaceTabSessionSelections) {
         this.handleGpuiWorkspaceTabSessionSelected(payload);
       }
-    }
-    const pendingWorkspaceFolderPicks = Array.isArray(gpuiBridge.pendingWorkspaceFolderPicks)
-      ? gpuiBridge.pendingWorkspaceFolderPicks.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceFolderPicks) {
-      void this.handleGpuiWorkspaceFolderPicked(payload);
     }
     const pendingSidebarCommands = Array.isArray(gpuiBridge.pendingSidebarCommands)
       ? gpuiBridge.pendingSidebarCommands.splice(0)

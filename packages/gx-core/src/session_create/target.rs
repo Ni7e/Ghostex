@@ -82,3 +82,32 @@ pub fn group_project(group_id: &str) -> Option<ProjectKey> {
     }
     ProjectKey::parse_sidebar_group_id(group_id)
 }
+
+/// `gpuiProjectNameFromPath(path)`: the last path segment, Windows separators read as slashes for
+/// a drive or UNC path; `Project` for a path with no segment.
+pub fn project_name_from_path(path: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let windows = (bytes.len() >= 3
+        && bytes[0].is_ascii_lowercase()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/'))
+        || lower.starts_with("\\\\")
+        || lower.starts_with("//");
+    let normalized = match windows {
+        true => path.replace('\\', "/"),
+        false => path.to_string(),
+    };
+    normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .next_back()
+        .map(str::to_string)
+        .unwrap_or_else(|| "Project".to_string())
+}
+
+/// `normalizeGpuiProjectPath(value)`: trimmed, trailing slashes removed; `None` for a blank path.
+pub fn normalize_project_path(path: &str) -> Option<String> {
+    let trimmed = crate::sidebar_view::text::js_trim(path);
+    (!trimmed.is_empty()).then(|| trimmed.trim_end_matches('/').to_string())
+}

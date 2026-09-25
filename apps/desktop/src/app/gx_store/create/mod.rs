@@ -10,6 +10,8 @@ mod agent;
 mod browser;
 mod claim;
 mod focus_created;
+mod folder_pick;
+mod os_integration;
 mod projects;
 mod terminal;
 

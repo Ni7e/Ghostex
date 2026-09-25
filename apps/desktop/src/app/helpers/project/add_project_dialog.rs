@@ -192,11 +192,6 @@ pub(crate) fn gpui_add_project_dialog_bounded_text(
         .map(str::to_string)
 }
 
-pub(crate) fn gpui_workspace_project_key_allowed(value: &str) -> bool {
-    gpui_remote_sidebar_project_id_allowed(value)
-        || gpui_remote_project_reference_from_project_id(value).is_some()
-}
-
 /*
 CDXC:Browser 2026-07-12:
 Browser tab models are keyed by project id strings. Local projects use the
@@ -204,16 +199,9 @@ plain workspace id, and remote projects use their machine-scoped
 `remote:<machine>:project:<id>` identity so their tabs park, persist, and
 restore per remote project exactly like local ones.
 */
-pub(crate) fn gpui_workspace_folder_picked_script(message: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceFolderPicked==='function'){{bridge.onWorkspaceFolderPicked(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceFolderPicks)?bridge.pendingWorkspaceFolderPicks:[];pending.push(payload);bridge.pendingWorkspaceFolderPicks=pending;}}}})(); undefined;"
-    )
-}
-
-pub(crate) fn gpui_os_integration_command_script(message: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onOsIntegrationCommand==='function'){{bridge.onOsIntegrationCommand(payload);}}else{{const pending=Array.isArray(bridge.pendingOsIntegrationCommands)?bridge.pendingOsIntegrationCommands:[];pending.push(payload);bridge.pendingOsIntegrationCommands=pending;}}}})(); undefined;"
-    )
+pub(crate) fn gpui_workspace_project_key_allowed(value: &str) -> bool {
+    gpui_remote_sidebar_project_id_allowed(value)
+        || gpui_remote_project_reference_from_project_id(value).is_some()
 }
 
 #[cfg(target_os = "macos")]
