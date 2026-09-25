@@ -89,7 +89,7 @@ impl GhostexGpuiApp {
         let subscription =
             cx.subscribe(
                 &view,
-                move |this, view, event: &NativeChatEvent, cx| match event {
+                move |this, _view, event: &NativeChatEvent, cx| match event {
                     NativeChatEvent::Broker(message) => {
                         this.relay_session_chat_runtime_request(generation, message);
                     }

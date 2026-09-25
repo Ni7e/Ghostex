@@ -113,7 +113,7 @@ impl GhostexGpuiApp {
             }
             match project_id {
                 None => self.evict_native_chat_view(session_id, cx),
-                Some(project_id) => self.evict_parked_native_chat_view(&project_id, session_id, cx),
+                Some(project_id) => self.evict_parked_native_chat_view(&project_id, session_id),
             }
             excess -= 1;
         }
@@ -267,7 +267,6 @@ impl GhostexGpuiApp {
         &mut self,
         project_id: &str,
         session_id: TerminalSessionId,
-        cx: &mut gpui::Context<Self>,
     ) {
         let Some(parked) = self
             .parked_agents_chat_runtimes_by_project

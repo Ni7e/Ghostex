@@ -315,7 +315,7 @@ export const storageCatalog = Object.freeze({
   chatSnapshots: define(
     'chatSnapshots',
     'Recent conversation cache',
-    desktop + 'sidebar/session-chat-runtime/persistence.ts',
+    desktop + 'src/app/gx_chat/retained.rs',
     'ghostex.sessionChat.snapshot.',
     objectCodec,
     {
