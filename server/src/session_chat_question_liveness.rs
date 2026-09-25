@@ -76,6 +76,15 @@ pub struct ClaudeQuestionSelectorPosition {
     pub text_row: Option<usize>,
 }
 
+/// The selector's tab row: "←  ☐ Color  ☐ Fruit  ✔ Submit  →" with several
+/// questions, or a lone header chip (" ☐ Size") with one.
+pub(crate) fn claude_question_tab_row(lines: &[&str]) -> Option<usize> {
+    lines.iter().rposition(|line| {
+        let line = line.trim_start();
+        line.starts_with('←') || line.starts_with('☐') || line.starts_with('☒')
+    })
+}
+
 fn without_whitespace(text: &str) -> String {
     text.chars().filter(|c| !c.is_whitespace()).collect()
 }
@@ -88,12 +97,7 @@ pub fn claude_question_selector_position(
     screen_text: &str,
 ) -> Option<ClaudeQuestionSelectorPosition> {
     let lines: Vec<&str> = screen_text.lines().map(str::trim_end).collect();
-    // The tab row: "←  ☐ Color  ☐ Fruit  ✔ Submit  →" with several questions,
-    // or a lone header chip (" ☐ Size") with one.
-    let tab_row = lines.iter().rposition(|line| {
-        let line = line.trim_start();
-        line.starts_with('←') || line.starts_with('☐') || line.starts_with('☒')
-    })?;
+    let tab_row = claude_question_tab_row(&lines)?;
     let below = &lines[tab_row + 1..];
     let heading_start = below.iter().position(|line| !line.trim().is_empty())?;
     let heading_len = below[heading_start..]
@@ -151,7 +155,7 @@ pub fn claude_question_selector_position(
 }
 
 /// CDXC:SessionChat 2026-09-25 DECISION:
-/// User: "make gxserver move the highlight back before answering". The answer plan types option digits and arrow runs that assume the first question's tab is open with its first row highlighted. A highlight left on "Type something" turned the digits into custom text (the answer arrived as "1"), and a tab left on a later question sent the answers to the wrong questions. So the plan starts from the capture it already takes: Up to the tab's first row (Up from the first row wraps, so the count is exact, never a blind run), then Left to the first question, where Claude opens every tab on its first row.
+/// User: "make gxserver move the highlight back before answering", and later the same day: text the user already typed into "Type something" in the terminal must be cleared before the chat's answer is typed, and a multi-select tab must end with exactly the chat's picks. The answer plan types option digits and arrow runs that assume the first question's tab is open with its first row highlighted. A highlight left on "Type something" turned the digits into custom text (the answer arrived as "1"), and a tab left on a later question sent the answers to the wrong questions. So the plan starts from the capture it already takes: Up to the tab's first row (Up from the first row wraps, so the count is exact, never a blind run), then Left to the first question, where Claude opens every tab on its first row. Each question's keys then start with a step that reads that tab when it runs (session_chat_claude_question_prep.rs): it empties leftover field text (otherwise joined to the typed answer, or submitted beside a picked option), presses the digit only for rows whose tick differs from the chat's pick (a digit toggles, so a row already ticked in the terminal was unticked), and brings the highlight back to the first row.
 /// CDXC:SessionChat 2026-09-25 WHY: Claude Code 2.1.280 drops the rest of an Up burst once the highlight lands on the "Type something" field (five Ups from "Chat about this" stopped in the field and the option digits became its text), so the Ups that reach the field are a group of their own and the queue's pacing lets the field settle before the rest.
 pub fn claude_question_selector_reset_keys(
     position: ClaudeQuestionSelectorPosition,
