@@ -47,10 +47,39 @@ fn loopback(
     path: &str,
     params: Value,
 ) -> std::result::Result<Value, DomainStateError> {
-    let envelope =
-        crate::http_client::post_local_api(path, Some(&params), Some(token), STEP_TIMEOUT_MS)
-            .map_err(|error| DomainStateError::corrupt_state(format!("{path} failed: {error}")))?
-            .ok_or_else(|| DomainStateError::corrupt_state(format!("{path} did not answer.")))?;
+    let unavailable =
+        |detail: String| DomainStateError::corrupt_state(format!("{path} failed: {detail}"));
+    let port = crate::config::read_selected_local_api_port()
+        .map_err(|error| unavailable(error.to_string()))?;
+    let address = format!("{}:{port}", crate::constants::GXSERVER_LOCAL_API_HOST);
+    let body = json!({
+        "params": params,
+        "protocolVersion": crate::constants::GXSERVER_PROTOCOL_VERSION,
+    })
+    .to_string();
+    let mut stream =
+        std::net::TcpStream::connect(&address).map_err(|error| unavailable(error.to_string()))?;
+    let timeout = Some(Duration::from_millis(STEP_TIMEOUT_MS));
+    let _ = stream.set_read_timeout(timeout);
+    let _ = stream.set_write_timeout(timeout);
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n{}: {}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        crate::constants::GXSERVER_PROTOCOL_HEADER,
+        crate::constants::GXSERVER_PROTOCOL_VERSION,
+        body.len(),
+    );
+    use std::io::{Read, Write};
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| unavailable(error.to_string()))?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| unavailable(error.to_string()))?;
+    let envelope = response
+        .split_once("\r\n\r\n")
+        .and_then(|(_, body)| serde_json::from_str::<Value>(body.trim()).ok())
+        .ok_or_else(|| unavailable("the answer was not JSON".to_string()))?;
     if envelope.get("ok").and_then(Value::as_bool) == Some(true) {
         return Ok(envelope.get("result").cloned().unwrap_or(Value::Null));
     }
