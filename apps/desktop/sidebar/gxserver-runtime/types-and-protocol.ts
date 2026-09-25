@@ -133,7 +133,6 @@ export type GpuiSidebarHostMessage =
           | 'cancelDelayedSend'
           | 'confirmAgentHookLaunch'
           | 'createSession'
-          | 'removeProject'
           | 'renameSession'
           | 'runSidebarAgent'
           | 'scheduleDelayedSend'

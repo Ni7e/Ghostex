@@ -71,11 +71,8 @@ export interface GpuiSidebarRuntimeProjectAndCommandMethods {
   ensureLocalProjectPathAvailable(projectId: string): boolean;
   presentMissingProjectFolder(projectId: string): boolean;
   relocateProjectFolder(projectId: string, path: string): Promise<void>;
-  removeProject(projectId: string): Promise<void>;
   restoreRecentProject(projectId: string): Promise<void>;
   removeRecentProject(projectId: string): Promise<void>;
-  closeProjectForGroup(groupId: string, successorSessionId?: string): Promise<void>;
-  removeProjectForGroup(groupId: string): Promise<void>;
   resolveProjectIdForGroup(groupId: string): string | undefined;
   activeDomainProject(): GxserverProjectDomainState | undefined;
   domainProjectById(projectId: string): GxserverProjectDomainState | undefined;
@@ -581,20 +578,6 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
     }
   },
 
-  async removeProject(this: GpuiSidebarRuntime, projectId: string): Promise<void> {
-    const remoteReference = parseGpuiRemotePresentationProjectId(projectId);
-    if (remoteReference) {
-      await this.removeRemoteProject(remoteReference);
-      return;
-    }
-    if (!this.client) {
-      return;
-    }
-    await this.client.rpc('/api/removeProject', {
-      projectId,
-    });
-  },
-
   async restoreRecentProject(this: GpuiSidebarRuntime, projectId: string): Promise<void> {
     const remoteReference = parseGpuiRemotePresentationProjectId(projectId);
     if (remoteReference) {
@@ -641,75 +624,6 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
     this.domainProjects = this.domainProjects.filter((project) => project.projectId !== projectId);
     this.recentProjects = [...response.recentProjects];
     this.publishHudPatch();
-  },
-
-  async closeProjectForGroup(this: GpuiSidebarRuntime, groupId: string, successorSessionId?: string): Promise<void> {
-    /*
-    CDXC:Projects 2026-09-16 DECISION:
-    User: closing a project in a Space stays in that Space and selects a non-sleeping session from the next project in the list.
-    SidebarApp picks that session from the Space the user is in; it is focused before the park so the active project moves straight to it and never passes through the "no active project" state, which is what used to let the host land on a project outside the Space.
-    */
-    if (successorSessionId) {
-      await this.focusSession(successorSessionId, { sessionId: successorSessionId, type: 'focusSession' });
-    }
-    const remoteScope = this.resolveRemotePresentationProjectScope({ groupId });
-    if (parseGpuiRemotePresentationGroupId(groupId)) {
-      if (!remoteScope) {
-        this.postRemoteToast('warning', 'Remote project close unavailable', {
-          description: 'Reconnect the remote machine before closing the project.',
-        });
-        return;
-      }
-      await this.closeRemoteProjectForGroup(remoteScope, groupId);
-      return;
-    }
-    if (!this.client) {
-      return;
-    }
-    const projectId = this.resolveProjectIdForGroup(groupId);
-    if (!projectId) {
-      return;
-    }
-    /*
-    CDXC:Projects 2026-06-24-12:38:
-    GPUI reuses SidebarApp's macOS close/remove split. Close must call the gxserver park endpoint with the project id resolved from the live presentation group, then consume gxserver's authoritative parked row; never synthesize a Recent Project row or map Close to hard delete when resolution or the daemon mutation fails.
-    */
-    const response = await this.client.rpc<{
-      project: GxserverProjectDomainState;
-      recentProjects: GxserverRecentProjectDomainState[];
-    }>('/api/closeProjectToRecent', {
-      projectId,
-    });
-    this.upsertDomainProject(response.project);
-    this.recentProjects = [...response.recentProjects];
-    if (this.activeGroupId === groupId || this.activeProjectId === projectId) {
-      this.activeGroupId = undefined;
-      this.activeProjectId = undefined;
-    }
-    this.removeLocalPresentationProject(projectId);
-    if (this.presentation) {
-      this.publishPresentation('patch');
-      return;
-    }
-    this.publishHudPatch();
-  },
-
-  async removeProjectForGroup(this: GpuiSidebarRuntime, groupId: string): Promise<void> {
-    const remoteScope = this.resolveRemotePresentationProjectScope({ groupId });
-    if (parseGpuiRemotePresentationGroupId(groupId)) {
-      if (!remoteScope) {
-        this.postRemoteToast('warning', 'Remote project removal unavailable', {
-          description: 'Reconnect the remote machine before removing the project.',
-        });
-        return;
-      }
-      await this.removeRemoteProject(remoteScope);
-      return;
-    }
-    const projectId = parseGxserverPresentationProjectGroupId(groupId);
-    if (projectId) {
-      await this.removeProject(projectId);
-    }
   },
 
   resolveProjectIdForGroup(this: GpuiSidebarRuntime, groupId: string): string | undefined {

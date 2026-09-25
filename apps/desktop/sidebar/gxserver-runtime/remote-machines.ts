@@ -9,11 +9,7 @@ import {
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import { createGpuiSidebarSettings } from './helpers/bootstrap';
-import {
-  countGpuiRemotePresentationProjectSessions,
-  orderGpuiRecentProjects,
-  writeStoredGpuiRemoteRecentProjects,
-} from './helpers/recent-projects';
+import { writeStoredGpuiRemoteRecentProjects } from './helpers/recent-projects';
 import { normalizeNonEmptyString } from './helpers/records';
 import {
   compareGpuiRemoteAttachCandidateSessions,
@@ -41,8 +37,6 @@ import type {
   GxserverEndpointPath,
   GxserverPresentationProject,
   GxserverPresentationSession,
-  GxserverProjectId,
-  GxserverRecentProjectDomainState,
 } from '@/packages/shared/gxserver-protocol';
 import type { SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
 
@@ -99,10 +93,8 @@ export interface GpuiSidebarRuntimeRemoteMachineMethods {
   scheduleStaleRemotePresentationRefresh(remoteMachineId: string): void;
   forgetStaleRemotePresentationRefresh(remoteMachineId: string): void;
   refreshRemoteSidebarHudFromGxserver(remoteMachineId: string): Promise<void>;
-  closeRemoteProjectForGroup(remoteScope: GpuiRemoteProjectScope, groupId: string): Promise<void>;
   restoreRemoteRecentProject(remoteReference: GpuiRemoteProjectReference): Promise<void>;
   removeRemoteRecentProject(remoteReference: GpuiRemoteProjectReference): Promise<void>;
-  removeRemoteProject(remoteReference: GpuiRemoteProjectReference): Promise<void>;
   selectRemoteGroupAttachTarget(
     reference: GpuiRemoteProjectReference
   ): { machineId: string; projectId: string; sessionId: string } | undefined;
@@ -482,41 +474,6 @@ export const gpuiSidebarRuntimeRemoteMachineMethods = {
     this.publishHudPatch();
   },
 
-  async closeRemoteProjectForGroup(
-    this: GpuiSidebarRuntime,
-    remoteScope: GpuiRemoteProjectScope,
-    groupId: string
-  ): Promise<void> {
-    /*
-    CDXC:RemoteMachines 2026-06-27-19:37:
-    Remote Recent Projects are client-app state, not local Mac gxserver state
-    and not the remote daemon's shared project state. GPUI parks a
-    machine-scoped row in its own CEF storage so macOS and GPUI can connect to
-    and organize the same remote machine independently.
-    */
-    const presentation = this.remotePresentations.get(remoteScope.machineId);
-    const recentProject: GxserverRecentProjectDomainState = {
-      path: remoteScope.project.path ?? '',
-      projectId: remoteScope.projectId as GxserverProjectId,
-      recentClosedAt: new Date().toISOString(),
-      sessionCount: presentation ? countGpuiRemotePresentationProjectSessions(presentation, remoteScope.projectId) : 0,
-      title: remoteScope.project.title,
-    };
-    const previousProjects = this.remoteRecentProjectsByMachineId.get(remoteScope.machineId) ?? [];
-    this.remoteRecentProjectsByMachineId.set(
-      remoteScope.machineId,
-      orderGpuiRecentProjects([
-        recentProject,
-        ...previousProjects.filter((project) => project.projectId !== remoteScope.projectId),
-      ])
-    );
-    writeStoredGpuiRemoteRecentProjects(this.remoteRecentProjectsByMachineId);
-    if (this.activeGroupId === groupId) {
-      this.activeGroupId = undefined;
-    }
-    this.publishRemotePresentationPatch();
-  },
-
   async restoreRemoteRecentProject(
     this: GpuiSidebarRuntime,
     remoteReference: GpuiRemoteProjectReference
@@ -557,27 +514,6 @@ export const gpuiSidebarRuntimeRemoteMachineMethods = {
     );
     writeStoredGpuiRemoteRecentProjects(this.remoteRecentProjectsByMachineId);
     this.publishRemotePresentationPatch();
-  },
-
-  async removeRemoteProject(this: GpuiSidebarRuntime, remoteReference: GpuiRemoteProjectReference): Promise<void> {
-    try {
-      await this.requestRemoteGxserver(remoteReference.machineId, '/api/removeProject', {
-        projectId: remoteReference.projectId,
-      });
-      this.removeRemotePresentationProject(remoteReference.machineId, remoteReference.projectId);
-      this.remoteRecentProjectsByMachineId.set(
-        remoteReference.machineId,
-        (this.remoteRecentProjectsByMachineId.get(remoteReference.machineId) ?? []).filter(
-          (project) => project.projectId !== remoteReference.projectId
-        )
-      );
-      writeStoredGpuiRemoteRecentProjects(this.remoteRecentProjectsByMachineId);
-      this.publishRemotePresentationPatch();
-    } catch {
-      this.postRemoteToast('warning', 'Remote project removal failed', {
-        description: 'The remote gxserver could not remove that project.',
-      });
-    }
   },
 
   selectRemoteGroupAttachTarget(

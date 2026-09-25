@@ -31,6 +31,8 @@ pub(crate) struct CreateCounters {
     pub(super) browser_pane_opens: u64,
     pub(super) quick_browser_opens: u64,
     pub(super) find_prompts: u64,
+    pub(super) project_removes: u64,
+    pub(super) project_closes: u64,
 }
 
 impl GhostexGpuiApp {
@@ -49,6 +51,13 @@ impl GhostexGpuiApp {
         };
         // New Group, Rename and Close Group (gx_store/workspace_groups/group_commands.rs).
         if self.gx_store_run_group_command(command, message, cx) {
+            return true;
+        }
+        // Close Project carries the successor the store names from the list it draws, which the
+        // dispatch adds only on the way to the runtime (sidebar_close_project.rs).
+        if message.get("type").and_then(Value::as_str) == Some("closeWorkspaceProjectForGroup") {
+            let command = self.gx_store_add_close_project_successor(command.clone());
+            self.gx_store_close_project_for_group(&command["message"], cx);
             return true;
         }
         self.gx_store_answer_create_message(message, cx)
@@ -105,6 +114,18 @@ impl GhostexGpuiApp {
             }
             Some("updateCustomSessionTags") => {
                 self.gx_store_update_custom_session_tags(message, cx);
+                true
+            }
+            Some("removeProject") => {
+                if let Some(project_id) = message.get("projectId").and_then(Value::as_str) {
+                    self.gx_store_remove_project(project_id, cx);
+                }
+                true
+            }
+            Some("removeWorkspaceProjectForGroup") => {
+                if let Some(group_id) = message.get("groupId").and_then(Value::as_str) {
+                    self.gx_store_remove_project_for_group(group_id, cx);
+                }
                 true
             }
             _ => false,

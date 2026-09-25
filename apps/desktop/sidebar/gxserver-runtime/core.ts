@@ -510,13 +510,6 @@ export class GpuiSidebarRuntime {
       reached `handleSidebarMessage`/gxserver and no `/rename` was staged in
       the terminal. Route exactly these known command types to the runtime's
       own sidebar-message handler instead.
-
-      CDXC:RepoStructure 2026-08-22:
-      `removeProject` (Settings → Projects → Remove) is dispatched by Rust over
-      this same bridge and belongs in that list: it too has no inbound React
-      branch, so it was reaching the message source and dying there. The union
-      in `GpuiSidebarHostMessage` is what makes the remaining fall-through
-      provably an extension-to-sidebar message.
       */
       if (message.type === 'runSidebarAgent') {
         /*
@@ -534,7 +527,6 @@ export class GpuiSidebarRuntime {
         message.type === 'postponeDelayedSend' ||
         message.type === 'confirmAgentHookLaunch' ||
         message.type === 'createSession' ||
-        message.type === 'removeProject' ||
         message.type === 'runSidebarAgent' ||
         message.type === 'setSessionNote' ||
         message.type === 'toggleCloseAfterDone'
@@ -1104,15 +1096,6 @@ export class GpuiSidebarRuntime {
         return;
       case 'promptRenameWorktreeForGroup':
         await this.promptRenameWorktreeForGroup(message.groupId);
-        return;
-      case 'removeProject':
-        await this.removeProject(message.projectId);
-        return;
-      case 'closeWorkspaceProjectForGroup':
-        await this.closeProjectForGroup(message.groupId, message.successorSessionId);
-        return;
-      case 'removeWorkspaceProjectForGroup':
-        await this.removeProjectForGroup(message.groupId);
         return;
       case 'runSidebarGitAction':
         await this.runSidebarGitAction(message);

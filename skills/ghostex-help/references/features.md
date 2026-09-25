@@ -238,9 +238,10 @@ project's sessions only; its browser tabs are slept and closed from the tab
 strip above the view, where they live.
 Click a project header (or the chevron beside it) or a group header to expand
 or collapse it; rename a group from its right-click menu.
-Close Project parks the project in Recent Projects; when it held the active
-session, Ghostex stays in the current Space and switches to an awake session
-of the next project in the list.
+Close Project parks the project in Recent Projects (a remote machine's project
+goes to that machine's Recent Projects, which Quick Access lists); when it held
+the active session, Ghostex stays in the current Space and switches to an awake
+session of the next project in the list.
 Session rows show the agent icon, title, status, tags, and last-active time.
 Ctrl+Tab and Ctrl+Shift+Tab (also Cmd+Shift+] and Cmd+Shift+[ on Mac) move to
 the next or previous session shown in the sidebar, the same keys Chrome uses
