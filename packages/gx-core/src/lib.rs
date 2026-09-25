@@ -112,7 +112,8 @@ pub use crate::sidebar_actions::{
     SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES, SORT_ACTIONS,
 };
 pub use crate::sidebar_actions::{
-    open_remote_session_terminal, plan_generate_session_title, provider_transition_committed,
+    open_remote_session_terminal, plan_generate_session_title, plan_group_sleep,
+    provider_transition_committed,
     running_local_session_ids,
     terminal_lifecycle_fallback_focus, titlebar_sleep_inactive_ids,
 };

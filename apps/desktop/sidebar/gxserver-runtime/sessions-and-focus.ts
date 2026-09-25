@@ -3,11 +3,7 @@ CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
-import {
-  getGpuiWorkspaceSessionSubgroups,
-  moveGpuiWorkspaceSessionToSubgroup,
-  parseGpuiWorkspaceSessionSubgroupId,
-} from '../workspace-session-groups';
+import { moveGpuiWorkspaceSessionToSubgroup, parseGpuiWorkspaceSessionSubgroupId } from '../workspace-session-groups';
 import {
   GPUI_GXSERVER_CHATS_GROUP_ID,
   GPUI_QUICK_AUTOMATIONS_PROJECT_ID,
@@ -35,7 +31,6 @@ import {
 } from './helpers/remote-presentation';
 import { shouldApplyGpuiLocalWorkspaceTransition } from './helpers/terminal-lifecycle';
 import type { GpuiWorkspaceTerminalFocusPlacement } from './types-and-protocol';
-import { postAppModalHostMessage } from '@/packages/core-ui/app-modal-host-bridge';
 import {
   resolveEffectivePreferredAgentInterface,
   type PreferredAgentInterface,
@@ -105,11 +100,9 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
     }
   ): void;
   transitionSession(sessionId: string, action: 'close' | 'sleep'): Promise<void>;
-  copySessionDetails(message: Extract<SidebarToExtensionMessage, { type: 'copySessionDetails' }>): void;
   fullReloadSession(sessionId: string): Promise<void>;
   splitSessionRight(sessionId: string): Promise<void>;
   fullReloadProjectZmxSessions(groupId: string): Promise<void>;
-  fullReloadWorkspaceGroup(groupId: string): Promise<void>;
   resolveLocalProjectListTransitionFocusTarget(projectId: string, removedSessionId: string): string | undefined;
   localProjectTransitionSessionIds(projectId: string, removedSessionId: string): string[];
   isRunningLocalPresentationSession(projectId: string, sessionId: string): boolean;
@@ -581,22 +574,6 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     }
   },
 
-  copySessionDetails(
-    this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'copySessionDetails' }>
-  ): void {
-    const detailsText = normalizeNonEmptyString(message.detailsText);
-    if (!detailsText) {
-      this.handleUnsupportedSidebarMessage(message);
-      return;
-    }
-    try {
-      postAppModalHostMessage({ detailsText, type: 'copySessionDetails' }, 'GPUISidebarActions:copySessionDetails');
-    } catch {
-      this.handleUnsupportedSidebarMessage(message);
-    }
-  },
-
   async fullReloadSession(this: GpuiSidebarRuntime, sessionId: string): Promise<void> {
     /*
     CDXC:CefRuntime 2026-07-12:
@@ -691,26 +668,6 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
       .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId));
     for (const reloadSessionId of sessionIds) {
       await this.fullReloadSession(reloadSessionId);
-    }
-  },
-
-  async fullReloadWorkspaceGroup(this: GpuiSidebarRuntime, groupId: string): Promise<void> {
-    const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
-    if (!subgroup) {
-      await this.fullReloadProjectZmxSessions(groupId);
-      return;
-    }
-    const remoteProject = parseGpuiRemotePresentationProjectId(subgroup.projectId);
-    const memberIds =
-      getGpuiWorkspaceSessionSubgroups(this.workspaceGroups, subgroup.projectId).find(
-        (group) => group.groupId === subgroup.groupId
-      )?.sessionIds ?? [];
-    for (const sessionId of memberIds) {
-      await this.fullReloadSession(
-        remoteProject
-          ? createGpuiRemotePresentationSessionId(remoteProject.machineId, remoteProject.projectId, sessionId)
-          : createGxserverPresentationProjectSessionId(subgroup.projectId, sessionId)
-      );
     }
   },
 

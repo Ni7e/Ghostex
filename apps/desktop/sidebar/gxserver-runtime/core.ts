@@ -661,33 +661,6 @@ export class GpuiSidebarRuntime {
         this.runSidebarCommand(commandId, message, message.scope ?? 'project');
         return;
       }
-      case 'setSessionSleeping':
-        await this.setSessionSleeping(message.sessionId, message.sleeping);
-        return;
-      case 'setSessionsSleeping':
-        await this.setSessionsSleeping(message.sessionIds, message.sleeping);
-        return;
-      case 'setGroupSleeping':
-        await this.setGroupSleeping(message.groupId, message.sleeping);
-        return;
-      case 'closeSession':
-        await this.transitionSession(message.sessionId, 'close');
-        return;
-      case 'closeSessions':
-        await Promise.all(message.sessionIds.map((sessionId) => this.transitionSession(sessionId, 'close')));
-        return;
-      case 'copySessionDetails':
-        this.copySessionDetails(message);
-        return;
-      case 'fullReloadSession':
-        await this.fullReloadSession(message.sessionId);
-        return;
-      case 'fullReloadProjectZmxSessions':
-        await this.fullReloadProjectZmxSessions(message.groupId);
-        return;
-      case 'fullReloadGroup':
-        await this.fullReloadWorkspaceGroup(message.groupId);
-        return;
       case 'openAutomationsPage':
         /*
         CDXC:Automations 2026-07-08:
@@ -697,59 +670,6 @@ export class GpuiSidebarRuntime {
         existing active-project context post carry the Automate workarea identity.
         */
         this.openQuickAutomationsPage();
-        return;
-      case 'closeInactiveProjectSessions':
-        await this.closeInactiveProjectSessions(message.groupId);
-        return;
-      case 'sleepInactiveProjectSessions':
-        await this.sleepInactiveProjectSessions(message.groupId);
-        return;
-      case 'wakeProjectSleepingSessions':
-        await this.wakeProjectSleepingSessions(message.groupId);
-        return;
-      case 'forkSession':
-        await this.forkSession(message.sessionId);
-        return;
-      case 'splitSessionRight':
-        await this.splitSessionRight(message.sessionId);
-        return;
-      case 'setSessionTag':
-        await this.updateSessionFlags(message.sessionId, {
-          isFavorite: message.sessionTag === 'favorite',
-          sessionTag: message.sessionTag ?? null,
-        });
-        return;
-      case 'setSessionPinned':
-        await this.updateSessionFlags(message.sessionId, {
-          isPinned: message.pinned,
-        });
-        return;
-      case 'setSessionParked':
-        await this.setSessionParked(message.sessionId, message.parked);
-        return;
-      /*
-      CDXC:StateSync 2026-07-29:
-      Sidebar V2's settle/snooze commands map 1:1 onto gxserver endpoints. They
-      are remote-allowed, so they route through the same machine resolution
-      every other session mutation uses; the client posts no optimistic patch
-      because the endpoints answer with a presentation delta and enforce guards
-      (a working or blocked session cannot settle) that the client must not
-      pre-empt.
-      */
-      case 'snoozeSession':
-        await this.snoozeSession(message.sessionId, message.snoozedUntil);
-        return;
-      case 'unsnoozeSession':
-        await this.runSessionLifecycleCommand(message.sessionId, '/api/unsnoozeSession', {});
-        return;
-      /*
-       * CDXC:Sessions 2026-09-25 WHY:
-       * A user-made group's order, New Group, Rename, Close Group, Move to New Group, a session
-       * dropped into a group and the project order are all Rust's (gx-core workspace_groups/ and
-       * sidebar_drag/, a remote row's included), so only a project group's session order is left.
-       */
-      case 'syncSessionOrder':
-        await this.syncSessionOrder(message.groupId, message.sessionIds);
         return;
       /*
       CDXC:Projects 2026-09-21 WHY:
