@@ -608,6 +608,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/snoozeSession"
         | "/api/unsnoozeSession"
         | "/api/runGitAction"
+        | "/api/readProjectGitState"
         | "/api/runGitHubAction"
         | "/api/runWorktreeAction"
         | "/api/runProjectSetupCommand"
@@ -743,6 +744,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         */
         | "/api/generateCommitMessage"
         | "/api/createPullRequest"
+        | "/api/runGitShipWorkflow"
         | "/api/updatePortlessState"
         /*
         CDXC:RemotePairing 2026-09-01:

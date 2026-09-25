@@ -18,6 +18,7 @@ mod connection;
 mod core;
 mod doc_sync;
 mod focus;
+pub mod git_menu;
 mod keys;
 mod notification_feed;
 mod overlay;

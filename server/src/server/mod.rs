@@ -2561,6 +2561,8 @@ async fn route_http(
             handle_read_session_transcript_sizes_http(&state, endpoint.path, request_id, &body_json)
                 .await
         }
+        "/api/readProjectGitState" => crate::project_git_state::handle_read_project_git_state_http(&state, endpoint.path, request_id, &body_json).await,
+        "/api/runGitShipWorkflow" => crate::git_ship_workflow::handle_run_git_ship_workflow_http(&state, endpoint.path, request_id, &body_json).await,
         "/api/createPullRequest" => {
             handle_create_pull_request_http(&state, endpoint.path, request_id, &body_json).await
         }
