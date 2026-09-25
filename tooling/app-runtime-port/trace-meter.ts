@@ -54,7 +54,7 @@ function readLedger(): Row[] {
       columns = cells;
       continue;
     }
-    if (!/^[A-Z]+\d+/.test(cells[0] ?? '')) continue;
+    if (!/^[A-Z]\d{3}$/.test(cells[0] ?? '')) continue;
     const entry = cells[columns.indexOf('Entry point')] ?? '';
     const ticked = [...entry.matchAll(/`([^`]+)`/g)].map(([, name]) => name);
     const tokens = (ticked.length ? ticked : [entry])
@@ -93,10 +93,11 @@ const lines = readLog();
  * for `handleSidebarMessage:createSession`), then the door before it (a C or R row for
  * `onWorktreeModalCommand:confirmDeleteWorktree`).
  */
-function rowFor(name: string): Row | undefined {
+function rowFor(name: string, kinds?: string): Row | undefined {
   const candidates = [name, name.split(':').pop() ?? name, name.split(':')[0]];
+  const rows = kinds ? ledger.filter((entry) => kinds.includes(entry.id[0])) : ledger;
   for (const candidate of candidates) {
-    const row = ledger.find((entry) => entry.tokens.includes(candidate));
+    const row = rows.find((entry) => entry.tokens.includes(candidate));
     if (row) return row;
   }
   return undefined;
@@ -107,7 +108,8 @@ const rpcs = new Map<string, number>();
 for (const { event, details } of lines) {
   if (event === 'runtime.entry' || event === 'runtime.post') {
     const name = event === 'runtime.post' ? `${details.kind}:${details.name}` : String(details.name);
-    const row = rowFor(event === 'runtime.post' ? String(details.name) : name);
+    // A post is a P (bridge function), N (nativeHost) or M (modalHost) row, never the Rust row that reacts to it.
+    const row = event === 'runtime.post' ? rowFor(String(details.name), 'PNM') : rowFor(name);
     if (family && row?.family !== family && !(row === undefined && family === '?')) continue;
     const key = `${event} ${name}`;
     const held = counts.get(key) ?? { row, count: 0 };
