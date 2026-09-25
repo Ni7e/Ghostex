@@ -80,31 +80,10 @@ export const GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.openBrowserUrl";
 export const GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS = 16 * 1024;
 export const GPUI_SIDEBAR_BROWSER_FAVICON_URL_MAX_CHARS = 2048;
-export const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_VERSION = 1;
-export const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.projectBoardConversationRequest";
-export const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_VERSION = 1;
-export const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.projectBoardConversationResponse";
 export const GPUI_QUICK_AUTOMATIONS_PROJECT_ID = "quick-automations";
 export const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE = "All Automations";
 export const GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID =
   "__quick-automations__";
-export const GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_TTL_MS = 60_000;
-export const GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_CACHE_MAX = 512;
-export const GPUI_PROJECT_BOARD_LINK_AVAILABILITY_CONCURRENCY = 4;
-/*
-CDXC:ProjectBoard 2026-08-07:
-Resuming a bead's closed conversation runs through the daemon's fork plan,
-which only knows how to continue Codex, Claude, and Pi conversations. gxserver
-stays the authority and rejects anything else, so this set exists to keep the
-board from offering a Resume the daemon would refuse.
-*/
-export const GPUI_PROJECT_BOARD_RESUMABLE_AGENT_IDS = new Set([
-  "claude",
-  "codex",
-  "pi",
-]);
 export const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION = 1;
 export const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalEscapePressed";

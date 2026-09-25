@@ -623,7 +623,7 @@ impl GhostexGpuiApp {
         }
         // macOS `appendProjectBoardDebugLog` parity: the board page's debug
         // breadcrumbs persist to the GPUI project-board support log
-        // (scenario-gated) while the runtime still answers the state echo.
+        // (scenario-gated) while gx_store/create/board.rs answers the state echo.
         // Details arrive as a JSON string and are parsed at the writer
         // boundary like the Swift writers, then sanitized.
         if request.get("action").and_then(serde_json::Value::as_str) == Some("appendDebugLog") {
@@ -641,24 +641,7 @@ impl GhostexGpuiApp {
                 support_logs::append(support_logs::GpuiSupportLog::ProjectBoard, event, details);
             }
         }
-        let message = serde_json::json!({
-            "request": request,
-            "type": GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_TYPE,
-            "version": GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_VERSION,
-        });
-        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
-        self.gx_store_flush_old_runtime_tell(cx);
-        let script = gpui_project_board_conversation_request_script(&message);
-        if script.chars().count() > GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_PAYLOAD_MAX_CHARS {
-            return false;
-        }
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        sidebar.update(cx, |surface, _| {
-            let _ = surface.execute_app_owned_script(&script);
-        });
-        true
+        self.gx_store_run_board_conversation_request(request, cx)
     }
 
     pub(crate) fn dispatch_gpui_command_palette_session_focus(

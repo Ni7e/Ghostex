@@ -128,7 +128,6 @@ export type GhostexGpuiSidebarBridge = {
   onMenuBarProjectActivation?: (payload: unknown) => void;
   onNativeAppShotCaptured?: (payload: unknown) => void;
   onNativeAppShotPromptResult?: (payload: unknown) => void;
-  onProjectBoardConversationRequest?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot) => void;
   /**
    * CDXC:Sidebar 2026-09-21 WHY:
@@ -172,7 +171,6 @@ export type GhostexGpuiSidebarBridge = {
   pendingNativeAppShotPromptResults?: unknown[];
   pendingNativeAppShots?: unknown[];
   pendingSidebarCommands?: unknown[];
-  pendingProjectBoardConversationRequests?: unknown[];
   pendingTitlebarGitActions?: unknown[];
   pendingWorktreeModalCommands?: unknown[];
   pendingWorkspaceSessionAttentionAcknowledgements?: unknown[];
@@ -188,7 +186,6 @@ export type GhostexGpuiSidebarBridge = {
   postNativeProjectPathAction?: (payload: string) => boolean;
   postOpenBrowserUrl?: (payload: string) => boolean;
   postPetOverlayState?: (payload: string) => boolean;
-  postProjectBoardConversationResponse?: (payload: string) => boolean;
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
   postSessionCompletionSound?: (payload: string) => boolean;
@@ -625,29 +622,6 @@ export type GpuiCreatedProjectAgentSessionRecord = {
   projectId: string;
   sessionId: string;
   zmxName?: string;
-};
-
-export type GpuiProjectBoardConversationRequest = {
-  action:
-    | 'appendDebugLog'
-    | 'associateFocusedSession'
-    | 'getState'
-    | 'jumpToConversation'
-    | 'showToast'
-    | 'startWork'
-    | 'unlinkConversation';
-  agentId?: string;
-  beadDisplayId?: string;
-  beadId?: string;
-  projectId?: string;
-  projectPath?: string;
-  prompt?: string;
-  requestId: string;
-  sessionId?: string;
-  startLocation?: string;
-  toastDescription?: string;
-  toastLevel?: string;
-  toastTitle?: string;
 };
 
 export type GpuiWorkspaceTerminalEscapePressedPayload = {

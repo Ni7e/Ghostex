@@ -45,14 +45,10 @@ import {
 } from './helpers/remote-presentation';
 import type { GpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
 import { gpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
-import type { GpuiSidebarRuntimeProjectBoardMethods } from './project-board';
-import { gpuiSidebarRuntimeProjectBoardMethods } from './project-board';
 import type { GpuiSidebarRuntimeProjectAndCommandMethods } from './projects-and-commands';
 import { gpuiSidebarRuntimeProjectAndCommandMethods } from './projects-and-commands';
 import type { GpuiSidebarRuntimeRemoteMachineMethods } from './remote-machines';
 import { gpuiSidebarRuntimeRemoteMachineMethods } from './remote-machines';
-import type { GpuiSidebarRuntimeConversationJumpMethods } from './session-conversation-jump';
-import { gpuiSidebarRuntimeConversationJumpMethods } from './session-conversation-jump';
 import type { GpuiSidebarRuntimeDraftSessionMethods } from './draft-sessions';
 import { gpuiSidebarRuntimeDraftSessionMethods } from './draft-sessions';
 import type { GpuiSidebarRuntimeSessionCreateMethods } from './session-create';
@@ -75,8 +71,6 @@ import type {
 } from './types-and-protocol';
 import type { GpuiSidebarRuntimeWorkspaceGroupMethods } from './workspace-groups-sync';
 import { gpuiSidebarRuntimeWorkspaceGroupMethods, installGpuiWorkspaceGroupsHandBack } from './workspace-groups-sync';
-import type { GpuiSidebarRuntimeWorktreeMethods } from './worktrees';
-import { gpuiSidebarRuntimeWorktreeMethods } from './worktrees';
 import type { WebviewApi } from '@/packages/core-ui/webview-api';
 import { reduceGxserverPresentationDelta } from '@/packages/shared/gxserver-presentation-cache';
 import type {
@@ -364,9 +358,6 @@ export class GpuiSidebarRuntime {
     gpuiBridge.onMenuBarProjectActivation = (payload) => {
       this.handleGpuiMenuBarProjectActivation(payload);
     };
-    gpuiBridge.onProjectBoardConversationRequest = (payload) => {
-      void this.handleGpuiProjectBoardConversationRequest(payload);
-    };
     gpuiBridge.onWorkspaceTabSessionSelected = (payload) => {
       this.handleGpuiWorkspaceTabSessionSelected(payload);
     };
@@ -395,17 +386,6 @@ export class GpuiSidebarRuntime {
       for (const payload of pendingMenuBarProjectActivations) {
         this.handleGpuiMenuBarProjectActivation(payload);
       }
-    }
-    const pendingProjectBoardConversationRequests = Array.isArray(gpuiBridge.pendingProjectBoardConversationRequests)
-      ? gpuiBridge.pendingProjectBoardConversationRequests.splice(0)
-      : [];
-    for (const payload of pendingProjectBoardConversationRequests) {
-      /*
-      Kanban board conversation requests (getState first of all) routinely
-      arrive before the sidebar runtime installs callbacks at startup. Drain
-      them in order so early board loads answer instead of timing out.
-      */
-      void this.handleGpuiProjectBoardConversationRequest(payload);
     }
     const pendingWorkspaceTabSessionSelections = Array.isArray(gpuiBridge.pendingWorkspaceTabSessionSelections)
       ? gpuiBridge.pendingWorkspaceTabSessionSelections.splice(0)
@@ -698,15 +678,12 @@ moved method carries an explicit return type annotation.
 export interface GpuiSidebarRuntime
   extends
     GpuiSidebarRuntimeGitMethods,
-    GpuiSidebarRuntimeWorktreeMethods,
     GpuiSidebarRuntimeSidebarGroupMethods,
     GpuiSidebarRuntimePresentationStreamMethods,
     GpuiSidebarRuntimeSessionFocusMethods,
     GpuiSidebarRuntimeSessionCreateMethods,
     GpuiSidebarRuntimeDraftSessionMethods,
     GpuiSidebarRuntimeAutoSleepMethods,
-    GpuiSidebarRuntimeProjectBoardMethods,
-    GpuiSidebarRuntimeConversationJumpMethods,
     GpuiSidebarRuntimeAttentionMethods,
     GpuiSidebarRuntimeCloseAfterDoneMethods,
     GpuiSidebarRuntimeTerminalLifecycleMethods,
@@ -727,15 +704,12 @@ function installGpuiSidebarRuntimeMethods(methods: Record<string, unknown>): voi
 }
 
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeGitMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeWorktreeMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSidebarGroupMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimePresentationStreamMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSessionFocusMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSessionCreateMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeDraftSessionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAutoSleepMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeProjectBoardMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeConversationJumpMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAttentionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeCloseAfterDoneMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeTerminalLifecycleMethods);

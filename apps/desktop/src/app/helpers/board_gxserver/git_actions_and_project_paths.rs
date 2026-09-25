@@ -10,14 +10,6 @@ use std::{collections::HashSet, path::PathBuf, time::Duration};
 use crate::app::helpers::*;
 use crate::*;
 
-pub(crate) fn gpui_project_board_conversation_request_script(
-    message: &serde_json::Value,
-) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onProjectBoardConversationRequest==='function'){{bridge.onProjectBoardConversationRequest(payload);}}else{{const pending=Array.isArray(bridge.pendingProjectBoardConversationRequests)?bridge.pendingProjectBoardConversationRequests:[];pending.push(payload);bridge.pendingProjectBoardConversationRequests=pending;}}}})(); undefined;"
-    )
-}
-
 pub(crate) fn gpui_gxserver_git_action_result(
     project_id: &str,
     action: &str,
