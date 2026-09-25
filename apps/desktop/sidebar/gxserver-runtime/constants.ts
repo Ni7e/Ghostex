@@ -166,17 +166,6 @@ export const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE =
 export const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_VERSION = 1;
 export const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.sessionCompletionSound";
-export const GPUI_SIDEBAR_GLOBAL_ACTIONS_MESSAGE_VERSION = 1;
-export const GPUI_SIDEBAR_GLOBAL_ACTIONS_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.globalActions";
-/*
- * CDXC:AgentLauncher 2026-08-01:
- * The tab strip is gpui-drawn, so it cannot read the HUD store the React
- * surfaces use. Cap what crosses the bridge at the number of buttons the strip
- * will actually draw; gpui rejects a longer list outright rather than
- * truncating it, so the two caps must agree.
- */
-export const GPUI_TAB_STRIP_MAX_GLOBAL_ACTIONS = 8;
 export const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION = 1;
 export const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.sessionStatusIndicators";

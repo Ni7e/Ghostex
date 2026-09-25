@@ -412,24 +412,11 @@ export class GpuiSidebarRuntime {
   remoteGroupOrderByMachineId = new Map<string, string[]>();
   revision = 0;
   runtimeSettings: GpuiSidebarRuntimeSettings | undefined;
-  sidebarHudState: GxserverSidebarHudResponse | undefined;
-  postedGlobalActionsPayload: string | undefined;
-
   /*
-   * CDXC:AgentLauncher 2026-08-01:
-   * The gpui tab strip renders Global Actions natively and cannot read this
-   * runtime's state, so every HUD change has to push the list across the
-   * bridge. Routing all HUD writes through this accessor is what guarantees a
-   * new assignment site cannot forget the push and leave the strip stale.
+   * The HUD read this runtime still keeps for its own remaining readers. The tab strip's Global
+   * Actions come from the Rust HUD since the app runtime port's F2 (gx_store/hud/).
    */
-  get sidebarHud(): GxserverSidebarHudResponse | undefined {
-    return this.sidebarHudState;
-  }
-
-  set sidebarHud(hud: GxserverSidebarHudResponse | undefined) {
-    this.sidebarHudState = hud;
-    this.postGpuiGlobalActions();
-  }
+  sidebarHud: GxserverSidebarHudResponse | undefined;
   sleepingLocalSidebarSessionIds = new Set<string>();
   subscription: GpuiPresentationSubscription | undefined;
   trustedExistingWorktreeList: GpuiTrustedExistingWorktreeList | undefined;

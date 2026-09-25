@@ -16,8 +16,15 @@
 //! row and a chat's working row draw are formatted from the deadline against the host's clock
 //! (gx-core `timer_trailing_label`, `armed_actions_by_session`).
 //!
+//! CDXC:Sidebar 2026-09-25 WHY:
+//! The channel goes one fact at a time as the app runtime port moves each one to Rust, which is how
+//! it dies with QuickJS. The HUD left it first: gx_store/hud/ composes it (family F2) and writes
+//! `hud` here, where every reader already looked. The remote machines' client-parked projects come
+//! on their own `remoteRecentProjects` post, because the runtime still writes them, and the HUD
+//! reads them from here.
+//!
 //! SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/sidebar-runtime-facts.ts,
-//! apps/desktop/src/app/gx_store/diagnostics_runtime_facts.rs.
+//! apps/desktop/src/app/gx_store/diagnostics_runtime_facts.rs, apps/desktop/src/app/gx_store/hud/.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,7 +39,7 @@ use crate::app::native_sidebar::model::NativeSidebarRevealRequest;
 /// What the channel has delivered.
 #[derive(Default)]
 pub(crate) struct SidebarRuntimeFacts {
-    /// The sidebar HUD as the zustand store holds it, normalized the way the store normalizes it.
+    /// The sidebar HUD, composed by gx_store/hud/ (it used to be the runtime's post).
     ///
     /// CDXC:Sidebar 2026-09-21 WHY:
     /// Behind an `Arc` because every list install used to deep-clone it three times (the install
@@ -43,6 +50,9 @@ pub(crate) struct SidebarRuntimeFacts {
     pub(super) project_diff_stats: HashMap<String, ProjectDiffStats>,
     pub(super) close_after_done: HashMap<String, CloseAfterDoneInput>,
     pub(super) delayed_sends: HashMap<String, DelayedSendInput>,
+    /// Each remote machine's client-parked projects, in the runtime's stored order: an input of the
+    /// HUD while the runtime still writes them.
+    pub(super) remote_recent_projects: Vec<(String, Vec<Value>)>,
     /// Bumped when a post really replaced the HUD, and when one replaced the per-row facts. The
     /// two are apart so a rows post, which arrives with every projection the runtime builds, does
     /// not make the list re-read the HUD's Recent Projects.
@@ -104,28 +114,13 @@ impl GhostexGpuiApp {
             return;
         }
         let mut reveal: Option<NativeSidebarRevealRequest> = None;
-        let remote_project = self.gpui_app_modal_active_project_id().filter(|id| {
-            self.app_modal_window.is_some()
-                && gpui_remote_project_reference_from_project_id(id).is_some()
-        });
-        let mut remote_actions_changed = false;
+        let mut remote_recents_moved = false;
         let facts = &mut self.gx_store.runtime_facts;
         match value.get("kind").and_then(Value::as_str) {
-            Some("hud") => {
-                if let Some(project) = remote_project.as_deref() {
-                    remote_actions_changed = facts
-                        .hud
-                        .as_deref()
-                        .and_then(|hud| hud.get("commandsByProject"))
-                        .and_then(|rows| rows.get(project))
-                        != value
-                            .get("hud")
-                            .and_then(|hud| hud.get("commandsByProject"))
-                            .and_then(|rows| rows.get(project));
-                }
-                facts.hud = value.get("hud").cloned().map(Arc::new);
-                facts.hud_generation += 1;
-                facts.counters.hud_posts += 1;
+            Some("remoteRecentProjects") => {
+                let rows = remote_recent_projects(&value);
+                remote_recents_moved = facts.remote_recent_projects != rows;
+                facts.remote_recent_projects = rows;
             }
             Some("rows") => {
                 facts.project_diff_stats = value
@@ -191,8 +186,8 @@ impl GhostexGpuiApp {
         // Everything the list still borrows moved with this post, so the list is brought up to
         // date now rather than at the next thing that happens to move the store.
         self.gx_store_sidebar_state_changed(cx);
-        if remote_actions_changed {
-            self.refresh_open_gpui_app_modal_sidebar_state_in_background(cx);
+        if remote_recents_moved {
+            self.gx_store_hud_sources_changed(cx);
         }
     }
 
@@ -261,6 +256,23 @@ fn project_diff_stats(stats: &Value) -> ProjectDiffStats {
         is_loading: flag("isLoading"),
         is_repo: flag("isRepo"),
     }
+}
+
+/// `[[machineId, rows], ...]`, the runtime's `remoteRecentProjectsByMachineId`.
+fn remote_recent_projects(value: &Value) -> Vec<(String, Vec<Value>)> {
+    value
+        .get("remoteRecentProjects")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| {
+            Some((
+                entry.get(0)?.as_str()?.to_string(),
+                entry.get(1)?.as_array()?.clone(),
+            ))
+        })
+        .collect()
 }
 
 fn close_after_done(entry: &Value) -> CloseAfterDoneInput {

@@ -414,6 +414,7 @@ impl GhostexGpuiApp {
         let ui_generation = self.gx_store.sidebar_ui.generation();
         let changes = std::mem::take(&mut self.gx_store.sidebar_list.changes);
         let dirty = std::mem::take(&mut self.gx_store.sidebar_list.dirty);
+        self.gx_store_hud_store_changed(&changes, cx);
         let mut inputs = std::mem::take(&mut self.gx_store.sidebar_list.last_inputs);
         let unavailable = self.gx_store.sidebar_list.unavailable;
         let store = &mut self.gx_store;

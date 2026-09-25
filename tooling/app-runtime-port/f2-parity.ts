@@ -10,7 +10,13 @@
  * the fact and expects the gate to report differences, which proves it can fail.
  *
  * Mutations: feed-drop-item, feed-unread-count, feed-jump, attention-sound, attention-report,
- * attention-visible.
+ * attention-visible, hud-settings, hud-recent, hud-scopes.
+ *
+ * `hud` builds the sidebar HUD from the same sources on both sides: the runtime's
+ * `createGpuiSidebarHudState` (with the groups the runtime would have built from the same
+ * presentations) normalized the way the sidebar store normalized it, against gx-core
+ * `compose_sidebar_hud`. It compares the fields the HUD's Rust contract names (gx-core
+ * `hud/mod.rs`), and of `settings` the keys `hud/settings.rs` normalizes.
  *
  * `attention` replays one scripted timeline (snapshots, deltas, acknowledgements, Escape, timer
  * ticks, local and remote) through the runtime's deleted tracker, extracted from git at
@@ -440,6 +446,314 @@ async function attentionTypescript(dir: string, steps: Json[]): Promise<Json[]> 
   return results;
 }
 
+// ---------------------------------------------------------------- HUD
+
+const HUD_FIELDS = [
+  'activeProjectId',
+  'activeProjectSpaceRefs',
+  'activeSessionsSortMode',
+  'agentManagerZoomPercent',
+  'agents',
+  'commandsByProject',
+  'createSessionOnSidebarDoubleClick',
+  'debuggingMode',
+  'globalCommands',
+  'projectViewProjects',
+  'projectViewSpaces',
+  'recentProjects',
+  'renameSessionOnDoubleClick',
+  'theme',
+];
+const HUD_SETTINGS_KEYS = [
+  'sidebarTheme',
+  'sidebarTooltipDelayMs',
+  'sidebarCollapseAnimationDurationMs',
+  'showProjectIcons',
+  'hideProjectHeaderDiffStats',
+  'showProjectEditorDiffFileCount',
+  'renameSessionOnDoubleClick',
+  'createSessionOnSidebarDoubleClick',
+  'hideBrowserFaviconUntilHover',
+  'hideSessionAgentIconUntilHover',
+  'sidebarSessionCycleSkipsSleeping',
+  'agentManagerZoomPercent',
+  'defaultPromptAgentId',
+  'debuggingMode',
+  'showBetaFeatures',
+];
+
+function hudProject(projectId: string, extra: Json = {}) {
+  return {
+    createdAt: '2026-06-29T13:10:42.091Z',
+    groupIds: [`${projectId}:active`],
+    path: `/tmp/${projectId}`,
+    pathState: 'available',
+    projectId,
+    sortKey: `1:${projectId}`,
+    title: `Project ${projectId}`,
+    updatedAt: '2026-09-15T01:18:43.055Z',
+    ...extra,
+  };
+}
+
+function hudSnapshot(serverId: string, projects: Json[], sessions: Json[], docs: Json = {}) {
+  return {
+    protocolVersion: 1,
+    revision: 1,
+    serverId,
+    snapshot: {
+      generatedAt: '2026-09-25T00:00:00.000Z',
+      groups: projects.map((project) => ({
+        groupId: `${project.projectId}:active`,
+        projectId: project.projectId,
+        sessionIds: sessions.filter((session) => session.projectId === project.projectId).map((s) => s.sessionId),
+        sortKey: `1:${project.projectId}:active`,
+        title: 'Active',
+      })),
+      projects,
+      revision: 1,
+      sessions,
+      ...docs,
+    },
+    type: 'presentationSnapshot',
+  };
+}
+
+function hudFixtures(): Json[] {
+  const localProjects = [
+    hudProject('P1'),
+    hudProject('P2', { title: '  Spaced title  ' }),
+    hudProject('P3', { worktree: { parentProjectId: 'P1', branch: 'feature' }, title: 'P1 worktree' }),
+    hudProject('P4', { title: 'Parked' }),
+    hudProject('P5', { path: '/Users/x/.ghostex/chats/P5', title: 'Chat' }),
+    hudProject('P6', { title: 'Collected' }),
+  ];
+  const localSessions = [
+    attentionRow('P1', 'S1', 'working'),
+    attentionRow('P2', 'S2', 'idle'),
+    attentionRow('P6', 'S6', 'idle'),
+  ];
+  const localDocs = {
+    sidebarProjectCollections: {
+      collections: { 'col-1': { collectionId: 'col-1', color: '#112233', projectIds: ['P6'], title: 'Group' } },
+      nextCollectionNumber: 2,
+      order: ['col-1'],
+    },
+    sidebarSpaces: {
+      order: ['space-b', 'space-a', 'space-c'],
+      spaces: {
+        'space-a': { memberCollectionIds: [], memberProjectIds: ['P1'], name: '  Alpha ', spaceId: 'space-a' },
+        'space-b': { memberCollectionIds: ['col-1'], memberProjectIds: ['P2'], name: 'Beta', spaceId: 'space-b' },
+        'space-c': { memberCollectionIds: [], memberProjectIds: ['P1', 'P2'], name: '   ', spaceId: 'space-c' },
+      },
+    },
+    workspaceGroups: { projectOrder: ['P6', 'P2', 'P1'], projects: {} },
+  };
+  const remoteProjects = [hudProject('R1', { title: 'Remote one' }), hudProject('R2', { title: 'Remote two' })];
+  const remoteSessions = [
+    attentionRow('R1', 'RS1', 'idle'),
+    attentionRow('R1', 'RS2', 'idle', undefined, { visibleInSidebarByDefault: false }),
+    attentionRow('R2', 'RS3', 'idle', undefined, { surface: 'commands' }),
+  ];
+  const remoteDocs = {
+    sidebarSpaces: {
+      order: ['rs-1'],
+      spaces: { 'rs-1': { memberCollectionIds: [], memberProjectIds: ['R1'], name: 'Remote space', spaceId: 'rs-1' } },
+    },
+  };
+  const settingsVariants: Json[] = [
+    {},
+    {
+      agentManagerZoomPercent: 137.5,
+      createSessionOnSidebarDoubleClick: true,
+      defaultPromptAgentId: '   ',
+      hideBrowserFaviconUntilHover: 'yes',
+      remoteMachines: [{ id: 'remote-m1', name: 'Studio', sshHost: 'studio.local' }],
+      renameSessionOnDoubleClick: true,
+      showProjectIcons: false,
+      sidebarCollapseAnimationDurationMs: 1450,
+      sidebarSessionCycleSkipsSleeping: true,
+      sidebarTheme: 'plain-light',
+      sidebarTooltipDelayMs: 649,
+      unknownKey: 'kept',
+    },
+    {
+      agentManagerZoomPercent: 12,
+      defaultPromptAgentId: ` ${'x'.repeat(130)} `,
+      hideProjectHeaderDiffStats: true,
+      remoteMachines: [{ id: 'remote-m1', name: 'Studio', sshHost: 'studio.local' }, { id: 'remote-m2', name: 'Off', sshHost: 'off.local' }],
+      showProjectEditorDiffFileCount: true,
+      sidebarCollapseAnimationDurationMs: -5,
+      sidebarTheme: 'dark-blue',
+      sidebarTooltipDelayMs: 50,
+    },
+    { sidebarTheme: 42, sidebarTooltipDelayMs: 'slow', agentManagerZoomPercent: 250.5 },
+  ];
+  const sidebarHud = {
+    agents: [{ agentId: 'codex', command: 'codex', icon: 'codex', isDefault: true, name: 'Codex' }],
+    commands: [{ actionType: 'terminal', commandId: 'c1', name: 'Build', showOnProjectRow: true }],
+    commandsByProject: {
+      P1: [{ actionType: 'terminal', commandId: 'c1', name: 'Build' }],
+      P2: [{ actionType: 'browser', commandId: 'c2', name: 'Open', showOnProjectRow: 'no' }],
+    },
+    globalCommands: [{ actionType: 'terminal', commandId: 'g1', name: 'Global', showOnProjectRow: true }],
+  };
+  const remoteHud = {
+    agents: [],
+    commands: [],
+    commandsByProject: { R1: [{ actionType: 'terminal', commandId: 'rc', name: 'Remote build' }] },
+    globalCommands: [{ commandId: 'rg', name: 'Remote global' }],
+  };
+  const recentProjects = [
+    { path: '/tmp/P4/', projectId: 'P4', recentClosedAt: '2026-09-20T10:00:00.000Z', sessionCount: 3.7, title: ' Parked ' },
+    {
+      icon: { color: '#AABBCC', icon: 'rocket', kind: 'tabler' },
+      path: '/tmp/P9',
+      projectId: 'P9',
+      recentClosedAt: '2026-09-22T10:00:00Z',
+      sessionCount: -2,
+      theme: 'plain-dark',
+      themeColor: '#ABCDEF',
+      title: 'Nine',
+    },
+    {
+      icon: { dataUrl: 'data:image/png;base64,AAAA', kind: 'image' },
+      iconDataUrl: 'data:image/jpeg;base64,AAAA',
+      path: '/tmp/P10',
+      projectId: 'P10',
+      theme: 'neon',
+      title: 'Ten',
+    },
+    { icon: { icon: 'notAnIcon', kind: 'tabler' }, path: '/tmp/P11', projectId: 'P11', recentClosedAt: '   ', title: 'Eleven' },
+    { path: '   ', projectId: 'P12', title: 'No path' },
+    { path: '/tmp/P13', projectId: '', title: 'No id' },
+    { path: '/tmp/P14', projectId: 'P14', recentClosedAt: '2026-09-22T10:00:00.000Z', title: 'Tie' },
+  ];
+  const remoteRecents = [
+    [
+      'remote-m1',
+      [
+        { path: '/tmp/R2-stored', projectId: 'R2', recentClosedAt: '2026-09-23T00:00:00.000Z', sessionCount: 9, title: 'Stored' },
+        { path: '/tmp/R9', projectId: 'R9', recentClosedAt: '2026-09-24T00:00:00.000Z', title: 'Gone' },
+      ],
+    ],
+    ['remote-m2', [{ path: '/tmp/X', projectId: 'X1', recentClosedAt: '2026-09-21T00:00:00.000Z', sessionCount: 4, title: 'Offline' }]],
+    ['remote-m9', [{ path: '/tmp/Y', projectId: 'Y1', title: 'Unsaved machine' }]],
+  ];
+  const domainProjects = [{ projectId: 'P3', worktree: { parentProjectId: 'P1' } }];
+  const cases: Json[] = [];
+  const bases = [
+    { active: undefined, name: 'before any read', read: false },
+    { active: 'P1', name: 'local active in spaces', read: true },
+    { active: 'P6', name: 'collected project', read: true },
+    { active: 'P3', name: 'worktree inherits parent', read: true },
+    { active: 'remote:remote-m1:project:R1', name: 'remote active', read: true },
+  ];
+  for (const base of bases) {
+    for (const [index, settings] of settingsVariants.entries()) {
+      cases.push({
+        activeProjectId: base.active,
+        debuggingMode: index === 1,
+        domainProjects,
+        local: hudSnapshot('local-1', localProjects, localSessions, localDocs),
+        name: `${base.name} / settings ${index}`,
+        recentProjects: base.read ? recentProjects : [],
+        remote: hudSnapshot('remote-1', remoteProjects, remoteSessions, remoteDocs),
+        remoteHud: base.read ? remoteHud : undefined,
+        remoteRecents,
+        settings,
+        showBetaFeatures: index === 2,
+        sidebarHud: base.read ? sidebarHud : undefined,
+      });
+    }
+  }
+  return cases;
+}
+
+function hudContract(hud: Json): Json {
+  const out: Json = {};
+  for (const field of HUD_FIELDS) {
+    if (hud[field] !== undefined) out[field] = hud[field];
+  }
+  if (Array.isArray(out.activeProjectSpaceRefs)) {
+    // The runtime listed them in the spaces object's insertion order, the store in id order.
+    out.activeProjectSpaceRefs = [...out.activeProjectSpaceRefs].sort((a: Json, b: Json) =>
+      a.spaceId.localeCompare(b.spaceId)
+    );
+  }
+  out.settings = Object.fromEntries(HUD_SETTINGS_KEYS.map((key) => [key, hud.settings?.[key]]));
+  return out;
+}
+
+async function hudTypescript(cases: Json[]): Promise<Json[]> {
+  const { createGpuiSidebarHudState } = await import(`${root}${RUNTIME}/helpers/command-pane`);
+  const { createGpuiPresentationProjectProjectionMetadata, resolveGpuiSidebarAgentIcon } = await import(
+    `${root}${RUNTIME}/helpers/presentation-projection`
+  );
+  const { createGpuiRemotePresentationSidebarGroups } = await import(`${root}${RUNTIME}/helpers/remote-presentation`);
+  const { createGpuiSidebarSettings } = await import(`${root}${RUNTIME}/helpers/bootstrap`);
+  const { createGxserverPresentationSidebarGroups } = await import(
+    '@/packages/shared/gxserver-presentation-sidebar-projection'
+  );
+  const { normalizeghostexSettings } = await import('@/packages/shared/ghostex-settings');
+  return cases.map((fixture) => {
+    const presentation = fixture.local.snapshot;
+    const runtimeSettings = {
+      debuggingMode: fixture.debuggingMode,
+      settings: fixture.settings,
+      showBetaFeatures: fixture.showBetaFeatures,
+    };
+    const settings = createGpuiSidebarSettings(runtimeSettings);
+    const remotePresentations = new Map([['remote-m1', fixture.remote.snapshot]]);
+    const remoteRecents = new Map(fixture.remoteRecents.map(([machine, rows]: Json) => [machine, rows]));
+    const meta = createGpuiPresentationProjectProjectionMetadata({
+      domainProjects: fixture.domainProjects,
+      presentation,
+      projectOrder: presentation.workspaceGroups?.projectOrder ?? [],
+      recentProjects: fixture.recentProjects,
+    });
+    const groups = [
+      ...createGxserverPresentationSidebarGroups({
+        chatProjectIds: meta.chatProjectIds,
+        hiddenProjectIds: meta.hiddenProjectIds,
+        presentation,
+        projectOverlays: meta.projectOverlays,
+        resolveAgentIcon: resolveGpuiSidebarAgentIcon,
+      }),
+      ...createGpuiRemotePresentationSidebarGroups({
+        presentationsByMachineId: remotePresentations,
+        remoteRecentProjectsByMachineId: remoteRecents,
+        resolveAgentIcon: resolveGpuiSidebarAgentIcon,
+        settings,
+      }),
+    ];
+    const hud = createGpuiSidebarHudState({
+      activeProjectId: fixture.activeProjectId,
+      commandPaneSessions: [],
+      domainProjects: fixture.domainProjects,
+      groups,
+      presentation,
+      recentProjects: fixture.recentProjects,
+      remotePresentationsByMachineId: remotePresentations,
+      remoteRecentProjectsByMachineId: remoteRecents,
+      remoteSidebarHudsByMachineId: fixture.remoteHud ? new Map([['remote-m1', fixture.remoteHud]]) : new Map(),
+      runtimeSettings,
+      sidebarHud: fixture.sidebarHud,
+    });
+    // `normalizeHydratedSidebarHud` (packages/core-ui/sidebar-store-model.ts), then a JSON round
+    // trip, which is what the facts channel carried.
+    const stored = JSON.parse(
+      JSON.stringify({
+        ...hud,
+        projectSettingsProjects: hud.projectSettingsProjects ?? [],
+        recentProjects: hud.recentProjects ?? [],
+        settings: { ...hud.settings, ...normalizeghostexSettings(hud.settings) },
+      })
+    );
+    return { hud: hudContract(stored), name: fixture.name };
+  });
+}
+
 // ---------------------------------------------------------------- driver
 
 function canonical(value: Json): Json {
@@ -473,6 +787,15 @@ function injectMutation(rust: Json): void {
     case 'attention-report':
       rust.attention[6].rpcs[0].event = 'escape';
       return;
+    case 'hud-settings':
+      rust.hud[6].hud.settings.sidebarTooltipDelayMs += 100;
+      return;
+    case 'hud-recent':
+      rust.hud[7].hud.recentProjects.reverse();
+      return;
+    case 'hud-scopes':
+      rust.hud[8].hud.projectViewProjects.pop();
+      return;
     case 'attention-visible':
       rust.attention[7].visible[Object.keys(rust.attention[7].visible)[0]] = 'attention';
       return;
@@ -484,12 +807,17 @@ function injectMutation(rust: Json): void {
 
 const dir = keep ?? mkdtempSync(join(tmpdir(), 'f2-parity-'));
 try {
-  const fixtures = { attention: attentionFixtures(), notificationFeed: notificationFeedFixtures() };
+  const fixtures = {
+    attention: attentionFixtures(),
+    hud: hudFixtures(),
+    notificationFeed: notificationFeedFixtures(),
+  };
   // JSON round trip first, so both halves read the same bytes (undefined fields vanish).
   writeFileSync(join(dir, 'fixtures.json'), JSON.stringify(fixtures));
   const read = JSON.parse(readFileSync(join(dir, 'fixtures.json'), 'utf8'));
   const typescript = {
     attention: await attentionTypescript(dir, read.attention),
+    hud: await hudTypescript(read.hud),
     notificationFeed: notificationFeedTypescript(read.notificationFeed),
   };
   writeFileSync(join(dir, 'typescript.json'), JSON.stringify(typescript, null, 2));
@@ -502,6 +830,7 @@ try {
     process.exit(2);
   }
   const rust = JSON.parse(readFileSync(join(dir, 'rust.json'), 'utf8'));
+  for (const entry of rust.hud) entry.hud = hudContract(entry.hud);
   injectMutation(rust);
   let differences = 0;
   let cases = 0;

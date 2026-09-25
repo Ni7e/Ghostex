@@ -160,6 +160,8 @@ pub(crate) struct GxStoreHost {
     pub(crate) runtime_facts: super::runtime_facts::SidebarRuntimeFacts,
     /// The effects the app performs rather than the store (`effects.rs`).
     pub(super) app_effects: super::effects::AppEffectQueue,
+    /// The sidebar HUD's sources (hud/).
+    pub(super) hud: super::hud::HudHost,
     /// The collection a project move just created, which the renderer opens its Rename on. Held
     /// here rather than carried from the old projection's publish, because the create is the
     /// store's now and the publish would not know about it.

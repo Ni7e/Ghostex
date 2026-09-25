@@ -9,6 +9,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use ghostex_gx_core::hud::{compose_sidebar_hud, HudSources};
 use ghostex_gx_core::{
     notification_feed_jump_target, notification_feed_state_message, Core, Effect, Event, Intent,
     MachineId, SessionKey,
@@ -27,6 +28,7 @@ fn main() {
         notification_feed(&fixtures["notificationFeed"]),
     );
     out.insert("attention".into(), attention(&fixtures["attention"]));
+    out.insert("hud".into(), hud(&fixtures["hud"]));
     fs::write(
         dir.join("rust.json"),
         serde_json::to_string_pretty(&Value::Object(out)).expect("serializable"),
@@ -180,4 +182,70 @@ fn attention(steps: &Value) -> Value {
         results.push(json!({ "t": now, "rpcs": rpcs, "sounds": sounds, "visible": visible }));
     }
     Value::Array(results)
+}
+
+/// Each case: the same presentations, reads and settings the TypeScript half builds its HUD from.
+fn hud(cases: &Value) -> Value {
+    Value::Array(
+        cases
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(|case| {
+                let mut core = Core::new();
+                core.handle_raw_frame(MachineId::Local, &case["local"].to_string(), 1)
+                    .expect("local frame");
+                core.handle(
+                    Event::DomainProjectsRead {
+                        machine: MachineId::Local,
+                        projects: case["domainProjects"]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_default(),
+                    },
+                    1,
+                );
+                core.handle_raw_frame(
+                    MachineId::Remote("remote-m1".to_string()),
+                    &case["remote"].to_string(),
+                    1,
+                )
+                .expect("remote frame");
+                let sources = HudSources {
+                    settings: case["settings"].clone(),
+                    debugging_mode: case["debuggingMode"] == true,
+                    show_beta_features: case["showBetaFeatures"] == true,
+                    sidebar_hud: case.get("sidebarHud").filter(|hud| !hud.is_null()).cloned(),
+                    remote_sidebar_huds: case
+                        .get("remoteHud")
+                        .filter(|hud| !hud.is_null())
+                        .map(|hud| {
+                            [("remote-m1".to_string(), hud.clone())]
+                                .into_iter()
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    recent_projects: case["recentProjects"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default(),
+                    remote_recent_projects: case["remoteRecents"]
+                        .as_array()
+                        .map(Vec::as_slice)
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|entry| {
+                            Some((
+                                entry.get(0)?.as_str()?.to_string(),
+                                entry.get(1)?.as_array()?.clone(),
+                            ))
+                        })
+                        .collect(),
+                    active_project_id: case["activeProjectId"].as_str().map(str::to_string),
+                };
+                json!({ "name": case["name"], "hud": compose_sidebar_hud(&core, &sources) })
+            })
+            .collect(),
+    )
 }

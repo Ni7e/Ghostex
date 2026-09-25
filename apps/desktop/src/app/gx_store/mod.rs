@@ -68,6 +68,7 @@ mod diagnostics_remote_last_seen;
 mod diagnostics_runtime_facts;
 mod effects;
 mod host;
+mod hud;
 mod layout_persist;
 mod primary_launcher;
 mod local_focus;

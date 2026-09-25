@@ -77,22 +77,20 @@ impl GxStoreHost {
                 }
                 // The notification feed is this computer's daemon's: the old runtime read it on
                 // its local socket only, and a remote machine's feed is not shown.
-                Effect::RefetchNotificationFeed { machine } | Effect::MachineLive { machine }
-                    if machine.is_local() =>
-                {
+                Effect::RefetchNotificationFeed { machine } if machine.is_local() => {
                     self.app_effects
                         .push(Effect::RefetchNotificationFeed { machine });
                 }
+                // A stream that went live reads the feed (this computer's only) and the HUD
+                // (gx_store/hud/); the HUD is read again when its announcements say so.
+                effect @ (Effect::MachineLive { .. }
+                | Effect::RefetchSidebarHud { .. }
+                | Effect::DomainProjectChanged { .. }) => self.app_effects.push(effect),
                 // Attention: the acknowledgement timer, the report to the session's daemon and the
                 // completion sound (gx_store/attention/).
                 effect @ (Effect::ArmAttentionAcknowledge { .. }
                 | Effect::ReportAgentActivity { .. }
                 | Effect::SessionAttentionRaised { .. }) => self.app_effects.push(effect),
-                // The HUD's reads are still the old runtime's (family F2 of the app runtime port,
-                // docs/2026-09-25/app-runtime-port/PLAN.md).
-                Effect::RefetchSidebarHud { .. }
-                | Effect::MachineLive { .. }
-                | Effect::DomainProjectChanged { .. } => {}
                 // The core's effect list grows with each milestone; a new one is wired when the
                 // milestone that introduces it lands.
                 _ => {}
@@ -108,6 +106,9 @@ impl GhostexGpuiApp {
         if self.gx_store.app_effects.sender.is_some() {
             return;
         }
+        // The first HUD, from the settings alone, before any read answers: the runtime posted the
+        // same at its start, so the list never waits for one (gx_store/hud/).
+        self.gx_store_compose_hud(cx);
         let (sender, mut effects) = mpsc::unbounded::<Effect>();
         for effect in std::mem::take(&mut self.gx_store.app_effects.held) {
             let _ = sender.unbounded_send(effect);
@@ -135,6 +136,15 @@ impl GhostexGpuiApp {
             | Effect::ReportAgentActivity { .. }
             | Effect::SessionAttentionRaised { .. }) => {
                 self.gx_store_perform_attention_effect(effect, cx)
+            }
+            Effect::MachineLive { machine } => {
+                if machine.is_local() {
+                    self.gx_store_refresh_notification_feed(cx);
+                }
+                self.gx_store_perform_hud_effect(Effect::MachineLive { machine }, cx);
+            }
+            effect @ (Effect::RefetchSidebarHud { .. } | Effect::DomainProjectChanged { .. }) => {
+                self.gx_store_perform_hud_effect(effect, cx)
             }
             _ => {}
         }

@@ -15,11 +15,8 @@ import {
   GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE,
   GPUI_QUICK_AUTOMATIONS_PROJECT_ID,
   GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID,
-  GPUI_SIDEBAR_GLOBAL_ACTIONS_MESSAGE_TYPE,
-  GPUI_SIDEBAR_GLOBAL_ACTIONS_MESSAGE_VERSION,
   GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE,
   GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION,
-  GPUI_TAB_STRIP_MAX_GLOBAL_ACTIONS,
 } from "./constants";
 import type { GpuiSidebarRuntime } from "./core";
 import {
@@ -88,10 +85,7 @@ import {
   GRID_COLUMN_COUNT,
 } from "@/packages/shared/session-grid-contract";
 import { createDefaultSidebarGitState } from "@/packages/shared/sidebar-git";
-import {
-  postGpuiSidebarRuntimeFactsHud,
-  postGpuiSidebarRuntimeFactsRows,
-} from "./sidebar-runtime-facts";
+import { postGpuiSidebarRuntimeFactsRows } from "./sidebar-runtime-facts";
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -120,7 +114,6 @@ export interface GpuiSidebarRuntimeSidebarGroupMethods {
   activeRemoteProjectReference():
     { machineId: string; projectId: string } | undefined;
   activeWorkspaceTabSessionsFromLatestGroups(): GpuiActiveWorkspaceTabSessionPayload[];
-  postGpuiGlobalActions(): void;
   postGpuiStatusPetState(): void;
   createHydrateMessage(
     groups: SidebarSessionGroup[],
@@ -246,7 +239,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       );
     }
     this.latestGroups = groups;
-    postGpuiSidebarRuntimeFactsHud();
     postGpuiSidebarRuntimeFactsRows(this);
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
@@ -351,7 +343,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       this.createHydrateMessage(this.latestGroups, this.latestHud),
     );
     this.hasHydrated = true;
-    postGpuiSidebarRuntimeFactsHud();
     postGpuiSidebarRuntimeFactsRows(this);
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
@@ -418,7 +409,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       );
     }
     this.latestGroups = groups;
-    postGpuiSidebarRuntimeFactsHud();
     postGpuiSidebarRuntimeFactsRows(this);
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
@@ -537,7 +527,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       revision: ++this.revision,
       type: "sidebarHudChanged",
     });
-    postGpuiSidebarRuntimeFactsHud();
   },
 
   postActiveProjectContext(this: GpuiSidebarRuntime): void {
@@ -780,50 +769,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       });
     }
     return sessions;
-  },
-
-  /*
-   * CDXC:AgentLauncher 2026-08-01:
-   * Publish only what the native strip draws: bounded action id, display name,
-   * and icon slug. Command text, URLs, links, and run state deliberately stay
-   * on this side — a strip click sends the id back and this runtime resolves
-   * the trusted definition, so gpui never holds anything executable.
-   */
-  postGpuiGlobalActions(this: GpuiSidebarRuntime): void {
-    const actions = (this.sidebarHudState?.globalCommands ?? [])
-      .slice(0, GPUI_TAB_STRIP_MAX_GLOBAL_ACTIONS)
-      .map((command) => ({
-        commandId: command.commandId,
-        ...(command.icon ? { icon: command.icon } : {}),
-        name: command.name,
-      }));
-    const payload = JSON.stringify({
-      actions,
-      type: GPUI_SIDEBAR_GLOBAL_ACTIONS_MESSAGE_TYPE,
-      version: GPUI_SIDEBAR_GLOBAL_ACTIONS_MESSAGE_VERSION,
-    });
-    if (payload === this.postedGlobalActionsPayload) {
-      return;
-    }
-    /*
-     * Cache only what the bridge confirmed it took. An absent CEF function
-     * makes the optional call return undefined WITHOUT throwing, and a rejected
-     * payload returns false, so caching before the call would record an
-     * undelivered payload as sent and leave the strip empty until some
-     * unrelated HUD change happened to produce a different payload. Leaving the
-     * cache unset instead means the next HUD refresh retries on its own.
-     */
-    let delivered = false;
-    try {
-      delivered = window.ghostexGpui?.postGlobalActions?.(payload) === true;
-    } catch {
-      /*
-       * The strip is presentation-only. Keep this runtime authoritative and do
-       * not log raw payloads or invent native state.
-       */
-      delivered = false;
-    }
-    this.postedGlobalActionsPayload = delivered ? payload : undefined;
   },
 
   postGpuiStatusPetState(this: GpuiSidebarRuntime): void {

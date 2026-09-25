@@ -1,4 +1,3 @@
-import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import type { GpuiSidebarRuntime } from './core';
 
 /**
@@ -18,23 +17,18 @@ function post(payload: unknown): void {
 }
 
 /**
- * CDXC:Sidebar 2026-09-21 WHY:
- * The HUD is taken from the zustand store rather than from `runtime.latestHud`, at the moment the
- * runtime has just dispatched its `sidebarHudChanged` message (the local message source dispatches
- * synchronously, so the store already holds it). The store normalizes what it is given
- * (`normalizeHydratedSidebarHud` fills the settings defaults and the two array fields), and the
- * projection publishes THAT object, so this is the only spelling that lets Rust compare the channel
- * with the publish byte for byte and later read one instead of the other with no behaviour change.
+ * CDXC:Sidebar 2026-09-25 WHY:
+ * The HUD is composed in Rust since the app runtime port's F2 (apps/desktop/src/app/gx_store/hud/).
+ * Its one input this runtime still writes, the remote machines' client-parked projects, goes over
+ * on its own post, only when it moved.
  */
-let lastPostedHud: unknown;
+let lastPostedRemoteRecentProjects: string | undefined;
 
-export function postGpuiSidebarRuntimeFactsHud(): void {
-  const hud = sidebarStore.getState().hud;
-  // The store replaces `hud` only when a HUD message changed it, which is exactly when the
-  // projection publishes a different one, so identity is the whole "did it move" test here.
-  if (hud === lastPostedHud) return;
-  lastPostedHud = hud;
-  post({ hud, kind: 'hud', version: 1 });
+function postRemoteRecentProjects(runtime: GpuiSidebarRuntime): void {
+  const remoteRecentProjects = JSON.stringify([...runtime.remoteRecentProjectsByMachineId]);
+  if (remoteRecentProjects === lastPostedRemoteRecentProjects) return;
+  lastPostedRemoteRecentProjects = remoteRecentProjects;
+  post({ kind: 'remoteRecentProjects', remoteRecentProjects: JSON.parse(remoteRecentProjects), version: 1 });
 }
 
 /**
@@ -57,6 +51,7 @@ export function postGpuiSidebarRuntimeFactsHud(): void {
  * reader can use in place of the publish with no behaviour change.
  */
 export function postGpuiSidebarRuntimeFactsRows(runtime: GpuiSidebarRuntime): void {
+  postRemoteRecentProjects(runtime);
   const projectDiffStats: Record<string, unknown> = {};
   for (const group of runtime.latestGroups) {
     const editor = group.projectContext?.editor;
