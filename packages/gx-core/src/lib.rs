@@ -27,6 +27,7 @@ mod overlay;
 mod presentation_store;
 mod refetch;
 mod project_docs;
+mod quick_access;
 mod renderer_commands;
 mod selectors;
 mod sidebar_accounts;
@@ -154,6 +155,13 @@ pub use crate::sidebar_ui::{
     SidebarUiOutcome, SidebarUiStore, ToggleAllProjectsInput, COLLAPSE_STORAGE_KEY, COLLAPSE_STORAGE_VERSION,
     HIDDEN_ITEMS_STORAGE_KEY, MACHINE_TAB_STORAGE_KEY, PROJECT_COLLECTIONS_STORAGE_KEY,
     SIDEBAR_WINDOW_SCOPE_ID,
+};
+pub use crate::quick_access::{
+    FixedClock, HotkeyPlatform, HotkeyPlatformWire, QuickAccessClock, QuickAccessCollection,
+    QuickAccessContext, QuickAccessController, QuickAccessData, QuickAccessEffect,
+    QuickAccessHiddenItems, QuickAccessOpenTarget, QuickAccessRecoveredDraft, QuickAccessRunState,
+    QuickAccessSession, QuickAccessStorage, QuickAccessStoreGroup, QuickAccessTab,
+    QuickAccessUpdate, quick_access_store_groups,
 };
 pub use crate::sidebar_view::{
     armed_actions_by_session, ArmedAction, ARMED_ACTION_CLOSE_AFTER_DONE,

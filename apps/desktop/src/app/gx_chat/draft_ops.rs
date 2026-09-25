@@ -175,7 +175,7 @@ pub(super) fn receive(session_key: &str, value: &Value, now_ms: i64) -> Result<(
 /// to read back as a checkpoint. `dismissDraftRecovery` then compacts, and so does this: the
 /// markers become `recoveryDismissed` ranges and their records are removed
 /// (`super::dismissals`).
-fn retire_recovery(
+pub(super) fn retire_recovery(
     session_key: &str,
     version: &DraftVersion,
     now_ms: i64,

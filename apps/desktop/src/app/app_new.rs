@@ -507,6 +507,7 @@ impl GhostexGpuiApp {
                 floating_reveal: Default::default(),
                 panel_motion: Default::default(),
                 gx_store: Default::default(),
+                quick_access: Default::default(),
                 browser_surfaces: HashMap::new(),
                 browser_address_inputs: HashMap::new(),
                 browser_address_input_subscriptions: HashMap::new(),

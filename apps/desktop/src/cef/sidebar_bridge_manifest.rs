@@ -21,7 +21,6 @@ pub(crate) enum SidebarBridgeFunctionId {
     OpenBrowserUrl,
     BrowserTabFocus,
     ProjectBoardConversationResponse,
-    NativeQuickAccessSnapshot,
     SidebarRuntimeFacts,
 }
 
@@ -393,16 +392,11 @@ The sidebar CEF post-function allowlist must have one Rust manifest shared by ma
 CDXC:CefRuntime 2026-06-29-14:45:
 GPUI CEF bridge names, payload budgets, and allowed app-modal/project-workarea surfaces live in this Rust manifest so the macOS browser process and helper renderer consume one ownership point. Keep sidebar, project-workarea, and app-modal handlers surface-specific; this manifest is an allowlist, not a generic IPC bus.
 */
-pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 23] = [
+pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 22] = [
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::SidebarRuntimeFacts,
         js_function_name: "postSidebarRuntimeFacts",
         process_message_name: "ghostex.gpui.sidebar.runtimeFacts",
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::NativeQuickAccessSnapshot,
-        js_function_name: "postNativeQuickAccessSnapshot",
-        process_message_name: "ghostex.gpui.sidebar.nativeQuickAccess",
     },
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::ActiveProjectContext,

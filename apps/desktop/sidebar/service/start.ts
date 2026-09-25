@@ -3,7 +3,6 @@ import { createGpuiSidebarRuntime } from '../gxserver-runtime';
 import { currentGpuiRuntimeSettings } from '../gxserver-runtime/helpers/bootstrap';
 import { createGpuiSidebarHudState } from '../gxserver-runtime/helpers/command-pane';
 import { connectSidebarStoreFeed } from '../sidebar-store-feed';
-import { connectNativeQuickAccess } from '../native-quick-access/controller';
 
 export function startNativeSidebar(): void {
   const runtimeSettings = currentGpuiRuntimeSettings();
@@ -17,6 +16,5 @@ export function startNativeSidebar(): void {
     });
   const runtime = createGpuiSidebarRuntime();
   connectSidebarStoreFeed(runtime.messageSource);
-  connectNativeQuickAccess(runtime);
   runtime.start();
 }

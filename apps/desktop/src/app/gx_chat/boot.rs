@@ -120,7 +120,7 @@ pub(super) fn chat_settings() -> ChatSettings {
 /// shape is `packages/shared/session-chat-controller/client-id.ts`'s, `gx-` then two base-36 runs,
 /// because an id is compared and stored but never parsed. A refused write is counted and the
 /// in-memory id is used anyway, which is what the TypeScript's `catch` does for private mode.
-fn client_id(now_ms: i64, errors: &mut BootReads) -> String {
+pub(super) fn client_id(now_ms: i64, errors: &mut BootReads) -> String {
     let key = StorageKey {
         store: "chatClient".to_string(),
         suffix: String::new(),

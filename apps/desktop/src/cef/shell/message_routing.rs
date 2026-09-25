@@ -29,7 +29,6 @@ pub(crate) enum SidebarBridgeEventKind {
     OpenBrowserUrl,
     BrowserTabFocus,
     ProjectBoardConversationResponse,
-    NativeQuickAccessSnapshot,
     SidebarRuntimeFacts,
 }
 
@@ -72,7 +71,6 @@ impl SidebarBridgeEventKind {
             SidebarBridgeFunctionId::ProjectBoardConversationResponse => {
                 Self::ProjectBoardConversationResponse
             }
-            SidebarBridgeFunctionId::NativeQuickAccessSnapshot => Self::NativeQuickAccessSnapshot,
             SidebarBridgeFunctionId::SidebarRuntimeFacts => Self::SidebarRuntimeFacts,
         })
     }
@@ -216,7 +214,6 @@ pub enum SidebarBridgeEvent {
     OpenBrowserUrl(String),
     BrowserTabFocus(String),
     ProjectBoardConversationResponse(String),
-    NativeQuickAccessSnapshot(String),
     /// The runtime's one-way channel of the facts the Rust sidebar still takes from outside the
     /// store: the HUD, a project's git numbers, the two armed timers, and a reveal request.
     SidebarRuntimeFacts(String),
@@ -290,9 +287,6 @@ impl SidebarBridgeEventKind {
             Self::BrowserTabFocus => SidebarBridgeEvent::BrowserTabFocus(payload),
             Self::ProjectBoardConversationResponse => {
                 SidebarBridgeEvent::ProjectBoardConversationResponse(payload)
-            }
-            Self::NativeQuickAccessSnapshot => {
-                SidebarBridgeEvent::NativeQuickAccessSnapshot(payload)
             }
             Self::SidebarRuntimeFacts => SidebarBridgeEvent::SidebarRuntimeFacts(payload),
         }

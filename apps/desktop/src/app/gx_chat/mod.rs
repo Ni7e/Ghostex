@@ -54,6 +54,7 @@ mod queries;
 mod refusals;
 mod retained;
 mod saves;
+pub(crate) mod saved_prompt_records;
 mod storage;
 mod storage_backend;
 mod store;

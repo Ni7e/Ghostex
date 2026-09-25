@@ -971,6 +971,7 @@ pub struct GhostexGpuiApp {
     pub(crate) floating_reveal: crate::app::floating_reveal::model::FloatingRevealState,
     pub(crate) panel_motion: crate::app::panel_motion::PanelMotions,
     pub(crate) gx_store: crate::app::gx_store::GxStoreHost,
+    pub(crate) quick_access: crate::app::quick_access::host::QuickAccessHost,
     pub(crate) browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
     pub(crate) browser_address_inputs: HashMap<BrowserPaneId, Entity<InputState>>,
     pub(crate) browser_address_input_subscriptions: HashMap<BrowserPaneId, gpui::Subscription>,

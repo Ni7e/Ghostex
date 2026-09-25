@@ -153,6 +153,48 @@ impl SidebarViewModel {
             })
     }
 
+    /// Every group this model built, drawn or not, in the order it planned them, with each one's
+    /// rows before any filter: the Chats group, then each project followed by its user-made groups.
+    /// Quick Access lists the sessions of hidden, filtered and Chats groups too, which is what the
+    /// old runtime's `sessionIdsByGroup` held.
+    pub fn built_groups(&self) -> Vec<(&super::view::GroupCore, Vec<&super::view::SessionRow>)> {
+        let Some(state) = &self.state else {
+            return Vec::new();
+        };
+        let mut ids: Vec<String> = vec![chats_group_id(&state.machine)];
+        for project_id in &state.meta.project_order {
+            ids.push(
+                ProjectKey {
+                    machine: state.machine.clone(),
+                    project_id: project_id.clone(),
+                }
+                .to_sidebar_group_id(),
+            );
+            if let Some(members) = state.membership.get(project_id) {
+                ids.extend(
+                    members
+                        .subgroups
+                        .iter()
+                        .map(|subgroup| subgroup.sidebar_group_id.clone()),
+                );
+            }
+        }
+        ids.iter()
+            .filter_map(|id| state.groups.get(id))
+            .map(|cached| {
+                (
+                    cached.build.core.as_ref(),
+                    cached
+                        .build
+                        .store_rows
+                        .iter()
+                        .map(|session| session.row.as_ref())
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
     /// The next host time at which a row moves on its own (a new session stops leading the list, a
     /// snooze ends). The host re-runs the update then; nothing else has to.
     pub fn next_deadline_ms(&self) -> Option<u64> {

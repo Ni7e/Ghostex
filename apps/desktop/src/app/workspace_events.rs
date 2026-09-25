@@ -422,9 +422,6 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::NativeAppShotPrompt(payload) => {
                 self.receive_sidebar_native_app_shot_prompt_payload(&payload, cx);
             }
-            cef::SidebarBridgeEvent::NativeQuickAccessSnapshot(payload) => {
-                self.receive_native_quick_access_update(&payload, cx);
-            }
             cef::SidebarBridgeEvent::SidebarRuntimeFacts(payload) => {
                 self.receive_sidebar_runtime_facts(&payload, cx);
             }

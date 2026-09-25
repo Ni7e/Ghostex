@@ -76,6 +76,7 @@ mod local_delayed_sends;
 mod local_focus;
 mod notifications;
 mod project_docs;
+mod quick_access_data;
 mod records_storage;
 mod remote_clients;
 mod remote_last_seen;

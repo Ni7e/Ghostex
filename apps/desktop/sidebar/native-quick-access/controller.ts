@@ -1,6 +1,10 @@
 /**
  * The Quick Access controller: the runtime half of the native window.
  *
+ * Unhooked 2026-09-25: packages/gx-core/src/quick_access/ is the model and apps/desktop/src/app/quick_access/host.rs
+ * runs it. Nothing starts this file any more; it stays only as the TypeScript half of
+ * tooling/app-runtime-port/f6-quick-access-parity.ts until the runtime is deleted.
+ *
  * It owns exactly what the four React modals owned (data requests, filters, ranking, grouping, selection and every
  * command) and publishes one resolved snapshot per frame instead of rendering a tree.
  *
