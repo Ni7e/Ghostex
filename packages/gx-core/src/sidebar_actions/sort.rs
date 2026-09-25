@@ -10,8 +10,8 @@
 //! `setActiveSessionsSortMode` case, so the message reaches `default:` and
 //! `handleUnsupportedSidebarMessage`, the documented no-op. Nothing is written to any storage key,
 //! document or daemon, and the sort mode itself cannot move: both HUD builders pin
-//! `activeSessionsSortMode: 'lastActivity'` (`createGpuiSidebarHudState` in
-//! gxserver-runtime/helpers/command-pane.ts, and the hydrate in
+//! `activeSessionsSortMode: 'lastActivity'` (gx-core `compose_sidebar_hud` in
+//! hud/mod.rs, and the hydrate in
 //! app/helpers/sidebar/settings_messages_and_width.rs).
 //!
 //! So this file builds NO layout. A frozen order computed here would be work thrown away on every

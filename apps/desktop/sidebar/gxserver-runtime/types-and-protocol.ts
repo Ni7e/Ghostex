@@ -25,9 +25,7 @@ import type {
 } from '@/packages/shared/gxserver-protocol';
 import type {
   ExtensionToSidebarMessage,
-  SidebarCommandSessionIndicator,
   SidebarRemoteMachineStatusMessage,
-  SidebarSessionGroup,
   SidebarToExtensionMessage,
 } from '@/packages/shared/session-grid-contract';
 import type { ModelPickerProvider } from '@/packages/shared/session-chat-presentation/model-picker';
@@ -185,13 +183,6 @@ export type GpuiValidatedGxserverBootstrap = {
   focusedSessionId?: string;
   initialActiveProjectId?: string;
   visibleSessionIds?: readonly string[];
-};
-
-export type GpuiSidebarGroupsPatch = {
-  groupOrder: string[];
-  groups: SidebarSessionGroup[];
-  removedGroupIds: string[];
-  removedSessionIds: string[];
 };
 
 export type GpuiGxserverRpcSuccess<TResult> = {

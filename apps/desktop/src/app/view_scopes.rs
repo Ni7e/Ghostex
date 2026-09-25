@@ -19,7 +19,7 @@ Space membership itself is owned by the daemon's collections and spaces document
 cannot read; the sidebar HUD carries the active project's resolved spaces instead.
 SEE-ALSO: packages/shared/ghostex-settings/view-scopes.ts owns the same rule, the same precedence and
 the same allow-list migration for React and the settings schema, and
-apps/desktop/sidebar/gxserver-runtime/helpers/view-scopes.ts resolves the HUD field.
+packages/gx-core/src/hud/scopes.rs resolves the HUD field.
 */
 
 pub(crate) fn official_view_scope_key(official_extension_id: &str) -> String {

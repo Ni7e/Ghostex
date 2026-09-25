@@ -5,127 +5,13 @@ Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
 import { GPUI_REMOTE_GROUP_ORDER_STORAGE_KEY, GPUI_REMOTE_RECENT_PROJECTS_STORAGE_KEY } from '../constants';
-import { normalizeGpuiSidebarTheme } from './bootstrap';
 import { normalizeNonEmptyString } from './records';
-import { createGpuiRemotePresentationProjectId } from './remote-presentation';
-import { normalizeGpuiProjectPath } from './worktrees';
-import type { ghostexSettings } from '@/packages/shared/ghostex-settings';
 import type {
-  GxserverPresentationSnapshot,
   GxserverProjectId,
   GxserverRecentProjectDomainState,
 } from '@/packages/shared/gxserver-protocol';
-import type { SidebarRecentProject } from '@/packages/shared/session-grid-contract';
-import { resolveSidebarTheme } from '@/packages/shared/session-grid-contract';
-import {
-  normalizeWorkspaceProjectIcon,
-  normalizeWorkspaceProjectIconDataUrl,
-  normalizeWorkspaceThemeColor,
-} from '@/packages/shared/workspace-project-appearance';
 
 const clientStorage = storageScope(["remoteOrder","remoteRecents"]);
-
-export function createGpuiRecentProjects(
-  recentProjects: readonly GxserverRecentProjectDomainState[],
-  settings: ghostexSettings
-): SidebarRecentProject[] {
-  return recentProjects
-    .flatMap((project) => {
-      const projectId = typeof project.projectId === 'string' ? project.projectId.trim() : '';
-      const title = typeof project.title === 'string' ? project.title.trim() : '';
-      const path = normalizeGpuiProjectPath(project.path);
-      if (!projectId || !title || !path) {
-        return [];
-      }
-      const icon = normalizeWorkspaceProjectIcon(project.icon);
-      const iconDataUrl = normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl);
-      const theme = normalizeGpuiSidebarTheme(project.theme) ?? resolveSidebarTheme(settings.sidebarTheme, 'dark');
-      const themeColor = normalizeWorkspaceThemeColor(project.themeColor);
-      const recentClosedAt =
-        typeof project.recentClosedAt === 'string' && project.recentClosedAt.trim().length > 0
-          ? project.recentClosedAt.trim()
-          : undefined;
-      return [
-        {
-          ...(icon ? { icon } : {}),
-          ...(iconDataUrl ? { iconDataUrl } : {}),
-          ...(recentClosedAt ? { recentClosedAt } : {}),
-          ...(themeColor ? { themeColor } : {}),
-          path,
-          projectId,
-          sessionCount: Number.isFinite(project.sessionCount) ? Math.max(0, Math.floor(project.sessionCount)) : 0,
-          theme,
-          title,
-        },
-      ];
-    })
-    .sort(compareGpuiRecentProjectsByClosedAt);
-}
-
-export function createGpuiRemoteRecentProjects(
-  recentProjectsByMachineId: ReadonlyMap<string, readonly GxserverRecentProjectDomainState[]> | undefined,
-  presentationsByMachineId: ReadonlyMap<string, GxserverPresentationSnapshot> | undefined,
-  settings: ghostexSettings
-): SidebarRecentProject[] {
-  /*
-  CDXC:RemoteMachines 2026-06-27-19:37:
-  Remote Recent Projects are GPUI-client-local parking rows. Keep ids
-  machine-scoped and reconcile display fields from a live remote presentation
-  when connected, but do not call the remote daemon's recent endpoints or share
-  the parked state with the macOS app.
-  */
-  if (!recentProjectsByMachineId) {
-    return [];
-  }
-  const remoteMachinesById = new Map(settings.remoteMachines.map((machine) => [machine.id, machine]));
-  return [...recentProjectsByMachineId.entries()].flatMap(([machineId, recentProjects]) => {
-    const machine = remoteMachinesById.get(machineId);
-    if (!machine) {
-      return [];
-    }
-    const presentation = presentationsByMachineId?.get(machineId);
-    return recentProjects.flatMap((project) => {
-      const projectId = typeof project.projectId === 'string' ? project.projectId.trim() : '';
-      const presentationProject = presentation?.projects.find((candidate) => candidate.projectId === projectId);
-      if (presentation && !presentationProject) {
-        return [];
-      }
-      const title =
-        presentationProject?.title.trim() || (typeof project.title === 'string' ? project.title.trim() : '');
-      const path = normalizeGpuiProjectPath(presentationProject?.path ?? project.path);
-      if (!projectId || !title || !path) {
-        return [];
-      }
-      const icon = normalizeWorkspaceProjectIcon(project.icon);
-      const iconDataUrl = normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl);
-      const theme = normalizeGpuiSidebarTheme(project.theme) ?? resolveSidebarTheme(settings.sidebarTheme, 'dark');
-      const themeColor = normalizeWorkspaceThemeColor(project.themeColor);
-      const recentClosedAt =
-        typeof project.recentClosedAt === 'string' && project.recentClosedAt.trim().length > 0
-          ? project.recentClosedAt.trim()
-          : undefined;
-      return [
-        {
-          ...(icon ? { icon } : {}),
-          ...(iconDataUrl ? { iconDataUrl } : {}),
-          ...(recentClosedAt ? { recentClosedAt } : {}),
-          ...(themeColor ? { themeColor } : {}),
-          path,
-          projectId: createGpuiRemotePresentationProjectId(machineId, projectId),
-          remoteMachineId: machineId,
-          remoteMachineName: machine.name || 'Remote',
-          sessionCount: presentation
-            ? countGpuiRemotePresentationProjectSessions(presentation, projectId)
-            : Number.isFinite(project.sessionCount)
-              ? Math.max(0, Math.floor(project.sessionCount))
-              : 0,
-          theme,
-          title,
-        },
-      ];
-    });
-  });
-}
 
 /*
 CDXC:RemoteMachines 2026-07-12:
@@ -283,27 +169,4 @@ export function orderGpuiRecentProjects(
   return [...projects].sort(
     (left, right) => Date.parse(right.recentClosedAt ?? '') - Date.parse(left.recentClosedAt ?? '')
   );
-}
-
-export function countGpuiRemotePresentationProjectSessions(
-  presentation: GxserverPresentationSnapshot,
-  projectId: string
-): number {
-  return presentation.sessions.filter(
-    (session) =>
-      session.projectId === projectId && session.visibleInSidebarByDefault === true && session.surface !== 'commands'
-  ).length;
-}
-
-export function compareGpuiRecentProjectsByClosedAt(left: SidebarRecentProject, right: SidebarRecentProject): number {
-  /*
-  CDXC:Projects 2026-06-25-19:22:
-  Native `compareRecentProjectsByClosedAt` only sorts parsed close time descending. The Recent Projects drawer contract does not include gxserver `updatedAt`, so GPUI must not invent title or id tie-breaks; stable sort preserves producer order for equal timestamps.
-  */
-  return gpuiRecentProjectClosedAtMillis(right) - gpuiRecentProjectClosedAtMillis(left);
-}
-
-export function gpuiRecentProjectClosedAtMillis(project: SidebarRecentProject): number {
-  const millis = Date.parse(project.recentClosedAt ?? '');
-  return Number.isFinite(millis) ? millis : 0;
 }

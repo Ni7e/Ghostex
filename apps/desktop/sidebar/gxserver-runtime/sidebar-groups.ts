@@ -24,13 +24,10 @@ import {
   createGpuiSidebarSettings,
 } from "./helpers/bootstrap";
 import { relayoutGpuiSidebarSessions } from "./helpers/browser-tabs";
-import { createGpuiSidebarHudState } from "./helpers/command-pane";
 import {
   createGpuiGxserverUnavailableSidebarGroups,
   createGpuiPresentationProjectProjectionMetadata,
-  createGpuiSidebarGroupsPatch,
   createGpuiSidebarSessionRoutingId,
-  haveSameSidebarProjectionValue,
   resolveGpuiSidebarAgentIcon,
 } from "./helpers/presentation-projection";
 import {
@@ -61,17 +58,12 @@ import {
   visibleCountForGxserverPresentationSidebarSessions,
 } from "@/packages/shared/gxserver-presentation-sidebar-projection";
 import type {
-  GxserverCustomSessionTagsState,
   GxserverPresentationDelta,
   GxserverPresentationSession,
   GxserverPresentationSnapshot,
-  GxserverSidebarProjectCollectionsState,
-  GxserverSidebarSpacesState,
 } from "@/packages/shared/gxserver-protocol";
 import { createDefaultSidebarProjectDiffStats } from "@/packages/shared/project-diff-stats";
 import type {
-  SidebarHudState,
-  SidebarHydrateMessage,
   SidebarSessionGroup,
   SidebarSessionItem,
 } from "@/packages/shared/session-grid-contract";
@@ -92,35 +84,16 @@ at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeSidebarGroupMethods {
   publishPresentation(kind: GpuiSidebarRuntimeSnapshotKind): void;
-  postSidebarProjectionPatchMessages(
-    previousGroups: readonly SidebarSessionGroup[],
-    groups: SidebarSessionGroup[],
-    previousHud: SidebarHudState,
-  ): void;
   publishUnavailable(_reason: string): void;
   publishRemotePresentationPatch(): void;
   applyDomainProjectDelta(delta: GxserverPresentationDelta): void;
   refreshRecentProjectsFromClient(): void;
   refreshSidebarHudFromClient(): void;
-  publishHudPatch(): void;
   postActiveProjectContext(): void;
   postGxserverPresentationFocusState(): void;
   activeRemoteProjectReference():
     { machineId: string; projectId: string } | undefined;
   activeWorkspaceTabSessionsFromLatestGroups(): GpuiActiveWorkspaceTabSessionPayload[];
-  createHydrateMessage(
-    groups: SidebarSessionGroup[],
-    hud: SidebarHudState,
-  ): SidebarHydrateMessage;
-  remoteSidebarProjectCollectionsByMachineId(): Readonly<
-    Record<string, GxserverSidebarProjectCollectionsState>
-  >;
-  remoteSidebarSpacesByMachineId(): Readonly<
-    Record<string, GxserverSidebarSpacesState>
-  >;
-  remoteCustomSessionTagsByMachineId(): Readonly<
-    Record<string, GxserverCustomSessionTagsState>
-  >;
   createSidebarGroups(
     presentation: GxserverPresentationSnapshot,
   ): SidebarSessionGroup[];
@@ -176,7 +149,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       return;
     }
 
-    const previousGroups = this.latestGroups;
     const groups = this.createSidebarGroups(presentation);
     /*
     CDXC:FocusRouting 2026-06-26-23:24:
@@ -201,82 +173,11 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
         }),
       ),
     );
-    const previousHud = this.latestHud;
-    this.latestHud = createGpuiSidebarHudState({
-      activeProjectId: this.activeProjectId,
-      focusedSessionId: this.focusedSessionId,
-      groups,
-      presentation,
-      runtimeSettings: this.runtimeSettings,
-      domainProjects: this.domainProjects,
-      recentProjects: this.recentProjects,
-      remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
-      remotePresentationsByMachineId: this.remotePresentations,
-      remoteSidebarHudsByMachineId: this.remoteSidebarHuds,
-      sidebarHud: this.sidebarHud,
-    });
-
-    if (kind === "hydrate" || !this.hasHydrated) {
-      this.messageSource.postMessage(
-        this.createHydrateMessage(groups, this.latestHud),
-      );
-      this.hasHydrated = true;
-    } else {
-      this.postSidebarProjectionPatchMessages(
-        previousGroups,
-        groups,
-        previousHud,
-      );
-    }
+    this.hasHydrated = true;
     this.latestGroups = groups;
     postGpuiSidebarRuntimeFactsRows(this);
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
-  },
-
-  /*
-  CDXC:Git 2026-08-16:
-  Routine publishes frequently rebuild a projection identical to the last one
-  (background pollers, presentation deltas that only touch non-rendered
-  state). Sending those anyway made the renderer re-normalize the full tree
-  and deep-compare the whole HUD per message. Skip the groups message when the
-  diffed patch carries nothing and skip the HUD message when the rebuilt HUD
-  is structurally identical to the one already published.
-  */
-  postSidebarProjectionPatchMessages(
-    this: GpuiSidebarRuntime,
-    previousGroups: readonly SidebarSessionGroup[],
-    groups: SidebarSessionGroup[],
-    previousHud: SidebarHudState,
-  ): void {
-    const patch = createGpuiSidebarGroupsPatch(previousGroups, groups);
-    const groupOrderChanged =
-      patch.groupOrder.length !== previousGroups.length ||
-      patch.groupOrder.some(
-        (groupId, index) => previousGroups[index]?.groupId !== groupId,
-      );
-    if (
-      patch.groups.length > 0 ||
-      patch.removedGroupIds.length > 0 ||
-      patch.removedSessionIds.length > 0 ||
-      groupOrderChanged
-    ) {
-      this.messageSource.postMessage({
-        groupOrder: patch.groupOrder,
-        groups: patch.groups,
-        removedGroupIds: patch.removedGroupIds,
-        removedSessionIds: patch.removedSessionIds,
-        revision: ++this.revision,
-        type: "sidebarGroupsChanged",
-      });
-    }
-    if (!haveSameSidebarProjectionValue(previousHud, this.latestHud)) {
-      this.messageSource.postMessage({
-        hud: this.latestHud,
-        revision: ++this.revision,
-        type: "sidebarHudChanged",
-      });
-    }
   },
 
   publishUnavailable(this: GpuiSidebarRuntime, _reason: string): void {
@@ -296,20 +197,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       ...createGpuiGxserverUnavailableSidebarGroups(),
       ...this.createRemoteSidebarGroups(),
     ];
-    this.latestHud = createGpuiSidebarHudState({
-      activeProjectId: this.activeProjectId,
-      groups: this.latestGroups,
-      runtimeSettings: this.runtimeSettings,
-      domainProjects: this.domainProjects,
-      recentProjects: this.recentProjects,
-      remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
-      remotePresentationsByMachineId: this.remotePresentations,
-      remoteSidebarHudsByMachineId: this.remoteSidebarHuds,
-      sidebarHud: this.sidebarHud,
-    });
-    this.messageSource.postMessage(
-      this.createHydrateMessage(this.latestGroups, this.latestHud),
-    );
     this.hasHydrated = true;
     postGpuiSidebarRuntimeFactsRows(this);
     this.postActiveProjectContext();
@@ -339,39 +226,13 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
         );
       }
     }
-    const previousGroups = this.latestGroups;
-    const previousHud = this.latestHud;
     const groups = this.presentation
       ? this.createSidebarGroups(this.presentation)
       : [
           ...createGpuiGxserverUnavailableSidebarGroups(),
           ...this.createRemoteSidebarGroups(),
         ];
-    this.latestHud = createGpuiSidebarHudState({
-      activeProjectId: this.activeProjectId,
-      focusedSessionId: this.focusedSessionId,
-      groups,
-      presentation: this.presentation,
-      runtimeSettings: this.runtimeSettings,
-      domainProjects: this.domainProjects,
-      recentProjects: this.recentProjects,
-      remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
-      remotePresentationsByMachineId: this.remotePresentations,
-      remoteSidebarHudsByMachineId: this.remoteSidebarHuds,
-      sidebarHud: this.sidebarHud,
-    });
-    if (!this.hasHydrated) {
-      this.messageSource.postMessage(
-        this.createHydrateMessage(groups, this.latestHud),
-      );
-      this.hasHydrated = true;
-    } else {
-      this.postSidebarProjectionPatchMessages(
-        previousGroups,
-        groups,
-        previousHud,
-      );
-    }
+    this.hasHydrated = true;
     this.latestGroups = groups;
     postGpuiSidebarRuntimeFactsRows(this);
     this.postActiveProjectContext();
@@ -427,9 +288,7 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
         this.recentProjects = [...recentProjects];
         if (this.presentation) {
           this.publishPresentation("patch");
-          return;
         }
-        this.publishHudPatch();
       })
       .catch(() => undefined);
   },
@@ -446,7 +305,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
           return;
         }
         this.sidebarHud = sidebarHud;
-        this.publishHudPatch();
       })
       .catch(() => {
         /*
@@ -457,34 +315,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
          * raw project metadata in the renderer.
          */
       });
-  },
-
-  publishHudPatch(this: GpuiSidebarRuntime): void {
-    const previousHud = this.latestHud;
-    this.latestHud = createGpuiSidebarHudState({
-      activeProjectId: this.activeProjectId,
-      focusedSessionId: this.focusedSessionId,
-      groups: this.latestGroups,
-      presentation: this.presentation,
-      runtimeSettings: this.runtimeSettings,
-      domainProjects: this.domainProjects,
-      recentProjects: this.recentProjects,
-      remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
-      remotePresentationsByMachineId: this.remotePresentations,
-      remoteSidebarHudsByMachineId: this.remoteSidebarHuds,
-      sidebarHud: this.sidebarHud,
-    });
-    if (
-      !this.hasHydrated ||
-      haveSameSidebarProjectionValue(previousHud, this.latestHud)
-    ) {
-      return;
-    }
-    this.messageSource.postMessage({
-      hud: this.latestHud,
-      revision: ++this.revision,
-      type: "sidebarHudChanged",
-    });
   },
 
   postActiveProjectContext(this: GpuiSidebarRuntime): void {
@@ -719,128 +549,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       });
     }
     return sessions;
-  },
-
-  createHydrateMessage(
-    this: GpuiSidebarRuntime,
-    groups: SidebarSessionGroup[],
-    hud: SidebarHudState,
-  ): SidebarHydrateMessage {
-    const localCustomSessionTags = this.presentation?.customSessionTags;
-    return {
-      groups,
-      hud,
-      pinnedPrompts: [...this.appUserData.pinnedPrompts],
-      previousSessions: [],
-      remoteSidebarProjectCollectionsByMachineId:
-        this.remoteSidebarProjectCollectionsByMachineId(),
-      remoteSidebarSpacesByMachineId: this.remoteSidebarSpacesByMachineId(),
-      /*
-      CDXC:Sessions 2026-09-11 WHY:
-      Unlike Spaces, the LOCAL custom tag catalog also rides hydrate: SidebarApp's
-      store seeds `customSessionTags` from hydrate/sessionState, and a hydrate
-      that re-publishes after the first `customSessionTagsChanged` must not
-      leave the catalog empty until the next live change.
-      */
-      remoteCustomSessionTagsByMachineId:
-        this.remoteCustomSessionTagsByMachineId(),
-      ...(isCustomSessionTagsState(localCustomSessionTags)
-        ? { customSessionTags: localCustomSessionTags }
-        : {}),
-      revision: ++this.revision,
-      type: "hydrate",
-    };
-  },
-
-  remoteSidebarProjectCollectionsByMachineId(
-    this: GpuiSidebarRuntime,
-  ): Readonly<Record<string, GxserverSidebarProjectCollectionsState>> {
-    const result: Record<string, GxserverSidebarProjectCollectionsState> = {};
-    const savedMachineIds = new Set(
-      createGpuiSidebarSettings(this.runtimeSettings).remoteMachines.map(
-        (machine) => machine.id,
-      ),
-    );
-    for (const [machineId, snapshot] of this.remoteLastSeenPresentations) {
-      if (
-        savedMachineIds.has(machineId) &&
-        isSidebarProjectCollectionsState(snapshot.sidebarProjectCollections)
-      ) {
-        result[machineId] = snapshot.sidebarProjectCollections;
-      }
-    }
-    for (const [machineId, snapshot] of this.remotePresentations) {
-      if (
-        savedMachineIds.has(machineId) &&
-        isSidebarProjectCollectionsState(snapshot.sidebarProjectCollections)
-      ) {
-        result[machineId] = snapshot.sidebarProjectCollections;
-      }
-    }
-    return result;
-  },
-
-  /*
-  CDXC:Spaces 2026-08-27:
-  Each gxserver owns its own Space set, so hydrate carries the remote documents
-  keyed by machine and never merges them. LOCAL Spaces stay out of hydrate for
-  the same reason the local project collections do: they arrive through
-  `sidebarSpacesChanged` once the presentation snapshot lands.
-  */
-  remoteSidebarSpacesByMachineId(
-    this: GpuiSidebarRuntime,
-  ): Readonly<Record<string, GxserverSidebarSpacesState>> {
-    const result: Record<string, GxserverSidebarSpacesState> = {};
-    const savedMachineIds = new Set(
-      createGpuiSidebarSettings(this.runtimeSettings).remoteMachines.map(
-        (machine) => machine.id,
-      ),
-    );
-    for (const [machineId, snapshot] of this.remoteLastSeenPresentations) {
-      if (
-        savedMachineIds.has(machineId) &&
-        isSidebarSpacesState(snapshot.sidebarSpaces)
-      ) {
-        result[machineId] = snapshot.sidebarSpaces;
-      }
-    }
-    for (const [machineId, snapshot] of this.remotePresentations) {
-      if (
-        savedMachineIds.has(machineId) &&
-        isSidebarSpacesState(snapshot.sidebarSpaces)
-      ) {
-        result[machineId] = snapshot.sidebarSpaces;
-      }
-    }
-    return result;
-  },
-
-  remoteCustomSessionTagsByMachineId(
-    this: GpuiSidebarRuntime,
-  ): Readonly<Record<string, GxserverCustomSessionTagsState>> {
-    const result: Record<string, GxserverCustomSessionTagsState> = {};
-    const savedMachineIds = new Set(
-      createGpuiSidebarSettings(this.runtimeSettings).remoteMachines.map(
-        (machine) => machine.id,
-      ),
-    );
-    for (const [machineId, snapshot] of this.remoteLastSeenPresentations) {
-      if (
-        savedMachineIds.has(machineId) &&
-        isCustomSessionTagsState(snapshot.customSessionTags)
-      ) {
-        result[machineId] = snapshot.customSessionTags;
-      }
-    }
-    for (const [machineId, snapshot] of this.remotePresentations) {
-      if (
-        savedMachineIds.has(machineId) &&
-        isCustomSessionTagsState(snapshot.customSessionTags)
-      ) {
-        result[machineId] = snapshot.customSessionTags;
-      }
-    }
-    return result;
   },
 
   createSidebarGroups(

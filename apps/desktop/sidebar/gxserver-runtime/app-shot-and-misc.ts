@@ -59,7 +59,6 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
   postSidebarCommandRunEnd(commandId: string, originalMessage: SidebarToExtensionMessage): boolean;
   openAppModal(modal: 'firstLaunchSetup' | 'onboarding' | 'settings' | 'watchGhostexVideo'): void;
   savePinnedPrompt(message: Extract<SidebarToExtensionMessage, { type: 'savePinnedPrompt' }>): Promise<void>;
-  publishAppUserDataHydrate(): void;
 }
 
 export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
@@ -281,14 +280,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
       promptId: message.promptId,
       title: message.title,
     });
-    this.publishAppUserDataHydrate();
-  },
-
-  publishAppUserDataHydrate(this: GpuiSidebarRuntime): void {
-    if (!this.hasHydrated) {
-      return;
-    }
-    this.messageSource.postMessage(this.createHydrateMessage(this.latestGroups, this.latestHud));
   },
 };
 

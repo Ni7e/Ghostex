@@ -8,13 +8,12 @@ import {
   GPUI_GXSERVER_CHATS_GROUP_ID,
   GPUI_GXSERVER_UNAVAILABLE_GROUP_ID,
 } from '../constants';
-import type { GpuiPresentationProjectProjectionMetadata, GpuiSidebarGroupsPatch } from '../types-and-protocol';
-import { booleanFromRecord, optionalNumberField, stringFromRecord } from './records';
+import type { GpuiPresentationProjectProjectionMetadata } from '../types-and-protocol';
+import { booleanFromRecord, optionalNumberField } from './records';
 import {
   createGpuiProjectWorktreeParentCandidates,
   normalizeGpuiProjectPath,
   normalizeGpuiSidebarWorktreeMetadata,
-  normalizeGpuiWorktreeParentProjectId,
   resolveGpuiProjectWorktreeParentMetadata,
 } from './worktrees';
 import type { GxserverPresentationSidebarProjectOverlay } from '@/packages/shared/gxserver-presentation-sidebar-projection';
@@ -23,7 +22,7 @@ import type {
   GxserverProjectDomainState,
   GxserverRecentProjectDomainState,
 } from '@/packages/shared/gxserver-protocol';
-import type { SidebarProjectSettingsItem, SidebarSessionGroup } from '@/packages/shared/session-grid-contract';
+import type { SidebarSessionGroup } from '@/packages/shared/session-grid-contract';
 import type { SidebarAgentButton } from '@/packages/shared/sidebar-agents';
 import { DEFAULT_SIDEBAR_AGENTS, getSidebarAgentIconById } from '@/packages/shared/sidebar-agents';
 import type { WorkspaceProjectIcon } from '@/packages/shared/workspace-project-appearance';
@@ -189,72 +188,6 @@ export function isGpuiPresentationChatProjectPath(value: unknown): boolean {
   );
 }
 
-export function createGpuiProjectSettingsProjects(
-  domainProjects: readonly GxserverProjectDomainState[],
-  presentation: GxserverPresentationSnapshot | undefined
-): SidebarProjectSettingsItem[] {
-  if (domainProjects.length > 0) {
-    return domainProjects.flatMap((project) => {
-      const path = normalizeGpuiProjectPath(project.path);
-      if (!path || project.isRecentProject === true || isGpuiPresentationQuickDomainProject(project)) {
-        return [];
-      }
-      return [
-        {
-          ...optionalGpuiProjectSettingsString(
-            'beadsDirectory',
-            stringFromRecord(project.projectBoardConfig, 'beadsDirectory')
-          ),
-          ...optionalGpuiProjectSettingsString(
-            'beadsDisplayKey',
-            stringFromRecord(project.projectBoardConfig, 'beadsDisplayKey') ??
-              stringFromRecord(project.gitConfig, 'beadsDisplayKey')
-          ),
-          ...optionalGpuiProjectSettingsString(
-            'docsDirectory',
-            stringFromRecord(project.projectBoardConfig, 'docsDirectory')
-          ),
-          name: project.name,
-          path,
-          projectId: project.projectId,
-          ...optionalGpuiProjectSettingsString(
-            'worktreeCommand',
-            stringFromRecord(project.gitConfig, 'worktreeCommand')
-          ),
-          ...optionalGpuiProjectSettingsString(
-            'worktreeParentProjectId',
-            normalizeGpuiWorktreeParentProjectId(project.worktree)
-          ),
-        },
-      ];
-    });
-  }
-  return (presentation?.projects ?? []).flatMap((project) => {
-    const path = normalizeGpuiProjectPath(project.path);
-    if (!path || isGpuiPresentationChatProjectPath(path)) {
-      return [];
-    }
-    return [
-      {
-        name: project.title,
-        path,
-        projectId: project.projectId,
-        ...optionalGpuiProjectSettingsString(
-          'worktreeParentProjectId',
-          normalizeGpuiWorktreeParentProjectId(project.worktree)
-        ),
-      },
-    ];
-  });
-}
-
-export function optionalGpuiProjectSettingsString<TKey extends keyof SidebarProjectSettingsItem>(
-  key: TKey,
-  value: string | undefined
-): Partial<Pick<SidebarProjectSettingsItem, TKey>> {
-  return value ? ({ [key]: value } as Partial<Pick<SidebarProjectSettingsItem, TKey>>) : {};
-}
-
 export function normalizeGpuiPathForProjectComparison(path: string): string {
   return path.trim().replace(/\/+$/u, '') || path.trim();
 }
@@ -285,67 +218,6 @@ export function createGpuiGxserverUnavailableSidebarGroups(): SidebarSessionGrou
       visibleCount: GPUI_DEFAULT_VISIBLE_COUNT,
     },
   ];
-}
-
-export function createGpuiSidebarGroupsPatch(
-  previousGroups: readonly SidebarSessionGroup[],
-  nextGroups: SidebarSessionGroup[]
-): GpuiSidebarGroupsPatch {
-  const previousGroupsById = new Map(previousGroups.map((group) => [group.groupId, group]));
-  const nextGroupIds = new Set(nextGroups.map((group) => group.groupId));
-  const previousSessionIds = new Set(
-    previousGroups.flatMap((group) => group.sessions.map((session) => session.sessionId))
-  );
-  const nextSessionIds = new Set(nextGroups.flatMap((group) => group.sessions.map((session) => session.sessionId)));
-  return {
-    groupOrder: nextGroups.map((group) => group.groupId),
-    /*
-    CDXC:Git 2026-08-16:
-    The SidebarApp store merges patch groups by groupId and leaves untouched
-    groups alone, so a patch only needs the groups that actually changed.
-    Sending all groups on every publish forced the renderer to re-normalize
-    and deep-compare the entire tree per message, which is what made routine
-    background publishes expensive in large sidebars.
-    */
-    groups: nextGroups.filter((group) => {
-      const previousGroup = previousGroupsById.get(group.groupId);
-      return !previousGroup || !haveSameSidebarProjectionValue(previousGroup, group);
-    }),
-    removedGroupIds: [...previousGroupsById.keys()].filter((groupId) => !nextGroupIds.has(groupId)),
-    removedSessionIds: [...previousSessionIds].filter((sessionId) => !nextSessionIds.has(sessionId)),
-  };
-}
-
-/**
- * Structural equality for the JSON-serializable sidebar projection values that
- * cross the runtime -> SidebarApp postMessage boundary. Mirrors the store's
- * `haveSameSerializableValue` so both sides agree on what "unchanged" means.
- */
-export function haveSameSidebarProjectionValue(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) {
-    return true;
-  }
-  if (typeof left !== typeof right) {
-    return false;
-  }
-  if (typeof left !== 'object' || left === null || right === null) {
-    return false;
-  }
-  if (Array.isArray(left) || Array.isArray(right)) {
-    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
-      return false;
-    }
-    return left.every((value, index) => haveSameSidebarProjectionValue(value, right[index]));
-  }
-
-  const leftRecord = left as Record<string, unknown>;
-  const rightRecord = right as Record<string, unknown>;
-  const leftKeys = Object.keys(leftRecord);
-  const rightKeys = Object.keys(rightRecord);
-  return (
-    leftKeys.length === rightKeys.length &&
-    leftKeys.every((key) => haveSameSidebarProjectionValue(leftRecord[key], rightRecord[key]))
-  );
 }
 
 export function resolveGpuiSidebarAgentIcon(agentName: string | undefined): SidebarAgentButton['icon'] {

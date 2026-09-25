@@ -23,8 +23,8 @@ use super::runtime_facts::SidebarRuntimeFacts;
 /// The one sort mode any desktop HUD can have.
 ///
 /// CDXC:Sessions 2026-09-21 WHY:
-/// Both HUD builders pin `activeSessionsSortMode: 'lastActivity'` (`createGpuiSidebarHudState` in
-/// gxserver-runtime/helpers/command-pane.ts and the hydrate in
+/// Both HUD builders pin `activeSessionsSortMode: 'lastActivity'` (gx-core `compose_sidebar_hud` in
+/// hud/mod.rs and the hydrate in
 /// app/helpers/sidebar/settings_messages_and_width.rs) and no desktop handler answers
 /// `setActiveSessionsSortMode`, so Manual Sorting ends in a no-op (gx-core `sidebar_actions/sort.rs`).
 /// Reading it off the HUD document per update was a walk that could only ever produce this.

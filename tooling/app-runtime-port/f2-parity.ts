@@ -12,8 +12,8 @@
  * Mutations: feed-drop-item, feed-unread-count, feed-jump, attention-sound, attention-report,
  * attention-visible, hud-settings, hud-recent, hud-scopes, indicators-count, indicators-order, pet.
  *
- * `hud` builds the sidebar HUD from the same sources on both sides: the runtime's
- * `createGpuiSidebarHudState` (with the groups the runtime would have built from the same
+ * `hud` builds the sidebar HUD from the same sources on both sides: the runtime's deleted
+ * `createGpuiSidebarHudState`, extracted from git at `HUD_BASE` (with the groups the runtime would have built from the same
  * presentations) normalized the way the sidebar store normalized it, against gx-core
  * `compose_sidebar_hud`. It compares the fields the HUD's Rust contract names (gx-core
  * `hud/mod.rs`), and of `settings` the keys `hud/settings.rs` normalizes.
@@ -722,13 +722,35 @@ function hudContract(hud: Json): Json {
   return out;
 }
 
-async function hudTypescript(cases: Json[]): Promise<Json[]> {
-  const { createGpuiSidebarHudState } = await import(`${root}${RUNTIME}/helpers/command-pane`);
+/** The last commit whose runtime still composed its own HUD. */
+const HUD_BASE = '3062a6481';
+
+/** Copies the runtime's helpers, constants and types as they were at `HUD_BASE` out of git. */
+function extractOldRuntimeHelpers(dir: string): string {
+  const out = join(dir, 'old-hud');
+  mkdirSync(out, { recursive: true });
+  const paths = [`${RUNTIME}/helpers`, `${RUNTIME}/constants.ts`, `${RUNTIME}/types-and-protocol.ts`];
+  const archive = spawnSync('git', ['archive', HUD_BASE, ...paths], { cwd: root, maxBuffer: 1 << 28 });
+  if (archive.status !== 0) throw new Error(`git archive ${HUD_BASE} failed`);
+  const untar = spawnSync('tar', ['-x', '-C', out], { input: archive.stdout });
+  if (untar.status !== 0) throw new Error('tar failed');
+  const files = execFileSync('find', [join(out, RUNTIME), '-name', '*.ts'], { encoding: 'utf8' })
+    .trim()
+    .split('\n');
+  for (const file of files) {
+    writeFileSync(file, readFileSync(file, 'utf8').replaceAll("'@/", `'${root}`).replaceAll('"@/', `"${root}`));
+  }
+  return join(out, RUNTIME);
+}
+
+async function hudTypescript(dir: string, cases: Json[]): Promise<Json[]> {
+  const old = extractOldRuntimeHelpers(dir);
+  const { createGpuiSidebarHudState } = await import(`${old}/helpers/command-pane`);
   const { createGpuiPresentationProjectProjectionMetadata, resolveGpuiSidebarAgentIcon } = await import(
-    `${root}${RUNTIME}/helpers/presentation-projection`
+    `${old}/helpers/presentation-projection`
   );
-  const { createGpuiRemotePresentationSidebarGroups } = await import(`${root}${RUNTIME}/helpers/remote-presentation`);
-  const { createGpuiSidebarSettings } = await import(`${root}${RUNTIME}/helpers/bootstrap`);
+  const { createGpuiRemotePresentationSidebarGroups } = await import(`${old}/helpers/remote-presentation`);
+  const { createGpuiSidebarSettings } = await import(`${old}/helpers/bootstrap`);
   const { createGxserverPresentationSidebarGroups } =
     await import('@/packages/shared/gxserver-presentation-sidebar-projection');
   const { normalizeghostexSettings } = await import('@/packages/shared/ghostex-settings');
@@ -1028,7 +1050,7 @@ try {
   const read = JSON.parse(readFileSync(join(dir, 'fixtures.json'), 'utf8'));
   const typescript = {
     attention: await attentionTypescript(dir, read.attention),
-    hud: await hudTypescript(read.hud),
+    hud: await hudTypescript(dir, read.hud),
     indicators: await indicatorsTypescript(dir, read.indicators),
     notificationFeed: notificationFeedTypescript(read.notificationFeed),
   };

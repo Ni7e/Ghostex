@@ -31,9 +31,6 @@ import {
   hasSameGpuiRuntimeSettings,
 } from './helpers/bootstrap';
 import { normalizeGpuiBrowserTabs } from './helpers/browser-tabs';
-import {
-  createGpuiSidebarHudState,
-} from './helpers/command-pane';
 import { readStoredGpuiRemoteGroupOrder, readStoredGpuiRemoteRecentProjects } from './helpers/recent-projects';
 import { normalizeNonEmptyString } from './helpers/records';
 import { GpuiRemoteLastSeenStore } from './helpers/remote-last-seen';
@@ -80,7 +77,6 @@ import type {
   ExtensionToSidebarMessage,
   SidebarGroupsChangedMessage,
   SidebarHudChangedMessage,
-  SidebarHudState,
   SidebarHydrateMessage,
   SidebarOrderSyncResultMessage,
   SidebarPreviousSessionItem,
@@ -236,7 +232,6 @@ export class GpuiSidebarRuntime {
   gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
   hasHydrated = false;
   latestGroups: SidebarSessionGroup[] = [];
-  latestHud: SidebarHudState = createGpuiSidebarHudState();
   localFirstHiddenPresentationSessionKeys = new Set<string>();
   pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
   presentation: GxserverPresentationSnapshot | undefined;
@@ -381,7 +376,6 @@ export class GpuiSidebarRuntime {
       if (!didChange) {
         return;
       }
-      this.publishHudPatch();
       this.postActiveProjectContext();
     };
     gpuiBridge.onGxserverBootstrapChanged = (bootstrap) => {
