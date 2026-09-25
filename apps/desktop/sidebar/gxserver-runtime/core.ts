@@ -343,21 +343,7 @@ export class GpuiSidebarRuntime {
       /*
       CDXC:CommandPane 2026-06-24-23:49:
       Rust-owned command-pane Action lifecycle feedback enters the reused SidebarApp through the same local message source as gxserver presentation patches. Keep this callback typed to existing sidebar messages so GPUI can update button run-state without exposing generic IPC, command text, paths, terminal output, or persisted state to React.
-
-      CDXC:Sessions 2026-07-29:
-      Rust also forwards sidebar-owned app-modal commands (Rename Session
-      confirm, focused-session Close After Done toggles) through this one
-      bridge callback. Those are sidebar-to-extension commands: posting them
-      into the inbound React message source silently dropped them because
-      SidebarApp has no inbound branch for them, so a modal rename never
-      reached `handleSidebarMessage`/gxserver and no `/rename` was staged in
-      the terminal. Route exactly these known command types to the runtime's
-      own sidebar-message handler instead.
       */
-      if (message.type === 'renameSession') {
-        void this.handleSidebarMessage(message);
-        return;
-      }
       this.messageSource.postMessage(message);
     };
     const applyBrowserTabs = (tabs: readonly GpuiBrowserTabSummary[] | undefined) => {
@@ -774,9 +760,6 @@ export class GpuiSidebarRuntime {
         return;
       case 'splitSessionRight':
         await this.splitSessionRight(message.sessionId);
-        return;
-      case 'renameSession':
-        await this.renameSession(message);
         return;
       case 'setSessionTag':
         await this.updateSessionFlags(message.sessionId, {

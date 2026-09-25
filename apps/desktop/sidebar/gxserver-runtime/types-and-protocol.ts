@@ -106,27 +106,11 @@ export type GpuiSidebarRuntimeSettingsSnapshot = {
 
 /**
  * Everything Rust's `dispatch_gpui_sidebar_host_message` can hand to
- * `onSidebarHostMessage`. Beside the extension-to-sidebar messages the React
- * app consumes, Rust also forwards exactly these sidebar-owned commands, which
- * the runtime answers itself through `handleSidebarMessage` — the React app has
- * no inbound branch for them, so relaying one into the message source would
- * silently drop it. Keep this union in step with the Rust dispatch sites.
+ * `onSidebarHostMessage`: the extension-to-sidebar messages the React app
+ * consumes. The sidebar-owned commands Rust used to forward here (rename,
+ * notes, delayed sends, creates) are answered in Rust.
  */
-export type GpuiSidebarHostMessage =
-  | ExtensionToSidebarMessage
-  | Extract<
-      SidebarToExtensionMessage,
-      {
-        /*
-         * CDXC:AgentLauncher 2026-09-25 WHY:
-         * The New Thread picker's launches, the Hooks Required dialog's answer and
-         * every other create are answered in Rust
-         * (apps/desktop/src/app/gx_store/create/), so only the rename confirm is
-         * left on this list.
-         */
-        type: 'renameSession';
-      }
-    >;
+export type GpuiSidebarHostMessage = ExtensionToSidebarMessage;
 
 export type GhostexGpuiSidebarBridge = {
   browserTabs?: readonly GpuiBrowserTabSummary[];

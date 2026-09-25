@@ -56,8 +56,6 @@ import type {
 } from '@/packages/shared/gxserver-protocol';
 import type { SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
 import type { SidebarSessionTag } from '@/packages/shared/session-tags';
-import { getDefaultSidebarAgentByIcon, getDefaultSidebarAgentById } from '@/packages/shared/sidebar-agents';
-import { isSessionTitleGenerationAgent } from '@/packages/shared/ghostex-settings/session-title-generation';
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -117,7 +115,6 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
   isRunningLocalPresentationSession(projectId: string, sessionId: string): boolean;
   isSleepingLocalPresentationSession(projectId: string, sessionId: string): boolean;
   forkSession(sessionId: string): Promise<void>;
-  renameSession(message: Extract<SidebarToExtensionMessage, { type: 'renameSession' }>): Promise<void>;
   updateSessionFlags(
     sessionId: string,
     flags: { isFavorite?: boolean; isParked?: boolean; isPinned?: boolean; sessionTag?: SidebarSessionTag | null }
@@ -900,59 +897,6 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
       await this.refreshDomainPresentationSnapshotFromClient('patch').catch(() => undefined);
     } catch (error) {
       this.postSidebarActionToast('error', 'Could not fork session', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    }
-  },
-
-  async renameSession(
-    this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'renameSession' }>
-  ): Promise<void> {
-    /*
-    Only Generate Name reaches the runtime: a plain rename, local or remote, is Rust's
-    (gx_store/terminal_lifecycle/session_edits.rs).
-    */
-    if (!message.shouldGenerateTitle) {
-      return;
-    }
-    const reference = parseGxserverPresentationProjectSessionId(message.sessionId);
-    if (!reference || !this.client) {
-      return;
-    }
-    /*
-    CDXC:Sessions 2026-07-29:
-    Generate Name reuses the first-message auto-title UX end to end:
-    gxserver marks the session generating (the card shows the same
-    "Generating title…" chrome), summarizes the pasted text with the chosen
-    generation agent, stages the agent rename command through zmx with the
-    same delayed real Enter, and applies the generated title. The long
-    pasted text must never reach `/api/requestSessionRename` as a literal
-    title.
-    */
-    const generationAgent = this.resolveSidebarAgent(message.agentId ?? '');
-    const generationCommand = generationAgent?.command?.trim();
-    /**
-     * CDXC:SessionTitles 2026-09-15 WHY:
-     * The picker returns a launcher configuration id, but title generation needs its CLI family. Passing a custom Claude id previously selected Codex flags and ran `claude --yolo exec ...`, which exits immediately.
-     * Keep the selected configuration's command so its account and arguments survive the family resolution.
-     */
-    const generationFamily =
-      getDefaultSidebarAgentById(generationAgent?.agentId)?.agentId ??
-      getDefaultSidebarAgentByIcon(generationAgent?.icon)?.agentId;
-    try {
-      if (message.agentId && (!generationCommand || !isSessionTitleGenerationAgent(generationFamily))) {
-        throw new Error('Choose a configured agent that supports name generation.');
-      }
-      await this.client.rpc('/api/generateSessionTitle', {
-        ...(generationFamily ? { agentId: generationFamily } : {}),
-        ...(generationCommand ? { command: generationCommand } : {}),
-        projectId: reference.projectId,
-        sessionId: reference.sessionId,
-        text: message.title,
-      });
-    } catch (error) {
-      this.postSidebarActionToast('error', 'Could not generate session name', {
         description: error instanceof Error ? error.message : String(error),
       });
     }

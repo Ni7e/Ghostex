@@ -11,7 +11,7 @@
 //! Save (or, with an empty note, clear) a session's note. No optimistic patch: gxserver schedules a presentation delta after a successful save, and a daemon that predates notes or a session without a conversation refuses it, which is a toast rather than a silently lost note.
 //!
 //! CDXC:SessionTitles 2026-09-15 WHY:
-//! Chat view can have no mounted terminal to receive a native rename, so a local rename uses gxserver's queued command submission just like a remote one. Generate Name (`shouldGenerateTitle`) still goes to the runtime until the launcher agent list it reads has a Rust owner.
+//! Chat view can have no mounted terminal to receive a native rename, so a local rename uses gxserver's queued command submission just like a remote one.
 
 use std::time::Duration;
 
@@ -60,14 +60,6 @@ impl GhostexGpuiApp {
         };
         match text("type") {
             Some("renameSession") => {
-                // Generate Name on a local session stays the runtime's for now; a remote one never
-                // generated (the runtime sent the text as the title), and still does not.
-                if message.get("shouldGenerateTitle").and_then(Value::as_bool) == Some(true)
-                    && SessionKey::parse_sidebar_session_id(session_id)
-                        .is_none_or(|session| session.machine.is_local())
-                {
-                    return false;
-                }
                 self.gx_store_rename_session(session_id, message, cx);
                 true
             }
@@ -114,6 +106,11 @@ impl GhostexGpuiApp {
         {
             params.insert("agentName".into(), json!(agent_id));
         }
+        let generate = message.get("shouldGenerateTitle").and_then(Value::as_bool) == Some(true);
+        if generate && session.machine.is_local() {
+            self.gx_store_generate_session_title(&session, message, &title, cx);
+            return;
+        }
         params.insert("projectId".into(), json!(session.project_id));
         params.insert("reason".into(), json!("gpui-sidebar"));
         params.insert("sessionId".into(), json!(session.session_id));
@@ -156,6 +153,51 @@ impl GhostexGpuiApp {
                 .detach();
             }
         }
+    }
+
+    /// CDXC:Sessions 2026-07-29:
+    /// Generate Name reuses the first-message auto-title UX end to end: gxserver marks the session generating (the card shows the same "Generating title" chrome), summarizes the pasted text with the chosen generation agent, stages the agent rename command through zmx with the same delayed real Enter, and applies the generated title. The long pasted text must never reach `/api/requestSessionRename` as a literal title.
+    fn gx_store_generate_session_title(
+        &mut self,
+        session: &SessionKey,
+        message: &Value,
+        text: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let hud = self.gx_store_sidebar_hud();
+        let agent_id = message.get("agentId").and_then(Value::as_str);
+        let plan = ghostex_gx_core::plan_generate_session_title(
+            hud.as_deref(),
+            agent_id,
+            &session.project_id,
+            &session.session_id,
+            text,
+        );
+        let params = match plan {
+            Ok(params) => params,
+            Err(reason) => {
+                self.dispatch_gpui_app_modal_toast(
+                    "error",
+                    "Could not generate session name",
+                    reason,
+                    cx,
+                );
+                return;
+            }
+        };
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = gx_rpc(None, "/api/generateSessionTitle", params).await {
+                let _ = this.update(cx, |this, cx| {
+                    this.dispatch_gpui_app_modal_toast(
+                        "error",
+                        "Could not generate session name",
+                        &error.message,
+                        cx,
+                    );
+                });
+            }
+        })
+        .detach();
     }
 
     fn gx_store_save_session_note(
