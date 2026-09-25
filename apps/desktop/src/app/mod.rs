@@ -64,6 +64,7 @@ pub(crate) mod project_editor;
 pub(crate) mod project_keep_alive;
 pub(crate) mod project_views;
 pub(crate) mod project_websites;
+pub(crate) mod quick_access;
 pub(crate) mod quick_access_modal_lifecycle;
 pub(crate) mod remote_conn;
 pub(crate) mod remote_gxserver_install_modal_lifecycle;

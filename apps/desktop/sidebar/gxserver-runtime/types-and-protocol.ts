@@ -171,15 +171,12 @@ export type GhostexGpuiSidebarBridge = {
    * those rows, so Rust never has to know the sidebar's id format.
    */
   gxserverBootstrap?: GpuiGxserverBootstrap;
-  onCommandPaletteRunSidebarCommand?: (payload: unknown) => void;
-  onCommandPaletteSessionFocus?: (payload: unknown) => void;
   onCommandPaneSessionsChanged?: (sessions: readonly GpuiCommandPaneSessionSummary[]) => void;
   onWorkspaceSessionDelayedSendsChanged?: (sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[]) => void;
   onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
   onExportTranscriptModalCommand?: (payload: unknown) => void;
   onGitCommitModalCommand?: (payload: unknown) => void;
   onMenuBarProjectActivation?: (payload: unknown) => void;
-  onMenuBarSessionActivation?: (payload: unknown) => void;
   onNativeAppShotCaptured?: (payload: unknown) => void;
   onNativeAppShotPromptResult?: (payload: unknown) => void;
   onOsIntegrationCommand?: (payload: unknown) => void;
@@ -202,7 +199,6 @@ export type GhostexGpuiSidebarBridge = {
    * conversation id; this runtime resolves the best available target.
    */
   onStashedPromptSessionJump?: (payload: unknown) => void;
-  onStatusPetActivation?: (payload: unknown) => void;
   onTitlebarGitAction?: (payload: unknown) => void;
   onWorktreeModalCommand?: (payload: unknown) => void;
   /**
@@ -228,12 +224,9 @@ export type GhostexGpuiSidebarBridge = {
   onWorkspaceTerminalEscapePressed?: (payload: unknown) => void;
   onWorkspaceTerminalLifecycleRequest?: (payload: unknown) => void;
   onWorkspaceTerminalRuntimeAction?: (payload: unknown) => void;
-  pendingCommandPaletteRunSidebarCommands?: unknown[];
-  pendingCommandPaletteSessionFocusRequests?: unknown[];
   pendingExportTranscriptModalCommands?: unknown[];
   pendingGitCommitModalCommands?: unknown[];
   pendingMenuBarProjectActivations?: unknown[];
-  pendingMenuBarSessionActivations?: unknown[];
   pendingNativeAppShotPromptResults?: unknown[];
   pendingNativeAppShots?: unknown[];
   pendingOsIntegrationCommands?: unknown[];
@@ -241,7 +234,6 @@ export type GhostexGpuiSidebarBridge = {
   pendingSidebarCommands?: unknown[];
   pendingProjectBoardConversationRequests?: unknown[];
   pendingStashedPromptSessionJumps?: unknown[];
-  pendingStatusPetActivations?: unknown[];
   pendingTitlebarGitActions?: unknown[];
   pendingWorktreeModalCommands?: unknown[];
   pendingWorkspaceFolderPicks?: unknown[];

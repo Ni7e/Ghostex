@@ -52,6 +52,7 @@
 //! the menu-host re-read ride;
 //! `diagnostics.rs` writes the log lines.
 
+mod activation_focus;
 mod added_project;
 mod burst;
 mod client_document;
@@ -130,6 +131,7 @@ pub(crate) use sidebar_ui_storage::{
 pub(crate) use client_storage_init::initialize_client_storage_at_start;
 pub(crate) use host::GxStoreHost;
 #[allow(unused_imports)] // the first callers arrive with the runtime port's family commits
+pub(crate) use activation_focus::{menu_bar_session_focus_id, palette_session_focus_id};
 pub(crate) use rpc::gx_rpc;
 #[allow(unused_imports)]
 pub(crate) use rpc_types::GxRpcError;

@@ -3510,6 +3510,12 @@ impl GhostexGpuiApp {
                     .detach();
                 }
             }
+            command_type
+                if crate::app::quick_access::commands::QUICK_ACCESS_COMMAND_ROW_TYPES
+                    .contains(&command_type) =>
+            {
+                self.run_quick_access_command_row(command_type, command, window, cx);
+            }
             "searchPreviousSessionsByText" => {
                 /*
                 CDXC:Sessions 2026-06-24-11:53:

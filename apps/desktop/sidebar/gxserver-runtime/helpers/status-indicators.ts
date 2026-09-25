@@ -7,14 +7,10 @@ import {
   GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS,
   GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_TYPE,
   GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_VERSION,
-  GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_TYPE,
-  GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_VERSION,
   GPUI_SIDEBAR_PET_OVERLAY_STATE_MESSAGE_TYPE,
   GPUI_SIDEBAR_PET_OVERLAY_STATE_MESSAGE_VERSION,
   GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE,
   GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION,
-  GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_TYPE,
-  GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_VERSION,
   GPUI_STATUS_INDICATOR_ID_MAX_CHARS,
   GPUI_STATUS_INDICATOR_MAX_CANDIDATES,
   GPUI_STATUS_INDICATOR_MAX_PROJECTS,
@@ -23,26 +19,16 @@ import {
 } from '../constants';
 import type {
   GpuiMenuBarProjectActivationPayload,
-  GpuiMenuBarSessionActivationPayload,
   GpuiPetOverlayStatePayload,
   GpuiSessionStatusIndicatorCandidate,
   GpuiSessionStatusIndicatorProject,
   GpuiSessionStatusIndicatorStatus,
   GpuiSessionStatusIndicatorsPayload,
-  GpuiStatusPetActivationPayload,
 } from '../types-and-protocol';
 import { normalizeNonEmptyString } from './records';
-import {
-  createGpuiRemotePresentationSessionId,
-  parseGpuiRemotePresentationProjectId,
-  parseGpuiRemotePresentationSessionId,
-} from './remote-presentation';
 import { createDisplaySessionLayout } from '@/packages/shared/active-sessions-sort';
 import type { ghostexSettings } from '@/packages/shared/ghostex-settings';
-import {
-  createGxserverPresentationProjectSessionId,
-  parseGxserverPresentationProjectSessionId,
-} from '@/packages/shared/gxserver-presentation-sidebar-projection';
+import { parseGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import type { SidebarSessionGroup, SidebarSessionItem } from '@/packages/shared/session-grid-contract';
 import { DEFAULT_TERMINAL_SESSION_TITLE } from '@/packages/shared/session-grid-contract';
 import { normalizeWorkspaceProjectIconDataUrl } from '@/packages/shared/workspace-project-appearance';
@@ -313,27 +299,6 @@ export function boundedGpuiActiveWorkspaceTabSessionTitle(value: string): string
     : normalized;
 }
 
-export function normalizeGpuiStatusPetActivation(value: unknown): GpuiStatusPetActivationPayload | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !['sessionId', 'type', 'version'].includes(key))) {
-    return undefined;
-  }
-  if (
-    record.type !== GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_TYPE ||
-    record.version !== GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_VERSION
-  ) {
-    return undefined;
-  }
-  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
-  if (!sessionId || !gpuiStatusPetActivationSessionIdAllowed(sessionId)) {
-    return undefined;
-  }
-  return { sessionId };
-}
-
 export function normalizeGpuiMenuBarProjectActivation(value: unknown): GpuiMenuBarProjectActivationPayload | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -353,44 +318,6 @@ export function normalizeGpuiMenuBarProjectActivation(value: unknown): GpuiMenuB
     return undefined;
   }
   return { projectId };
-}
-
-export function normalizeGpuiMenuBarSessionActivation(value: unknown): GpuiMenuBarSessionActivationPayload | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !['projectId', 'sessionId', 'type', 'version'].includes(key))) {
-    return undefined;
-  }
-  if (
-    record.type !== GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_TYPE ||
-    record.version !== GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_VERSION
-  ) {
-    return undefined;
-  }
-  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
-  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
-  if (
-    !projectId ||
-    !sessionId ||
-    !gpuiStatusPetActivationSessionIdAllowed(projectId) ||
-    !gpuiStatusPetActivationSessionIdAllowed(sessionId)
-  ) {
-    return undefined;
-  }
-  return { projectId, sessionId };
-}
-
-export function gpuiMenuBarStatusSessionFocusRoutingId(projectId: string, sessionId: string): string {
-  if (parseGpuiRemotePresentationSessionId(sessionId) || parseGxserverPresentationProjectSessionId(sessionId)) {
-    return sessionId;
-  }
-  const remoteProject = parseGpuiRemotePresentationProjectId(projectId);
-  if (remoteProject) {
-    return createGpuiRemotePresentationSessionId(remoteProject.machineId, remoteProject.projectId, sessionId);
-  }
-  return createGxserverPresentationProjectSessionId(projectId, sessionId);
 }
 
 export function gpuiStatusPetActivationSessionIdAllowed(value: string): boolean {

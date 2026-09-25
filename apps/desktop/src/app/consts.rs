@@ -476,40 +476,20 @@ Actions past the cap stay runnable from Settings and Ghostex Quick Access.
 */
 pub(crate) const GPUI_TAB_STRIP_MAX_GLOBAL_ACTIONS: usize = 8;
 
-pub(crate) const GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.statusPetActivation";
-
 pub(crate) const GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_VERSION: u64 = 1;
 
 pub(crate) const GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.menuBarProjectActivation";
-
-pub(crate) const GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.menuBarSessionActivation";
 
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION: u64 = 1;
 
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTabSessionSelected";
 
-pub(crate) const GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.commandPaletteSessionFocus";
-
 pub(crate) const GPUI_SIDEBAR_STASHED_PROMPT_SESSION_JUMP_MESSAGE_VERSION: u64 = 1;
 
 pub(crate) const GPUI_SIDEBAR_STASHED_PROMPT_SESSION_JUMP_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.stashedPromptSessionJump";
-
-pub(crate) const GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.commandPaletteRunSidebarCommand";
 
 pub(crate) const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION: u64 = 1;
 

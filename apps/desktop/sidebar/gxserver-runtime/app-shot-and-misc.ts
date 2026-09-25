@@ -31,10 +31,6 @@ import {
   normalizeGpuiNativeAppShotPromptResult,
 } from './helpers/app-shot';
 import { createGpuiSidebarSettings } from './helpers/bootstrap';
-import {
-  normalizeGpuiCommandPaletteRunSidebarCommand,
-  normalizeGpuiCommandPaletteSessionFocus,
-} from './helpers/command-palette';
 import { normalizeNonEmptyString, readGpuiRecordString } from './helpers/records';
 import {
   createGpuiRemotePresentationGroupId,
@@ -47,12 +43,7 @@ import {
   parseGpuiRendererCommandGlobalSessionRef,
   readGpuiRendererCommandSessionTarget,
 } from './helpers/renderer-commands';
-import {
-  gpuiMenuBarStatusSessionFocusRoutingId,
-  normalizeGpuiMenuBarProjectActivation,
-  normalizeGpuiMenuBarSessionActivation,
-  normalizeGpuiStatusPetActivation,
-} from './helpers/status-indicators';
+import { normalizeGpuiMenuBarProjectActivation } from './helpers/status-indicators';
 import type {
   GpuiPendingNativeAppShotPromptInsertion,
   GpuiRendererCommandResolvedSession,
@@ -85,11 +76,7 @@ reports as a circular base type. `gpuiSidebarRuntimeAppShotAndMiscMethodsShapeCh
 at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
-  handleGpuiStatusPetActivation(payload: unknown): void;
   handleGpuiMenuBarProjectActivation(payload: unknown): void;
-  handleGpuiMenuBarSessionActivation(payload: unknown): Promise<void>;
-  handleGpuiCommandPaletteSessionFocus(payload: unknown): Promise<void>;
-  handleGpuiCommandPaletteRunSidebarCommand(payload: unknown): void;
   handleNativeAppShotCaptured(payload: unknown): Promise<void>;
   stageNativeAppShotInAgentSession(prompt: string): Promise<{ ok: true } | { description: string; ok: false }>;
   stageNativeAppShotInExistingAgentSession(session: SidebarSessionItem, prompt: string): Promise<boolean>;
@@ -157,75 +144,12 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
 }
 
 export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
-  handleGpuiStatusPetActivation(this: GpuiSidebarRuntime, payload: unknown): void {
-    const activation = normalizeGpuiStatusPetActivation(payload);
-    if (!activation) {
-      return;
-    }
-    /*
-    CDXC:StatusPet 2026-06-26-05:07:
-    Visible GPUI status activation, and later pet activation, must re-enter the sidebar runtime's existing focusSession route. Keep this as a fixed callback with one bounded session id so local focus stays local, remote focus uses the reviewed remote native action path, and Rust never creates or wakes unrelated sessions for indicator clicks.
-    */
-    void this.focusSession(activation.sessionId, {
-      sessionId: activation.sessionId,
-      type: 'focusSession',
-    });
-  },
-
   handleGpuiMenuBarProjectActivation(this: GpuiSidebarRuntime, payload: unknown): void {
     const activation = normalizeGpuiMenuBarProjectActivation(payload);
     if (!activation) {
       return;
     }
     void activateGpuiProject(this, activation.projectId);
-  },
-
-  async handleGpuiMenuBarSessionActivation(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
-    const activation = normalizeGpuiMenuBarSessionActivation(payload);
-    if (!activation) {
-      return;
-    }
-    /*
-    CDXC:StatusPet 2026-06-26-06:05:
-    Running Agents session rows should behave like sidebar session-card clicks. Normalize raw local gxserver ids into the existing project-scoped presentation id when needed, then reuse focusSession so local clicks update presentation focus and post WorkspaceTerminalFocus back to Rust for terminal selection/materialization.
-    */
-    const sessionId = gpuiMenuBarStatusSessionFocusRoutingId(activation.projectId, activation.sessionId);
-    await this.focusSession(sessionId, {
-      sessionId,
-      type: 'focusSession',
-    });
-  },
-
-  async handleGpuiCommandPaletteSessionFocus(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
-    /*
-    Command-palette current-session rows post {type:"focusSession"} from the
-    app-modal host window; Rust forwards only the bounded projected session id
-    here so palette selection reuses the same reviewed focusSession routing as
-    sidebar card clicks (local materialize/wake, remote-shaped ids included).
-    */
-    const sessionId = normalizeGpuiCommandPaletteSessionFocus(payload);
-    if (!sessionId) {
-      return;
-    }
-    await this.focusSession(sessionId, {
-      sessionId,
-      type: 'focusSession',
-    });
-  },
-
-  handleGpuiCommandPaletteRunSidebarCommand(this: GpuiSidebarRuntime, payload: unknown): void {
-    /*
-    Command-palette Action rows post {type:"runSidebarCommand"} from the
-    app-modal host window; Rust forwards only the selector (command id +
-    optional runMode). Execution resolves the trusted saved/HUD command and
-    goes through the same strict SidebarCommandAction bridge as sidebar-surface
-    Action clicks.
-    */
-    const selection = normalizeGpuiCommandPaletteRunSidebarCommand(payload);
-    if (!selection) {
-      return;
-    }
-    this.runSidebarCommand(selection.message.commandId, selection.message, selection.scope);
   },
 
   async handleNativeAppShotCaptured(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {

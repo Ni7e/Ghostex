@@ -674,20 +674,8 @@ export class GpuiSidebarRuntime {
     gpuiBridge.onResourcesSnapshotResult = (payload) => {
       this.handleResourcesSnapshotResult(payload);
     };
-    gpuiBridge.onStatusPetActivation = (payload) => {
-      this.handleGpuiStatusPetActivation(payload);
-    };
     gpuiBridge.onMenuBarProjectActivation = (payload) => {
       this.handleGpuiMenuBarProjectActivation(payload);
-    };
-    gpuiBridge.onMenuBarSessionActivation = (payload) => {
-      void this.handleGpuiMenuBarSessionActivation(payload);
-    };
-    gpuiBridge.onCommandPaletteSessionFocus = (payload) => {
-      void this.handleGpuiCommandPaletteSessionFocus(payload);
-    };
-    gpuiBridge.onCommandPaletteRunSidebarCommand = (payload) => {
-      this.handleGpuiCommandPaletteRunSidebarCommand(payload);
     };
     gpuiBridge.onStashedPromptSessionJump = (payload) => {
       void this.handleGpuiStashedPromptSessionJump(payload);
@@ -746,18 +734,6 @@ export class GpuiSidebarRuntime {
     for (const payload of pendingOsIntegrationCommands) {
       void this.handleGpuiOsIntegrationCommand(payload);
     }
-    const pendingStatusPetActivations = Array.isArray(gpuiBridge.pendingStatusPetActivations)
-      ? gpuiBridge.pendingStatusPetActivations.splice(0)
-      : [];
-    if (pendingStatusPetActivations.length > 0) {
-      /*
-      CDXC:StatusPet 2026-06-26-05:07:
-      GPUI status clicks, and a later pet slice using the same fixed shape, can arrive before the runtime installs callbacks. Drain only first-party activation payloads carrying bounded session ids, then route through focusSession; do not persist payloads or expose paths, titles, commands, URLs, tokens, terminal text, or a generic native event bus.
-      */
-      for (const payload of pendingStatusPetActivations) {
-        this.handleGpuiStatusPetActivation(payload);
-      }
-    }
     const pendingMenuBarProjectActivations = Array.isArray(gpuiBridge.pendingMenuBarProjectActivations)
       ? gpuiBridge.pendingMenuBarProjectActivations.splice(0)
       : [];
@@ -769,32 +745,6 @@ export class GpuiSidebarRuntime {
       for (const payload of pendingMenuBarProjectActivations) {
         this.handleGpuiMenuBarProjectActivation(payload);
       }
-    }
-    const pendingMenuBarSessionActivations = Array.isArray(gpuiBridge.pendingMenuBarSessionActivations)
-      ? gpuiBridge.pendingMenuBarSessionActivations.splice(0)
-      : [];
-    if (pendingMenuBarSessionActivations.length > 0) {
-      /*
-      CDXC:StatusPet 2026-06-26-06:05:
-      GPUI menu-bar session clicks use a fixed first-party payload with bounded project/session ids. Drain queued clicks into the existing focusSession path so local clicks still use WorkspaceTerminalFocus and remote-shaped ids stay within reviewed focus routing.
-      */
-      for (const payload of pendingMenuBarSessionActivations) {
-        void this.handleGpuiMenuBarSessionActivation(payload);
-      }
-    }
-    const pendingCommandPaletteSessionFocusRequests = Array.isArray(
-      gpuiBridge.pendingCommandPaletteSessionFocusRequests
-    )
-      ? gpuiBridge.pendingCommandPaletteSessionFocusRequests.splice(0)
-      : [];
-    for (const payload of pendingCommandPaletteSessionFocusRequests) {
-      void this.handleGpuiCommandPaletteSessionFocus(payload);
-    }
-    const pendingCommandPaletteRunSidebarCommands = Array.isArray(gpuiBridge.pendingCommandPaletteRunSidebarCommands)
-      ? gpuiBridge.pendingCommandPaletteRunSidebarCommands.splice(0)
-      : [];
-    for (const payload of pendingCommandPaletteRunSidebarCommands) {
-      this.handleGpuiCommandPaletteRunSidebarCommand(payload);
     }
     const pendingStashedPromptSessionJumps = Array.isArray(gpuiBridge.pendingStashedPromptSessionJumps)
       ? gpuiBridge.pendingStashedPromptSessionJumps.splice(0)
