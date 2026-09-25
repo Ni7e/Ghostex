@@ -74,8 +74,7 @@ impl ChatAppearance {
     /// User: the chat's menus and popovers (the model picker, the transcript's Copy menu, the composer's ⋯ menu and the like) take the same tinted colour as the sidebar's menus instead of a fixed grey, and are frosted glass while window glass is on. Their windows blur what is behind them, so the fill only thins.
     pub(crate) fn menu_surface(&self) -> Hsla {
         if crate::app::helpers::window_glass_active() {
-            self.menu
-                .opacity(crate::app::helpers::WINDOW_GLASS_MENU_ALPHA)
+            crate::app::helpers::frosted_menu_fill(self.menu)
         } else {
             self.menu
         }

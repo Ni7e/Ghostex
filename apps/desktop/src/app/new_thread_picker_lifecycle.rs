@@ -304,6 +304,9 @@ impl GhostexGpuiApp {
                 let picker = cx.new(|cx| {
                     let mut picker = GpuiNewThreadPickerWindow::new(config, host, window, cx);
                     picker.glass = window_glass_active();
+                    picker.frosted_fill = picker
+                        .glass
+                        .then(|| crate::app::helpers::frosted_menu_fill(picker.surface_color()));
                     picker
                 });
                 *picker_out.borrow_mut() = Some(picker.clone());

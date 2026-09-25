@@ -1571,7 +1571,15 @@ pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
     // CDXC:Theming 2026-09-23 DECISION: User: tooltips "dont fit the glass look". gpui-component's
     // tooltip paints `tokens.popover`, which kept the stock near-black, so it now takes the same
     // tinted menu colour as the app's menus.
-    theme.tokens.popover = titlebar_popup_menu_background().into();
+    // Under glass tooltips draw in the frosted tooltip window, which paints this token at the
+    // frosted alpha, so it takes the same lifted colour as the other frosted menus.
+    theme.tokens.popover = if window_glass_active() {
+        frosted_menu_fill(titlebar_popup_menu_background())
+            .opacity(1.0)
+            .into()
+    } else {
+        titlebar_popup_menu_background().into()
+    };
     theme.popover_foreground = titlebar_popup_menu_foreground();
     theme.border = titlebar_popup_menu_border_color();
     gpui_component::tooltip::set_frosted_tooltip_alpha(WINDOW_GLASS_MENU_ALPHA);

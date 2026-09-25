@@ -501,13 +501,28 @@ impl GhostexGpuiApp {
 }
 
 /// Fill coverage of a menu or popover window under glass; its own window blurs what is behind it.
-pub(crate) const WINDOW_GLASS_MENU_ALPHA: f32 = 0.62;
+pub(crate) const WINDOW_GLASS_MENU_ALPHA: f32 = 0.5;
 
-/// The fill of a menu or panel that has a window of its own (the header's dropdowns): thinned under
-/// glass, where that window blurs whatever is behind it.
+/// How much a dark menu colour is lifted toward white under glass, so the frost reads as a light
+/// pane over the blur instead of a dark hole.
+const WINDOW_GLASS_MENU_LIFT_DARK: f32 = 0.08;
+
+/// CDXC:Theming 2026-09-25 DECISION:
+/// User: a single frosted menu was "not looking glassy at all" (the theme's dark menu colour at 62% over a blurred dark window read as nearly solid). Every frosted menu and tooltip takes this one fill: in dark mode the menu colour is lifted a little toward white, and the fill covers half the blur, so the frost shows. Supersedes the plain 62% fill.
+pub(crate) fn frosted_menu_fill(color: Hsla) -> Hsla {
+    let lifted = if CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed) {
+        color
+    } else {
+        color.blend(gpui::white().opacity(WINDOW_GLASS_MENU_LIFT_DARK))
+    };
+    lifted.opacity(WINDOW_GLASS_MENU_ALPHA)
+}
+
+/// The fill of a menu or panel that has a window of its own (the header's dropdowns): the frosted
+/// menu fill under glass, where that window blurs whatever is behind it.
 pub(crate) fn popup_window_surface(color: Hsla) -> Hsla {
     if window_glass_active() {
-        color.opacity(WINDOW_GLASS_MENU_ALPHA)
+        frosted_menu_fill(color)
     } else {
         color
     }

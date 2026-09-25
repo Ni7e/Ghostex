@@ -22,8 +22,15 @@ pub(crate) type FrostedContent = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FrostedHostKind {
     Tooltip,
-    SidebarMenu,
+    /// One panel of the sidebar's menu: the menu itself at 0, each submenu stacked above it.
+    SidebarMenu(u8),
 }
+
+/// How many stacked sidebar menu panels get a window of their own; deeper ones share none.
+pub(crate) const SIDEBAR_MENU_HOST_LEVELS: u8 = 4;
+
+/// The corner radius of a sidebar menu panel's window (the panel's own 8px at 100% zoom).
+pub(crate) const SIDEBAR_MENU_HOST_RADIUS: f32 = 8.0;
 
 /// Whether menus and tooltips drawn inside the main window move into frosted host windows now.
 /// macOS only: a host's blur is limited to its content's frames, which only the macOS window
@@ -51,13 +58,20 @@ struct HostSlot {
 
 thread_local! {
     static TOOLTIP_HOST: RefCell<HostSlot> = RefCell::default();
-    static SIDEBAR_MENU_HOST: RefCell<HostSlot> = RefCell::default();
+    static SIDEBAR_MENU_HOSTS: RefCell<Vec<HostSlot>> = RefCell::default();
 }
 
 fn with_slot<R>(kind: FrostedHostKind, f: impl FnOnce(&mut HostSlot) -> R) -> R {
     match kind {
         FrostedHostKind::Tooltip => TOOLTIP_HOST.with(|slot| f(&mut slot.borrow_mut())),
-        FrostedHostKind::SidebarMenu => SIDEBAR_MENU_HOST.with(|slot| f(&mut slot.borrow_mut())),
+        FrostedHostKind::SidebarMenu(level) => SIDEBAR_MENU_HOSTS.with(|slots| {
+            let mut slots = slots.borrow_mut();
+            let level = usize::from(level);
+            if slots.len() <= level {
+                slots.resize_with(level + 1, HostSlot::default);
+            }
+            f(&mut slots[level])
+        }),
     }
 }
 
@@ -218,7 +232,15 @@ fn open_host(
             ..Default::default()
         },
         move |window, cx| {
-            window.set_frosted_surface(true);
+            match kind {
+                // A tooltip bubble sits inside margins, so its window's blur follows the bubble.
+                FrostedHostKind::Tooltip => window.set_frosted_surface(true),
+                // A menu panel fills its window exactly, the way a header dropdown does, so the
+                // window is simply rounded to the panel's corners.
+                FrostedHostKind::SidebarMenu(_) => {
+                    window.set_background_corner_radius(gpui::px(SIDEBAR_MENU_HOST_RADIUS))
+                }
+            }
             attach_host_window(window, parent_view, kind == FrostedHostKind::Tooltip);
             let observe = with_slot(kind, |slot| slot.observe.clone());
             cx.new(|cx| {

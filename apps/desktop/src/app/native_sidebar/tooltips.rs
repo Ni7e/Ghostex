@@ -81,7 +81,7 @@ fn sidebar_tooltip_sized(
     let frosted = window_glass_active_in(window)
         && crate::app::window::frosted_host::frosted_hosting_active();
     let background = if frosted {
-        menu.opacity(WINDOW_GLASS_MENU_ALPHA)
+        crate::app::helpers::frosted_menu_fill(menu)
     } else if window_glass_active_in(window) {
         menu.opacity(0.9)
     } else {
