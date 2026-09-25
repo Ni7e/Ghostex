@@ -183,6 +183,7 @@ pub mod agent_prompt_search_http;
 pub mod background_tasks;
 mod browser_tcp;
 mod close_after_done_runtime;
+mod open_conversation_http;
 pub mod commit_message_generation;
 pub mod http_endpoints;
 pub mod http_infra;
@@ -2295,6 +2296,15 @@ async fn route_http(
             &body_json,
             |_, db, params, server_id| search_presentation_sessions(db, server_id, params),
         ),
+        "/api/openConversation" => {
+            open_conversation_http::handle_open_conversation_http(
+                &state,
+                endpoint.path,
+                request_id,
+                body_json,
+            )
+            .await
+        }
         "/api/listPreviousSessions" => {
             let worker_state = state.clone();
             let worker_endpoint = endpoint.path.clone();

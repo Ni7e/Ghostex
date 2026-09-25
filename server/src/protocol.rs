@@ -480,6 +480,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         */
         | "/api/holdSessionsAwake"
         | "/api/toggleCloseAfterDone"
+        | "/api/openConversation"
         | "/api/sleepSession"
         | "/api/wakeSession"
         | "/api/startSessionProvider"
