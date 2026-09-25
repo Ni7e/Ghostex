@@ -518,31 +518,6 @@ impl GhostexGpuiApp {
         self.close_gpui_sidebar_command_run(&command_id, cx);
     }
 
-    pub(crate) fn receive_sidebar_ghostex_hotkey_action_payload(
-        &mut self,
-        payload: &str,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        /*
-        CDXC:CommandPalette 2026-06-27-08:17:
-        Shared SidebarApp and command-palette hotkey rows reach GPUI through the CEF sidebar runtime, not the native WKScriptMessage path. Parse only the fixed action-id selector and feed the existing Rust `runGhostexHotkeyAction` dispatcher so Open Commands Panel uses the shared open/focus/minimize route and focused-pane, Settings, and modal routes do not accept renderer-owned sessions, paths, commands, URLs, or launch metadata.
-        */
-        let Ok(action_id) = gpui_sidebar_ghostex_hotkey_action_from_json(payload) else {
-            return;
-        };
-        self.handle_gpui_app_modal_sidebar_command(
-            serde_json::json!({
-                "message": {
-                    "actionId": action_id,
-                    "type": "runGhostexHotkeyAction",
-                },
-            }),
-            window,
-            cx,
-        );
-    }
-
     pub(crate) fn land_quick_automations_active_project_on_automate_mode(
         &mut self,
         window: &mut Window,

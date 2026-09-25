@@ -100,7 +100,6 @@ pub enum SidebarBridgeEvent {
     NativeProjectPathAction(String),
     SidebarCommandAction(String),
     SidebarCommandRunEnd(String),
-    GhostexHotkeyAction(String),
     GxserverPresentationFocusState(String),
     CreateProjectAgent(String),
     CreateProjectTerminal(String),

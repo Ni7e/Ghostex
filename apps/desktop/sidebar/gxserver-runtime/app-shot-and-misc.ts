@@ -53,9 +53,6 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
     command: SidebarCommandButton,
     selectionMessage: Extract<SidebarToExtensionMessage, { type: 'runSidebarCommand' }>
   ): boolean;
-  postGhostexHotkeyAction(
-    originalMessage: Extract<SidebarToExtensionMessage, { type: 'runGhostexHotkeyAction' }>
-  ): boolean;
   postSidebarCommandRunEnd(commandId: string, originalMessage: SidebarToExtensionMessage): boolean;
   openAppModal(modal: 'firstLaunchSetup' | 'onboarding' | 'settings' | 'watchGhostexVideo'): void;
   savePinnedPrompt(message: Extract<SidebarToExtensionMessage, { type: 'savePinnedPrompt' }>): Promise<void>;
@@ -176,43 +173,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
       return true;
     } catch {
       this.handleUnsupportedSidebarMessage(selectionMessage);
-      return false;
-    }
-  },
-
-  postGhostexHotkeyAction(
-    this: GpuiSidebarRuntime,
-    originalMessage: Extract<SidebarToExtensionMessage, { type: 'runGhostexHotkeyAction' }>
-  ): boolean {
-    const bridge = window.ghostexGpui?.postGhostexHotkeyAction;
-    if (!bridge) {
-      this.handleUnsupportedSidebarMessage(originalMessage);
-      return false;
-    }
-    /*
-    CDXC:CommandPalette 2026-06-27-08:11:
-    Shared SidebarApp and Command Palette hotkey rows emit `runGhostexHotkeyAction` through the reused GPUI runtime, not directly to Rust. Forward only the fixed action-id selector so Open Commands Panel, focused-pane routes, Settings, and modal hotkeys share Rust's native dispatcher without renderer-owned session ids, paths, command text, URLs, or launch metadata.
-    */
-    if (
-      Object.keys(originalMessage).some((key) => key !== 'type' && key !== 'actionId') ||
-      typeof originalMessage.actionId !== 'string' ||
-      originalMessage.actionId.trim() === ''
-    ) {
-      this.handleUnsupportedSidebarMessage(originalMessage);
-      return false;
-    }
-    const payload = JSON.stringify({
-      actionId: originalMessage.actionId,
-      type: 'runGhostexHotkeyAction',
-    });
-    try {
-      if (!bridge(payload)) {
-        this.handleUnsupportedSidebarMessage(originalMessage);
-        return false;
-      }
-      return true;
-    } catch {
-      this.handleUnsupportedSidebarMessage(originalMessage);
       return false;
     }
   },

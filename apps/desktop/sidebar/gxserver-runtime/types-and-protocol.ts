@@ -153,7 +153,6 @@ export type GhostexGpuiSidebarBridge = {
   postCreateProjectAgent?: (payload: string) => boolean;
   postCreateProjectTerminal?: (payload: string) => boolean;
   postGxserverPresentationFocusState?: (payload: string) => boolean;
-  postGhostexHotkeyAction?: (payload: string) => boolean;
   postNativeProjectPathAction?: (payload: string) => boolean;
   postOpenBrowserUrl?: (payload: string) => boolean;
   postPetOverlayState?: (payload: string) => boolean;

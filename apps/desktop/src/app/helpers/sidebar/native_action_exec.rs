@@ -309,29 +309,6 @@ pub(crate) fn gpui_sidebar_command_run_end_from_json(text: &str) -> Result<Strin
     Ok(command_id)
 }
 
-pub(crate) fn gpui_sidebar_ghostex_hotkey_action_from_json(text: &str) -> Result<String, ()> {
-    /*
-    CDXC:CommandPalette 2026-06-27-08:17:
-    Command-palette hotkey payloads are selector authority only. Accept `type` plus a bounded non-empty `actionId`, then let the existing hotkey dispatcher decide support; reject renderer-owned command text, cwd/env, session ids, paths, URLs, launch metadata, generic IPC fields, and versioned action payloads before they can influence command-pane focus or modal routing.
-    */
-    let value = serde_json::from_str::<serde_json::Value>(text).map_err(|_| ())?;
-    let object = value.as_object().ok_or(())?;
-    if object
-        .keys()
-        .any(|key| !["type", "actionId"].contains(&key.as_str()))
-    {
-        return Err(());
-    }
-    if object.get("type").and_then(serde_json::Value::as_str) != Some("runGhostexHotkeyAction") {
-        return Err(());
-    }
-    let action_id = gpui_trimmed_json_string_field(object, "actionId")
-        .filter(|value| value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS)
-        .ok_or(())?
-        .to_string();
-    Ok(action_id)
-}
-
 pub(crate) fn execute_gpui_sidebar_native_project_path_action(
     message: GpuiSidebarNativeProjectPathActionMessage,
 ) -> Result<GpuiSidebarNativeProjectPathActionResult, String> {

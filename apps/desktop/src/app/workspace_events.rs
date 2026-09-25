@@ -428,9 +428,6 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::SidebarCommandRunEnd(payload) => {
                 self.receive_sidebar_command_run_end_payload(&payload, cx);
             }
-            cef::SidebarBridgeEvent::GhostexHotkeyAction(payload) => {
-                self.receive_sidebar_ghostex_hotkey_action_payload(&payload, window, cx);
-            }
             cef::SidebarBridgeEvent::SessionCompletionSound(payload) => {
                 self.receive_sidebar_session_completion_sound_payload(&payload, cx);
             }

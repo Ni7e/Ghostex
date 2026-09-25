@@ -13,7 +13,6 @@ pub(crate) enum SidebarBridgeEventKind {
     NativeProjectPathAction,
     SidebarCommandAction,
     SidebarCommandRunEnd,
-    GhostexHotkeyAction,
     GxserverPresentationFocusState,
     CreateProjectAgent,
     CreateProjectTerminal,
@@ -46,7 +45,6 @@ impl SidebarBridgeEventKind {
             SidebarBridgeFunctionId::NativeProjectPathAction => Self::NativeProjectPathAction,
             SidebarBridgeFunctionId::SidebarCommandAction => Self::SidebarCommandAction,
             SidebarBridgeFunctionId::SidebarCommandRunEnd => Self::SidebarCommandRunEnd,
-            SidebarBridgeFunctionId::GhostexHotkeyAction => Self::GhostexHotkeyAction,
             SidebarBridgeFunctionId::GxserverPresentationFocusState => {
                 Self::GxserverPresentationFocusState
             }
@@ -196,7 +194,6 @@ pub enum SidebarBridgeEvent {
     NativeProjectPathAction(String),
     SidebarCommandAction(String),
     SidebarCommandRunEnd(String),
-    GhostexHotkeyAction(String),
     GxserverPresentationFocusState(String),
     CreateProjectAgent(String),
     CreateProjectTerminal(String),
@@ -261,7 +258,6 @@ impl SidebarBridgeEventKind {
             Self::NativeProjectPathAction => SidebarBridgeEvent::NativeProjectPathAction(payload),
             Self::SidebarCommandAction => SidebarBridgeEvent::SidebarCommandAction(payload),
             Self::SidebarCommandRunEnd => SidebarBridgeEvent::SidebarCommandRunEnd(payload),
-            Self::GhostexHotkeyAction => SidebarBridgeEvent::GhostexHotkeyAction(payload),
             Self::GxserverPresentationFocusState => {
                 SidebarBridgeEvent::GxserverPresentationFocusState(payload)
             }
