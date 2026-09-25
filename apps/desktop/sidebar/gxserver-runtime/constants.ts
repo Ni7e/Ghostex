@@ -39,7 +39,6 @@ remote machine. Stale deltas arrive in bursts — one per changed row — and ea
 refetch is a full presentation read across the SSH tunnel.
 */
 export const GPUI_STALE_REMOTE_PRESENTATION_REFRESH_COOLDOWN_MS = 3 * 1000;
-export const GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS = 60 * 1000;
 export const GPUI_PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS = 15 * 1000;
 /*
 CDXC:Git 2026-08-16:
@@ -87,7 +86,6 @@ export const GPUI_MUTATING_GIT_ACTIONS: ReadonlySet<string> =
     "pushSetUpstream",
     "pushSetUpstreamCurrent",
   ]);
-export const GPUI_AUTO_SLEEP_MINUTE_MS = 60 * 1000;
 export const GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS = 400;
 export const GPUI_WORKSPACE_GROUPS_SERVER_SYNC_RETRY_DELAY_MS = 5000;
 export const GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS = 512;

@@ -165,7 +165,6 @@ impl GhostexGpuiApp {
                 browser_tabs_project_epoch: 0,
                 browser_tabs_runtime_key: 0,
                 sidebar_browser_tabs_snapshot: String::new(),
-                sidebar_displayed_sessions_snapshot: String::new(),
                 pending_export_transcript_reveal_path: None,
                 latest_sidebar_project_snapshot: None,
                 navigation_history_state: navigation_history::GpuiNavigationHistoryState::default(),

@@ -1805,53 +1805,6 @@ impl GhostexGpuiApp {
         true
     }
 
-    pub(crate) fn refresh_gpui_sidebar_displayed_sessions_if_changed(
-        &mut self,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        /*
-        CDXC:SessionSleep 2026-08-20:
-        Auto Sleep ("Sleep idle agent sessions") runs in the sidebar runtime,
-        which only knows which rows it last saw selected. That is not the same
-        thing as what this shell is rendering: a session switched to Chat view
-        parks its terminal behind the chat surface, and a gxserver reconnect
-        drops the runtime's local focus/visible sets entirely. Either way an
-        idle agent the user is sitting in front of looked retirable.
-
-        Rust is the only party that knows what is on screen, so it publishes
-        that set (the Agents column's rendered leaves, chat-mode sessions
-        included, because the tab still owns its pane) and the sweep protects it. The
-        bridge carries bounded local gxserver session ids only: no titles,
-        paths, commands, terminal output, or project bodies.
-        */
-        let session_ids = self
-            .gpui_sidebar_visible_local_session_ids()
-            .into_iter()
-            .filter(|session_id| {
-                gpui_sidebar_local_gxserver_session_id_allowed(session_id.as_str())
-            })
-            .collect::<Vec<_>>();
-        let snapshot = serde_json::Value::Array(
-            session_ids
-                .into_iter()
-                .map(serde_json::Value::String)
-                .collect(),
-        )
-        .to_string();
-        if self.sidebar_displayed_sessions_snapshot == snapshot {
-            return false;
-        }
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let script = gpui_sidebar_displayed_sessions_script(&snapshot);
-        if !sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script)) {
-            return false;
-        }
-        self.sidebar_displayed_sessions_snapshot = snapshot;
-        true
-    }
-
     pub(crate) fn dispatch_gpui_sidebar_command_pane_sessions(
         &mut self,
         sessions: &serde_json::Value,

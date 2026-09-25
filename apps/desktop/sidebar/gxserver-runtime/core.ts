@@ -36,7 +36,7 @@ import {
   currentGpuiRuntimeSettings,
   hasSameGpuiRuntimeSettings,
 } from './helpers/bootstrap';
-import { normalizeGpuiBrowserTabs, normalizeGpuiDisplayedWorkspaceSessionIds } from './helpers/browser-tabs';
+import { normalizeGpuiBrowserTabs } from './helpers/browser-tabs';
 import { readStoredGpuiCloseAfterDoneSessionIds } from './helpers/close-after-done';
 import {
   createGpuiSidebarHudState,
@@ -316,8 +316,6 @@ export class GpuiSidebarRuntime {
     scopeId: NAVIGATION_HISTORY_SCOPE_GPUI,
   });
   appUserData: GxserverAppUserData = createEmptyGpuiAppUserData();
-  autoSleepMonitorIntervalId: number | undefined;
-  autoSleepMonitorRunning = false;
   /**
    * Escalating presentation-stream recovery state. `AcknowledgedAt` is when the
    * daemon last answered a `subscribePresentation` (with a snapshot or with
@@ -340,7 +338,6 @@ export class GpuiSidebarRuntime {
   closeAfterDoneCountdownTickerId: number | undefined;
   closeAfterDoneTimersBySessionId = new Map<string, GpuiCloseAfterDoneTimer>();
   commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
-  displayedWorkspaceSessionIds: string[] = [];
   workspaceSessionDelayedSends = new Map<string, GpuiWorkspaceSessionDelayedSendSummary>();
   domainProjects: GxserverProjectDomainState[] = [];
   focusedSessionId: string | undefined;
@@ -502,7 +499,6 @@ export class GpuiSidebarRuntime {
     if (bootstrap) {
       this.startFromBootstrap(bootstrap);
     }
-    this.startGpuiAutoSleepMonitor();
     this.startGitPollingDriver();
     window.setTimeout(() => this.connectSavedRemoteMachinesOnStartup(), 0);
   }
@@ -585,23 +581,6 @@ export class GpuiSidebarRuntime {
     };
     gpuiBridge.onCommandPaneSessionsChanged = applyCommandPaneSessions;
     applyCommandPaneSessions(gpuiBridge.commandPaneSessions);
-    const applyDisplayedWorkspaceSessionIds = (sessionIds: readonly string[] | undefined) => {
-      /*
-      CDXC:SessionSleep 2026-08-20:
-      Rust owns what is actually on screen. This runtime's own visible/focused
-      sets are a click-history projection: they cannot see that a session's
-      terminal is parked behind its chat surface, and they are dropped whenever
-      gxserver goes away, so a session the user was sitting in front of could be
-      retired by the "Sleep idle agent sessions" sweep. Cache the ids the same
-      way the command-pane bridge does so a restored tab hydrates before React
-      installs listeners.
-      */
-      const next = normalizeGpuiDisplayedWorkspaceSessionIds(sessionIds);
-      gpuiBridge.displayedWorkspaceSessionIds = next;
-      this.displayedWorkspaceSessionIds = next;
-    };
-    gpuiBridge.onDisplayedWorkspaceSessionIdsChanged = applyDisplayedWorkspaceSessionIds;
-    applyDisplayedWorkspaceSessionIds(gpuiBridge.displayedWorkspaceSessionIds);
     const applyWorkspaceSessionDelayedSends = (
       sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[] | undefined
     ) => {
@@ -790,7 +769,6 @@ export class GpuiSidebarRuntime {
       this.publishHudPatch();
       this.postGpuiStatusPetState();
       this.postActiveProjectContext();
-      void this.runGpuiAutoSleepMonitor('settings-change');
     };
     gpuiBridge.onGxserverBootstrapChanged = (bootstrap) => {
       this.applyGxserverBootstrapChanged(bootstrap);

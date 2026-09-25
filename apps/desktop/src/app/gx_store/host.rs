@@ -162,6 +162,7 @@ pub(crate) struct GxStoreHost {
     /// here rather than carried from the old projection's publish, because the create is the
     /// store's now and the publish would not know about it.
     pub(super) pending_collection_rename: Option<(String, u64)>,
+    pub(crate) shown_sessions: super::terminal_lifecycle::shown_sessions::ShownSessionsHost,
     #[cfg(target_os = "windows")]
     pub(crate) terminal_title_settle:
         super::terminal_lifecycle::terminal_events::TerminalTitleSettle,

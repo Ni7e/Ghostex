@@ -49,7 +49,7 @@ pub(crate) async fn handle_zmx_lifecycle_http(
     }
 }
 
-fn dispatch_zmx_lifecycle_http_blocking(
+pub(crate) fn dispatch_zmx_lifecycle_http_blocking(
     state: &AppState,
     endpoint_path: String,
     request_id: String,

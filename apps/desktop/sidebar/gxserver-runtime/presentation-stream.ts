@@ -325,7 +325,6 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     this.publishPresentation(kind);
     this.notifyNativeGxserverPresentationReady();
     if (kind === 'hydrate') {
-      void this.runGpuiAutoSleepMonitor('startup');
       this.autoMaterializeStartupFocusedSession();
     }
   },

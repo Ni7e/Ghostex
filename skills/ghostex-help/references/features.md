@@ -503,7 +503,10 @@ lists every session that shares the earlier history, including the thread you
 forked away from, and switches to the one you pick; a stopped branch is resumed
 when you open it.
 
-- Sleeping frees RAM; Auto Sleep does it after idle minutes; Resources in the
+- Sleeping frees RAM; Auto Sleep does it after idle minutes. Auto Sleep runs
+  on the computer that hosts the sessions, so it keeps working while the app
+  window is closed, and it never sleeps a session a Ghostex window or the phone
+  app is showing. Resources in the
   header's ⋯ menu sleeps many at once and shows CPU and RAM per session. Clean RAM
   copies a diagnosis prompt; paste it into an agent session to reduce RAM use.
   Sleeping sidebar sessions keep their normal title color and show a dimmer

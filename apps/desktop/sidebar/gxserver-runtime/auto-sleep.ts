@@ -5,15 +5,10 @@ changed. See `core.ts` for how the runtime's methods are re-attached.
 */
 import { runGpuiSidebarBulkSleepPaced } from '../bulk-sleep-pacing';
 import { getGpuiWorkspaceSessionSubgroups, parseGpuiWorkspaceSessionSubgroupId } from '../workspace-session-groups';
-import { GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS, GPUI_QUICK_AUTOMATIONS_PROJECT_ID } from './constants';
+import { GPUI_QUICK_AUTOMATIONS_PROJECT_ID } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import type { PreferredAgentInterface } from '@/packages/shared/ghostex-settings';
-import {
-  createGpuiAutoSleepAgentSessionIds,
-  focusMovedElsewhereDuringWake,
-  gxserverSleepWasDeclined,
-} from './helpers/auto-sleep';
-import { createGpuiSidebarSettings } from './helpers/bootstrap';
+import { focusMovedElsewhereDuringWake, gxserverSleepWasDeclined } from './helpers/auto-sleep';
 import { gpuiBrowserSidebarSessionId } from './helpers/browser-tabs';
 import { isGpuiInactiveProjectPresentationSession } from './helpers/close-after-done';
 import {
@@ -40,8 +35,6 @@ reports as a circular base type. `gpuiSidebarRuntimeAutoSleepMethodsShapeCheck`
 at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeAutoSleepMethods {
-  startGpuiAutoSleepMonitor(): void;
-  runGpuiAutoSleepMonitor(_source: 'interval' | 'settings-change' | 'startup'): Promise<void>;
   setGroupSleeping(groupId: string, sleeping: boolean): Promise<void>;
   setSessionsSleeping(sessionIds: readonly string[], sleeping: boolean): Promise<void>;
   setSessionSleeping(
@@ -62,65 +55,6 @@ export interface GpuiSidebarRuntimeAutoSleepMethods {
 }
 
 export const gpuiSidebarRuntimeAutoSleepMethods = {
-  startGpuiAutoSleepMonitor(this: GpuiSidebarRuntime): void {
-    if (this.autoSleepMonitorIntervalId !== undefined) {
-      return;
-    }
-    /*
-    CDXC:SessionSleep 2026-06-27-01:24:
-    GPUI owns only the SidebarApp/gxserver runtime policy loop for agent terminal Auto Sleep. Run a small idempotent monitor from the runtime lifecycle, use the normalized shared settings snapshot, and route every sleep through the existing gxserver session lifecycle path instead of adding Browser, project-editor, native-pane, or renderer-local sleep behavior.
-    */
-    this.autoSleepMonitorIntervalId = window.setInterval(() => {
-      void this.runGpuiAutoSleepMonitor('interval');
-    }, GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS);
-    void this.runGpuiAutoSleepMonitor('startup');
-  },
-
-  async runGpuiAutoSleepMonitor(
-    this: GpuiSidebarRuntime,
-    _source: 'interval' | 'settings-change' | 'startup'
-  ): Promise<void> {
-    if (this.autoSleepMonitorRunning) {
-      return;
-    }
-    const settings = createGpuiSidebarSettings(this.runtimeSettings);
-    if (settings.autoSleepAgentIdleMinutes === 0 || !this.presentation) {
-      return;
-    }
-    const sessionIdsToSleep = createGpuiAutoSleepAgentSessionIds({
-      activeProjectId: this.activeProjectId,
-      commandPaneSessions: this.commandPaneSessions,
-      delayedSendSessionIds: [...this.workspaceSessionDelayedSends.keys()],
-      displayedWorkspaceSessionIds: this.displayedWorkspaceSessionIds,
-      focusedSessionId: this.focusedSessionId,
-      groups: this.latestGroups,
-      nowMs: Date.now(),
-      presentation: this.presentation,
-      settings,
-    });
-    if (sessionIdsToSleep.length === 0) {
-      return;
-    }
-    this.autoSleepMonitorRunning = true;
-    try {
-      /*
-      CDXC:SessionSleep 2026-06-27-02:05:
-      Auto Sleep must match native bulk sleep pacing: eligible agent sessions sleep one at a time with a 350 ms gap so gxserver and terminal teardown are not hit concurrently. Use the shared aggregate-count helper and ignore its private-data-free result because monitor progress is already reflected by gxserver presentation updates.
-      */
-      await runGpuiSidebarBulkSleepPaced(sessionIdsToSleep, async (sessionId) => {
-        /*
-        CDXC:KeepAwake 2026-08-19:
-        The sweep marks itself automatic so gxserver can decline it for a session
-        another client (Ghostex mobile) is attached to. This client cannot see
-        those attachments, and the daemon can.
-        */
-        await this.setSessionSleeping(sessionId, true, { automatic: true });
-      });
-    } finally {
-      this.autoSleepMonitorRunning = false;
-    }
-  },
-
   /*
   The four project-scoped payloads below (`setGroupSleeping`,
   `collectInactiveProjectSessionIds` for Sleep Inactive and Close Inactive, and

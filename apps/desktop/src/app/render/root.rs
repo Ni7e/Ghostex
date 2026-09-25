@@ -213,9 +213,9 @@ impl Render for GhostexGpuiApp {
         );
         self.sample_panel_motion(window, cx);
         self.refresh_gpui_sidebar_browser_tabs_if_changed(cx);
-        // The displayed set crosses the bridge to the sidebar runtime; while the selection is still moving it would do so once per tab step. The settle repaints, so the set is reported for the tab the user landed on.
+        // The shown sessions are reported to gxserver's Auto Sleep; while the selection is still moving that would happen once per tab step. The settle repaints, so the set is reported for the tab the user landed on.
         if !self.gx_store_selection_is_settling() {
-            self.refresh_gpui_sidebar_displayed_sessions_if_changed(cx);
+            self.gx_store_report_shown_sessions(cx);
         }
         self.prepare_focus_bounds_for_render(window.scale_factor(), cx);
         #[cfg(target_os = "macos")]

@@ -140,7 +140,6 @@ pub struct GhostexGpuiApp {
     otherwise decides visibility from its own click history, which cannot see a
     parked terminal behind a chat surface and is wiped on a daemon reconnect.
     */
-    pub(crate) sidebar_displayed_sessions_snapshot: String,
     /*
     CDXC:TranscriptExport 2026-08-20:
     The path of the markdown file the open Export Transcript result dialog is

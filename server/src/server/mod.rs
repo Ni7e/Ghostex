@@ -188,6 +188,7 @@ pub mod http_infra;
 pub mod presentation_delta;
 mod project_docs_http;
 pub mod project_paths;
+mod session_auto_sleep_sweep;
 pub mod session_state_sync;
 pub mod telemetry_http;
 pub mod telemetry_tasks;
@@ -578,6 +579,7 @@ pub async fn run_gxserver_foreground(
     */
     let _ = crate::session_chat_queue::recover_session_chat_queue_after_restart(&paths);
     crate::accounts::recovery::start(state.clone());
+    session_auto_sleep_sweep::start_session_auto_sleep_sweep(state.clone());
     /*
     CDXC:SessionChat 2026-08-21:
     The queue scheduler is built HERE rather than beside the other runtimes

@@ -118,12 +118,6 @@ pub(crate) fn gpui_sidebar_agents_delayed_sends_script(sessions: &serde_json::Va
     )
 }
 
-pub(crate) fn gpui_sidebar_displayed_sessions_script(session_ids_json: &str) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};bridge.displayedWorkspaceSessionIds={session_ids_json};if(typeof bridge.onDisplayedWorkspaceSessionIdsChanged==='function'){{bridge.onDisplayedWorkspaceSessionIdsChanged(bridge.displayedWorkspaceSessionIds);}}}})(); undefined;"
-    )
-}
-
 pub(crate) fn gpui_sidebar_browser_tabs_script(tabs_json: &str) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};bridge.browserTabs={tabs_json};if(typeof bridge.onBrowserTabsChanged==='function'){{bridge.onBrowserTabsChanged(bridge.browserTabs);}}}})(); undefined;"

@@ -152,8 +152,6 @@ export type GhostexGpuiSidebarBridge = {
    * or chat surface alike. Auto Sleep protects these instead of guessing
    * visibility from the rows this runtime last saw selected.
    */
-  displayedWorkspaceSessionIds?: readonly string[];
-  onDisplayedWorkspaceSessionIdsChanged?: (sessionIds: readonly string[]) => void;
   workspaceSessionDelayedSends?: readonly GpuiWorkspaceSessionDelayedSendSummary[];
   onBrowserTabsChanged?: (tabs: readonly GpuiBrowserTabSummary[]) => void;
   /**
