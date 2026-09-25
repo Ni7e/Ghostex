@@ -146,6 +146,9 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_action(&command, cx) {
             return;
         }
+        if self.gx_store_run_sidebar_more_menu(&command, cx) {
+            return;
+        }
         // Sleep and wake call the daemon from here, so the command must not also reach the old
         // runtime: it would make the same call a second time (gx_store/sidebar_lifecycle.rs).
         if self.gx_store_run_sidebar_lifecycle(&command, cx) {

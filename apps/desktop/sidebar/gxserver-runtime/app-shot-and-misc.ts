@@ -39,7 +39,6 @@ import { normalizeNonEmptyString, readGpuiRecordString } from './helpers/records
 import {
   createGpuiRemotePresentationGroupId,
   createGpuiRemotePresentationProjectId,
-  parseGpuiRemotePresentationGroupId,
   parseGpuiRemotePresentationProjectId,
   parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
@@ -132,24 +131,6 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
     }
   ): void;
   postSidebarActionToast(level: AppToastLevel, title: string, options?: { description?: string }): void;
-  copyWorkspaceProjectRemoteUrl(
-    message: Extract<SidebarToExtensionMessage, { type: 'copyWorkspaceProjectRemoteUrl' }>
-  ): void;
-  postProjectPathActionForGroup(
-    action: Extract<
-      GpuiSidebarNativeProjectPathAction,
-      'copyWorkspaceProjectPath' | 'openWorkspaceProjectInFinder' | 'openWorkspaceProjectInIde'
-    >,
-    groupId: string,
-    originalMessage: SidebarToExtensionMessage
-  ): void;
-  postActiveProjectPathAction(
-    action: Extract<
-      GpuiSidebarNativeProjectPathAction,
-      'openActiveWorkspaceProjectInFinder' | 'openActiveWorkspaceProjectInVscode' | 'openActiveWorkspaceProjectInZed'
-    >,
-    originalMessage: SidebarToExtensionMessage
-  ): void;
   postNativeProjectPathAction(
     action: GpuiSidebarNativeProjectPathAction,
     projectId: string,
@@ -170,32 +151,12 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
   ): boolean;
   postSidebarCommandRunEnd(commandId: string, originalMessage: SidebarToExtensionMessage): boolean;
   saveSidebarSettingsPatch(message: Extract<SidebarToExtensionMessage, { type: 'updateSettingsPatch' }>): void;
-  openExternalUrl(message: Extract<SidebarToExtensionMessage, { type: 'openExternalUrl' }>): void;
   openAppModal(modal: 'firstLaunchSetup' | 'onboarding' | 'settings' | 'watchGhostexVideo'): void;
   savePinnedPrompt(message: Extract<SidebarToExtensionMessage, { type: 'savePinnedPrompt' }>): Promise<void>;
   publishAppUserDataHydrate(): void;
 }
 
 export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
-  copyWorkspaceProjectRemoteUrl(
-    this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'copyWorkspaceProjectRemoteUrl' }>
-  ): void {
-    const remoteUrl = normalizeNonEmptyString(message.remoteUrl);
-    if (!remoteUrl) {
-      this.handleUnsupportedSidebarMessage(message);
-      return;
-    }
-    try {
-      postAppModalHostMessage(
-        { detailsText: remoteUrl, type: 'copySessionDetails' },
-        'GPUISidebarActions:copyRemoteUrl'
-      );
-    } catch {
-      this.handleUnsupportedSidebarMessage(message);
-    }
-  },
-
   handleGpuiStatusPetActivation(this: GpuiSidebarRuntime, payload: unknown): void {
     const activation = normalizeGpuiStatusPetActivation(payload);
     if (!activation) {
@@ -962,72 +923,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
     }
   },
 
-  postProjectPathActionForGroup(
-    this: GpuiSidebarRuntime,
-    action: Extract<
-      GpuiSidebarNativeProjectPathAction,
-      'copyWorkspaceProjectPath' | 'openWorkspaceProjectInFinder' | 'openWorkspaceProjectInIde'
-    >,
-    groupId: string,
-    originalMessage: SidebarToExtensionMessage
-  ): void {
-    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
-    if (remoteGroup) {
-      if (action === 'copyWorkspaceProjectPath') {
-        this.postRemoteProjectNativeAction('copyRemoteProjectPath', remoteGroup, originalMessage);
-        return;
-      }
-      if (action === 'openWorkspaceProjectInIde') {
-        this.postRemoteProjectNativeAction('openRemoteWorkspaceProjectInIde', remoteGroup, originalMessage);
-        return;
-      }
-      this.postRemoteToast('warning', 'Remote project open unavailable', {
-        description: 'Remote project locations cannot be opened in the local file manager.',
-      });
-      return;
-    }
-    const projectId = this.resolveProjectIdForGroup(groupId);
-    if (!projectId) {
-      this.handleUnsupportedSidebarMessage(originalMessage);
-      return;
-    }
-    this.postNativeProjectPathAction(action, projectId, originalMessage);
-  },
-
-  postActiveProjectPathAction(
-    this: GpuiSidebarRuntime,
-    action: Extract<
-      GpuiSidebarNativeProjectPathAction,
-      'openActiveWorkspaceProjectInFinder' | 'openActiveWorkspaceProjectInVscode' | 'openActiveWorkspaceProjectInZed'
-    >,
-    originalMessage: SidebarToExtensionMessage
-  ): void {
-    const remoteGroup = this.activeGroupId ? parseGpuiRemotePresentationGroupId(this.activeGroupId) : undefined;
-    if (remoteGroup) {
-      if (action === 'openActiveWorkspaceProjectInVscode') {
-        this.postRemoteProjectNativeAction('openRemoteWorkspaceProjectInVscode', remoteGroup, originalMessage);
-        return;
-      }
-      if (action === 'openActiveWorkspaceProjectInZed') {
-        this.postRemoteProjectNativeAction('openRemoteWorkspaceProjectInZed', remoteGroup, originalMessage);
-        return;
-      }
-      this.postRemoteToast('warning', 'Remote project open unavailable', {
-        description:
-          action === 'openActiveWorkspaceProjectInFinder'
-            ? 'Remote project locations cannot be opened in the local file manager.'
-            : 'That editor is not supported for GPUI remote project opens.',
-      });
-      return;
-    }
-    const projectId = this.activeProjectId;
-    if (!projectId || !this.domainProjectById(projectId)) {
-      this.handleUnsupportedSidebarMessage(originalMessage);
-      return;
-    }
-    this.postNativeProjectPathAction(action, projectId, originalMessage);
-  },
-
   postNativeProjectPathAction(
     this: GpuiSidebarRuntime,
     action: GpuiSidebarNativeProjectPathAction,
@@ -1211,26 +1106,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
     */
     try {
       postAppModalHostMessage({ message, type: 'sidebarCommand' }, 'GPUISidebarActions:updateSettingsPatch');
-    } catch {
-      this.handleUnsupportedSidebarMessage(message);
-    }
-  },
-
-  openExternalUrl(
-    this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'openExternalUrl' }>
-  ): void {
-    /*
-    CDXC:Sidebar 2026-08-07:
-    The shared sidebar's external links must enter the same native command
-    route as Settings and first-launch links. The GPUI sidebar adapter used to
-    drop openExternalUrl as unsupported after the React click had already
-    closed the menu, so Join Discord appeared inert. Forward the typed command
-    through the existing app-modal host bridge; Rust remains responsible for
-    validating and opening the http/https URL.
-    */
-    try {
-      postAppModalHostMessage({ message, type: 'sidebarCommand' }, 'GPUISidebarActions:openExternalUrl');
     } catch {
       this.handleUnsupportedSidebarMessage(message);
     }

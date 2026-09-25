@@ -126,7 +126,11 @@ impl GhostexGpuiApp {
             project_commands: hud
                 .map(|hud| commands_by_project(&hud["commandsByProject"]))
                 .unwrap_or_default(),
-            keep_awake_minutes: self.gx_store.menu_host.keep_awake_minutes,
+            // The Keep Awake period this app is running, which the More menu ticks.
+            keep_awake_minutes: self
+                .keep_awake_runtime
+                .as_ref()
+                .map(|runtime| runtime.duration_minutes.minutes() as i64),
             machine_connected,
         }
     }

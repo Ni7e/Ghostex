@@ -1379,9 +1379,6 @@ export class GpuiSidebarRuntime {
       case 'promptRenameWorktreeForGroup':
         await this.promptRenameWorktreeForGroup(message.groupId);
         return;
-      case 'openExternalUrl':
-        this.openExternalUrl(message);
-        return;
       case 'reconnectRemoteMachine':
         this.reconnectRemoteMachine(message.remoteMachineId, message.installApproved === true);
         return;
@@ -1390,18 +1387,6 @@ export class GpuiSidebarRuntime {
         return;
       case 'closeWorkspaceProjectForGroup':
         await this.closeProjectForGroup(message.groupId, message.successorSessionId);
-        return;
-      case 'copyWorkspaceProjectPathForGroup':
-        this.postProjectPathActionForGroup('copyWorkspaceProjectPath', message.groupId, message);
-        return;
-      case 'copyWorkspaceProjectRemoteUrl':
-        this.copyWorkspaceProjectRemoteUrl(message);
-        return;
-      case 'openWorkspaceProjectInFinderForGroup':
-        this.postProjectPathActionForGroup('openWorkspaceProjectInFinder', message.groupId, message);
-        return;
-      case 'openWorkspaceProjectInIdeForGroup':
-        this.postProjectPathActionForGroup('openWorkspaceProjectInIde', message.groupId, message);
         return;
       case 'removeWorkspaceProjectForGroup':
         await this.removeProjectForGroup(message.groupId);
