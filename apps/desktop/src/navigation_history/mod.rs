@@ -47,7 +47,7 @@ const NAVIGATION_ICON_BACK: &str = "titlebar/chevron-left.svg";
 const NAVIGATION_ICON_FORWARD: &str = "titlebar/chevron-right.svg";
 
 /// Availability only. The arrows carry no hover tooltip, so the destination
-/// labels the daemon also answers with are deliberately not read here — two
+/// labels the daemon also answers with are deliberately not read here: two
 /// arrows beside the project name do not need a hover card to explain themselves.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct GpuiNavigationHistoryState {
