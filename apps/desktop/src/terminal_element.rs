@@ -103,19 +103,20 @@ gpui::actions!(
 
 pub(crate) const TERMINAL_KEY_CONTEXT: &str = "GhostexGpuiTerminal";
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
-/// How long the previous frame may stand in for a displayed zmx viewer after a
-/// resize-and-claim. The hold ends once PTY output has been quiet for
-/// `ZMX_REFLOW_QUIET` — merging the daemon's post-claim dump AND the agent
-/// TUI's SIGWINCH redraw into one paint — or at `ZMX_REFLOW_CAP` at the
-/// latest. The quiet window must outlast the gap between the daemon's dump
-/// and the TUI's own redraw (the dump alone shows the daemon's ghostty reflow
-/// of the old width, where long border lines wrap), AND the workarea's double
-/// layout pass on a session switch: the pane lays the incoming session out at
-/// one height first and settles to its final height ~150ms later, and each
-/// layout runs the full claim-dump-redraw pipeline. A hold that settles
-/// between the two passes paints the first pass's frame — the garbage frame.
+/// How long a displayed zmx viewer holds its frame after a resize-and-claim.
+/// The hold ends once PTY output has been quiet for `ZMX_REFLOW_QUIET`, so the
+/// daemon's post-claim dump and the agent TUI's SIGWINCH redraw land in one
+/// paint, and at `ZMX_REFLOW_CAP` after the last claim at the latest. The quiet
+/// window must outlast the gap between the dump and the TUI's redraw (the dump
+/// alone is the daemon's reflow of the old width, where long border lines
+/// wrap) and the workarea's double layout pass on a session switch, where the
+/// pane settles to its final height about 150ms after its first layout and
+/// each layout claims again.
 const ZMX_REFLOW_QUIET: Duration = Duration::from_millis(250);
 const ZMX_REFLOW_CAP: Duration = Duration::from_millis(400);
+/// Longest a synchronized-output update (DECSET 2026) may defer painting, so a
+/// producer that never sends the closing reset cannot freeze the view.
+const SYNCHRONIZED_OUTPUT_TIMEOUT: Duration = Duration::from_millis(300);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 5.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 24.0;
 /// Extra pointer room beside the track that keeps a revealed bar up while the
@@ -586,6 +587,23 @@ pub struct TerminalLayout {
     scrollbar: Option<ScrollbarLayout>,
 }
 
+impl TerminalLayout {
+    /// A layout that paints only the pane background: no cells, cursor or overlays.
+    fn background_only(metrics: CellMetrics, background: Hsla) -> Self {
+        Self {
+            metrics,
+            background,
+            rows: Vec::new(),
+            selection_spans: Vec::new(),
+            search_spans: Vec::new(),
+            link_underline: None,
+            cursor: None,
+            marked_text: None,
+            scrollbar: None,
+        }
+    }
+}
+
 pub type TerminalContextMenuHandler = Box<dyn Fn(Point<Pixels>, bool, &mut Window, &mut App)>;
 
 /// Called after this view writes the clipboard for the user (copy on select,
@@ -593,12 +611,31 @@ pub type TerminalContextMenuHandler = Box<dyn Fn(Point<Pixels>, bool, &mut Windo
 /// sound here, and the standalone demo binary installs nothing.
 pub type TerminalCopyHandler = Box<dyn Fn(&mut App)>;
 
-/// The armed reflow hold of a displayed zmx viewer: which arm this is, when it
-/// must end regardless of output, and when the last PTY output landed.
+/// The armed reflow hold of a displayed zmx viewer (`TerminalView::zmx_reflow_hold`).
 struct ZmxReflowHold {
+    /// Identifies this hold to its settle timer, so a timer armed for an
+    /// earlier hold does nothing.
     token: u64,
+    /// When the hold ends regardless of output: `ZMX_REFLOW_CAP` after the
+    /// latest claim.
     deadline: web_time::Instant,
-    last_output: Option<web_time::Instant>,
+    /// The latest claim or PTY output; the hold settles `ZMX_REFLOW_QUIET`
+    /// after it.
+    last_activity: web_time::Instant,
+    /// Paint only the background while held: the viewer has no frame that
+    /// shows current content at the grid last on screen (a new viewer, output
+    /// that arrived while parked, or a frame taken at the chat width).
+    blank: bool,
+}
+
+/// Viewport a zmx viewer had before it parked at another grid
+/// (`TerminalView::parked_viewport`).
+#[derive(Clone, Copy)]
+struct ParkedViewport {
+    cols: u16,
+    rows: u16,
+    offset: u64,
+    at_bottom: bool,
 }
 
 /// Entity that owns a live terminal: the P1b model, the latest snapshot, and
@@ -669,28 +706,27 @@ pub struct TerminalView {
     /// CDXC:Zmx 2026-09-19 WHY:
     /// A parked terminal sits at the zmx resting grid, so the first prepaint of a displayed slot resizes it and claims the grid, and the daemon resizes the session. A held "next tab" key passed one such terminal per key repeat. While the app holds the claim (the selection is still moving, app/gx_store/burst.rs) the prepaint keeps the parked grid and claims nothing; the app releases the hold when the selection settles, and the next prepaint resizes and claims once.
     zmx_grid_claim_held: bool,
-    /// CDXC:Zmx 2026-09-24 WHY:
-    /// Resizing a displayed zmx viewer used to paint the local VT reflow immediately, and the daemon's post-claim refresh then overwrote it a few frames later with the authoritative grid; the two reflows diverge (loop.zig handleVisibility), so every sidebar toggle registered as a flicker. Ending the hold at the first output was still two paints, because the daemon's dump and the agent TUI's SIGWINCH redraw arrive as separate bursts and differ.
-    /// While a hold is armed, the prepaint that resizes and claims keeps the previous frame on screen, wakeups only record output times, and the frame swaps once the output has been quiet for `ZMX_REFLOW_QUIET` (no dump came, or the bursts are over) or at `ZMX_REFLOW_CAP`.
-    /// Terminals without zmx visibility claims keep the immediate refresh.
+    /// CDXC:Zmx 2026-09-25 WHY:
+    /// Resizing a displayed zmx viewer used to paint the local VT reflow at once, and the daemon's post-claim refresh overwrote it a few frames later; the two reflows diverge (loop.zig handleVisibility), and the agent TUI's SIGWINCH redraw arrives as a third, separate burst, so every sidebar toggle, chat-to-terminal flip and viewer respawn showed several different screens.
+    /// While a hold is armed the viewer keeps painting the frame it last showed at its previous grid (or only its background when it has no such frame, see `ZmxReflowHold::blank`), wakeups only record activity, and one refresh lands once output has been quiet for `ZMX_REFLOW_QUIET` or `ZMX_REFLOW_CAP` after the latest claim.
+    /// This replaced a separate first-frame mount gate in the host, which kept a new viewer out of layout, so its first claim waited for the gate and the agent ran at the 80x24 spawn grid meanwhile.
+    /// Terminals without zmx visibility claims refresh immediately, as before.
     zmx_reflow_hold: Option<ZmxReflowHold>,
-    /// Monotonic token distinguishing the hold the current timers armed from a newer one.
+    /// Monotonic token for `ZmxReflowHold::token`.
     zmx_reflow_hold_seq: u64,
+    /// The grid of the latest prepaint: what a displayed slot last showed. Only a
+    /// frame taken at this grid may stand in during a reflow hold.
+    displayed_grid: Option<(u16, u16)>,
     /// Diagnostic Terminal-focus scenario: sequence number of logged frames.
     diagnostic_frame_seq: u64,
-    /// Mount-gate state: when the first frame landed, when PTY output last
-    /// landed, and whether the gate has opened (sticky open, never re-gates).
-    first_frame_at: Option<web_time::Instant>,
-    last_output_at: Option<web_time::Instant>,
-    mount_gate_open: bool,
-    mount_gate_check_scheduled: bool,
-    /// When deferral of a mid-synchronized-output refresh began (DECSET 2026),
-    /// with a 300ms bound so a lost closing marker cannot freeze the view.
-    sync_defer_started_at: Option<web_time::Instant>,
-    /// CDXC:Zmx 2026-09-24 WHY:
-    /// Parking a hidden viewer reflows its local grid to the resting width, and the redisplay reflow anchors at the bottom, so a viewer scrolled up into scrollback redisplayed at the wrong scroll level for a few frames until the next sync caught up — the flicker a session switch shows.
-    /// The grid size, viewport offset, and bottom-anchor flag are saved before the park reflow; the redisplay settle restores them once the grid is back at the display size.
-    parked_viewport: Option<(u16, u16, u64, bool)>,
+    /// CDXC:Terminal 2026-09-25 WHY:
+    /// A producer that wraps a redraw in synchronized output (DECSET 2026) asks the terminal not to paint until the matching reset: the zmx refresh dump does, and so do agent TUIs that stream a frame over several PTY reads. Refreshing mid-update painted half-drawn screens.
+    /// This is when the mode was first seen active, bounded by `SYNCHRONIZED_OUTPUT_TIMEOUT`: past the bound the view paints normally until the mode resets, the way Ghostty expires a stuck mode.
+    synchronized_output_since: Option<web_time::Instant>,
+    /// CDXC:Zmx 2026-09-25 WHY:
+    /// A viewer that parks at another grid (chat mode claims the 200-column resting width) reflows its local grid, and the redisplay reflow anchors at the bottom, so a viewer scrolled up into scrollback came back at the wrong scroll position.
+    /// The viewport is saved when it first parks at another grid and restored by the first redisplay whose grid matches it; a redisplay at another size drops it.
+    parked_viewport: Option<ParkedViewport>,
     /// CDXC:Terminal 2026-09-18 WHY:
     /// Every PTY wakeup used to refresh the grid snapshot and notify, and gpui redraws the whole window on any notify, so a hidden agent terminal streaming output behind its chat view redrew the window on every chunk.
     /// A parked or chat-mode terminal only marks its snapshot stale; the next prepaint of a displayed slot takes the fresh frame. Titles and pwd still sync so the sidebar stays current.
@@ -825,12 +861,9 @@ impl TerminalView {
             zmx_grid_claim_held: false,
             zmx_reflow_hold: None,
             zmx_reflow_hold_seq: 0,
+            displayed_grid: None,
             diagnostic_frame_seq: 0,
-            first_frame_at: None,
-            last_output_at: None,
-            mount_gate_open: false,
-            mount_gate_check_scheduled: false,
-            sync_defer_started_at: None,
+            synchronized_output_since: None,
             parked_viewport: None,
             displayed: true,
             snapshot_stale: false,
@@ -900,53 +933,45 @@ impl TerminalView {
     }
 
     /// Resize the cell grid outside a layout pass, keeping the cell pixel
-    /// sizes the last prepaint established. Used to park a hidden terminal
-    /// at the zmx resting width; the next prepaint of a displayed slot
-    /// resizes back to the real bounds. Cancels a pending visible announce:
-    /// a parked terminal must not claim the grid.
+    /// sizes the last prepaint established. Used when a zmx viewer leaves its
+    /// displayed slot (chat mode parks it at the resting width); the next
+    /// prepaint of a displayed slot resizes back to the real bounds. Cancels a
+    /// pending visible announce and any reflow hold: a parked terminal must
+    /// not claim the grid.
     ///
-    /// CDXC:Zmx 2026-09-24 WHY:
-    /// Parking does not refresh the painted snapshot: the frame keeps the last
-    /// displayed content, and on redisplay that frame stands in while the
-    /// visible claim round-trips. Refreshing here used to replace it with the
-    /// resting-width grid, so a tab switch showed wide clipped text until the
-    /// settle — its own flicker.
+    /// The painted snapshot is not refreshed here, so the frame keeps the
+    /// content last shown on screen; the redisplay's reflow hold decides
+    /// whether it may stand in (`ZmxReflowHold::blank`).
     pub fn resize_grid(&mut self, cols: u16, rows: u16, cx: &mut Context<Self>) {
         self.pending_zmx_visible_announce = false;
         self.zmx_reflow_hold = None;
         if (cols, rows) == self.model.size() {
             return;
         }
-        // Save the viewport in the grid it belongs to: the redisplay settle
-        // restores it once the grid is back at this size (CDXC:Zmx above).
-        self.parked_viewport = self.model.scrollbar().ok().map(|sb| {
+        if self.parked_viewport.is_none() {
             let (grid_cols, grid_rows) = self.model.size();
-            (
-                grid_cols,
-                grid_rows,
-                sb.offset,
-                sb.offset + sb.len >= sb.total,
-            )
-        });
+            self.parked_viewport = self.model.scrollbar().ok().map(|scrollbar| ParkedViewport {
+                cols: grid_cols,
+                rows: grid_rows,
+                offset: scrollbar.offset,
+                at_bottom: scrollbar.offset + scrollbar.len >= scrollbar.total,
+            });
+        }
         let _ = self.model.resize_grid(cols, rows);
+        self.row_cache.clear();
         cx.notify();
     }
 
-    /// Re-apply the viewport saved when the viewer parked, once the grid is
-    /// back at the size it was parked from. A bottom-anchored viewer is left
-    /// alone: following the bottom is the natural state there.
-    fn restore_parked_viewport_if_roundtrip(&mut self) {
-        let Some((grid_cols, grid_rows, offset, at_bottom)) = self.parked_viewport else {
+    /// Consume the viewport saved when the viewer parked: re-apply it if the
+    /// grid is back at the size it was saved at, otherwise drop it. A viewer
+    /// that followed the bottom keeps following it.
+    fn restore_parked_viewport(&mut self) {
+        let Some(parked) = self.parked_viewport.take() else {
             return;
         };
-        if (grid_cols, grid_rows) != self.model.size() {
-            return;
+        if (parked.cols, parked.rows) == self.model.size() && !parked.at_bottom {
+            self.model.scroll_viewport_to_row(parked.offset);
         }
-        self.parked_viewport = None;
-        if at_bottom {
-            return;
-        }
-        self.model.scroll_viewport_to_row(offset);
     }
 
     pub fn paste_requires_confirmation(&mut self, text: &str) -> bool {
@@ -1100,58 +1125,27 @@ impl TerminalView {
         }
         match event {
             TerminalEvent::Wakeup => {
-                self.last_output_at = Some(web_time::Instant::now());
-                // DECSET 2026: the producer wrapped a redraw in synchronized
-                // output and the close has not arrived yet, so the grid is
-                // mid-atomic-update. Defer the refresh — painting here is the
-                // garbage frame. Bounded: a lost marker must not freeze the
-                // view.
-                if self
-                    .model
-                    .mode_active(ffi::GHOSTTY_MODE_SYNCHRONIZED_OUTPUT)
-                {
-                    let defer_started = self
-                        .sync_defer_started_at
-                        .get_or_insert(web_time::Instant::now());
-                    if defer_started.elapsed() < Duration::from_millis(300) {
-                        self.snapshot_stale = true;
-                        self.sync_title_and_pwd(cx);
-                        return;
-                    }
+                // Titles still sync while a refresh waits, so the sidebar stays current.
+                self.sync_title_and_pwd(cx);
+                if let Some(hold) = self.zmx_reflow_hold.as_mut() {
+                    // The daemon's dump and the TUI's redraw are still landing: the
+                    // hold's settle timer reads this and waits out the quiet window.
+                    hold.last_activity = web_time::Instant::now();
+                    self.snapshot_stale = true;
+                    return;
                 }
-                self.sync_defer_started_at = None;
+                if self.synchronized_output_defers_refresh(cx) {
+                    self.snapshot_stale = true;
+                    return;
+                }
                 let drawn_recently = self
                     .last_prepaint
                     .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1));
-                if self.zmx_reflow_hold.is_some() {
-                    // Holding the previous frame across a resize-and-claim:
-                    // record the output time and stay silent. The daemon's
-                    // dump and the agent TUI's SIGWINCH redraw arrive as
-                    // separate bursts; painting between them is the flicker.
-                    // Titles still sync so the sidebar stays current.
-                    if let Some(hold) = self.zmx_reflow_hold.as_mut() {
-                        hold.last_output = Some(web_time::Instant::now());
-                    }
-                    let token = self.zmx_reflow_hold.as_ref().map(|hold| hold.token);
-                    self.sync_title_and_pwd(cx);
-                    if let Some(token) = token {
-                        self.spawn_zmx_reflow_check(token, ZMX_REFLOW_QUIET, cx);
-                    }
-                    return;
-                }
                 if self.displayed || drawn_recently {
                     self.refresh_snapshot();
-                    self.sync_title_and_pwd(cx);
                     cx.notify();
                 } else {
                     self.snapshot_stale = true;
-                    self.sync_title_and_pwd(cx);
-                }
-                if self.frame.is_some() && !self.mount_gate_open && !self.mount_gate_check_scheduled
-                {
-                    self.mount_gate_check_scheduled = true;
-                    self.spawn_zmx_gate_check(ZMX_REFLOW_QUIET, cx);
-                    self.spawn_zmx_gate_check(ZMX_REFLOW_CAP, cx);
                 }
             }
             TerminalEvent::Exited(exit) => {
@@ -1177,70 +1171,105 @@ impl TerminalView {
         }
     }
 
-    /// Schedule a settled-check for the reflow hold `token`: stale timers of
-    /// superseded holds no-op there, and a check that fires early (output
-    /// landed inside the quiet window) just reschedules itself.
-    fn spawn_zmx_reflow_check(&self, token: u64, after: Duration, cx: &mut Context<Self>) {
+    /// Whether a refresh now would paint a synchronized-output update that has
+    /// not finished (`synchronized_output_since`). The first sighting of the
+    /// mode arms a repaint at the bound, so the final screen shows even when
+    /// no further output arrives to wake the view.
+    fn synchronized_output_defers_refresh(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self
+            .model
+            .mode_active(ffi::GHOSTTY_MODE_SYNCHRONIZED_OUTPUT)
+        {
+            self.synchronized_output_since = None;
+            return false;
+        }
+        if let Some(since) = self.synchronized_output_since {
+            return since.elapsed() < SYNCHRONIZED_OUTPUT_TIMEOUT;
+        }
+        self.synchronized_output_since = Some(web_time::Instant::now());
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(after).await;
+            cx.background_executor()
+                .timer(SYNCHRONIZED_OUTPUT_TIMEOUT)
+                .await;
             let _ = this.update(cx, |view, cx| {
-                view.end_zmx_reflow_hold_if_settled(token, cx)
+                if view.snapshot_stale && view.displayed {
+                    cx.notify();
+                }
             });
         })
         .detach();
+        true
     }
 
-    /// Schedule a mount-gate check: when due (output quiet or cap), the gate
-    /// opens and the host's next render mounts the viewer.
-    fn spawn_zmx_gate_check(&self, after: Duration, cx: &mut Context<Self>) {
+    /// Arm a reflow hold for the claim this prepaint just wrote, or extend the
+    /// one already armed: a hold that is still waiting keeps its stand-in
+    /// decision and its settle timer, so consecutive layouts (the workarea's
+    /// double pass, a divider drag) swap once, after the last of them.
+    fn arm_zmx_reflow_hold(&mut self, blank: bool, cx: &mut Context<Self>) {
+        let now = web_time::Instant::now();
+        if let Some(hold) = self.zmx_reflow_hold.as_mut() {
+            hold.deadline = now + ZMX_REFLOW_CAP;
+            hold.last_activity = now;
+            return;
+        }
+        self.zmx_reflow_hold_seq += 1;
+        let token = self.zmx_reflow_hold_seq;
+        self.zmx_reflow_hold = Some(ZmxReflowHold {
+            token,
+            deadline: now + ZMX_REFLOW_CAP,
+            last_activity: now,
+            blank,
+        });
+        if support_logs::scenario_enabled(GpuiDiagnosticScenario::TerminalFocus) {
+            let (cols, rows) = self.model.size();
+            support_logs::append(
+                GpuiSupportLog::TerminalFocus,
+                "reflowHoldArmed",
+                serde_json::json!({"token": token, "cols": cols, "rows": rows, "blank": blank}),
+            );
+        }
+        self.schedule_zmx_reflow_settle(token, ZMX_REFLOW_QUIET, cx);
+    }
+
+    fn schedule_zmx_reflow_settle(&self, token: u64, after: Duration, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(after).await;
-            let _ = this.update(cx, |view, cx| view.open_mount_gate_if_due(cx));
+            let _ = this.update(cx, |view, cx| view.settle_zmx_reflow_hold(token, cx));
         })
         .detach();
     }
 
-    fn open_mount_gate_if_due(&mut self, cx: &mut Context<Self>) {
-        self.mount_gate_check_scheduled = false;
-        if self.mount_gate_open || self.frame.is_none() {
-            return;
-        }
-        let quiet_due = self
-            .last_output_at
-            .is_none_or(|at| at.elapsed() >= ZMX_REFLOW_QUIET);
-        let cap_due = self
-            .first_frame_at
-            .is_some_and(|at| at.elapsed() >= ZMX_REFLOW_CAP);
-        if quiet_due || cap_due {
-            self.mount_gate_open = true;
-            cx.notify();
-        }
-    }
-
-    /// End the reflow hold `token` once it has settled: no PTY output for
-    /// `ZMX_REFLOW_QUIET` (the daemon dump and the TUI redraw are both in) or
-    /// the `ZMX_REFLOW_CAP` deadline hit. One swap, old geometry to final.
-    fn end_zmx_reflow_hold_if_settled(&mut self, token: u64, cx: &mut Context<Self>) {
-        let Some(hold) = self.zmx_reflow_hold.as_ref() else {
+    /// End the reflow hold `token` once output has been quiet for
+    /// `ZMX_REFLOW_QUIET` (the dump and the TUI redraw are both in) or its
+    /// deadline has passed, with one refresh from the held frame to the final
+    /// grid. Otherwise wait until the earlier of the two and check again.
+    fn settle_zmx_reflow_hold(&mut self, token: u64, cx: &mut Context<Self>) {
+        let Some((deadline, last_activity)) = self
+            .zmx_reflow_hold
+            .as_ref()
+            .filter(|hold| hold.token == token)
+            .map(|hold| (hold.deadline, hold.last_activity))
+        else {
             return;
         };
-        if hold.token != token {
+        let now = web_time::Instant::now();
+        let quiet_at = last_activity + ZMX_REFLOW_QUIET;
+        if now < deadline && now < quiet_at {
+            let wait = quiet_at.min(deadline) - now;
+            self.schedule_zmx_reflow_settle(token, wait, cx);
             return;
         }
-        let settled = web_time::Instant::now() >= hold.deadline
-            || hold
-                .last_output
-                .is_none_or(|at| at.elapsed() >= ZMX_REFLOW_QUIET);
-        if !settled {
-            self.spawn_zmx_reflow_check(token, ZMX_REFLOW_QUIET, cx);
+        if now < deadline && self.synchronized_output_defers_refresh(cx) {
+            // Quiet in the middle of a synchronized update: its end, or the
+            // deadline, settles the hold.
+            let wait = SYNCHRONIZED_OUTPUT_TIMEOUT.min(deadline - now);
+            self.schedule_zmx_reflow_settle(token, wait, cx);
             return;
         }
         self.zmx_reflow_hold = None;
-        // The grid was resized while the previous frame stood in, so the
-        // cached row layouts belong to the old geometry. The viewport restore
-        // must land before the refresh: the settled frame is the first one
-        // the user sees after the hold, and it has to be at the right scroll.
-        self.restore_parked_viewport_if_roundtrip();
+        // The viewport restore lands before the refresh: the settled frame is
+        // the first one shown after the hold and must be at the right scroll.
+        self.restore_parked_viewport();
         self.row_cache.clear();
         self.snapshot_stale = false;
         self.refresh_snapshot();
@@ -1275,37 +1304,6 @@ impl TerminalView {
         self.title.as_deref()
     }
 
-    /// Whether the viewer holds a complete first frame. A freshly spawned
-    /// viewer does not until the daemon's first dump is applied; hosts gate
-    /// mounting on this so a respawn never paints an empty or partial grid.
-    ///
-    /// The gate stays closed past the first frame until PTY output has been
-    /// quiet for `ZMX_REFLOW_QUIET` (or `ZMX_REFLOW_CAP` since the first
-    /// frame): the agent TUI redraws its whole conversation after the
-    /// switch-in resize, and that redraw streams through in chunks whose
-    /// boundaries look like complete older screens. Once the gate has opened
-    /// it stays open, so live streaming never re-gates.
-    pub(crate) fn has_displayable_frame(&mut self) -> bool {
-        if self.mount_gate_open {
-            return self.frame.is_some();
-        }
-        let Some(_) = &self.frame else {
-            return false;
-        };
-        let quiet = self
-            .last_output_at
-            .is_none_or(|at| at.elapsed() >= ZMX_REFLOW_QUIET);
-        let capped = self
-            .first_frame_at
-            .is_some_and(|at| at.elapsed() >= ZMX_REFLOW_CAP);
-        if quiet || capped {
-            self.mount_gate_open = true;
-            true
-        } else {
-            false
-        }
-    }
-
     /// Latest OSC 7 pwd read back from the terminal, if any.
     #[allow(dead_code)] // public TerminalView API kept complete: the app drives this element through terminal_gpui_engine
     pub fn pwd(&self) -> Option<&str> {
@@ -1333,23 +1331,17 @@ impl TerminalView {
                 }
             }
         }
-        // Diagnostic disk logging scenario: Terminal focus. The content hash
-        // identifies which screen state each paint came from without storing
-        // any terminal content.
         if support_logs::scenario_enabled(GpuiDiagnosticScenario::TerminalFocus) {
             self.log_diagnostic_frame(&frame);
-        }
-        if self.first_frame_at.is_none() {
-            self.first_frame_at = Some(web_time::Instant::now());
         }
         self.frame = Some(frame);
         self.recompute_search_matches();
         self.update_scroll_button_visibility();
     }
 
-    /// Terminal-focus scenario: log a bounded fingerprint of this frame
-    /// (sizes, scroll offset, cursor row, content hash — never the content)
-    /// so a trace ties each painted state to its source.
+    /// Terminal-focus diagnostic scenario: log a fingerprint of this frame
+    /// (sizes, scroll offset, cursor row and a content hash, never the
+    /// content) so a trace ties each painted screen to the output behind it.
     fn log_diagnostic_frame(&mut self, frame: &TerminalSnapshot) {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::hash::DefaultHasher::new();
@@ -2717,10 +2709,12 @@ impl TerminalView {
     ) -> TerminalLayout {
         self.terminal_bounds = Some(bounds);
         self.last_prepaint = Some(web_time::Instant::now());
-        // While a reflow hold is armed the stale flag stays set: the hold-end
-        // refresh below supersedes it, and refreshing here would paint the
-        // mid-settle grid the hold exists to cover.
-        if self.snapshot_stale && self.zmx_reflow_hold.is_none() {
+        // A reflow hold's settle takes the fresh frame itself; refreshing here
+        // would paint the mid-settle grid the hold exists to cover.
+        if self.snapshot_stale
+            && self.zmx_reflow_hold.is_none()
+            && !self.synchronized_output_defers_refresh(cx)
+        {
             self.snapshot_stale = false;
             self.refresh_snapshot();
         }
@@ -2771,12 +2765,17 @@ impl TerminalView {
             false
         };
         let grid_changed = !self.zmx_grid_claim_held && !held && (cols, rows) != self.model.size();
-        // A displayed zmx viewer keeps its previous frame on screen across a
-        // resize-and-claim (`zmx_reflow_hold`): the local reflow below is
-        // always overwritten by the daemon's post-claim refresh moments
-        // later, and painting both is the flicker a sidebar toggle shows.
-        let hold_reflow =
-            grid_changed && self.zmx_visibility_claims_enabled && self.frame.is_some();
+        // A displayed zmx viewer holds its frame across a resize-and-claim
+        // (`zmx_reflow_hold`): the local reflow below is overwritten by the
+        // daemon's post-claim refresh and the TUI's redraw moments later, and
+        // painting all three is the flicker.
+        let hold_reflow = grid_changed && self.zmx_visibility_claims_enabled;
+        let hold_blank = match &self.zmx_reflow_hold {
+            Some(hold) => hold.blank,
+            None => self.frame.as_ref().is_none_or(|frame| {
+                Some((frame.cols, frame.rows.len() as u16)) != self.displayed_grid
+            }),
+        };
         if self.frame.is_none() || grid_changed {
             // Resize reflows the vt grid synchronously, so take the fresh
             // frame now instead of waiting for the SIGWINCH redraw wakeup.
@@ -2786,11 +2785,15 @@ impl TerminalView {
                 let _ = self.model.resize(cols, rows, cell_width_px, cell_height_px);
             }
             if !hold_reflow {
-                self.restore_parked_viewport_if_roundtrip();
+                self.restore_parked_viewport();
                 self.row_cache.clear();
+                self.refresh_snapshot();
+            } else if self.frame.is_none() {
+                // A blank hold paints this frame's background only.
                 self.refresh_snapshot();
             }
         }
+        self.displayed_grid = Some(self.model.size());
         if (self.pending_zmx_visible_announce && !held)
             || (self.zmx_visibility_claims_enabled && grid_changed)
         {
@@ -2803,25 +2806,7 @@ impl TerminalView {
                 crate::terminal_model::zmx_client_visible_sequence(rows, cols).as_bytes(),
             );
             if hold_reflow {
-                // The claim is out. The hold ends when output goes quiet (the
-                // dump and the TUI redraw have both landed) or at the cap;
-                // wakeups re-arm the quiet check.
-                self.zmx_reflow_hold_seq += 1;
-                let token = self.zmx_reflow_hold_seq;
-                self.zmx_reflow_hold = Some(ZmxReflowHold {
-                    token,
-                    deadline: web_time::Instant::now() + ZMX_REFLOW_CAP,
-                    last_output: None,
-                });
-                if support_logs::scenario_enabled(GpuiDiagnosticScenario::TerminalFocus) {
-                    support_logs::append(
-                        GpuiSupportLog::TerminalFocus,
-                        "reflowHoldArmed",
-                        serde_json::json!({"token": token, "cols": cols, "rows": rows}),
-                    );
-                }
-                self.spawn_zmx_reflow_check(token, ZMX_REFLOW_QUIET, cx);
-                self.spawn_zmx_reflow_check(token, ZMX_REFLOW_CAP, cx);
+                self.arm_zmx_reflow_hold(hold_blank, cx);
             }
         }
 
@@ -2830,18 +2815,11 @@ impl TerminalView {
         }
 
         let Some(frame) = &self.frame else {
-            return TerminalLayout {
-                metrics,
-                background: gpui::black().into(),
-                rows: Vec::new(),
-                selection_spans: Vec::new(),
-                search_spans: Vec::new(),
-                link_underline: None,
-                cursor: None,
-                marked_text: None,
-                scrollbar: None,
-            };
+            return TerminalLayout::background_only(metrics, gpui::black());
         };
+        if self.zmx_reflow_hold.as_ref().is_some_and(|hold| hold.blank) {
+            return TerminalLayout::background_only(metrics, rgb_to_hsla(frame.background));
+        }
 
         // A failed snapshot after a grid change can leave the cache length
         // stale; re-align before filling so indexing below stays in bounds.
