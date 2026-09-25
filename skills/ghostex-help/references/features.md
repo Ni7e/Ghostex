@@ -76,14 +76,14 @@ the bottom opens their settings, and **Hidden here** on the `+` menu brings one
 back.
 
 Right-click a view tab to choose where that view appears and what happens to it.
-**Show in <project>** and **Show in space <space>** are ticks: unticking one
-hides the view there and leaves it everywhere else, and the space row names the
-project's own space (it is absent when the project is not in one). **Choose
-where it's shown…** opens that view's full scope editor in Settings >
-Extensions. Below that, **Reload** refreshes the clicked view, **Sleep** unloads it while keeping its tab (Code also stops its editor
+**Reload** refreshes the clicked view, **Sleep** unloads it while keeping its tab (Code also stops its editor
 server; choose **Wake** or click the tab to bring it back, and Resources can stop
-Code too without closing Ghostex), **Pop out to window** opens its page in its
-own window, and **Close tab** removes it from the strip. **Hidden here** is on
+Code too without closing Ghostex), and **Open externally** opens its page in its
+own window. Lower down, **Show in this Project** and **Show in this Space** are
+ticks: unticking one hides the view there and leaves it everywhere else (the
+space row is absent when the project is not in a space), and **Choose where
+it's shown…** opens that view's full scope editor in Settings > Extensions.
+**Close tab** removes it from the strip, and **Hidden here** is on
 this menu as well. Custom project views also offer **Command output** and
 **Configure view**, which opens that view's editor in Settings > Extensions and
 focuses its name field.

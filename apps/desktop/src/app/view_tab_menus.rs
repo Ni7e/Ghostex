@@ -237,9 +237,9 @@ impl GhostexGpuiApp {
         }
         menu.separator()
             .submenu("Hidden here", self.hidden_here_submenu_rows())
-        .separator()
-        .menu("Close tab", Box::new(CloseGpuiViewTab { mode_index }))
-        .show(position, window, cx);
+            .separator()
+            .menu("Close tab", Box::new(CloseGpuiViewTab { mode_index }))
+            .show(position, window, cx);
     }
 
     /// A view's stored state for one space, with no precedence applied: the space row ticks what the
