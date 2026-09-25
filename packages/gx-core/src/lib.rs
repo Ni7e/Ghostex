@@ -109,13 +109,13 @@ pub use crate::sidebar_actions::{
     owns_machine_disable_command, plan_agent_run, plan_delayed_send_action, plan_machine_disable,
     MACHINE_DISABLE_SETTINGS_SOURCE,
 };
+pub use crate::session_create::{group_project, plan_browser_pane_open, terminal_create_target, BrowserPaneOpen, CreateTarget, DEFAULT_BROWSER_LAUNCH_URL};
 pub use crate::sidebar_accounts::{
     account_headline_windows, account_session_working, account_usage_detail, account_usage_label,
     agent_accounts_http_answer, group_accounts_target, is_five_hour_window, is_weekly_window,
     js_round, mask_account_text, session_accounts_target, AccountAnswer, AccountMenuHost,
     AccountMenuStep, AccountSession, AccountUsageWindow, AccountsRequest, AccountsState,
     AccountsTarget, AgentAccount, LauncherAccounts, LauncherCommand, ResetCredits,
-pub use crate::session_create::{group_project, plan_browser_pane_open, terminal_create_target, BrowserPaneOpen, CreateTarget, DEFAULT_BROWSER_LAUNCH_URL};
     SessionAccounts, SessionAccountsCommand, SidebarAccountMenus, AGENT_ACCOUNTS_PATH,
     INVALID_ACCOUNTS_ANSWER, SESSION_COMPUTER_UNAVAILABLE,
 };
@@ -164,6 +164,7 @@ pub use crate::sidebar_view::{
     TagPresentation, UnavailableState,
     WorktreeView, LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
 };
+pub use crate::workspace_groups::{CustomTagsPush, CustomTagsPushEffect};
 pub use crate::workspace_groups::{
     workspace_groups_hand_back_script, workspace_groups_request_script, AdoptOutcome,
     ProjectWorkspaceGroups,
@@ -171,7 +172,6 @@ pub use crate::workspace_groups::{
     WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE, WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER,
     WORKSPACE_GROUPS_SYNC_DELAY_MS, WORKSPACE_GROUPS_SYNC_RETRY_DELAY_MS,
     WORKSPACE_SESSION_GROUP_MAX_COUNT,
-pub use crate::workspace_groups::{CustomTagsPush, CustomTagsPushEffect};
 };
 
 /// The wire types, re-exported so a host needs one dependency.
