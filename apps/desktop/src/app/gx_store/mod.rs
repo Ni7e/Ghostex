@@ -69,6 +69,7 @@ mod diagnostics_runtime_facts;
 mod effects;
 mod host;
 mod layout_persist;
+mod primary_launcher;
 mod local_focus;
 mod notifications;
 mod project_docs;
@@ -137,6 +138,7 @@ pub(crate) use client_storage_init::initialize_client_storage_at_start;
 pub(crate) use host::GxStoreHost;
 #[allow(unused_imports)] // the first callers arrive with the runtime port's family commits
 pub(crate) use activation_focus::{menu_bar_session_focus_id, palette_session_focus_id};
+pub(crate) use primary_launcher::read_primary_agent_launcher_id;
 pub(crate) use rpc::gx_rpc;
 #[allow(unused_imports)]
 pub(crate) use rpc_types::GxRpcError;

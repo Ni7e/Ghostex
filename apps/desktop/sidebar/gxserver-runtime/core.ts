@@ -93,12 +93,6 @@ import { gpuiSidebarRuntimeWorkspaceGroupMethods, installGpuiWorkspaceGroupsHand
 import type { GpuiSidebarRuntimeWorktreeMethods } from './worktrees';
 import { gpuiSidebarRuntimeWorktreeMethods } from './worktrees';
 import type { WebviewApi } from '@/packages/core-ui/webview-api';
-import {
-  PRIMARY_AGENT_LAUNCHER_CHANGED_EVENT,
-  readPrimaryAgentLauncherId,
-  writePrimaryAgentLauncherId,
-  type PrimaryAgentLauncherChangedEvent,
-} from '@/packages/core-ui/primary-agent-launcher';
 import { reduceGxserverPresentationDelta } from '@/packages/shared/gxserver-presentation-cache';
 import type {
   GxserverAppUserData,
@@ -264,19 +258,6 @@ export class GpuiSidebarRuntime {
       void this.handleSidebarMessage(message);
     },
   };
-
-  /**
-   * CDXC:AgentLauncher 2026-09-09 WHY:
-   * The last-used agent lives in this page's localStorage (the project-header
-   * dropdown's key). The native New Thread picker is GPUI, which cannot read
-   * it, so the sidebar publishes the value once at startup and on every change.
-   */
-  publishPrimaryAgentLauncher(agentId: string | undefined): void {
-    window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
-      agentId: agentId ?? '',
-      type: 'primaryAgentLauncherChanged',
-    });
-  }
 
   notifyNativeGxserverPresentationReady(): void {
     window.requestAnimationFrame(() => {
@@ -467,10 +448,6 @@ export class GpuiSidebarRuntime {
 
   start(): void {
     this.installGpuiBridgeCallbacks();
-    this.publishPrimaryAgentLauncher(readPrimaryAgentLauncherId());
-    window.addEventListener(PRIMARY_AGENT_LAUNCHER_CHANGED_EVENT, (event) => {
-      this.publishPrimaryAgentLauncher((event as PrimaryAgentLauncherChangedEvent).detail.agentId);
-    });
     this.runtimeSettings = currentGpuiRuntimeSettings();
     this.remoteRecentProjectsByMachineId = readStoredGpuiRemoteRecentProjects();
     this.remoteGroupOrderByMachineId = readStoredGpuiRemoteGroupOrder();
@@ -511,15 +488,6 @@ export class GpuiSidebarRuntime {
       the terminal. Route exactly these known command types to the runtime's
       own sidebar-message handler instead.
       */
-      if (message.type === 'runSidebarAgent') {
-        /*
-        CDXC:AgentLauncher 2026-09-09 WHY:
-        A launch forwarded from the New Thread picker must also become the
-        sidebar's highlighted default agent, which the sidebar keeps in React
-        state and refreshes only through this page's storage event.
-        */
-        writePrimaryAgentLauncherId(message.agentId);
-      }
       if (
         message.type === 'renameSession' ||
         message.type === 'scheduleDelayedSend' ||

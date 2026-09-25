@@ -652,6 +652,7 @@ impl GhostexGpuiApp {
         }
         // Host messages carry the sidebar hotkeys (previous or next session, session and project slots), which change focus in the runtime: it must hear the newest local selection first (gx_store/burst.rs).
         self.gx_store_flush_old_runtime_tell(cx);
+        self.gx_store_note_primary_launcher_host_message(&message);
         let Some(sidebar) = self.sidebar.clone() else {
             return false;
         };

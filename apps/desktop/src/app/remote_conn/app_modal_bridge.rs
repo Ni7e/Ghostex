@@ -501,13 +501,6 @@ impl GhostexGpuiApp {
                 let state = state.clone();
                 self.gx_store_receive_workspace_groups_hand_off(&state, cx);
             }
-            "primaryAgentLauncherChanged" => {
-                self.sidebar_primary_agent_launcher_id = message["agentId"]
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|agent_id| !agent_id.is_empty() && agent_id.len() <= 128)
-                    .map(str::to_string);
-            }
             // The sidebar's own Load Sessions row reaches the same three steps without this
             // bridge since M5 (gx_store/sidebar_open.rs), so they are one function.
             "accountSwitchProgress" => {

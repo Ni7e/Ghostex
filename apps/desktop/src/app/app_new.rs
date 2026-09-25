@@ -294,7 +294,8 @@ impl GhostexGpuiApp {
                 sidebar_command_pane_sessions_snapshot: String::new(),
                 sidebar_agents_delayed_sends_snapshot: String::new(),
                 sidebar_timer_presentations_replayed_after_ready: false,
-                sidebar_primary_agent_launcher_id: None,
+                sidebar_primary_agent_launcher_id:
+                    crate::app::gx_store::read_primary_agent_launcher_id(),
                 native_app_modal: None,
                 native_automate: None,
                 new_thread_picker_window: None,
