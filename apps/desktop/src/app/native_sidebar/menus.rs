@@ -339,15 +339,15 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> Option<AnyElement> {
         use crate::app::window::frosted_host::{
-            FrostedHostKind, frosted_hosting_active, hide_frosted_host, show_frosted_host,
+            FrostedHostKind, SIDEBAR_MENU_HOST_LEVELS, frosted_hosting_active, show_frosted_host,
         };
         let Some(menu) = self.native_sidebar.menu.as_ref() else {
-            hide_frosted_host(FrostedHostKind::SidebarMenu, cx);
+            hide_sidebar_menu_hosts(0, cx);
             return None;
         };
         let sidebar = self.native_sidebar.bounds;
         let hosted = frosted_hosting_active();
-        let (panels, union) = self.native_sidebar_menu_panels(hosted, cx)?;
+        let (panels, union) = self.native_sidebar_menu_panels(hosted, None, cx)?;
         let layers = div()
             .id("native-sidebar-menu-layers")
             .absolute()
@@ -387,25 +387,33 @@ impl GhostexGpuiApp {
             // frame: as the key window it goes on getting pointer moves under the host, and the
             // rows beneath must not light up there (the same frame its panels occluded unhosted).
             let layers = layers.occlude();
-            let app = cx.entity();
-            show_frosted_host(
-                FrostedHostKind::SidebarMenu,
-                menu.window,
-                union,
-                None,
-                std::rc::Rc::new(move |_, cx| {
-                    app.update(cx, |app, cx| {
-                        app.native_sidebar_menu_panels(true, cx)
-                            .map(|(panels, _)| panels.into_any_element())
-                            .unwrap_or_else(|| div().into_any_element())
-                    })
-                }),
-                Some(cx.entity()),
-                cx,
-            );
+            // One window per panel, so a submenu stacked over its parent blurs the parent the way
+            // a header dropdown blurs whatever is under it.
+            let sidebar = self.native_sidebar.bounds;
+            let scale = menu.scale;
+            let count = menu.panels.len().min(usize::from(SIDEBAR_MENU_HOST_LEVELS));
+            for (index, panel) in menu.panels.iter().take(count).enumerate() {
+                let app = cx.entity();
+                show_frosted_host(
+                    FrostedHostKind::SidebarMenu(index as u8),
+                    menu.window,
+                    panel.bounds(sidebar, scale, index > 0),
+                    None,
+                    std::rc::Rc::new(move |_, cx| {
+                        app.update(cx, |app, cx| {
+                            app.native_sidebar_menu_panels(true, Some(index), cx)
+                                .map(|(panel, _)| panel.into_any_element())
+                                .unwrap_or_else(|| div().into_any_element())
+                        })
+                    }),
+                    Some(cx.entity()),
+                    cx,
+                );
+            }
+            hide_sidebar_menu_hosts(count, cx);
             return Some(deferred(layers).with_priority(20).into_any_element());
         }
-        hide_frosted_host(FrostedHostKind::SidebarMenu, cx);
+        hide_sidebar_menu_hosts(0, cx);
         Some(
             deferred(layers.child(panels))
                 .with_priority(20)
@@ -414,11 +422,12 @@ impl GhostexGpuiApp {
     }
 
     /// The menu's panels, positioned inside the box that holds them all (returned with it, in
-    /// window coordinates). `frosted` draws them for the frosted host: a thinned fill over the
-    /// host's blur, each panel reporting its frame as the blurred region.
+    /// window coordinates). `frosted` draws them for a frosted host window, with the thinned fill
+    /// over its blur; `only` draws just that panel, at the origin of its own window.
     fn native_sidebar_menu_panels(
         &self,
         frosted: bool,
+        only: Option<usize>,
         cx: &mut gpui::Context<Self>,
     ) -> Option<(gpui::Div, Bounds<Pixels>)> {
         let menu = self.native_sidebar.menu.as_ref()?;
@@ -465,23 +474,15 @@ impl GhostexGpuiApp {
         let mut layers = div().relative().w(right - left).h(bottom - top);
         let view = cx.entity();
         for (panel_index, panel) in panels.iter().enumerate() {
-            let bounds = panel.bounds(sidebar, scale, panel_index > 0);
-            let relative = bounds.origin - Point::new(left, top);
-            if frosted {
-                // The host's blur follows each panel's frame; the gaps between panels stay clear.
-                let radius = px(8.0 * scale);
-                layers = layers.child(
-                    gpui::canvas(
-                        |_, _, _| {},
-                        move |bounds, _, window, _| window.report_frosted_region(bounds, radius),
-                    )
-                    .absolute()
-                    .left(relative.x)
-                    .top(relative.y)
-                    .w(bounds.size.width)
-                    .h(bounds.size.height),
-                );
+            if only.is_some_and(|only| only != panel_index) {
+                continue;
             }
+            let bounds = panel.bounds(sidebar, scale, panel_index > 0);
+            let relative = if only.is_some() {
+                Point::default()
+            } else {
+                bounds.origin - Point::new(left, top)
+            };
             if panel.is_agent_launcher() {
                 layers = layers.child(self.render_agent_launcher_menu_panel(
                     panel_index,
@@ -863,5 +864,15 @@ pub(super) fn measure_menu_panel(
                 cx.notify();
             }
         });
+    }
+}
+
+/// Hides the sidebar menu's panel windows from `from` up.
+fn hide_sidebar_menu_hosts(from: usize, cx: &mut gpui::App) {
+    use crate::app::window::frosted_host::{
+        FrostedHostKind, SIDEBAR_MENU_HOST_LEVELS, hide_frosted_host,
+    };
+    for level in from..usize::from(SIDEBAR_MENU_HOST_LEVELS) {
+        hide_frosted_host(FrostedHostKind::SidebarMenu(level as u8), cx);
     }
 }
