@@ -104,9 +104,6 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     this.gxserverBootstrap = validated;
     this.client = new GpuiGxserverClient(validated);
     this.applyGxserverBootstrapPresentationState(validated);
-    // Heal the shared composer draft cache from the daemon's durable copy —
-    // an app kill can drop localStorage batches the daemon still holds.
-    this.reconcileSessionChatDraftCache();
 
     const client = this.client;
     void Promise.all([

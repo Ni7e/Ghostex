@@ -49,8 +49,6 @@ import type { GpuiSidebarRuntimeProjectAndCommandMethods } from './projects-and-
 import { gpuiSidebarRuntimeProjectAndCommandMethods } from './projects-and-commands';
 import type { GpuiSidebarRuntimeRemoteMachineMethods } from './remote-machines';
 import { gpuiSidebarRuntimeRemoteMachineMethods } from './remote-machines';
-import type { GpuiSidebarRuntimeDraftSessionMethods } from './draft-sessions';
-import { gpuiSidebarRuntimeDraftSessionMethods } from './draft-sessions';
 import type { GpuiSidebarRuntimeSessionCreateMethods } from './session-create';
 import { gpuiSidebarRuntimeSessionCreateMethods } from './session-create';
 import type { GpuiSidebarRuntimeSessionFocusMethods } from './sessions-and-focus';
@@ -682,7 +680,6 @@ export interface GpuiSidebarRuntime
     GpuiSidebarRuntimePresentationStreamMethods,
     GpuiSidebarRuntimeSessionFocusMethods,
     GpuiSidebarRuntimeSessionCreateMethods,
-    GpuiSidebarRuntimeDraftSessionMethods,
     GpuiSidebarRuntimeAutoSleepMethods,
     GpuiSidebarRuntimeAttentionMethods,
     GpuiSidebarRuntimeCloseAfterDoneMethods,
@@ -708,7 +705,6 @@ installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSidebarGroupMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimePresentationStreamMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSessionFocusMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSessionCreateMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeDraftSessionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAutoSleepMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAttentionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeCloseAfterDoneMethods);
