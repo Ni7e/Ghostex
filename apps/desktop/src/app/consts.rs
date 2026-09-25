@@ -378,18 +378,6 @@ pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE: 
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_ID_MAX: u64 =
     9_007_199_254_740_991;
 
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceTerminalBell";
-
-#[cfg(target_os = "windows")]
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_VERSION: u64 = 1;
-
-#[cfg(target_os = "windows")]
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceTerminalTitleChanged";
-
 #[cfg(target_os = "windows")]
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_MAX_CHARS: usize = 512;
 
@@ -397,11 +385,6 @@ pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION:
 
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTerminalEscapePressed";
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceFirstPromptTitleGenerationCancel";
 
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION: u64 = 1;
 

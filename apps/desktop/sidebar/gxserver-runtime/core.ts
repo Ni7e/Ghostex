@@ -98,7 +98,6 @@ import type {
   GpuiTrustedExistingWorktreeList,
   GpuiValidatedGxserverBootstrap,
   GpuiWorkspaceSessionDelayedSendSummary,
-  GpuiWorkspaceTerminalTitleChangedPayload,
 } from './types-and-protocol';
 import type { GpuiSidebarRuntimeWorkspaceGroupMethods } from './workspace-groups-sync';
 import { gpuiSidebarRuntimeWorkspaceGroupMethods, installGpuiWorkspaceGroupsHandBack } from './workspace-groups-sync';
@@ -372,8 +371,6 @@ export class GpuiSidebarRuntime {
   commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
   displayedWorkspaceSessionIds: string[] = [];
   workspaceSessionDelayedSends = new Map<string, GpuiWorkspaceSessionDelayedSendSummary>();
-  workspaceTerminalTitleObservations = new Map<string, GpuiWorkspaceTerminalTitleChangedPayload>();
-  workspaceTerminalTitleSettleTimeouts = new Map<string, number>();
   domainProjects: GxserverProjectDomainState[] = [];
   focusedSessionId: string | undefined;
   /**
@@ -721,20 +718,9 @@ export class GpuiSidebarRuntime {
       if (message) void this.handleSidebarMessage(message);
     };
     installGpuiWorkspaceGroupsHandBack(this);
-    gpuiBridge.onWorkspaceTerminalBell = (payload) => {
-      void this.handleGpuiWorkspaceTerminalBell(payload);
-    };
-    gpuiBridge.onWorkspaceTerminalTitleChanged = (payload) => {
-      this.handleGpuiWorkspaceTerminalTitleChanged(payload);
-    };
     // Bridge handler for `ghostex.gpui.sidebar.workspaceTerminalEscapePressed`.
     gpuiBridge.onWorkspaceTerminalEscapePressed = (payload) => {
       this.handleGpuiWorkspaceTerminalEscapePressed(payload);
-    };
-    // Bridge handler for
-    // `ghostex.gpui.sidebar.workspaceFirstPromptTitleGenerationCancel`.
-    gpuiBridge.onWorkspaceFirstPromptTitleGenerationCancel = (payload) => {
-      void this.handleGpuiWorkspaceFirstPromptTitleGenerationCancel(payload);
     };
     gpuiBridge.onWorkspaceTerminalRuntimeAction = (payload) => {
       void this.handleGpuiWorkspaceTerminalRuntimeAction(payload);
@@ -866,31 +852,11 @@ export class GpuiSidebarRuntime {
       const message = asGpuiSidebarCommand(payload);
       if (message) void this.handleSidebarMessage(message);
     }
-    const pendingWorkspaceTerminalBells = Array.isArray(gpuiBridge.pendingWorkspaceTerminalBells)
-      ? gpuiBridge.pendingWorkspaceTerminalBells.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceTerminalBells) {
-      void this.handleGpuiWorkspaceTerminalBell(payload);
-    }
-    const pendingWorkspaceTerminalTitleChanges = Array.isArray(gpuiBridge.pendingWorkspaceTerminalTitleChanges)
-      ? gpuiBridge.pendingWorkspaceTerminalTitleChanges.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceTerminalTitleChanges) {
-      this.handleGpuiWorkspaceTerminalTitleChanged(payload);
-    }
     const pendingWorkspaceTerminalEscapePresses = Array.isArray(gpuiBridge.pendingWorkspaceTerminalEscapePresses)
       ? gpuiBridge.pendingWorkspaceTerminalEscapePresses.splice(0)
       : [];
     for (const payload of pendingWorkspaceTerminalEscapePresses) {
       this.handleGpuiWorkspaceTerminalEscapePressed(payload);
-    }
-    const pendingWorkspaceFirstPromptTitleGenerationCancels = Array.isArray(
-      gpuiBridge.pendingWorkspaceFirstPromptTitleGenerationCancels
-    )
-      ? gpuiBridge.pendingWorkspaceFirstPromptTitleGenerationCancels.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceFirstPromptTitleGenerationCancels) {
-      void this.handleGpuiWorkspaceFirstPromptTitleGenerationCancel(payload);
     }
     const pendingWorkspaceTerminalRuntimeActions = Array.isArray(gpuiBridge.pendingWorkspaceTerminalRuntimeActions)
       ? gpuiBridge.pendingWorkspaceTerminalRuntimeActions.splice(0)

@@ -4,30 +4,20 @@ Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
 import {
-  GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_TYPE,
-  GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_VERSION,
   GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE,
   GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_VERSION,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_TYPE,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_VERSION,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_TYPE,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_VERSION,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_MAX_CHARS,
 } from '../constants';
 import type {
-  GpuiWorkspaceFirstPromptTitleGenerationCancelPayload,
   GpuiWorkspaceSessionAttentionAcknowledgePayload,
-  GpuiWorkspaceTerminalBellPayload,
   GpuiWorkspaceTerminalEscapePressedPayload,
   GpuiWorkspaceTerminalLifecycleRequest,
   GpuiWorkspaceTerminalRuntimeActionPayload,
-  GpuiWorkspaceTerminalTitleChangedPayload,
 } from '../types-and-protocol';
 import { isObjectRecord, normalizeNonEmptyString } from './records';
 import { parseGpuiRemotePresentationProjectId, parseGpuiRemotePresentationSessionId } from './remote-presentation';
@@ -46,37 +36,6 @@ export function gpuiWorkspaceTerminalTitleCommandForAgent(agentId: string): 'nam
     return 'title';
   }
   return 'rename';
-}
-
-export function normalizeGpuiWorkspaceTerminalTitleChanged(
-  value: unknown
-): GpuiWorkspaceTerminalTitleChangedPayload | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    Object.keys(record).some((key) => !['projectId', 'rawTitle', 'sessionId', 'type', 'version'].includes(key)) ||
-    record.type !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_TYPE ||
-    record.version !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_VERSION
-  ) {
-    return undefined;
-  }
-  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
-  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
-  const rawTitle = typeof record.rawTitle === 'string' ? record.rawTitle : undefined;
-  if (
-    !projectId ||
-    !sessionId ||
-    !rawTitle ||
-    rawTitle.length > GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_MAX_CHARS ||
-    /[\u0000-\u001f\u007f]/u.test(rawTitle) ||
-    !gpuiLocalWorkspaceLifecycleProjectIdAllowed(projectId) ||
-    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
-  ) {
-    return undefined;
-  }
-  return { projectId, rawTitle, sessionId };
 }
 
 /*
@@ -164,33 +123,6 @@ export function normalizeGpuiWorkspaceTerminalRuntimeAction(
   return { action, projectId, sessionId };
 }
 
-export function normalizeGpuiWorkspaceTerminalBell(value: unknown): GpuiWorkspaceTerminalBellPayload | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !['projectId', 'sessionId', 'type', 'version'].includes(key))) {
-    return undefined;
-  }
-  if (
-    record.type !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE ||
-    record.version !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_VERSION
-  ) {
-    return undefined;
-  }
-  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
-  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
-  if (
-    !projectId ||
-    !sessionId ||
-    !gpuiLocalWorkspaceLifecycleProjectIdAllowed(projectId) ||
-    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
-  ) {
-    return undefined;
-  }
-  return { projectId, sessionId };
-}
-
 export function normalizeGpuiWorkspaceTerminalEscapePressed(
   value: unknown
 ): GpuiWorkspaceTerminalEscapePressedPayload | undefined {
@@ -204,35 +136,6 @@ export function normalizeGpuiWorkspaceTerminalEscapePressed(
   if (
     record.type !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE ||
     record.version !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION
-  ) {
-    return undefined;
-  }
-  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
-  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
-  if (
-    !projectId ||
-    !sessionId ||
-    !gpuiLocalWorkspaceLifecycleProjectIdAllowed(projectId) ||
-    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
-  ) {
-    return undefined;
-  }
-  return { projectId, sessionId };
-}
-
-export function normalizeGpuiWorkspaceFirstPromptTitleGenerationCancel(
-  value: unknown
-): GpuiWorkspaceFirstPromptTitleGenerationCancelPayload | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !['projectId', 'sessionId', 'type', 'version'].includes(key))) {
-    return undefined;
-  }
-  if (
-    record.type !== GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_TYPE ||
-    record.version !== GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_VERSION
   ) {
     return undefined;
   }

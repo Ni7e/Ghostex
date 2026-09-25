@@ -113,6 +113,7 @@ mod sidebar_ui_storage;
 mod space_editor;
 mod space_sleep;
 mod space_switch;
+pub(crate) mod terminal_lifecycle;
 mod workspace_groups;
 
 /// The client-storage doors, for the other Rust hosts in this app that own catalogued stores of

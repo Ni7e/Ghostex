@@ -222,12 +222,9 @@ export type GhostexGpuiSidebarBridge = {
    * previous swipe's momentum tail.
    */
   onNativeScrollGestureBegan?: () => void;
-  onWorkspaceFirstPromptTitleGenerationCancel?: (payload: unknown) => void;
   onWorkspaceFolderPicked?: (payload: unknown) => void;
   onWorkspaceSessionAttentionAcknowledge?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;
-  onWorkspaceTerminalBell?: (payload: unknown) => void;
-  onWorkspaceTerminalTitleChanged?: (payload: unknown) => void;
   onWorkspaceTerminalEscapePressed?: (payload: unknown) => void;
   onWorkspaceTerminalLifecycleRequest?: (payload: unknown) => void;
   onWorkspaceTerminalRuntimeAction?: (payload: unknown) => void;
@@ -247,12 +244,9 @@ export type GhostexGpuiSidebarBridge = {
   pendingStatusPetActivations?: unknown[];
   pendingTitlebarGitActions?: unknown[];
   pendingWorktreeModalCommands?: unknown[];
-  pendingWorkspaceFirstPromptTitleGenerationCancels?: unknown[];
   pendingWorkspaceFolderPicks?: unknown[];
   pendingWorkspaceSessionAttentionAcknowledgements?: unknown[];
   pendingWorkspaceTabSessionSelections?: unknown[];
-  pendingWorkspaceTerminalBells?: unknown[];
-  pendingWorkspaceTerminalTitleChanges?: unknown[];
   pendingWorkspaceTerminalEscapePresses?: unknown[];
   pendingWorkspaceTerminalLifecycleRequests?: unknown[];
   pendingWorkspaceTerminalRuntimeActions?: unknown[];
@@ -757,23 +751,7 @@ export type GpuiProjectBoardConversationRequest = {
   toastTitle?: string;
 };
 
-export type GpuiWorkspaceTerminalBellPayload = {
-  projectId: string;
-  sessionId: string;
-};
-
-export type GpuiWorkspaceTerminalTitleChangedPayload = {
-  projectId: string;
-  rawTitle: string;
-  sessionId: string;
-};
-
 export type GpuiWorkspaceTerminalEscapePressedPayload = {
-  projectId: string;
-  sessionId: string;
-};
-
-export type GpuiWorkspaceFirstPromptTitleGenerationCancelPayload = {
   projectId: string;
   sessionId: string;
 };

@@ -306,32 +306,10 @@ pub(crate) fn gpui_os_integration_shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-pub(crate) fn gpui_workspace_terminal_bell_script(message: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalBell==='function'){{bridge.onWorkspaceTerminalBell(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalBells)?bridge.pendingWorkspaceTerminalBells:[];pending.push(payload);bridge.pendingWorkspaceTerminalBells=pending;}}}})(); undefined;"
-    )
-}
-
-#[cfg(target_os = "windows")]
-pub(crate) fn gpui_workspace_terminal_title_changed_script(message: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalTitleChanged==='function'){{bridge.onWorkspaceTerminalTitleChanged(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalTitleChanges)?bridge.pendingWorkspaceTerminalTitleChanges:[];pending.push(payload);bridge.pendingWorkspaceTerminalTitleChanges=pending;}}}})(); undefined;"
-    )
-}
-
 // Bridge script for `ghostex.gpui.sidebar.workspaceTerminalEscapePressed`.
 pub(crate) fn gpui_workspace_terminal_escape_pressed_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalEscapePressed==='function'){{bridge.onWorkspaceTerminalEscapePressed(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalEscapePresses)?bridge.pendingWorkspaceTerminalEscapePresses:[];pending.push(payload);bridge.pendingWorkspaceTerminalEscapePresses=pending;}}}})(); undefined;"
-    )
-}
-
-// Bridge script for `ghostex.gpui.sidebar.workspaceFirstPromptTitleGenerationCancel`.
-pub(crate) fn gpui_workspace_first_prompt_title_generation_cancel_script(
-    message: &serde_json::Value,
-) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceFirstPromptTitleGenerationCancel==='function'){{bridge.onWorkspaceFirstPromptTitleGenerationCancel(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceFirstPromptTitleGenerationCancels)?bridge.pendingWorkspaceFirstPromptTitleGenerationCancels:[];pending.push(payload);bridge.pendingWorkspaceFirstPromptTitleGenerationCancels=pending;}}}})(); undefined;"
     )
 }
 

@@ -8,14 +8,11 @@ import {
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_VERSION,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_SETTLE_MS,
   GPUI_WORKSPACE_TERMINAL_LIFECYCLE_BRIDGE_RETRY_DELAY_MS,
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
-import { createGpuiSidebarSettings } from './helpers/bootstrap';
 import { focusMovedElsewhereDuringWake } from './helpers/auto-sleep';
 import { normalizeGpuiWorkspaceTabSessionSelection } from './helpers/command-palette';
-import { normalizeNonEmptyString } from './helpers/records';
 import { rememberGpuiProjectSession } from './project-activation';
 import {
   createGpuiRemotePresentationSessionId,
@@ -24,25 +21,14 @@ import {
 } from './helpers/remote-presentation';
 import {
   gpuiWorkspaceTerminalTitleCommandForAgent,
-  normalizeGpuiWorkspaceFirstPromptTitleGenerationCancel,
-  normalizeGpuiWorkspaceTerminalBell,
   normalizeGpuiWorkspaceTerminalLifecycleRequest,
   normalizeGpuiWorkspaceTerminalRuntimeAction,
-  normalizeGpuiWorkspaceTerminalTitleChanged,
   normalizeQueuedGpuiWorkspaceTerminalLifecycleRequest,
   shouldApplyGpuiLocalWorkspaceTransition,
 } from './helpers/terminal-lifecycle';
-import type {
-  GpuiRemoteProjectReference,
-  GpuiWorkspaceTerminalLifecycleRequest,
-  GpuiWorkspaceTerminalTitleChangedPayload,
-} from './types-and-protocol';
+import type { GpuiRemoteProjectReference, GpuiWorkspaceTerminalLifecycleRequest } from './types-and-protocol';
 import { createGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
-import type {
-  GxserverSessionTransitionResult,
-  GxserverTerminalTitleEventResult,
-} from '@/packages/shared/gxserver-protocol';
-import { getVisibleTerminalTitle } from '@/packages/shared/session-grid-contract';
+import type { GxserverSessionTransitionResult } from '@/packages/shared/gxserver-protocol';
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -55,11 +41,6 @@ at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeTerminalLifecycleMethods {
   handleGpuiWorkspaceTabSessionSelected(payload: unknown): void;
-  handleGpuiWorkspaceFirstPromptTitleGenerationCancel(payload: unknown): Promise<void>;
-  clearLocalPresentationSessionFirstPromptTitleGeneration(projectId: string, sessionId: string): boolean;
-  handleGpuiWorkspaceTerminalBell(payload: unknown): Promise<void>;
-  handleGpuiWorkspaceTerminalTitleChanged(payload: unknown): void;
-  ingestGpuiWorkspaceTerminalTitle(observation: GpuiWorkspaceTerminalTitleChangedPayload): Promise<void>;
   handleGpuiWorkspaceTerminalRuntimeAction(payload: unknown): Promise<void>;
   postLocalWorkspaceTerminalRenameCommand(projectId: string, sessionId: string, title: string): void;
   transitionWorkspaceTerminalLifecycleClose(
@@ -136,166 +117,6 @@ export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
       this.postLocalWorkspaceTerminalFocus(selection.projectId, selection.sessionId);
     }
     this.publishPresentation('patch');
-  },
-
-  async handleGpuiWorkspaceFirstPromptTitleGenerationCancel(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
-    /*
-    CDXC:SessionTitles 2026-07-26:
-    Escape inside the blocking "Generating title" pane overlay cancels the
-    gxserver-owned first-prompt title job, matching the managed macOS pane.
-    Rust only reports the suppressed-pane Escape; the sidebar runtime owns the
-    decision and the gxserver call. Clear the local presentation flag first so
-    the overlay and terminal input suppression lift immediately instead of
-    waiting for the next gxserver delta.
-    */
-    const cancel = normalizeGpuiWorkspaceFirstPromptTitleGenerationCancel(payload);
-    if (!cancel || !this.client) {
-      return;
-    }
-    const session = this.findLocalPresentationSession(cancel.projectId, cancel.sessionId);
-    if (session?.isGeneratingFirstPromptTitle !== true) {
-      return;
-    }
-    if (this.clearLocalPresentationSessionFirstPromptTitleGeneration(cancel.projectId, cancel.sessionId)) {
-      this.publishPresentation('patch');
-    }
-    try {
-      await this.client.rpc('/api/cancelFirstPromptAutoTitle', {
-        projectId: cancel.projectId,
-        reason: 'escape',
-        sessionId: cancel.sessionId,
-      });
-    } catch {
-      /*
-      gxserver owns the title job, so a rejected cancel is recovered by the
-      next presentation delta: it republishes the generating flag and the
-      overlay comes back if the job is still alive.
-      */
-    }
-  },
-
-  clearLocalPresentationSessionFirstPromptTitleGeneration(
-    this: GpuiSidebarRuntime,
-    projectId: string,
-    sessionId: string
-  ): boolean {
-    const presentation = this.presentation;
-    if (!presentation) {
-      return false;
-    }
-    let didChange = false;
-    const sessions = presentation.sessions.map((session) => {
-      if (
-        session.projectId !== projectId ||
-        session.sessionId !== sessionId ||
-        session.isGeneratingFirstPromptTitle !== true
-      ) {
-        return session;
-      }
-      didChange = true;
-      return {
-        ...session,
-        isGeneratingFirstPromptTitle: false,
-      };
-    });
-    if (!didChange) {
-      return false;
-    }
-    this.presentation = {
-      ...presentation,
-      sessions,
-    };
-    return true;
-  },
-
-  async handleGpuiWorkspaceTerminalBell(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
-    /*
-    Shells use BEL for routine feedback such as zsh Tab-completion misses, so
-    the bell only becomes gxserver attention when the user opts in from
-    Terminal settings — the same gate macOS applies to its terminalBell host
-    event. Agent completion keeps its separate explicit attention path.
-    */
-    const bell = normalizeGpuiWorkspaceTerminalBell(payload);
-    if (!bell || !this.client) {
-      return;
-    }
-    const settings = createGpuiSidebarSettings(this.runtimeSettings);
-    if (!settings.showNotificationOnTerminalBell) {
-      return;
-    }
-    const agentName = normalizeNonEmptyString(
-      this.presentation?.sessions.find(
-        (session) => session.projectId === bell.projectId && session.sessionId === bell.sessionId
-      )?.agentName
-    );
-    try {
-      await this.client.rpc('/api/updateAgentActivity', {
-        ...(agentName ? { agentName } : {}),
-        event: 'bell',
-        projectId: bell.projectId,
-        sessionId: bell.sessionId,
-      });
-    } catch {
-      // gxserver attention sync is best-effort, matching macOS's log-only failure path.
-    }
-  },
-
-  handleGpuiWorkspaceTerminalTitleChanged(this: GpuiSidebarRuntime, payload: unknown): void {
-    const observation = normalizeGpuiWorkspaceTerminalTitleChanged(payload);
-    if (!observation) {
-      return;
-    }
-    const key = createGxserverPresentationProjectSessionId(observation.projectId, observation.sessionId);
-    this.workspaceTerminalTitleObservations.set(key, observation);
-    const previousTimeout = this.workspaceTerminalTitleSettleTimeouts.get(key);
-    if (previousTimeout !== undefined) {
-      window.clearTimeout(previousTimeout);
-    }
-    const timeout = window.setTimeout(() => {
-      this.workspaceTerminalTitleSettleTimeouts.delete(key);
-      const settled = this.workspaceTerminalTitleObservations.get(key);
-      this.workspaceTerminalTitleObservations.delete(key);
-      if (settled) {
-        void this.ingestGpuiWorkspaceTerminalTitle(settled);
-      }
-    }, GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_SETTLE_MS);
-    this.workspaceTerminalTitleSettleTimeouts.set(key, timeout);
-  },
-
-  async ingestGpuiWorkspaceTerminalTitle(
-    this: GpuiSidebarRuntime,
-    observation: GpuiWorkspaceTerminalTitleChangedPayload
-  ): Promise<void> {
-    if (!this.client) {
-      return;
-    }
-    const visibleTitle = getVisibleTerminalTitle(observation.rawTitle)?.trim();
-    if (!visibleTitle) {
-      return;
-    }
-    const session = this.presentation?.sessions.find(
-      (candidate) => candidate.projectId === observation.projectId && candidate.sessionId === observation.sessionId
-    );
-    if (!session || (session.kind !== 'terminal' && session.kind !== 'agent')) {
-      return;
-    }
-    const storedVisibleTitle = getVisibleTerminalTitle(session.terminalTitle)?.trim();
-    if (storedVisibleTitle && storedVisibleTitle.replace(/\s+/gu, ' ') === visibleTitle.replace(/\s+/gu, ' ')) {
-      return;
-    }
-    try {
-      await this.client.rpc<GxserverTerminalTitleEventResult>('/api/ingestTerminalTitleEvent', {
-        ...(session.agentName || session.agentId ? { agentName: session.agentName ?? session.agentId } : {}),
-        projectId: observation.projectId,
-        rawTitle: observation.rawTitle,
-        sessionId: observation.sessionId,
-        ...(session.sessionPersistenceProvider
-          ? { sessionPersistenceProvider: session.sessionPersistenceProvider }
-          : {}),
-      });
-    } catch {
-      // A later terminal observation or presentation recovery retries without inventing local state.
-    }
   },
 
   async handleGpuiWorkspaceTerminalRuntimeAction(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
