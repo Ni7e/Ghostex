@@ -34,7 +34,7 @@ pub struct SessionChatQuestion {
     #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
     /// omp's `recommended` option index: its ask dialog opens with the cursor
-    /// on this row (default 0), so arrow-key answer plans start counting here.
+    /// on this row (default 0). Answer plans read the live highlight instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recommended: Option<usize>,
     /// CDXC:SessionChat 2026-09-23 WHY: an AskUserQuestion option with a `preview` makes Claude Code draw the question as an option list beside a preview pane, with no "Type something" row: a digit only moves the highlight, Enter commits it, and typed text can only be a note on the highlighted option (`n`). The answer plan needs this layout before the screen shows it, so it is read from the tool input.
@@ -394,7 +394,13 @@ pub fn detect_cursor_question_prompt(
     let mut options = Vec::new();
     let mut allow_custom = false;
     for line in lines.iter().take(footer).skip(question_index + 1) {
-        let Some((_, after_checkbox)) = line.split_once("[ ]") else {
+        // A row the user already ticked in the terminal still counts, or every
+        // later option index would point one row too high.
+        let Some((_, after_checkbox)) = line
+            .split_once("[ ]")
+            .or_else(|| line.split_once("[x]"))
+            .or_else(|| line.split_once("[X]"))
+        else {
             continue;
         };
         let label = after_checkbox.trim();
