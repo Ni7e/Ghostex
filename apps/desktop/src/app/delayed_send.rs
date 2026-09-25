@@ -2090,12 +2090,12 @@ impl GhostexGpuiApp {
                 self.forward_gpui_sidebar_space_editor_result_to_sidebar(command, cx);
             }
             /*
-            CDXC:Sessions 2026-09-11 WHY:
+            CDXC:Sessions 2026-09-25 WHY:
             The Settings modal creates custom session tags from the app-modal
             host window, so its catalog write arrives here instead of from the
-            sidebar page. Like `setSessionNote` it is forwarded to the sidebar
-            runtime, which owns the gxserver client, the write-through debounce,
-            and the local/remote machine routing, and nothing is applied here.
+            sidebar page. It is bounded and then pushed from Rust
+            (gx_store/custom_tags_sync.rs); supersedes the 2026-09-11 note that
+            forwarded it to the sidebar runtime.
             */
             "updateCustomSessionTags" => {
                 self.forward_gpui_custom_session_tags_update_to_sidebar(command, cx);
@@ -3527,6 +3527,7 @@ impl GhostexGpuiApp {
                 self.refresh_open_gpui_app_modal_sidebar_state_in_background(cx);
             }
             command_type if gpui_app_modal_unsupported_settings_command_noop(command_type) => {}
+            command_type if self.gx_store_run_app_modal_create_command(command_type, cx) => {}
             _ => {}
         }
     }

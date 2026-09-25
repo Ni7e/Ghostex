@@ -264,6 +264,9 @@ impl GhostexGpuiApp {
         if self.gx_store_focus_local_row(&command, cx) {
             return;
         }
+        if self.gx_store_run_sidebar_create(&command, cx) {
+            return;
+        }
         if self.sidebar.is_none() {
             return;
         }

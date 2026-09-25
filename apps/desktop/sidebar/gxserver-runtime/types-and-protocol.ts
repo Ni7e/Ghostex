@@ -125,28 +125,22 @@ export type GpuiSidebarHostMessage =
          * arrives through Rust rather than from the sidebar page itself.
          *
          * CDXC:AgentLauncher 2026-09-09 WHY:
-         * `runSidebarAgent`, `createSession`, and `openBrowserPaneInGroup`
-         * join it for the New Thread picker, another app-modal window whose
-         * launches must land in this runtime's active-project handlers.
-         *
-         * CDXC:Sessions 2026-09-11 WHY:
-         * `updateCustomSessionTags` joins it because the Settings modal
-         * creates tags from the app-modal host window, so its catalog write
-         * arrives through Rust exactly like a note or rename confirm.
+         * `runSidebarAgent` and `createSession` join it for the New Thread
+         * picker, another app-modal window whose launches must land in this
+         * runtime's active-project handlers. (Its Browser row is answered in
+         * Rust since 2026-09-25: apps/desktop/src/app/gx_store/create/.)
          */
         type:
           | 'cancelDelayedSend'
           | 'confirmAgentHookLaunch'
           | 'createSession'
-          | 'openBrowserPaneInGroup'
           | 'removeProject'
           | 'renameSession'
           | 'runSidebarAgent'
           | 'scheduleDelayedSend'
           | 'postponeDelayedSend'
           | 'setSessionNote'
-          | 'toggleCloseAfterDone'
-          | 'updateCustomSessionTags';
+          | 'toggleCloseAfterDone';
       }
     >;
 

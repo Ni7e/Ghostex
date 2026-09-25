@@ -455,10 +455,9 @@ impl GhostexGpuiApp {
     /// result has to cross back, and only bounded metadata does: the mode enum, a Space id, a name,
     /// an icon id, a colour, an optional member id and the owning machine id, never a Space
     /// document, a project path or daemon state. Supersedes `CDXC:Spaces 2026-08-27`'s placement,
-    /// which said SidebarApp owns the Space document: for THIS COMPUTER the app owns it now
-    /// (gx_store/space_editor.rs) and the page is only told, so its Space selection and its
-    /// projection stay in step. A REMOTE machine's document is still the page's, because
-    /// `updateRemoteSidebarSpaces` is a direct call down that machine's tunnel.
+    /// which said SidebarApp owns the Space document: the app owns it now, for this computer and
+    /// for a remote machine (gx_store/space_editor.rs). The runtime is no longer told: the page
+    /// that read `applySidebarSpaceEditorResult` is gone and nothing else did (ledger R022).
     pub(crate) fn forward_gpui_sidebar_space_editor_result_to_sidebar(
         &mut self,
         command: &serde_json::Map<String, serde_json::Value>,
@@ -499,17 +498,15 @@ impl GhostexGpuiApp {
         // gone, and the sidebar's own state is the store's since M5 piece 7c
         // (gx_store/sidebar_ui_paths.rs).
         self.gx_store_note_sidebar_space_editor_result(&message, cx);
-        // The document edit itself, for this computer. The page is still told, because it keeps its
-        // own Space selection and draws its own projection until that projection is deleted; what
-        // it no longer does is write the document, so there is one writer.
+        // The document edit itself, for this computer or a remote machine.
         self.gx_store_run_space_editor_result(&message, cx);
-        self.dispatch_gpui_sidebar_host_message(serde_json::Value::Object(message), cx)
+        true
     }
 
     /// CDXC:Spaces 2026-09-15 DECISION:
     /// User: a project added through the Add Project dialog joins the Space that is open in the sidebar and goes to the top of it.
-    /// The app applies both halves for THIS COMPUTER (gx_store/added_project.rs) and still tells the sidebar page, which keeps them for a remote machine and keeps its own selected Space; only the added project's raw id and the owning machine id cross under the inbound `assignAddedProjectToSelectedSpace` type.
-    /// It must be dispatched before the project activation so the membership exists when the activation reveal resolves the project's Space.
+    /// The app applies both halves, for this computer and for a remote machine (gx_store/added_project.rs); the runtime is no longer told, because nothing there read `assignAddedProjectToSelectedSpace` once the sidebar page was gone (ledger R023).
+    /// It must run before the project activation so the membership exists when the activation reveal resolves the project's Space.
     pub(crate) fn forward_gpui_added_project_to_sidebar(
         &mut self,
         project_id: &str,
@@ -526,25 +523,15 @@ impl GhostexGpuiApp {
         let Some(project_id) = bounded(project_id) else {
             return false;
         };
-        let mut message = serde_json::Map::new();
-        message.insert("projectId".to_string(), serde_json::json!(project_id));
-        message.insert(
-            "type".to_string(),
-            serde_json::json!("assignAddedProjectToSelectedSpace"),
-        );
         let remote_machine_id = remote_machine_id.and_then(bounded);
-        if let Some(machine_id) = &remote_machine_id {
-            message.insert("remoteMachineId".to_string(), serde_json::json!(machine_id));
-        }
         self.gx_store_note_added_project(&project_id, remote_machine_id.as_deref(), cx);
-        self.dispatch_gpui_sidebar_host_message(serde_json::Value::Object(message), cx)
+        true
     }
 
-    /// Forward an `updateCustomSessionTags` catalog write issued from an
-    /// app-modal window (Settings) to the sidebar runtime, which performs the
-    /// gxserver write exactly as it does for the same message posted by the
-    /// sidebar page. Only a bounded copy of the catalog crosses: tag ids, names,
-    /// icon ids, colors, the order, and the owning machine id.
+    /// An `updateCustomSessionTags` catalog write issued from an app-modal
+    /// window (Settings), performed by gx_store/custom_tags_sync.rs. Only a
+    /// bounded copy of the catalog goes on: tag ids, names, icon ids, colors,
+    /// the order, and the owning machine id.
     pub(crate) fn forward_gpui_custom_session_tags_update_to_sidebar(
         &mut self,
         command: &serde_json::Map<String, serde_json::Value>,
@@ -620,7 +607,8 @@ impl GhostexGpuiApp {
                 serde_json::Value::String(remote_machine_id),
             );
         }
-        self.dispatch_gpui_sidebar_host_message(serde_json::Value::Object(message), cx)
+        self.gx_store_update_custom_session_tags(&serde_json::Value::Object(message), cx);
+        true
     }
 
     /// Reveal the exported markdown file in the OS file manager. The path comes
@@ -658,6 +646,9 @@ impl GhostexGpuiApp {
         CDXC:CommandPane 2026-06-24-23:49:
         Command-pane Action run-state feedback targets only the first-party GPUI sidebar CEF surface and the typed `window.ghostexGpui.onSidebarHostMessage` callback installed by the SidebarApp runtime. The generated script carries only existing sidebar message JSON and must not expose generic eval IPC, command text, paths, terminal output, status-file paths, tokens, or persisted shell-state fields.
         */
+        if self.gx_store_claim_sidebar_host_message(&message, cx) {
+            return true;
+        }
         // Host messages carry the sidebar hotkeys (previous or next session, session and project slots), which change focus in the runtime: it must hear the newest local selection first (gx_store/burst.rs).
         self.gx_store_flush_old_runtime_tell(cx);
         let Some(sidebar) = self.sidebar.clone() else {
@@ -1523,7 +1514,7 @@ impl GhostexGpuiApp {
     ) -> bool {
         /*
         CDXC:Workarea 2026-06-26-07:25:
-        Native GPUI workspace tab lifecycle uses a fixed Rust-to-sidebar callback, not a generic renderer bus. The request contains only request id, action, bounded gxserver project/session ids, and optional replacement ids so the sidebar can perform gxserver lifecycle ownership while Rust keeps pane/tab ownership local.
+        Native GPUI workspace tab lifecycle: the request carries only request id, action, bounded gxserver project/session ids, and optional replacement ids; the store performs the gxserver half (gx_store/terminal_lifecycle/lifecycle_requests.rs) while the workspace keeps pane/tab ownership local.
         */
         let Some(sidebar) = self.sidebar.clone() else {
             return false;

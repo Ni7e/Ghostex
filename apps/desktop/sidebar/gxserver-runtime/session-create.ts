@@ -8,11 +8,7 @@ import {
   parseGpuiWorkspaceSessionSubgroupId,
 } from "../workspace-session-groups";
 import { GpuiGxserverRpcError } from "./client";
-import {
-  GPUI_GXSERVER_CHATS_GROUP_ID,
-  GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
-  GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
-} from "./constants";
+import { GPUI_GXSERVER_CHATS_GROUP_ID } from "./constants";
 import type { GpuiSidebarRuntime } from "./core";
 import { createGpuiSidebarSettings } from "./helpers/bootstrap";
 import { normalizeNonEmptyString } from "./helpers/records";
@@ -53,7 +49,6 @@ import {
   getDefaultSidebarAgentByIcon,
   type SidebarAgentButton,
 } from "@/packages/shared/sidebar-agents";
-import { DEFAULT_BROWSER_LAUNCH_URL } from "@/packages/shared/sidebar-commands";
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -77,8 +72,6 @@ export interface GpuiSidebarRuntimeSessionCreateMethods {
   ): Promise<GxserverProjectDomainState | undefined>;
   createQuickTerminal(): Promise<void>;
   createQuickAgentSession(agentId: string, accountId?: string): Promise<void>;
-  openQuickBrowserTab(): void;
-  openBrowserPaneInGroup(groupId?: string): void;
   createSession(groupId?: string | undefined): Promise<void>;
   createProjectTerminal(
     message: Extract<
@@ -125,7 +118,6 @@ export interface GpuiSidebarRuntimeSessionCreateMethods {
     groupId?: string | undefined,
     accountId?: string,
   ): Promise<void>;
-  searchPreviousSessionsByText(): void;
   handleGpuiOsIntegrationCommand(payload: unknown): Promise<void>;
   createGhostexHelpChat(question: string, projectPath: string): Promise<void>;
   createOsIntegrationTerminal(input: {
@@ -285,78 +277,6 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
         createGxserverPresentationProjectGroupId(project.projectId),
         accountId,
       );
-    }
-  },
-
-  openQuickBrowserTab(this: GpuiSidebarRuntime): void {
-    openQuickHeaderBrowserUrl(this, DEFAULT_BROWSER_LAUNCH_URL);
-  },
-
-  openBrowserPaneInGroup(
-    this: GpuiSidebarRuntime,
-    groupId = this.activeGroupId,
-  ): void {
-    const projectId = groupId
-      ? this.resolveWorkspaceGroupProjectId(groupId)
-      : undefined;
-    if (!groupId || !projectId) {
-      return;
-    }
-    /*
-    CDXC:Browser 2026-07-12:
-    Browser tabs are project-keyed local CEF panes, so remote projects reuse
-    the same workarea through their machine-scoped project ids. The payload
-    carries the explicit target project id so Rust swaps the browser project
-    model before creating the tab instead of racing the async active-project
-    context round-trip through React.
-    */
-    const remoteProject = parseGpuiRemotePresentationProjectId(projectId);
-    if (remoteProject) {
-      this.activeGroupId = groupId;
-      this.publishRemotePresentationPatch();
-      /*
-      CDXC:RemoteMachines 2026-07-30:
-      A remote project's Browser pane defaults to the machine's listening-ports
-      page instead of the generic launch URL, so the tab lands on the remote's
-      address with its running apps one click away. Rust owns SSH port
-      discovery, page generation, and the final tab URL; the renderer sends
-      only the fixed action plus the machine-scoped project id.
-      */
-      if (
-        !this.postRemoteProjectNativeAction(
-          "openRemoteProjectPortsBrowser",
-          remoteProject,
-          {
-            groupId,
-            type: "openBrowserPaneInGroup",
-          },
-        )
-      ) {
-        this.postSidebarActionToast("warning", "Browser unavailable");
-      }
-      return;
-    }
-    if (!this.presentation) {
-      return;
-    }
-    this.activeProjectId = projectId;
-    this.activeGroupId = groupId;
-    this.publishPresentation("patch");
-
-    const post = window.ghostexGpui?.postOpenBrowserUrl;
-    if (
-      typeof post !== "function" ||
-      !post(
-        JSON.stringify({
-          projectId,
-          reuse: "none",
-          type: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
-          url: DEFAULT_BROWSER_LAUNCH_URL,
-          version: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
-        }),
-      )
-    ) {
-      this.postSidebarActionToast("warning", "Browser unavailable");
     }
   },
 
@@ -1054,20 +974,6 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
   },
 
   /*
-  CDXC:PromptSearch 2026-08-20:
-  Search by Text used to create a terminal and type `gx f` into it. The same
-  search is now a first-class modal, so this forwards the native Find action
-  and both entry points — the Previous Sessions search row and the command
-  palette — land on one implementation instead of two.
-  */
-  searchPreviousSessionsByText(this: GpuiSidebarRuntime): void {
-    this.postGhostexHotkeyAction({
-      actionId: "openFindPrompts",
-      type: "runGhostexHotkeyAction",
-    });
-  },
-
-  /*
   GPUI port of the macOS OS-integration sidebar router (`handleNativeCliCommand`
   "createQuickTerminal" / "openPaths" in native-sidebar.tsx). Rust owns URL and
   file parsing, the script Run/Edit/Cancel consent dialog, existence checks,
@@ -1507,36 +1413,6 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     ).catch(() => undefined);
   },
 };
-
-function openQuickHeaderBrowserUrl(
-  runtime: GpuiSidebarRuntime,
-  url: string,
-): void {
-  /*
-  GPUI currently owns Browser tabs at the window level instead of as Agents
-  workspace sessions. Send the Quick header's explicit browser launch through
-  the existing app-owned Browser bridge, with a distinct fixed origin so Rust
-  can honor this projectless launcher even while project-scoped Browser mode
-  is otherwise disabled in Quick context.
-  */
-  const post = window.ghostexGpui?.postOpenBrowserUrl;
-  if (typeof post !== "function") {
-    runtime.postSidebarActionToast("warning", "Quick Browser unavailable");
-    return;
-  }
-  const accepted = post(
-    JSON.stringify({
-      origin: "quickHeader",
-      reuse: "none",
-      type: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
-      url,
-      version: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
-    }),
-  );
-  if (!accepted) {
-    runtime.postSidebarActionToast("warning", "Quick Browser unavailable");
-  }
-}
 
 const gpuiSidebarRuntimeSessionCreateMethodsShapeCheck: GpuiSidebarRuntimeSessionCreateMethods =
   gpuiSidebarRuntimeSessionCreateMethods;

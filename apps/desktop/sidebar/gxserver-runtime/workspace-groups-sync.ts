@@ -17,10 +17,6 @@ import {
   syncGpuiWorkspaceSessionOrderInSubgroup,
   syncGpuiWorkspaceSessionSubgroupOrder,
 } from '../workspace-session-groups';
-import {
-  GPUI_CUSTOM_SESSION_TAGS_SERVER_SYNC_DELAY_MS,
-  GPUI_CUSTOM_SESSION_TAGS_SERVER_SYNC_RETRY_DELAY_MS,
-} from './constants';
 import type { GpuiWorkspaceSessionGroupsState } from '../workspace-session-groups';
 import type { GpuiSidebarRuntime } from './core';
 import type { NativeSidebarBridge } from '@/packages/shared/native-sidebar';
@@ -29,7 +25,6 @@ import {
   createGpuiRemotePresentationGroupId,
   createGpuiRemotePresentationProjectId,
   createGpuiRemotePresentationSessionId,
-  isCustomSessionTagsState,
   isSidebarProjectCollectionsState,
   isSidebarSpacesState,
   isWorkspaceSessionGroupsState,
@@ -74,11 +69,8 @@ export interface GpuiSidebarRuntimeWorkspaceGroupMethods {
   ): Promise<void>;
   forwardRemoteSidebarSpacesFromGxserver(remoteMachineId: string, state: GxserverSidebarSpacesState): void;
   updateRemoteSidebarSpaces(remoteMachineId: string, state: GxserverSidebarSpacesState): Promise<void>;
-  queueCustomSessionTagsServerSync(state: GxserverCustomSessionTagsState): void;
-  pushCustomSessionTagsToGxserver(): Promise<void>;
   forwardCustomSessionTagsFromGxserver(state: GxserverCustomSessionTagsState): void;
   forwardRemoteCustomSessionTagsFromGxserver(remoteMachineId: string, state: GxserverCustomSessionTagsState): void;
-  updateRemoteCustomSessionTags(remoteMachineId: string, state: GxserverCustomSessionTagsState): Promise<void>;
   updateRemoteWorkspaceGroups(remoteMachineId: string, projectOrder: readonly string[]): Promise<void>;
   createWorkspaceGroup(groupId?: string): void;
   createWorkspaceGroupFromSession(sessionId: string): void;
@@ -267,57 +259,12 @@ export const gpuiSidebarRuntimeWorkspaceGroupMethods = {
   },
 
   /*
-  CDXC:Sessions 2026-09-11 SEE-ALSO:
-  The custom session tag catalog relays exactly like Spaces above (debounced
-  local write-through with server forwards suppressed while a push is pending,
-  and a per-machine remote path that never merges into the local catalog).
-  The wire contract is `GxserverCustomSessionTagsState` in
-  packages/shared/gxserver-protocol.ts.
+  CDXC:Sessions 2026-09-25 WHY:
+  The catalog's write-through moved to Rust (apps/desktop/src/app/gx_store/custom_tags_sync.rs),
+  this computer's and a remote machine's alike. What stays here is the forward of the daemon's
+  copy into the store feed Quick Access still reads, which is why it no longer waits for a push.
   */
-  queueCustomSessionTagsServerSync(this: GpuiSidebarRuntime, state: GxserverCustomSessionTagsState): void {
-    this.latestCustomSessionTagsUpdate = state;
-    this.customSessionTagsServerSyncPending = true;
-    if (this.customSessionTagsServerSyncTimeoutId !== undefined) {
-      window.clearTimeout(this.customSessionTagsServerSyncTimeoutId);
-    }
-    this.customSessionTagsServerSyncTimeoutId = window.setTimeout(() => {
-      this.customSessionTagsServerSyncTimeoutId = undefined;
-      void this.pushCustomSessionTagsToGxserver();
-    }, GPUI_CUSTOM_SESSION_TAGS_SERVER_SYNC_DELAY_MS);
-  },
-
-  async pushCustomSessionTagsToGxserver(this: GpuiSidebarRuntime): Promise<void> {
-    const client = this.client;
-    const pushed = this.latestCustomSessionTagsUpdate;
-    if (!client || !pushed) {
-      return;
-    }
-    try {
-      const normalized = await client.updateCustomSessionTags(pushed);
-      if (this.latestCustomSessionTagsUpdate === pushed) {
-        this.customSessionTagsServerSyncPending = false;
-        if (isCustomSessionTagsState(normalized)) {
-          this.forwardCustomSessionTagsFromGxserver(normalized);
-        }
-      }
-    } catch {
-      if (
-        this.client === client &&
-        this.customSessionTagsServerSyncTimeoutId === undefined &&
-        this.customSessionTagsServerSyncPending
-      ) {
-        this.customSessionTagsServerSyncTimeoutId = window.setTimeout(() => {
-          this.customSessionTagsServerSyncTimeoutId = undefined;
-          void this.pushCustomSessionTagsToGxserver();
-        }, GPUI_CUSTOM_SESSION_TAGS_SERVER_SYNC_RETRY_DELAY_MS);
-      }
-    }
-  },
-
   forwardCustomSessionTagsFromGxserver(this: GpuiSidebarRuntime, state: GxserverCustomSessionTagsState): void {
-    if (this.customSessionTagsServerSyncPending) {
-      return;
-    }
     const stateJson = JSON.stringify(state);
     if (stateJson === this.lastForwardedCustomSessionTagsJson) {
       return;
@@ -344,27 +291,6 @@ export const gpuiSidebarRuntimeWorkspaceGroupMethods = {
       remoteMachineId,
       type: 'customSessionTagsChanged',
     });
-  },
-
-  async updateRemoteCustomSessionTags(
-    this: GpuiSidebarRuntime,
-    remoteMachineId: string,
-    state: GxserverCustomSessionTagsState
-  ): Promise<void> {
-    const response = await this.requestRemoteGxserver<{
-      customSessionTags?: unknown;
-    }>(remoteMachineId, '/api/updateCustomSessionTags', { state });
-    if (!isCustomSessionTagsState(response.customSessionTags)) {
-      throw new Error('Remote gxserver returned invalid custom session tags.');
-    }
-    const snapshot = this.remotePresentations.get(remoteMachineId);
-    if (snapshot) {
-      this.remotePresentations.set(remoteMachineId, {
-        ...snapshot,
-        customSessionTags: response.customSessionTags,
-      });
-    }
-    this.forwardRemoteCustomSessionTagsFromGxserver(remoteMachineId, response.customSessionTags);
   },
 
   async updateRemoteWorkspaceGroups(

@@ -27,6 +27,7 @@ mod project_docs;
 mod selectors;
 mod sidebar_accounts;
 mod sidebar_actions;
+mod session_create;
 mod sidebar_drag;
 mod sidebar_menu;
 mod sidebar_ui;
@@ -113,6 +114,7 @@ pub use crate::sidebar_accounts::{
     js_round, mask_account_text, session_accounts_target, AccountAnswer, AccountMenuHost,
     AccountMenuStep, AccountSession, AccountUsageWindow, AccountsRequest, AccountsState,
     AccountsTarget, AgentAccount, LauncherAccounts, LauncherCommand, ResetCredits,
+pub use crate::session_create::{group_project, plan_browser_pane_open, terminal_create_target, BrowserPaneOpen, CreateTarget, DEFAULT_BROWSER_LAUNCH_URL};
     SessionAccounts, SessionAccountsCommand, SidebarAccountMenus, AGENT_ACCOUNTS_PATH,
     INVALID_ACCOUNTS_ANSWER, SESSION_COMPUTER_UNAVAILABLE,
 };
@@ -168,6 +170,7 @@ pub use crate::workspace_groups::{
     WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE, WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER,
     WORKSPACE_GROUPS_SYNC_DELAY_MS, WORKSPACE_GROUPS_SYNC_RETRY_DELAY_MS,
     WORKSPACE_SESSION_GROUP_MAX_COUNT,
+pub use crate::workspace_groups::{CustomTagsPush, CustomTagsPushEffect};
 };
 
 /// The wire types, re-exported so a host needs one dependency.

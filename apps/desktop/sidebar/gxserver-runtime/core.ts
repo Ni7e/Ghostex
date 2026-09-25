@@ -116,7 +116,6 @@ import type {
   GxserverSidebarHudResponse,
   GxserverSidebarProjectCollectionsState,
   GxserverSidebarSpacesState,
-  GxserverCustomSessionTagsState,
 } from '@/packages/shared/gxserver-protocol';
 import { NAVIGATION_HISTORY_SCOPE_GPUI } from '@/packages/shared/navigation-history/navigation-history-contract';
 import { NavigationHistoryController } from '@/packages/shared/navigation-history/navigation-history-controller';
@@ -499,9 +498,6 @@ export class GpuiSidebarRuntime {
   workspaceGroups: GpuiWorkspaceSessionGroupsState = createEmptyGpuiWorkspaceSessionGroupsState();
   lastForwardedRemoteSidebarProjectCollectionsJsonByMachineId = new Map<string, string>();
   lastForwardedRemoteSidebarSpacesJsonByMachineId = new Map<string, string>();
-  latestCustomSessionTagsUpdate: GxserverCustomSessionTagsState | undefined;
-  customSessionTagsServerSyncTimeoutId: number | undefined;
-  customSessionTagsServerSyncPending = false;
   lastForwardedCustomSessionTagsJson: string | undefined;
   lastForwardedRemoteCustomSessionTagsJsonByMachineId = new Map<string, string>();
   workspaceTerminalLifecycleBridgeRetryId: number | undefined;
@@ -572,12 +568,10 @@ export class GpuiSidebarRuntime {
         message.type === 'postponeDelayedSend' ||
         message.type === 'confirmAgentHookLaunch' ||
         message.type === 'createSession' ||
-        message.type === 'openBrowserPaneInGroup' ||
         message.type === 'removeProject' ||
         message.type === 'runSidebarAgent' ||
         message.type === 'setSessionNote' ||
-        message.type === 'toggleCloseAfterDone' ||
-        message.type === 'updateCustomSessionTags'
+        message.type === 'toggleCloseAfterDone'
       ) {
         void this.handleSidebarMessage(message);
         return;
@@ -1068,12 +1062,6 @@ export class GpuiSidebarRuntime {
       case 'createChat':
         await this.createQuickTerminal();
         return;
-      case 'openBrowserChat':
-        this.openQuickBrowserTab();
-        return;
-      case 'openBrowserPaneInGroup':
-        this.openBrowserPaneInGroup(message.groupId);
-        return;
       case 'runSidebarAgent':
         await this.requestAgentSessionLaunch(message.agentId, message.groupId, message.accountId);
         return;
@@ -1250,16 +1238,6 @@ export class GpuiSidebarRuntime {
         if (message.remoteMachineId) {
           await this.updateRemoteSidebarSpaces(message.remoteMachineId, message.state);
         }
-        return;
-      case 'updateCustomSessionTags':
-        if (message.remoteMachineId) {
-          await this.updateRemoteCustomSessionTags(message.remoteMachineId, message.state);
-          return;
-        }
-        this.queueCustomSessionTagsServerSync(message.state);
-        return;
-      case 'searchPreviousSessionsByText':
-        this.searchPreviousSessionsByText();
         return;
       case 'copyAttachCommand': {
         const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
