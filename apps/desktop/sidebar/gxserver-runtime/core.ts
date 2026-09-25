@@ -305,7 +305,6 @@ export class GpuiSidebarRuntime {
     });
   }
 
-  activeProjectContextRetryId: number | undefined;
   titlebarGitMenuStateRetryId: number | undefined;
   lastTitlebarGitMenuStatePayload: string | undefined;
   gitPollingCycleTimeoutId: number | undefined;

@@ -16,8 +16,6 @@ import {
   GPUI_QUICK_AUTOMATIONS_PROJECT_ID,
   GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID,
   GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_PERSIST_DELAY_MS,
-  GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS,
-  GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS,
   GPUI_SIDEBAR_GLOBAL_ACTIONS_MESSAGE_TYPE,
   GPUI_SIDEBAR_GLOBAL_ACTIONS_MESSAGE_VERSION,
   GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE,
@@ -118,7 +116,7 @@ export interface GpuiSidebarRuntimeSidebarGroupMethods {
   refreshRecentProjectsFromClient(): void;
   refreshSidebarHudFromClient(): void;
   publishHudPatch(): void;
-  postActiveProjectContext(attempt?: number): void;
+  postActiveProjectContext(): void;
   postGxserverPresentationFocusState(): void;
   activeRemoteProjectReference():
     { machineId: string; projectId: string } | undefined;
@@ -549,7 +547,7 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     postGpuiSidebarRuntimeFactsHud();
   },
 
-  postActiveProjectContext(this: GpuiSidebarRuntime, attempt = 0): void {
+  postActiveProjectContext(this: GpuiSidebarRuntime): void {
     if (!this.presentation && !this.activeRemoteProjectReference()) {
       /*
       CDXC:Workarea 2026-09-04 WHY:
@@ -568,23 +566,10 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     */
     this.navigationHistory.recordVisit(this.createNavigationHistoryEntry());
 
-    if (this.activeProjectContextRetryId !== undefined) {
-      window.clearTimeout(this.activeProjectContextRetryId);
-      this.activeProjectContextRetryId = undefined;
-    }
-
+    // The service installs every bridge function before `start()`, so this is always present.
     const postActiveProjectContext =
       window.ghostexGpui?.postActiveProjectContext;
     if (typeof postActiveProjectContext !== "function") {
-      /*
-      CDXC:StateSync 2026-06-24-11:00:
-      CEF may install the sidebar bridge after the React entrypoint starts. Retry only the bridge send and rebuild the active-project payload from the latest live groups at send time, so startup never replays a stale fixture/workspace payload.
-      */
-      if (attempt < GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS) {
-        this.activeProjectContextRetryId = window.setTimeout(() => {
-          this.postActiveProjectContext(attempt + 1);
-        }, GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS);
-      }
       return;
     }
 
