@@ -2,7 +2,6 @@
 // lines, itself moved verbatim out of main.rs) into descriptively named
 // modules; pure move, no logic changes. Cluster: workspace terminal event dispatch (bell, title change, escape, first-prompt-title cancel, attention acknowledge) and the native-view prompt-editor shortcut.
 
-use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
 use crate::*;
@@ -109,10 +108,9 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    /// ESC follows the terminal input path first; Rust forwards only the
-    /// bounded gxserver project/session identity so the sidebar runtime can
-    /// apply escape suppression and sync gxserver for
-    /// `ghostex.gpui.sidebar.workspaceTerminalEscapePressed`.
+    /// ESC follows the terminal input path first; the store then suppresses
+    /// the session's completion sound, clears its attention and tells gxserver
+    /// (gx_store/attention/).
     pub(crate) fn dispatch_gpui_workspace_terminal_escape_pressed(
         &mut self,
         shell_session_id: TerminalSessionId,
@@ -134,19 +132,10 @@ impl GhostexGpuiApp {
                 "shellSessionId": format!("{:?}", shell_session_id),
             }),
         );
-        let Some(sidebar) = self.sidebar.clone() else {
-            return;
-        };
-        let message = serde_json::json!({
-            "projectId": key.project_id,
-            "sessionId": key.session_id,
-            "type": GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE,
-            "version": GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION,
-        });
-        let script = gpui_workspace_terminal_escape_pressed_script(&message);
-        sidebar.update(cx, |surface, _| {
-            surface.execute_app_owned_script(&script);
-        });
+        self.gx_store_terminal_escape(
+            ghostex_gx_core::SessionKey::local(key.project_id, key.session_id),
+            cx,
+        );
     }
 
     /// Escape inside the blocking "Generating title" overlay cancels the gxserver first-prompt title
@@ -192,10 +181,8 @@ impl GhostexGpuiApp {
             .detach();
     }
 
-    /// Rust reports only the mapped gxserver identity for direct workspace
-    /// interaction; the sidebar runtime owns the actual attention decision and
-    /// gxserver acknowledgement for
-    /// `ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge`.
+    /// Direct workspace interaction acknowledges the mapped session's attention;
+    /// the store decides when (gx_store/attention/).
     ///
     /// CDXC:FocusRouting 2026-09-19 WHY:
     /// A held "next tab" key evaluated one script in the sidebar runtime per tab it passed. The report now rides with the coalesced selection tell (gx_store/burst.rs), and a tab that is no longer in front when the tell goes out is not acknowledged, because the user never stopped on it.

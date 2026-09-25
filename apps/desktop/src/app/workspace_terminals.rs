@@ -233,18 +233,27 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         /*
-        Session-attention completion sound (macOS parity): the sidebar runtime
-        owns the attention transition edge, the attention-event dedupe, and the
-        completionBellEnabled gate. Rust only validates the fixed message shape
-        and plays a bundled sound asset; the sound id goes through the existing
-        whitelist normalization so no renderer-provided path or file name can
-        reach the player.
+        The old runtime's completion sound post. Nothing posts it since the attention edge, the
+        event dedupe and the gate moved to gx-core (`attention.rs`, played through
+        gx_store/attention/); the bridge entry goes with the manifest in the app runtime port's
+        step 3. The sound id still goes through the whitelist normalization.
         */
         let Ok((sound, session_id)) = gpui_sidebar_session_completion_sound_from_json(payload)
         else {
             return;
         };
-        let _ = gpui_play_completion_sound(&sound);
+        self.play_session_completion(&sound, session_id, cx);
+    }
+
+    /// The completion sound and the sidebar card's completion flash, which are one event. Called by
+    /// the store's attention host (gx_store/attention/) and by the bridge payload above.
+    pub(crate) fn play_session_completion(
+        &mut self,
+        sound: &str,
+        session_id: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let _ = gpui_play_completion_sound(sound);
         /*
         CDXC:Sessions 2026-09-21 WHY:
         The card's completion flash rides the same message as the sound, because they are the same

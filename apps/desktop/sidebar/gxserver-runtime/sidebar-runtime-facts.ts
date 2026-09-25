@@ -75,6 +75,11 @@ export function postGpuiSidebarRuntimeFactsRows(runtime: GpuiSidebarRuntime): vo
   post({ closeAfterDone, delayedSend, kind: 'rows', projectDiffStats, version: 1 });
 }
 
+/** The runtime's own focus paths acknowledge attention through the Rust store's one tracker. */
+export function postGpuiSidebarRuntimeFactsAttentionAcknowledge(sessionId: string): void {
+  post({ kind: 'attentionAcknowledge', sessionId, version: 1 });
+}
+
 /** A reveal the runtime asked the sidebar for, which used to reach Rust only on the next publish. */
 export function postGpuiSidebarRuntimeFactsReveal(sessionId: string, requestId: number): void {
   post({ kind: 'reveal', requestId, sessionId, version: 1 });

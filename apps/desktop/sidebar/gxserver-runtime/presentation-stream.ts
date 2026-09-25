@@ -316,10 +316,7 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     snapshot: GxserverPresentationSnapshot,
     kind: GpuiSidebarRuntimeSnapshotKind
   ): void {
-    const previousSessions = this.presentation?.sessions ?? [];
-    const projectedSnapshot = this.projectLocalPresentationAttentionAcknowledgementGuards(snapshot);
-    this.presentation = projectedSnapshot;
-    this.syncLocalPresentationAttentionTracking(previousSessions, projectedSnapshot.sessions);
+    this.presentation = snapshot;
     // The snapshot's own copies of the two project documents go the same way as the socket's, and
     // for the same reason: the app judges them behind the guard and hands the result back.
     if (isCustomSessionTagsState(snapshot.customSessionTags)) {
@@ -374,13 +371,7 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
       return;
     }
     this.applyDomainProjectDelta(delta);
-    const previousSessions = this.presentation.sessions;
-    const projectedSnapshot = this.projectLocalPresentationAttentionAcknowledgementGuards(
-      reduceGxserverPresentationDelta(this.presentation, delta, gxserverRevision)
-    );
-    this.presentation = projectedSnapshot;
-    this.syncLocalPresentationAttentionTracking(previousSessions, projectedSnapshot.sessions);
-    this.detectSessionAttentionCompletionSounds(previousSessions, projectedSnapshot.sessions);
+    this.presentation = reduceGxserverPresentationDelta(this.presentation, delta, gxserverRevision);
     this.publishPresentation('patch');
   },
 

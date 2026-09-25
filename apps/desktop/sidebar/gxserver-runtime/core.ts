@@ -317,12 +317,6 @@ export class GpuiSidebarRuntime {
     scopeId: NAVIGATION_HISTORY_SCOPE_GPUI,
   });
   appUserData: GxserverAppUserData = createEmptyGpuiAppUserData();
-  attentionAcknowledgementTimeoutsBySessionKey = new Map<string, number>();
-  attentionCompletionSoundEventKeys = new Set<string>();
-  attentionCompletionSoundEventKeyOrder: string[] = [];
-  attentionCompletionSoundSuppressedUntilBySessionKey = new Map<string, number>();
-  attentionEnteredAtBySessionKey = new Map<string, number>();
-  attentionEventIdBySessionKey = new Map<string, string>();
   autoSleepMonitorIntervalId: number | undefined;
   autoSleepMonitorRunning = false;
   /**
@@ -398,8 +392,6 @@ export class GpuiSidebarRuntime {
   });
   pendingGitHubProbeProjectIds = new Set<string>();
   gitHubProbeTimeoutIds = new Set<number>();
-  locallyAcknowledgedAttentionEventKeys = new Set<string>();
-  locallyAcknowledgedAttentionEventKeyOrder: string[] = [];
   pendingNativeAppShotPromptInsertions: GpuiPendingNativeAppShotPromptInsertion[] = [];
   pendingGitCommitRequests = new Map<string, GpuiPendingGitCommitRequest>();
   pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
@@ -648,9 +640,6 @@ export class GpuiSidebarRuntime {
     gpuiBridge.onWorkspaceFolderPicked = (payload) => {
       void this.handleGpuiWorkspaceFolderPicked(payload);
     };
-    gpuiBridge.onWorkspaceSessionAttentionAcknowledge = (payload) => {
-      this.handleGpuiWorkspaceSessionAttentionAcknowledge(payload);
-    };
     /*
     CDXC:Sidebar 2026-09-21 WHY:
     The desktop sidebar is the Rust store's, and the page that used to receive its commands and
@@ -665,10 +654,6 @@ export class GpuiSidebarRuntime {
       if (message) void this.handleSidebarMessage(message);
     };
     installGpuiWorkspaceGroupsHandBack(this);
-    // Bridge handler for `ghostex.gpui.sidebar.workspaceTerminalEscapePressed`.
-    gpuiBridge.onWorkspaceTerminalEscapePressed = (payload) => {
-      this.handleGpuiWorkspaceTerminalEscapePressed(payload);
-    };
     gpuiBridge.onWorkspaceTerminalRuntimeAction = (payload) => {
       void this.handleGpuiWorkspaceTerminalRuntimeAction(payload);
     };
@@ -740,26 +725,12 @@ export class GpuiSidebarRuntime {
     for (const payload of pendingWorkspaceFolderPicks) {
       void this.handleGpuiWorkspaceFolderPicked(payload);
     }
-    const pendingWorkspaceSessionAttentionAcknowledgements = Array.isArray(
-      gpuiBridge.pendingWorkspaceSessionAttentionAcknowledgements
-    )
-      ? gpuiBridge.pendingWorkspaceSessionAttentionAcknowledgements.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceSessionAttentionAcknowledgements) {
-      this.handleGpuiWorkspaceSessionAttentionAcknowledge(payload);
-    }
     const pendingSidebarCommands = Array.isArray(gpuiBridge.pendingSidebarCommands)
       ? gpuiBridge.pendingSidebarCommands.splice(0)
       : [];
     for (const payload of pendingSidebarCommands) {
       const message = asGpuiSidebarCommand(payload);
       if (message) void this.handleSidebarMessage(message);
-    }
-    const pendingWorkspaceTerminalEscapePresses = Array.isArray(gpuiBridge.pendingWorkspaceTerminalEscapePresses)
-      ? gpuiBridge.pendingWorkspaceTerminalEscapePresses.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceTerminalEscapePresses) {
-      this.handleGpuiWorkspaceTerminalEscapePressed(payload);
     }
     const pendingWorkspaceTerminalRuntimeActions = Array.isArray(gpuiBridge.pendingWorkspaceTerminalRuntimeActions)
       ? gpuiBridge.pendingWorkspaceTerminalRuntimeActions.splice(0)
@@ -846,10 +817,6 @@ export class GpuiSidebarRuntime {
         this.resetRemoteReconnect(remoteEvent.machineId);
       }
       if (GPUI_REMOTE_MACHINE_PRESENTATION_CLEAR_STATES.has(remoteEvent.state)) {
-        const previousPresentation = this.remotePresentations.get(remoteEvent.machineId);
-        if (previousPresentation) {
-          this.syncRemotePresentationAttentionTracking(remoteEvent.machineId, previousPresentation.sessions, []);
-        }
         this.remotePresentations.delete(remoteEvent.machineId);
         // A queued stale-revision refetch is for a cache this just dropped, and
         // the machine is no longer reachable to serve it.
@@ -873,18 +840,13 @@ export class GpuiSidebarRuntime {
     }
 
     if (remoteEvent.payload.type === 'presentationSnapshot') {
-      const previousSessions = this.remotePresentations.get(remoteEvent.remoteMachineId)?.sessions ?? [];
-      const snapshot = this.projectRemotePresentationAttentionAcknowledgementGuards(
-        remoteEvent.remoteMachineId,
-        remoteEvent.payload.snapshot
-      );
+      const snapshot = remoteEvent.payload.snapshot;
       const previous = this.remotePresentations.get(remoteEvent.remoteMachineId);
       if (previous && previous.revision > snapshot.revision) {
         return;
       }
       this.remotePresentations.set(remoteEvent.remoteMachineId, snapshot);
       this.pruneRemoteWorkspaceGroupAssignments(remoteEvent.remoteMachineId, snapshot);
-      this.syncRemotePresentationAttentionTracking(remoteEvent.remoteMachineId, previousSessions, snapshot.sessions);
       this.publishRemotePresentationPatch();
       /*
       CDXC:RemoteMachines 2026-08-29:
@@ -969,13 +931,9 @@ export class GpuiSidebarRuntime {
       this.scheduleStaleRemotePresentationRefresh(remoteEvent.remoteMachineId);
       return;
     }
-    const snapshot = this.projectRemotePresentationAttentionAcknowledgementGuards(
-      remoteEvent.remoteMachineId,
-      reduceGxserverPresentationDelta(previous, remoteEvent.payload.delta, remoteEvent.payload.revision)
-    );
+    const snapshot = reduceGxserverPresentationDelta(previous, remoteEvent.payload.delta, remoteEvent.payload.revision);
     this.remotePresentations.set(remoteEvent.remoteMachineId, snapshot);
     this.pruneRemoteWorkspaceGroupAssignments(remoteEvent.remoteMachineId, snapshot);
-    this.syncRemotePresentationAttentionTracking(remoteEvent.remoteMachineId, previous.sessions, snapshot.sessions);
     this.publishRemotePresentationPatch();
     /*
     CDXC:RemoteMachines 2026-08-29:

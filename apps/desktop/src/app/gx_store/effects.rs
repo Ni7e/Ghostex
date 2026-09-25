@@ -83,6 +83,11 @@ impl GxStoreHost {
                     self.app_effects
                         .push(Effect::RefetchNotificationFeed { machine });
                 }
+                // Attention: the acknowledgement timer, the report to the session's daemon and the
+                // completion sound (gx_store/attention/).
+                effect @ (Effect::ArmAttentionAcknowledge { .. }
+                | Effect::ReportAgentActivity { .. }
+                | Effect::SessionAttentionRaised { .. }) => self.app_effects.push(effect),
                 // The HUD's reads are still the old runtime's (family F2 of the app runtime port,
                 // docs/2026-09-25/app-runtime-port/PLAN.md).
                 Effect::RefetchSidebarHud { .. }
@@ -126,6 +131,11 @@ impl GhostexGpuiApp {
             Effect::RefetchNotificationFeed {
                 machine: MachineId::Local,
             } => self.gx_store_refresh_notification_feed(cx),
+            effect @ (Effect::ArmAttentionAcknowledge { .. }
+            | Effect::ReportAgentActivity { .. }
+            | Effect::SessionAttentionRaised { .. }) => {
+                self.gx_store_perform_attention_effect(effect, cx)
+            }
             _ => {}
         }
     }

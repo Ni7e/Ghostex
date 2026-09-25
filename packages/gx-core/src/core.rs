@@ -86,6 +86,20 @@ pub enum Intent {
     ClearSessionPatch {
         session: SessionKey,
     },
+    /// The user saw the session: acknowledge its attention now, or once it has been visible for
+    /// the minimum time (`attention.rs`).
+    AcknowledgeAttention {
+        session: SessionKey,
+    },
+    /// The timer an [`Effect::ArmAttentionAcknowledge`] asked for fired.
+    AttentionAcknowledgeDue {
+        session: SessionKey,
+        entered_at_ms: u64,
+    },
+    /// Escape was pressed in the session's terminal (`attention.rs`).
+    TerminalEscape {
+        session: SessionKey,
+    },
     /// The manual order of a project's sessions, written locally before `/api/updateSessionOrder`
     /// is awaited so the rows move under the user's finger.
     ReorderProjectSessions {
@@ -171,6 +185,22 @@ pub enum Effect {
         is_recent_project: bool,
         removed: bool,
     },
+    /// Call back with [`Intent::AttentionAcknowledgeDue`] after `delay_ms`: the attention has not
+    /// been visible for the minimum time yet.
+    ArmAttentionAcknowledge {
+        session: SessionKey,
+        delay_ms: u64,
+        entered_at_ms: u64,
+    },
+    /// Tell the session's daemon: `/api/updateAgentActivity` with `event` and `agentName` when known.
+    ReportAgentActivity {
+        session: SessionKey,
+        report: crate::attention::AgentActivityReport,
+        agent_name: Option<String>,
+    },
+    /// A live delta moved a session of this computer into unacknowledged attention: play the
+    /// completion sound unless the user turned it off.
+    SessionAttentionRaised { session: SessionKey },
     /// Persist the user's last selected session of a project (it must survive restarts, and the
     /// project being closed and reopened).
     ///
@@ -206,6 +236,7 @@ pub struct Core {
     presentation: PresentationStore,
     focus: FocusState,
     tabs_generation: u64,
+    attention: crate::attention::AttentionTracker,
 }
 
 impl Core {
@@ -324,6 +355,12 @@ impl Core {
     /// Applies one event. Synchronous and free of I/O; `now_ms` is the host's clock.
     pub fn handle(&mut self, event: Event, now_ms: u64) -> Output {
         let mut output = Output::default();
+        let live_delta = match &event {
+            Event::Frame { machine, frame } => {
+                matches!(**frame, ServerEvent::PresentationDelta(_)).then(|| machine.clone())
+            }
+            _ => None,
+        };
         match event {
             Event::Frame { machine, frame } => {
                 self.handle_frame(&machine, *frame, now_ms, &mut output)
@@ -351,6 +388,13 @@ impl Core {
             Event::Tick => output.changes = self.presentation.expire_patches(now_ms),
         }
         self.settle_after_change(&mut output);
+        self.attention.observe(
+            &self.presentation,
+            &output.changes,
+            live_delta.as_ref(),
+            now_ms,
+            &mut output.effects,
+        );
         output
     }
 
@@ -611,6 +655,31 @@ impl Core {
             Intent::ClearSessionPatch { session } => {
                 output.changes = self.presentation.clear_session_patch(&session);
             }
+            Intent::AcknowledgeAttention { session } => crate::attention::acknowledge(
+                &mut self.attention,
+                &mut self.presentation,
+                &session,
+                now_ms,
+                output,
+            ),
+            Intent::AttentionAcknowledgeDue {
+                session,
+                entered_at_ms,
+            } => crate::attention::acknowledge_due(
+                &mut self.attention,
+                &mut self.presentation,
+                &session,
+                entered_at_ms,
+                now_ms,
+                output,
+            ),
+            Intent::TerminalEscape { session } => crate::attention::terminal_escape(
+                &mut self.attention,
+                &mut self.presentation,
+                &session,
+                now_ms,
+                output,
+            ),
             Intent::ReorderProjectSessions {
                 project,
                 session_ids,

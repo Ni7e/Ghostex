@@ -302,12 +302,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
   },
 
   publishUnavailable(this: GpuiSidebarRuntime, _reason: string): void {
-    if (this.presentation) {
-      this.syncLocalPresentationAttentionTracking(
-        this.presentation.sessions,
-        [],
-      );
-    }
     this.presentation = undefined;
     this.appUserData = createEmptyGpuiAppUserData();
     this.domainProjects = [];

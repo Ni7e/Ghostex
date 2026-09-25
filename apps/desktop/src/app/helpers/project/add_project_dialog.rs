@@ -306,22 +306,6 @@ pub(crate) fn gpui_os_integration_shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-// Bridge script for `ghostex.gpui.sidebar.workspaceTerminalEscapePressed`.
-pub(crate) fn gpui_workspace_terminal_escape_pressed_script(message: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalEscapePressed==='function'){{bridge.onWorkspaceTerminalEscapePressed(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalEscapePresses)?bridge.pendingWorkspaceTerminalEscapePresses:[];pending.push(payload);bridge.pendingWorkspaceTerminalEscapePresses=pending;}}}})(); undefined;"
-    )
-}
-
-// Bridge script for `ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge`.
-pub(crate) fn gpui_workspace_session_attention_acknowledge_script(
-    message: &serde_json::Value,
-) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceSessionAttentionAcknowledge==='function'){{bridge.onWorkspaceSessionAttentionAcknowledge(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceSessionAttentionAcknowledgements)?bridge.pendingWorkspaceSessionAttentionAcknowledgements:[];pending.push(payload);bridge.pendingWorkspaceSessionAttentionAcknowledgements=pending;}}}})(); undefined;"
-    )
-}
-
 pub(crate) fn gpui_workspace_terminal_runtime_action_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalRuntimeAction==='function'){{bridge.onWorkspaceTerminalRuntimeAction(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalRuntimeActions)?bridge.pendingWorkspaceTerminalRuntimeActions:[];pending.push(payload);bridge.pendingWorkspaceTerminalRuntimeActions=pending;}}}})(); undefined;"

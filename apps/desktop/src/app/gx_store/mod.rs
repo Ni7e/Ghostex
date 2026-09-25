@@ -54,6 +54,7 @@
 
 mod activation_focus;
 mod added_project;
+mod attention;
 mod burst;
 mod client_document;
 mod client_storage_init;

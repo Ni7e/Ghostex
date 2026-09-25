@@ -9,14 +9,11 @@ use futures::{FutureExt as _, StreamExt as _};
 use super::local_focus::{FocusEchoKind, PendingTell, ToldSelection};
 use crate::GhostexGpuiApp;
 use crate::app::consts::{
-    GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE,
-    GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION,
     GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE,
     GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION,
 };
 use crate::app::helpers::{
-    gpui_status_bridge_id_allowed, gpui_workspace_session_attention_acknowledge_script,
-    gpui_workspace_tab_session_selected_script,
+    gpui_status_bridge_id_allowed, gpui_workspace_tab_session_selected_script,
 };
 use crate::app::model::GpuiLocalWorkspaceSessionKey;
 use crate::support_logs;
@@ -363,6 +360,21 @@ impl GhostexGpuiApp {
             return;
         }
         self.gx_store_persist_focus_state_file();
+        // The attention of what the user stopped on is the store's to acknowledge
+        // (gx_store/attention/), whether or not the old runtime is there to be told.
+        let pending_attention = std::mem::take(&mut self.gx_store.local_focus.pending_attention);
+        for key in pending_attention {
+            // A tab the user only passed through is not acknowledged: acknowledging means the
+            // user saw it, and what the user sees is what is in front of a pane now.
+            if !self.gx_store_session_is_in_front(&key) {
+                continue;
+            }
+            self.gx_store.local_focus.counters.attention_acknowledges += 1;
+            self.gx_store_acknowledge_attention(
+                ghostex_gx_core::SessionKey::local(key.project_id, key.session_id),
+                cx,
+            );
+        }
         // Without the service nothing is taken: the selection stays pending and goes out with the
         // next flush, so the runtime is never left without the newest stamp.
         let Some(sidebar) = self.sidebar.clone() else {
@@ -370,25 +382,8 @@ impl GhostexGpuiApp {
         };
         let local_focus = &mut self.gx_store.local_focus;
         let pending_tell = local_focus.pending_tell.take();
-        let pending_attention = std::mem::take(&mut local_focus.pending_attention);
         let visible_session_ids = self.gpui_sidebar_visible_local_session_ids();
         let mut scripts = Vec::new();
-        for key in pending_attention {
-            // A tab the user only passed through is not acknowledged: acknowledging means the
-            // user saw it, and what the user sees is what is in front of a pane now.
-            if !self.gx_store_session_is_in_front(&key) {
-                continue;
-            }
-            scripts.push(gpui_workspace_session_attention_acknowledge_script(
-                &serde_json::json!({
-                    "projectId": key.project_id,
-                    "sessionId": key.session_id,
-                    "type": GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE,
-                    "version": GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION,
-                }),
-            ));
-            self.gx_store.local_focus.counters.attention_acknowledges += 1;
-        }
         let told = pending_tell.is_some();
         if let Some(tell) = pending_tell {
             let stamp = self.gx_store.core.focus().local_stamp;

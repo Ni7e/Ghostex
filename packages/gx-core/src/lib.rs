@@ -13,6 +13,7 @@
 //! - Daemon rows are replaced whole, never merged; local edits are overlays that never renumber
 //!   the revision.
 
+mod attention;
 mod change;
 mod connection;
 mod core;
@@ -36,6 +37,9 @@ mod sidebar_ui;
 mod sidebar_view;
 mod workspace_groups;
 
+pub use crate::attention::{
+    AgentActivityReport, ATTENTION_PATCH_TTL_MS, ESCAPE_DONE_SUPPRESSION_MS, MIN_ATTENTION_VISIBLE_MS,
+};
 pub use crate::change::{ChangeSummary, IgnoredReason, SideStateChanges};
 pub use crate::connection::{ConnectionPhase, ConnectionState, ConnectionUpdate};
 pub use crate::core::{Core, Effect, Event, Intent, Output, ResubscribeReason};

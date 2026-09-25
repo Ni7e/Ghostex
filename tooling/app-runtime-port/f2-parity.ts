@@ -9,15 +9,22 @@
  * Rust half is `packages/gx-core/examples/f2_parity.rs`. `--inject` mutates the Rust answer after
  * the fact and expects the gate to report differences, which proves it can fail.
  *
- * Mutations: feed-drop-item, feed-unread-count, feed-jump.
+ * Mutations: feed-drop-item, feed-unread-count, feed-jump, attention-sound, attention-report,
+ * attention-visible.
+ *
+ * `attention` replays one scripted timeline (snapshots, deltas, acknowledgements, Escape, timer
+ * ticks, local and remote) through the runtime's deleted tracker, extracted from git at
+ * `ATTENTION_BASE`, and through gx-core's `Core`, and compares what each reported to a daemon,
+ * which completion sounds it played, and the activity every row shows after each step.
  *
  * Deleted with the runtime in step 3 (docs/2026-09-25/app-runtime-port/PLAN.md).
  */
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { reduceGxserverPresentationDelta } from '@/packages/shared/gxserver-presentation-cache';
 import { normalizeNotificationFeedState } from '@/packages/shared/notification-feed/notification-feed-contract';
 
 type Json = any;
@@ -127,6 +134,312 @@ function notificationFeedTypescript(cases: Json[]): Json[] {
   });
 }
 
+// ---------------------------------------------------------------- attention
+
+/** The last commit whose runtime still had its own attention tracker. */
+const ATTENTION_BASE = '11d3fe9a8';
+const RUNTIME = 'apps/desktop/sidebar/gxserver-runtime';
+
+function attentionRow(projectId: string, sessionId: string, activity: string, eventId?: string, extra: Json = {}) {
+  return {
+    activity,
+    alias: `Session ${sessionId}`,
+    createdAt: '2026-09-01T01:00:00.000Z',
+    groupId: `${projectId}:active`,
+    isPinned: false,
+    kind: 'agent',
+    lastInteractionAt: '2026-09-15T01:18:43.055Z',
+    lifecycleState: 'running',
+    pendingQuestionCount: 0,
+    projectId,
+    sessionId,
+    sortKey: `000${sessionId}`,
+    surface: 'workspace',
+    updatedAt: '2026-09-15T01:18:43.055Z',
+    visibleInSidebarByDefault: true,
+    zmxName: `S90-${projectId}-${sessionId}`,
+    ...(activity === 'attention'
+      ? { attention: { acknowledged: false, enteredAt: '2026-09-25T00:00:00.000Z', ...(eventId ? { eventId } : {}) } }
+      : {}),
+    ...extra,
+  };
+}
+
+function attentionSnapshot(serverId: string, revision: number, sessions: Json[]) {
+  const projects = [...new Set(sessions.map((session) => session.projectId))];
+  return {
+    protocolVersion: 1,
+    revision,
+    serverId,
+    snapshot: {
+      generatedAt: '2026-09-25T00:00:00.000Z',
+      groups: projects.map((projectId) => ({
+        groupId: `${projectId}:active`,
+        projectId,
+        sessionIds: sessions.filter((session) => session.projectId === projectId).map((session) => session.sessionId),
+        sortKey: `1:${projectId}:active`,
+        title: 'Active',
+      })),
+      projects: projects.map((projectId) => ({
+        createdAt: '2026-06-29T13:10:42.091Z',
+        groupIds: [`${projectId}:active`],
+        path: `/tmp/${projectId}`,
+        pathState: 'available',
+        projectId,
+        sortKey: `1:${projectId}`,
+        title: projectId,
+        updatedAt: '2026-09-15T01:18:43.055Z',
+      })),
+      revision,
+      sessions,
+    },
+    type: 'presentationSnapshot',
+  };
+}
+
+function attentionDelta(serverId: string, revision: number, session: Json) {
+  return {
+    delta: { session, type: 'sessionPresentationChanged' },
+    protocolVersion: 1,
+    revision,
+    serverId,
+    type: 'presentationDelta',
+  };
+}
+
+/** One timeline that walks every rule of the tracker. Times are milliseconds. */
+function attentionFixtures(): Json[] {
+  const L = 'local';
+  const R = 'm1';
+  const s1 = (activity: string, eventId?: string) =>
+    attentionRow('P1', 'S1', activity, eventId, { agentName: 'claude' });
+  const s3 = (activity: string, eventId?: string) => attentionRow('P2', 'S3', activity, eventId);
+  const local = (sessionId: string, projectId: string) =>
+    `combined-session:${encodeURIComponent(projectId)}:${encodeURIComponent(sessionId)}`;
+  return [
+    {
+      frame: attentionSnapshot('local-1', 1, [s1('idle'), attentionRow('P1', 'S2', 'attention', 'e0'), s3('working')]),
+      machine: L,
+      op: 'frame',
+      t: 0,
+    },
+    {
+      frame: attentionSnapshot('remote-1', 1, [attentionRow('P9', 'S9', 'working', undefined, { agentName: ' ' })]),
+      machine: R,
+      op: 'frame',
+      t: 0,
+    },
+    { frame: attentionDelta('local-1', 2, s1('attention', 'e1')), machine: L, op: 'frame', t: 100 },
+    { op: 'ack', sessionId: local('S1', 'P1'), t: 500 },
+    { op: 'ack', sessionId: local('S1', 'P1'), t: 600 },
+    { op: 'tick', t: 1599 },
+    { op: 'tick', t: 1600 },
+    { frame: attentionDelta('local-1', 3, s1('attention', 'e1')), machine: L, op: 'frame', t: 1700 },
+    { frame: attentionDelta('local-1', 4, s1('idle')), machine: L, op: 'frame', t: 1800 },
+    { frame: attentionDelta('local-1', 5, s1('attention', 'e2')), machine: L, op: 'frame', t: 2000 },
+    { op: 'escape', projectId: 'P1', sessionId: 'S1', t: 2100 },
+    { frame: attentionDelta('local-1', 6, s1('attention', 'e3')), machine: L, op: 'frame', t: 2200 },
+    { frame: attentionDelta('local-1', 7, s3('attention', 'e4')), machine: L, op: 'frame', t: 8000 },
+    { op: 'ack', sessionId: local('S3', 'P2'), t: 8000 },
+    { frame: attentionDelta('local-1', 8, s3('attention', 'e5')), machine: L, op: 'frame', t: 8200 },
+    { op: 'tick', t: 9500 },
+    { op: 'ack', sessionId: local('S3', 'P2'), t: 9600 },
+    { op: 'tick', t: 9700 },
+    {
+      frame: attentionDelta('remote-1', 2, attentionRow('P9', 'S9', 'attention', 'e9')),
+      machine: R,
+      op: 'frame',
+      t: 10000,
+    },
+    { op: 'ack', sessionId: 'remote:m1:session:P9:S9', t: 10000 },
+    { op: 'tick', t: 11500 },
+    { op: 'ack', sessionId: local('S2', 'P1'), t: 12000 },
+    { op: 'escape', projectId: 'P2', sessionId: 'S3', t: 13000 },
+    { frame: attentionDelta('local-1', 9, s3('idle')), machine: L, op: 'frame', t: 13050 },
+    { frame: attentionDelta('local-1', 10, s3('attention', 'e6')), machine: L, op: 'frame', t: 13100 },
+    {
+      frame: attentionDelta('local-1', 11, attentionRow('P2', 'S4', 'attention', 'e7')),
+      machine: L,
+      op: 'frame',
+      t: 14000,
+    },
+    { frame: attentionDelta('local-1', 12, s1('idle')), machine: L, op: 'frame', t: 15000 },
+    { frame: attentionDelta('local-1', 13, s1('attention', 'e2')), machine: L, op: 'frame', t: 16000 },
+    {
+      frame: attentionDelta('local-1', 14, attentionRow('P2', 'S3', 'attention', undefined)),
+      machine: L,
+      op: 'frame',
+      t: 19000,
+    },
+    { frame: attentionDelta('local-1', 14, s1('idle')), machine: L, op: 'frame', t: 19100 },
+    { op: 'ack', sessionId: local('S1', 'P1'), t: 19200 },
+    { op: 'escape', projectId: 'P9', sessionId: 'S404', t: 19300 },
+  ];
+}
+
+/** Copies the deleted tracker (and the two files it needs as they were) out of git into `dir`. */
+async function loadOldAttention(dir: string): Promise<Json> {
+  const out = join(dir, 'old');
+  mkdirSync(join(out, 'helpers'), { recursive: true });
+  const current = `${root}${RUNTIME}`;
+  const read = (path: string) =>
+    execFileSync('git', ['show', `${ATTENTION_BASE}:${RUNTIME}/${path}`], { cwd: root, encoding: 'utf8' }).replaceAll(
+      "'@/",
+      `'${root}`
+    );
+  writeFileSync(join(out, 'constants.ts'), read('constants.ts').replaceAll('"@/', `"${root}`));
+  writeFileSync(
+    join(out, 'helpers/attention.ts'),
+    read('helpers/attention.ts')
+      .replaceAll("'../types-and-protocol'", `'${current}/types-and-protocol'`)
+      .replaceAll("'./records'", `'${current}/helpers/records'`)
+      .replaceAll("'./remote-presentation'", `'${current}/helpers/remote-presentation'`)
+  );
+  writeFileSync(
+    join(out, 'attention-tracking.ts'),
+    read('attention-tracking.ts')
+      .replaceAll("'./core'", `'${current}/core'`)
+      .replaceAll("'./types-and-protocol'", `'${current}/types-and-protocol'`)
+      .replace(/'\.\/helpers\/(bootstrap|records|remote-presentation|terminal-lifecycle)'/g, `'${current}/helpers/$1'`)
+  );
+  return (await import(join(out, 'attention-tracking.ts'))).gpuiSidebarRuntimeAttentionMethods;
+}
+
+async function attentionTypescript(dir: string, steps: Json[]): Promise<Json[]> {
+  let now = 0;
+  const timers = new Map<number, { due: number; run: () => void }>();
+  let nextTimer = 1;
+  const rpcs: Json[] = [];
+  const sounds: string[] = [];
+  const g = globalThis as Json;
+  g.window = {
+    clearTimeout: (id: number) => timers.delete(id),
+    ghostexGpui: {
+      postSessionCompletionSound: (payload: string) => sounds.push(JSON.parse(payload).sessionId),
+    },
+    setTimeout: (run: () => void, delay: number) => {
+      const id = nextTimer++;
+      timers.set(id, { due: now + delay, run });
+      return id;
+    },
+  };
+  const realNow = Date.now;
+  Date.now = () => now;
+  const methods = await loadOldAttention(dir);
+  const runtime: Json = {
+    attentionAcknowledgementTimeoutsBySessionKey: new Map(),
+    attentionCompletionSoundEventKeyOrder: [],
+    attentionCompletionSoundEventKeys: new Set(),
+    attentionCompletionSoundSuppressedUntilBySessionKey: new Map(),
+    attentionEnteredAtBySessionKey: new Map(),
+    attentionEventIdBySessionKey: new Map(),
+    client: {
+      rpc: async (path: string, params: Json) => {
+        rpcs.push({ machine: 'local', path, ...params });
+      },
+    },
+    findLocalPresentationSession(projectId: string, sessionId: string) {
+      return this.presentation?.sessions.find(
+        (session: Json) => session.projectId === projectId && session.sessionId === sessionId
+      );
+    },
+    findRemotePresentationSession(reference: Json) {
+      return this.remotePresentations
+        .get(reference.machineId)
+        ?.sessions.find(
+          (session: Json) => session.projectId === reference.projectId && session.sessionId === reference.sessionId
+        );
+    },
+    locallyAcknowledgedAttentionEventKeyOrder: [],
+    locallyAcknowledgedAttentionEventKeys: new Set(),
+    messageSource: { postMessage() {} },
+    presentation: undefined,
+    publishPresentation() {},
+    publishRemotePresentationPatch() {},
+    remotePresentations: new Map(),
+    requestRemoteGxserver: async (machineId: string, path: string, params: Json) => {
+      rpcs.push({ machine: machineId, path, ...params });
+    },
+    runtimeSettings: { settings: {} },
+    ...methods,
+  };
+  const results: Json[] = [];
+  try {
+    for (const step of steps) {
+      now = step.t;
+      rpcs.length = 0;
+      sounds.length = 0;
+      if (step.op === 'frame' && step.machine === 'local') {
+        const previousSessions = runtime.presentation?.sessions ?? [];
+        if (step.frame.type === 'presentationSnapshot') {
+          const projected = runtime.projectLocalPresentationAttentionAcknowledgementGuards(step.frame.snapshot);
+          runtime.presentation = projected;
+          runtime.syncLocalPresentationAttentionTracking(previousSessions, projected.sessions);
+        } else if (runtime.presentation && step.frame.revision > runtime.presentation.revision) {
+          const projected = runtime.projectLocalPresentationAttentionAcknowledgementGuards(
+            reduceGxserverPresentationDelta(runtime.presentation, step.frame.delta, step.frame.revision)
+          );
+          runtime.presentation = projected;
+          runtime.syncLocalPresentationAttentionTracking(previousSessions, projected.sessions);
+          runtime.detectSessionAttentionCompletionSounds(previousSessions, projected.sessions);
+        }
+      } else if (step.op === 'frame') {
+        const previous = runtime.remotePresentations.get(step.machine);
+        if (step.frame.type === 'presentationSnapshot') {
+          const snapshot = runtime.projectRemotePresentationAttentionAcknowledgementGuards(
+            step.machine,
+            step.frame.snapshot
+          );
+          runtime.remotePresentations.set(step.machine, snapshot);
+          runtime.syncRemotePresentationAttentionTracking(step.machine, previous?.sessions ?? [], snapshot.sessions);
+        } else if (previous && step.frame.revision > previous.revision) {
+          const snapshot = runtime.projectRemotePresentationAttentionAcknowledgementGuards(
+            step.machine,
+            reduceGxserverPresentationDelta(previous, step.frame.delta, step.frame.revision)
+          );
+          runtime.remotePresentations.set(step.machine, snapshot);
+          runtime.syncRemotePresentationAttentionTracking(step.machine, previous.sessions, snapshot.sessions);
+        }
+      } else if (step.op === 'ack') {
+        runtime.acknowledgeSessionAttention(step.sessionId, 'native-focus');
+      } else if (step.op === 'escape') {
+        runtime.handleGpuiWorkspaceTerminalEscapePressed({
+          projectId: step.projectId,
+          sessionId: step.sessionId,
+          type: 'ghostex.gpui.sidebar.workspaceTerminalEscapePressed',
+          version: 1,
+        });
+      } else if (step.op === 'tick') {
+        const due = [...timers.entries()].filter(([, timer]) => timer.due <= now).sort((a, b) => a[1].due - b[1].due);
+        for (const [id, timer] of due) {
+          if (!timers.has(id)) continue;
+          timers.delete(id);
+          timer.run();
+        }
+      }
+      const visible: Record<string, string> = {};
+      for (const session of runtime.presentation?.sessions ?? []) {
+        visible[`combined-session:${encodeURIComponent(session.projectId)}:${encodeURIComponent(session.sessionId)}`] =
+          session.activity;
+      }
+      for (const [machineId, snapshot] of runtime.remotePresentations) {
+        for (const session of snapshot.sessions) {
+          visible[`remote:${machineId}:session:${session.projectId}:${session.sessionId}`] = session.activity;
+        }
+      }
+      results.push({
+        rpcs: rpcs.map((rpc) => ({ ...rpc })),
+        sounds: [...sounds],
+        t: step.t,
+        visible,
+      });
+    }
+  } finally {
+    Date.now = realNow;
+  }
+  return results;
+}
+
 // ---------------------------------------------------------------- driver
 
 function canonical(value: Json): Json {
@@ -154,6 +467,15 @@ function injectMutation(rust: Json): void {
     case 'feed-jump':
       rust.notificationFeed[12].jump = 'a';
       return;
+    case 'attention-sound':
+      rust.attention[2].sounds = [];
+      return;
+    case 'attention-report':
+      rust.attention[6].rpcs[0].event = 'escape';
+      return;
+    case 'attention-visible':
+      rust.attention[7].visible[Object.keys(rust.attention[7].visible)[0]] = 'attention';
+      return;
     default:
       console.error(`Unknown mutation ${inject}.`);
       process.exit(2);
@@ -162,11 +484,15 @@ function injectMutation(rust: Json): void {
 
 const dir = keep ?? mkdtempSync(join(tmpdir(), 'f2-parity-'));
 try {
-  const fixtures = { notificationFeed: notificationFeedFixtures() };
+  const fixtures = { attention: attentionFixtures(), notificationFeed: notificationFeedFixtures() };
   // JSON round trip first, so both halves read the same bytes (undefined fields vanish).
   writeFileSync(join(dir, 'fixtures.json'), JSON.stringify(fixtures));
   const read = JSON.parse(readFileSync(join(dir, 'fixtures.json'), 'utf8'));
-  const typescript = { notificationFeed: notificationFeedTypescript(read.notificationFeed) };
+  const typescript = {
+    attention: await attentionTypescript(dir, read.attention),
+    notificationFeed: notificationFeedTypescript(read.notificationFeed),
+  };
+  writeFileSync(join(dir, 'typescript.json'), JSON.stringify(typescript, null, 2));
   const cargo = spawnSync('cargo', ['run', '-q', '--example', 'f2_parity', '--', dir], {
     cwd: join(root, 'packages/gx-core'),
     stdio: ['ignore', 'inherit', 'inherit'],

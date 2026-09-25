@@ -9,11 +9,10 @@
 //!
 //! **The command no longer reaches the old runtime.** What its remote branch did besides the open
 //! is performed here, each at its end:
-//! - the attention acknowledgement goes to the runtime's attention subsystem as the one bridge
-//!   message the store already uses for a local row, with machine-scoped ids, and BEFORE the
-//!   open, as `focusSession` acknowledged first. The runtime keeps the minimum visible window,
-//!   the optimistic clear and the machine's `/api/updateAgentActivity` call, so the timer stays
-//!   one implementation;
+//! - the attention acknowledgement goes to the store's attention intent (gx_store/attention/),
+//!   BEFORE the open, as `focusSession` acknowledged first; the store keeps the minimum visible
+//!   window, the optimistic clear and the machine's `/api/updateAgentActivity` call for every door,
+//!   so the timer stays one implementation;
 //! - the remote focus marks (`setRemotePresentationSessionFocus`) and their patch publish are what
 //!   the open's own tab-selected callback runs (`set_sidebar_gxserver_remote_attach_focus_state`,
 //!   reached synchronously from `begin_gpui_remote_attach_terminal_open`), so they already moved
@@ -40,8 +39,7 @@
 //! SEE-ALSO: packages/gx-core/src/sidebar_actions/remote_focus.rs,
 //! apps/desktop/src/app/native_sidebar/actions.rs, apps/desktop/src/app/remote_conn/native_action.rs
 //! (`handle_gpui_remote_session_native_action`, which ends in `begin_gpui_remote_attach_terminal_open`),
-//! apps/desktop/sidebar/gxserver-runtime/attention-tracking.ts
-//! (`handleGpuiWorkspaceSessionAttentionAcknowledge`).
+//! packages/gx-core/src/attention.rs.
 
 use ghostex_gx_core::{
     PreferredInterfaceSettings, ProjectKey, RemoteFocusPlan, RuntimeActiveGroup, SessionKey,
@@ -54,7 +52,6 @@ use super::host::now_ms;
 use crate::GhostexGpuiApp;
 use crate::app::helpers::{
     GpuiGxserverPresentationFocusEcho, gpui_preferred_agent_interface_from_settings,
-    gpui_workspace_session_attention_acknowledge_script,
 };
 use crate::app::model::GpuiPreferredAgentInterface;
 use crate::shared_settings;
@@ -71,7 +68,7 @@ pub(crate) struct SidebarRemoteFocusCounters {
     /// Of those, the ones that carried each option.
     pub(crate) keep_view: u64,
     pub(crate) chat_interface: u64,
-    /// Attention acknowledgements sent to the old runtime, one per answered click while it runs.
+    /// Attention acknowledgements asked of the store, one per answered click.
     pub(crate) acknowledgements: u64,
     /// Remote tab selections sent to the old runtime, from any sender (the store's opens and a
     /// slow attach landing). Each one moves the remote focus marks: once per click on a row whose
@@ -188,15 +185,10 @@ impl GhostexGpuiApp {
             self.close_app_modal_from_bridge(cx);
         }
         // The runtime handles scripts in order, so a local selection it has not heard of yet goes
-        // before the acknowledgement, as it went before the forwarded command.
+        // before the open, as it went before the forwarded command.
         self.gx_store_flush_old_runtime_tell(cx);
-        if let Some(sidebar) = self.sidebar.clone() {
-            let script = gpui_workspace_session_attention_acknowledge_script(
-                &plan.attention_acknowledgement,
-            );
-            sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
-            self.gx_store.sidebar_remote_focus.counters.acknowledgements += 1;
-        }
+        self.gx_store_acknowledge_attention(plan.session.clone(), cx);
+        self.gx_store.sidebar_remote_focus.counters.acknowledgements += 1;
         let tab_selections = self.gx_store.sidebar_remote_focus.counters.tab_selections;
         {
             let counters = &mut self.gx_store.sidebar_remote_focus.counters;

@@ -90,6 +90,19 @@ impl GhostexGpuiApp {
             self.gx_store.runtime_facts.counters.unparsable += 1;
             return;
         };
+        // The runtime's own focus paths (focusSession, Split Right) acknowledge through the store's
+        // one attention tracker while the runtime still owns focus (gx_store/attention/).
+        if value.get("kind").and_then(Value::as_str) == Some("attentionAcknowledge") {
+            match value
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .and_then(ghostex_gx_core::SessionKey::parse_sidebar_session_id)
+            {
+                Some(session) => self.gx_store_acknowledge_attention(session, cx),
+                None => self.gx_store.runtime_facts.counters.unparsable += 1,
+            }
+            return;
+        }
         let mut reveal: Option<NativeSidebarRevealRequest> = None;
         let remote_project = self.gpui_app_modal_active_project_id().filter(|id| {
             self.app_modal_window.is_some()

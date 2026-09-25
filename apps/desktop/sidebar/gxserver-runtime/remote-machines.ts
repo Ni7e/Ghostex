@@ -556,14 +556,12 @@ export const gpuiSidebarRuntimeRemoteMachineMethods = {
     );
     if (isPresentationSnapshot(response.snapshot)) {
       const previous = this.remotePresentations.get(remoteMachineId);
-      const previousSessions = previous?.sessions ?? [];
-      const snapshot = this.projectRemotePresentationAttentionAcknowledgementGuards(remoteMachineId, response.snapshot);
+      const snapshot = response.snapshot;
       if (previous && previous.revision > snapshot.revision) {
         return;
       }
       this.remotePresentations.set(remoteMachineId, snapshot);
       this.pruneRemoteWorkspaceGroupAssignments(remoteMachineId, snapshot);
-      this.syncRemotePresentationAttentionTracking(remoteMachineId, previousSessions, snapshot.sessions);
       this.publishRemotePresentationPatch();
       await this.refreshRemoteSidebarHudFromGxserver(remoteMachineId).catch(() => undefined);
     }
