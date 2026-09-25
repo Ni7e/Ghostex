@@ -62,7 +62,9 @@ if (process.argv.includes('--check')) {
     current = readFileSync(OUT, 'utf8');
   } catch {}
   if (current !== text) {
-    console.error('packages/gx-core/src/quick_access/hotkey_table.rs is stale; run bun tooling/gx-core/quick-access-hotkey-table.ts');
+    console.error(
+      'packages/gx-core/src/quick_access/hotkey_table.rs is stale; run bun tooling/gx-core/quick-access-hotkey-table.ts'
+    );
     process.exit(1);
   }
   console.log('hotkey table is current');

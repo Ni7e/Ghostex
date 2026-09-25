@@ -1,6 +1,6 @@
 //! The agent launcher and the Actions: `agents`, `globalCommands` and
 //! `commandsByProject`, from gxserver's `/api/readSidebarHud` of this computer and of every remote
-//! machine (`createGpuiSidebarHudState` in apps/desktop/sidebar/gxserver-runtime/helpers/command-pane.ts).
+//! machine (the app runtime's `createGpuiSidebarHudState`, deleted).
 
 use std::collections::BTreeMap;
 

@@ -408,7 +408,6 @@ export const gpuiSidebarRuntimeRemoteMachineMethods = {
       return;
     }
     this.remoteSidebarHuds.set(remoteMachineId, hud);
-    this.publishHudPatch();
   },
 
   async restoreRemoteRecentProject(

@@ -448,9 +448,7 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
     }
     this.recentProjects = [...response.recentProjects];
     this.focusProjectId(projectId);
-    await this.refreshDomainPresentationSnapshotFromClient('patch').catch(() => {
-      this.publishHudPatch();
-    });
+    await this.refreshDomainPresentationSnapshotFromClient('patch').catch(() => undefined);
   },
 
   async removeRecentProject(this: GpuiSidebarRuntime, projectId: string): Promise<void> {
@@ -469,7 +467,6 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
     });
     this.domainProjects = this.domainProjects.filter((project) => project.projectId !== projectId);
     this.recentProjects = [...response.recentProjects];
-    this.publishHudPatch();
   },
 
   resolveProjectIdForGroup(this: GpuiSidebarRuntime, groupId: string): string | undefined {
@@ -787,7 +784,6 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
       this.upsertDomainProject(project);
     }
     this.sidebarHud = response.hud;
-    this.publishHudPatch();
     return response;
   },
 
@@ -804,7 +800,6 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
       projectId,
     });
     this.upsertDomainProject(response.project);
-    this.publishHudPatch();
     this.refreshSidebarHudFromClient();
     return response.project;
   },

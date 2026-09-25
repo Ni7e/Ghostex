@@ -11,10 +11,8 @@ use super::*;
 pub(crate) enum SidebarBridgeEventKind {
     ActiveProjectContext,
     NativeProjectPathAction,
-    NativeAppShotPrompt,
     SidebarCommandAction,
     SidebarCommandRunEnd,
-    GhostexHotkeyAction,
     GxserverPresentationFocusState,
     CreateProjectAgent,
     CreateProjectTerminal,
@@ -45,10 +43,8 @@ impl SidebarBridgeEventKind {
             SidebarBridgeFunctionId::SidebarEditableFocus => return None,
             SidebarBridgeFunctionId::ActiveProjectContext => Self::ActiveProjectContext,
             SidebarBridgeFunctionId::NativeProjectPathAction => Self::NativeProjectPathAction,
-            SidebarBridgeFunctionId::NativeAppShotPrompt => Self::NativeAppShotPrompt,
             SidebarBridgeFunctionId::SidebarCommandAction => Self::SidebarCommandAction,
             SidebarBridgeFunctionId::SidebarCommandRunEnd => Self::SidebarCommandRunEnd,
-            SidebarBridgeFunctionId::GhostexHotkeyAction => Self::GhostexHotkeyAction,
             SidebarBridgeFunctionId::GxserverPresentationFocusState => {
                 Self::GxserverPresentationFocusState
             }
@@ -196,10 +192,8 @@ pub type BrowserPopupOpenHandler = StdRc<dyn Fn(String, BrowserPopupPlacement)>;
 pub enum SidebarBridgeEvent {
     ActiveProjectContext(String),
     NativeProjectPathAction(String),
-    NativeAppShotPrompt(String),
     SidebarCommandAction(String),
     SidebarCommandRunEnd(String),
-    GhostexHotkeyAction(String),
     GxserverPresentationFocusState(String),
     CreateProjectAgent(String),
     CreateProjectTerminal(String),
@@ -262,10 +256,8 @@ impl SidebarBridgeEventKind {
         match self {
             Self::ActiveProjectContext => SidebarBridgeEvent::ActiveProjectContext(payload),
             Self::NativeProjectPathAction => SidebarBridgeEvent::NativeProjectPathAction(payload),
-            Self::NativeAppShotPrompt => SidebarBridgeEvent::NativeAppShotPrompt(payload),
             Self::SidebarCommandAction => SidebarBridgeEvent::SidebarCommandAction(payload),
             Self::SidebarCommandRunEnd => SidebarBridgeEvent::SidebarCommandRunEnd(payload),
-            Self::GhostexHotkeyAction => SidebarBridgeEvent::GhostexHotkeyAction(payload),
             Self::GxserverPresentationFocusState => {
                 SidebarBridgeEvent::GxserverPresentationFocusState(payload)
             }

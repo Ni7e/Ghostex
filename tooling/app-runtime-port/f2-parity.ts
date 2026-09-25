@@ -10,13 +10,17 @@
  * the fact and expects the gate to report differences, which proves it can fail.
  *
  * Mutations: feed-drop-item, feed-unread-count, feed-jump, attention-sound, attention-report,
- * attention-visible, hud-settings, hud-recent, hud-scopes.
+ * attention-visible, hud-settings, hud-recent, hud-scopes, indicators-count, indicators-order, pet.
  *
- * `hud` builds the sidebar HUD from the same sources on both sides: the runtime's
- * `createGpuiSidebarHudState` (with the groups the runtime would have built from the same
+ * `hud` builds the sidebar HUD from the same sources on both sides: the runtime's deleted
+ * `createGpuiSidebarHudState`, extracted from git at `HUD_BASE` (with the groups the runtime would have built from the same
  * presentations) normalized the way the sidebar store normalized it, against gx-core
  * `compose_sidebar_hud`. It compares the fields the HUD's Rust contract names (gx-core
  * `hud/mod.rs`), and of `settings` the keys `hud/settings.rs` normalizes.
+ *
+ * `indicators` builds the menu bar status payload and the pet overlay payload from the groups the
+ * runtime would have built (this computer's, then each saved remote machine's) against gx-core
+ * `indicators`, which reads one neutral sidebar view per machine.
  *
  * `attention` replays one scripted timeline (snapshots, deltas, acknowledgements, Escape, timer
  * ticks, local and remote) through the runtime's deleted tracker, extracted from git at
@@ -161,6 +165,7 @@ function attentionRow(projectId: string, sessionId: string, activity: string, ev
     sessionId,
     sortKey: `000${sessionId}`,
     surface: 'workspace',
+    title: `Session ${sessionId}`,
     updatedAt: '2026-09-15T01:18:43.055Z',
     visibleInSidebarByDefault: true,
     zmxName: `S90-${projectId}-${sessionId}`,
@@ -581,7 +586,10 @@ function hudFixtures(): Json[] {
       agentManagerZoomPercent: 12,
       defaultPromptAgentId: ` ${'x'.repeat(130)} `,
       hideProjectHeaderDiffStats: true,
-      remoteMachines: [{ id: 'remote-m1', name: 'Studio', sshHost: 'studio.local' }, { id: 'remote-m2', name: 'Off', sshHost: 'off.local' }],
+      remoteMachines: [
+        { id: 'remote-m1', name: 'Studio', sshHost: 'studio.local' },
+        { id: 'remote-m2', name: 'Off', sshHost: 'off.local' },
+      ],
       showProjectEditorDiffFileCount: true,
       sidebarCollapseAnimationDurationMs: -5,
       sidebarTheme: 'dark-blue',
@@ -605,7 +613,13 @@ function hudFixtures(): Json[] {
     globalCommands: [{ commandId: 'rg', name: 'Remote global' }],
   };
   const recentProjects = [
-    { path: '/tmp/P4/', projectId: 'P4', recentClosedAt: '2026-09-20T10:00:00.000Z', sessionCount: 3.7, title: ' Parked ' },
+    {
+      path: '/tmp/P4/',
+      projectId: 'P4',
+      recentClosedAt: '2026-09-20T10:00:00.000Z',
+      sessionCount: 3.7,
+      title: ' Parked ',
+    },
     {
       icon: { color: '#AABBCC', icon: 'rocket', kind: 'tabler' },
       path: '/tmp/P9',
@@ -624,7 +638,13 @@ function hudFixtures(): Json[] {
       theme: 'neon',
       title: 'Ten',
     },
-    { icon: { icon: 'notAnIcon', kind: 'tabler' }, path: '/tmp/P11', projectId: 'P11', recentClosedAt: '   ', title: 'Eleven' },
+    {
+      icon: { icon: 'notAnIcon', kind: 'tabler' },
+      path: '/tmp/P11',
+      projectId: 'P11',
+      recentClosedAt: '   ',
+      title: 'Eleven',
+    },
     { path: '   ', projectId: 'P12', title: 'No path' },
     { path: '/tmp/P13', projectId: '', title: 'No id' },
     { path: '/tmp/P14', projectId: 'P14', recentClosedAt: '2026-09-22T10:00:00.000Z', title: 'Tie' },
@@ -633,11 +653,28 @@ function hudFixtures(): Json[] {
     [
       'remote-m1',
       [
-        { path: '/tmp/R2-stored', projectId: 'R2', recentClosedAt: '2026-09-23T00:00:00.000Z', sessionCount: 9, title: 'Stored' },
+        {
+          path: '/tmp/R2-stored',
+          projectId: 'R2',
+          recentClosedAt: '2026-09-23T00:00:00.000Z',
+          sessionCount: 9,
+          title: 'Stored',
+        },
         { path: '/tmp/R9', projectId: 'R9', recentClosedAt: '2026-09-24T00:00:00.000Z', title: 'Gone' },
       ],
     ],
-    ['remote-m2', [{ path: '/tmp/X', projectId: 'X1', recentClosedAt: '2026-09-21T00:00:00.000Z', sessionCount: 4, title: 'Offline' }]],
+    [
+      'remote-m2',
+      [
+        {
+          path: '/tmp/X',
+          projectId: 'X1',
+          recentClosedAt: '2026-09-21T00:00:00.000Z',
+          sessionCount: 4,
+          title: 'Offline',
+        },
+      ],
+    ],
     ['remote-m9', [{ path: '/tmp/Y', projectId: 'Y1', title: 'Unsaved machine' }]],
   ];
   const domainProjects = [{ projectId: 'P3', worktree: { parentProjectId: 'P1' } }];
@@ -685,16 +722,37 @@ function hudContract(hud: Json): Json {
   return out;
 }
 
-async function hudTypescript(cases: Json[]): Promise<Json[]> {
-  const { createGpuiSidebarHudState } = await import(`${root}${RUNTIME}/helpers/command-pane`);
+/** The last commit whose runtime still composed its own HUD. */
+const HUD_BASE = '3062a6481';
+
+/** Copies the runtime's helpers, constants and types as they were at `HUD_BASE` out of git. */
+function extractOldRuntimeHelpers(dir: string): string {
+  const out = join(dir, 'old-hud');
+  mkdirSync(out, { recursive: true });
+  const paths = [`${RUNTIME}/helpers`, `${RUNTIME}/constants.ts`, `${RUNTIME}/types-and-protocol.ts`];
+  const archive = spawnSync('git', ['archive', HUD_BASE, ...paths], { cwd: root, maxBuffer: 1 << 28 });
+  if (archive.status !== 0) throw new Error(`git archive ${HUD_BASE} failed`);
+  const untar = spawnSync('tar', ['-x', '-C', out], { input: archive.stdout });
+  if (untar.status !== 0) throw new Error('tar failed');
+  const files = execFileSync('find', [join(out, RUNTIME), '-name', '*.ts'], { encoding: 'utf8' })
+    .trim()
+    .split('\n');
+  for (const file of files) {
+    writeFileSync(file, readFileSync(file, 'utf8').replaceAll("'@/", `'${root}`).replaceAll('"@/', `"${root}`));
+  }
+  return join(out, RUNTIME);
+}
+
+async function hudTypescript(dir: string, cases: Json[]): Promise<Json[]> {
+  const old = extractOldRuntimeHelpers(dir);
+  const { createGpuiSidebarHudState } = await import(`${old}/helpers/command-pane`);
   const { createGpuiPresentationProjectProjectionMetadata, resolveGpuiSidebarAgentIcon } = await import(
-    `${root}${RUNTIME}/helpers/presentation-projection`
+    `${old}/helpers/presentation-projection`
   );
-  const { createGpuiRemotePresentationSidebarGroups } = await import(`${root}${RUNTIME}/helpers/remote-presentation`);
-  const { createGpuiSidebarSettings } = await import(`${root}${RUNTIME}/helpers/bootstrap`);
-  const { createGxserverPresentationSidebarGroups } = await import(
-    '@/packages/shared/gxserver-presentation-sidebar-projection'
-  );
+  const { createGpuiRemotePresentationSidebarGroups } = await import(`${old}/helpers/remote-presentation`);
+  const { createGpuiSidebarSettings } = await import(`${old}/helpers/bootstrap`);
+  const { createGxserverPresentationSidebarGroups } =
+    await import('@/packages/shared/gxserver-presentation-sidebar-projection');
   const { normalizeghostexSettings } = await import('@/packages/shared/ghostex-settings');
   return cases.map((fixture) => {
     const presentation = fixture.local.snapshot;
@@ -754,6 +812,171 @@ async function hudTypescript(cases: Json[]): Promise<Json[]> {
   });
 }
 
+// ---------------------------------------------------------------- status indicators and pet
+
+function indicatorRow(projectId: string, sessionId: string, extra: Json = {}) {
+  return attentionRow(projectId, sessionId, extra.activity ?? 'idle', extra.eventId, {
+    lastActiveAt: '2026-09-20T10:00:00.000Z',
+    providerSessionState: 'exists',
+    sessionPersistenceProvider: 'zmx',
+    ...extra,
+  });
+}
+
+function indicatorFixtures(): Json[] {
+  const local = [
+    hudProject('P1', { title: 'Alpha' }),
+    hudProject('P2', { title: '   ' }),
+    hudProject('P5', { path: '/Users/x/.ghostex/chats/P5', title: 'Chat' }),
+    hudProject('P6', { title: 'Many' }),
+  ];
+  const sessions = [
+    indicatorRow('P1', 'S1', {
+      activity: 'attention',
+      eventId: 'e1',
+      meaningfulActivityAt: '2026-09-24T10:00:00.000Z',
+    }),
+    indicatorRow('P1', 'S2', { activity: 'working', title: 'Worker', displayTitle: '  Shown  ' }),
+    indicatorRow('P1', 'S3', { primaryTitle: 'Primary', providerSessionState: 'missing' }),
+    indicatorRow('P1', 'S4', { isPinned: true, terminalTitle: 'Term', title: '', primaryTitle: '  ' }),
+    indicatorRow('P1', 'S7', { isParked: true, lastActiveAt: '2026-09-25T09:00:00.000Z' }),
+    indicatorRow('P1', 'S8', { sessionPersistenceProvider: 'tmux', activity: 'working' }),
+    indicatorRow('P1', 'S9', { kind: 'terminal', zmxName: '' }),
+    indicatorRow('P2', 'S5', { activity: 'working', updatedAt: '2026-09-23T00:00:00.000Z' }),
+    indicatorRow('P5', 'C1', { activity: 'attention', eventId: 'c1' }),
+    indicatorRow('P5', 'C2', {}),
+    ...Array.from({ length: 20 }, (_, index) =>
+      indicatorRow('P6', `M${index}`, {
+        activity: index % 3 === 0 ? 'working' : 'idle',
+        lastActiveAt: `2026-09-${String(10 + index).padStart(2, '0')}T00:00:00.000Z`,
+      })
+    ),
+  ];
+  const remoteProjects = [
+    hudProject('R1', { title: 'Remote' }),
+    hudProject('R3', { path: '/Users/x/.ghostex/chats/R3' }),
+  ];
+  const remoteSessions = [
+    indicatorRow('R1', 'RS1', { activity: 'attention', eventId: 'r1' }),
+    indicatorRow('R1', 'RS2', {}),
+    indicatorRow('R3', 'RC1', { activity: 'working' }),
+  ];
+  const many = Array.from({ length: 12 }, (_, project) => hudProject(`Q${project}`, { title: `Q ${project}` }));
+  const manySessions = many.flatMap((project, projectIndex) =>
+    Array.from({ length: 9 }, (_, index) =>
+      indicatorRow(project.projectId, `${project.projectId}-${index}`, {
+        activity: (projectIndex + index) % 4 === 0 ? 'attention' : 'idle',
+        eventId: `ev-${projectIndex}-${index}`,
+      })
+    )
+  );
+  const settingsVariants: Json[] = [
+    {},
+    {
+      enableSessionParking: false,
+      hideMenuBarSessionStatusIndicators: true,
+      petOverlayEnabled: true,
+      remoteMachines: [{ id: 'remote-m1', name: 'Studio', sshHost: 'studio.local' }],
+      selectedPetId: 'dewey',
+    },
+    { remoteMachines: [{ id: 'remote-m1', name: 'Studio', sshHost: 'studio.local' }], selectedPetId: 'cat' },
+  ];
+  const cases: Json[] = [];
+  for (const [index, settings] of settingsVariants.entries()) {
+    cases.push({
+      local: hudSnapshot('local-1', local, sessions),
+      name: `mixed / settings ${index}`,
+      remote: hudSnapshot('remote-1', remoteProjects, remoteSessions),
+      settings,
+    });
+  }
+  cases.push({
+    local: hudSnapshot('local-1', many, manySessions),
+    name: 'caps',
+    remote: hudSnapshot('remote-1', remoteProjects, remoteSessions),
+    settings: settingsVariants[1],
+  });
+  cases.push({
+    local: hudSnapshot(
+      'local-1',
+      [hudProject('P1')],
+      [indicatorRow('P1', 'S1', {}), indicatorRow('P1', 'S2', { providerSessionState: 'missing' })]
+    ),
+    name: 'nothing actionable',
+    remote: hudSnapshot('remote-1', [], []),
+    settings: {},
+  });
+  return cases;
+}
+
+/** The last commit whose runtime still built the status item and pet payloads itself. */
+const INDICATORS_BASE = '912fcb0af';
+
+/** Copies the deleted payload builders (and the constants they read, as they were) out of git. */
+async function loadOldIndicators(dir: string): Promise<Json> {
+  const out = join(dir, 'old-indicators');
+  mkdirSync(join(out, 'helpers'), { recursive: true });
+  const current = `${root}${RUNTIME}`;
+  const read = (path: string) =>
+    execFileSync('git', ['show', `${INDICATORS_BASE}:${RUNTIME}/${path}`], { cwd: root, encoding: 'utf8' })
+      .replaceAll("'@/", `'${root}`)
+      .replaceAll('"@/', `"${root}`);
+  writeFileSync(join(out, 'constants.ts'), read('constants.ts'));
+  writeFileSync(
+    join(out, 'helpers/status-indicators.ts'),
+    read('helpers/status-indicators.ts')
+      .replaceAll("'../types-and-protocol'", `'${current}/types-and-protocol'`)
+      .replaceAll("'./records'", `'${current}/helpers/records'`)
+      .replaceAll("'./remote-presentation'", `'${current}/helpers/remote-presentation'`)
+  );
+  return import(join(out, 'helpers/status-indicators.ts'));
+}
+
+async function indicatorsTypescript(dir: string, cases: Json[]): Promise<Json[]> {
+  const indicators = await loadOldIndicators(dir);
+  const { createGpuiPresentationProjectProjectionMetadata, resolveGpuiSidebarAgentIcon } = await import(
+    `${root}${RUNTIME}/helpers/presentation-projection`
+  );
+  const { createGpuiRemotePresentationSidebarGroups } = await import(`${root}${RUNTIME}/helpers/remote-presentation`);
+  const { createGpuiSidebarSettings } = await import(`${root}${RUNTIME}/helpers/bootstrap`);
+  const { createGxserverPresentationSidebarGroups } =
+    await import('@/packages/shared/gxserver-presentation-sidebar-projection');
+  return cases.map((fixture) => {
+    const presentation = fixture.local.snapshot;
+    const settings = createGpuiSidebarSettings({ settings: fixture.settings });
+    const meta = createGpuiPresentationProjectProjectionMetadata({
+      domainProjects: [],
+      presentation,
+      projectOrder: [],
+    });
+    const groups = [
+      ...createGxserverPresentationSidebarGroups({
+        chatProjectIds: meta.chatProjectIds,
+        hiddenProjectIds: meta.hiddenProjectIds,
+        presentation,
+        projectOverlays: meta.projectOverlays,
+        resolveAgentIcon: resolveGpuiSidebarAgentIcon,
+      }),
+      ...createGpuiRemotePresentationSidebarGroups({
+        presentationsByMachineId: new Map([['remote-m1', fixture.remote.snapshot]]),
+        resolveAgentIcon: resolveGpuiSidebarAgentIcon,
+        settings,
+      }),
+    ];
+    const candidates = indicators.createGpuiSessionStatusIndicatorCandidatesFromSidebarGroups(
+      groups,
+      settings.enableSessionParking
+    );
+    return JSON.parse(
+      JSON.stringify({
+        name: fixture.name,
+        pet: indicators.createGpuiPetOverlayStatePayload(candidates, settings),
+        status: indicators.createGpuiSessionStatusIndicatorsPayload(candidates, settings),
+      })
+    );
+  });
+}
+
 // ---------------------------------------------------------------- driver
 
 function canonical(value: Json): Json {
@@ -796,6 +1019,15 @@ function injectMutation(rust: Json): void {
     case 'hud-scopes':
       rust.hud[8].hud.projectViewProjects.pop();
       return;
+    case 'indicators-count':
+      rust.indicators[0].status.attentionCount += 1;
+      return;
+    case 'indicators-order':
+      rust.indicators[0].status.projects.reverse();
+      return;
+    case 'pet':
+      rust.indicators[1].pet.selectedPetId = 'boo';
+      return;
     case 'attention-visible':
       rust.attention[7].visible[Object.keys(rust.attention[7].visible)[0]] = 'attention';
       return;
@@ -810,6 +1042,7 @@ try {
   const fixtures = {
     attention: attentionFixtures(),
     hud: hudFixtures(),
+    indicators: indicatorFixtures(),
     notificationFeed: notificationFeedFixtures(),
   };
   // JSON round trip first, so both halves read the same bytes (undefined fields vanish).
@@ -817,7 +1050,8 @@ try {
   const read = JSON.parse(readFileSync(join(dir, 'fixtures.json'), 'utf8'));
   const typescript = {
     attention: await attentionTypescript(dir, read.attention),
-    hud: await hudTypescript(read.hud),
+    hud: await hudTypescript(dir, read.hud),
+    indicators: await indicatorsTypescript(dir, read.indicators),
     notificationFeed: notificationFeedTypescript(read.notificationFeed),
   };
   writeFileSync(join(dir, 'typescript.json'), JSON.stringify(typescript, null, 2));

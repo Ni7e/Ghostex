@@ -26,6 +26,8 @@ pub(crate) struct CreateHost {
     pub(super) pending_browser_open: Option<super::browser::PendingBrowserOpen>,
     /// Sessions a create here just made, whose attach is the create's own (focus_created.rs).
     pub(super) created_attaches: super::focus_created::CreatedAttaches,
+    /// The Project Board's link availability answers, kept for their TTL (board.rs).
+    pub(super) board_link_checks: super::board::LinkChecks,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,6 +46,7 @@ pub(crate) struct CreateCounters {
     pub(super) placements_unread: u64,
     pub(super) folder_picks: u64,
     pub(super) os_integration_commands: u64,
+    pub(super) board_requests: u64,
 }
 
 impl GhostexGpuiApp {

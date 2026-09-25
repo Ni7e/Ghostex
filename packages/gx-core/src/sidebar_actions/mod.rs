@@ -33,6 +33,7 @@ mod delayed_send;
 mod flags;
 mod fork;
 mod generate_title;
+mod group_sleep;
 mod lifecycle;
 mod machine_disable;
 mod modals;
@@ -69,6 +70,7 @@ pub use fork::{
     apply_fork_answer, owns_fork_message, plan_fork_request, ForkFollowUp, ForkRequest,
 };
 pub use generate_title::plan_generate_session_title;
+pub use group_sleep::plan_group_sleep;
 pub use lifecycle::{
     apply_lifecycle_answer, owns_lifecycle_message, plan_lifecycle_request, FocusOptions,
     LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, LIFECYCLE_PATCH_TTL_MS,

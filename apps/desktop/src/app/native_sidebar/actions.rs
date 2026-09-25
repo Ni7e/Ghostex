@@ -165,6 +165,9 @@ impl GhostexGpuiApp {
         if self.gx_store_run_session_edit_command(&command, cx) {
             return;
         }
+        if self.gx_store_run_group_sleep(&command, cx) {
+            return;
+        }
         if self.gx_store_run_sidebar_fork(&command, cx) {
             return;
         }

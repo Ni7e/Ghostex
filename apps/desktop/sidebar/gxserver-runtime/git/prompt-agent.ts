@@ -1,5 +1,6 @@
 import { DEFAULT_GPUI_PROMPT_AGENT_ID } from '../constants';
 import type { GpuiSidebarRuntime } from '../core';
+import { createGpuiSidebarSettings } from '../helpers/bootstrap';
 import type { SidebarAgentButton } from '@/packages/shared/sidebar-agents';
 
 export const gpuiSidebarRuntimeGitPromptAgentMethods = {
@@ -10,7 +11,7 @@ export const gpuiSidebarRuntimeGitPromptAgentMethods = {
 
   resolveDefaultPromptAgentId(this: GpuiSidebarRuntime, agentId?: string): string {
     return (
-      agentId?.trim() || this.latestHud.settings?.defaultPromptAgentId?.trim() || DEFAULT_GPUI_PROMPT_AGENT_ID
+      agentId?.trim() || createGpuiSidebarSettings(this.runtimeSettings).defaultPromptAgentId.trim() || DEFAULT_GPUI_PROMPT_AGENT_ID
     );
   },
 };

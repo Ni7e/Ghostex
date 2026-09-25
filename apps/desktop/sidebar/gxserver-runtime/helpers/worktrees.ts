@@ -100,35 +100,3 @@ export function gpuiProjectNameFromPath(path: string): string {
 function gpuiProjectPathSeparators(path: string): string {
   return /^(?:[a-z]:[\\/]|\\\\|\/\/)/iu.test(path) ? path.replace(/\\/gu, '/') : path;
 }
-
-export function gpuiWorktreeSlugFromPrompt(prompt: string): string {
-  const firstWords = prompt
-    .trim()
-    .toLowerCase()
-    .replace(/[`'"]/gu, '')
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-    .split('-')
-    .filter(Boolean)
-    .slice(0, 6)
-    .join('-');
-  return (firstWords || 'worktree').slice(0, 48).replace(/-+$/u, '') || 'worktree';
-}
-
-export function createGpuiWorktreeToastId(): string {
-  return `toast-gpui-worktree-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export function gpuiWorktreeUserVisibleErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message.trim() : '';
-  if (
-    message &&
-    !message.includes('/') &&
-    !message.includes('\\') &&
-    !message.includes('\n') &&
-    message.length <= 160
-  ) {
-    return message;
-  }
-  return 'The gxserver worktree operation failed.';
-}

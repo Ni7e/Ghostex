@@ -1,7 +1,7 @@
 //! What view scopes read off the HUD: the Spaces the ACTIVE project belongs to
 //! (`activeProjectSpaceRefs`), every Space a scope can name (`projectViewSpaces`), and every
 //! project the sidebar lists (`projectViewProjects`)
-//! (apps/desktop/sidebar/gxserver-runtime/helpers/view-scopes.ts,
+//! (the app runtime's view-scopes helper, deleted, and
 //! packages/shared/ghostex-settings/project-views.ts `projectViewSpaceOptions`).
 //!
 //! CDXC:Extensions 2026-09-20 WHY:

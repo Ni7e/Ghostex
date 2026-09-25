@@ -10,9 +10,15 @@ use std::fs;
 use std::path::PathBuf;
 
 use ghostex_gx_core::hud::{compose_sidebar_hud, HudSources};
+use ghostex_gx_core::indicators::{
+    indicator_candidates, neutral_indicator_inputs, pet_overlay_payload, status_indicators_payload,
+};
 use ghostex_gx_core::{
     notification_feed_jump_target, notification_feed_state_message, Core, Effect, Event, Intent,
     MachineId, SessionKey,
+};
+use ghostex_gx_core::{
+    MachineTabInput, SessionSortMode, SidebarInputs, SidebarSettings, SidebarViewModel,
 };
 use serde_json::{json, Map, Value};
 
@@ -29,6 +35,7 @@ fn main() {
     );
     out.insert("attention".into(), attention(&fixtures["attention"]));
     out.insert("hud".into(), hud(&fixtures["hud"]));
+    out.insert("indicators".into(), indicators(&fixtures["indicators"]));
     fs::write(
         dir.join("rust.json"),
         serde_json::to_string_pretty(&Value::Object(out)).expect("serializable"),
@@ -245,6 +252,84 @@ fn hud(cases: &Value) -> Value {
                     active_project_id: case["activeProjectId"].as_str().map(str::to_string),
                 };
                 json!({ "name": case["name"], "hud": compose_sidebar_hud(&core, &sources) })
+            })
+            .collect(),
+    )
+}
+
+/// Each case: the status item and pet payloads from one neutral view per machine.
+fn indicators(cases: &Value) -> Value {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or_default();
+    Value::Array(
+        cases
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(|case| {
+                let mut core = Core::new();
+                core.handle_raw_frame(MachineId::Local, &case["local"].to_string(), 1)
+                    .expect("local frame");
+                let remote = MachineId::Remote("remote-m1".to_string());
+                core.handle_raw_frame(remote.clone(), &case["remote"].to_string(), 1)
+                    .expect("remote frame");
+                let settings = &case["settings"];
+                let mut inputs = SidebarInputs {
+                    settings: SidebarSettings::from_settings_json(
+                        settings,
+                        SessionSortMode::LastActivity,
+                    ),
+                    ..SidebarInputs::default()
+                };
+                inputs.host.machines = vec![MachineTabInput {
+                    machine_id: "remote-m1".to_string(),
+                    label: "Studio".to_string(),
+                    state: "connected".to_string(),
+                    message: None,
+                    fed: true,
+                }];
+                let saved_remote = settings["remoteMachines"]
+                    .as_array()
+                    .is_some_and(|machines| {
+                        machines.iter().any(|machine| machine["id"] == "remote-m1")
+                    });
+                let mut machines = vec![MachineId::Local];
+                if saved_remote {
+                    machines.push(remote);
+                }
+                let models: Vec<(MachineId, SidebarViewModel)> = machines
+                    .into_iter()
+                    .map(|machine| {
+                        let mut model = SidebarViewModel::new();
+                        model.update(
+                            &core,
+                            &neutral_indicator_inputs(&inputs, &machine),
+                            &ghostex_gx_core::ChangeSummary::default(),
+                            now_ms,
+                        );
+                        (machine, model)
+                    })
+                    .collect();
+                let borrowed: Vec<(MachineId, &SidebarViewModel)> = models
+                    .iter()
+                    .map(|(machine, model)| (machine.clone(), model))
+                    .collect();
+                let candidates = indicator_candidates(&core, &borrowed);
+                json!({
+                    "name": case["name"],
+                    "status": status_indicators_payload(
+                        &candidates,
+                        settings["hideMenuBarSessionStatusIndicators"] == true,
+                    ),
+                    "pet": pet_overlay_payload(
+                        &candidates,
+                        settings["petOverlayEnabled"] == true,
+                        settings["selectedPetId"].as_str(),
+                    ),
+                })
             })
             .collect(),
     )

@@ -20,8 +20,11 @@ mod core;
 mod doc_sync;
 mod focus;
 pub mod hud;
+pub mod indicators;
 pub mod git_menu;
 mod keys;
+pub mod navigation_history;
+pub mod app_shot;
 mod notification_feed;
 mod overlay;
 mod presentation_store;
@@ -112,7 +115,8 @@ pub use crate::sidebar_actions::{
     SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES, SORT_ACTIONS,
 };
 pub use crate::sidebar_actions::{
-    open_remote_session_terminal, plan_generate_session_title, provider_transition_committed,
+    open_remote_session_terminal, plan_generate_session_title, plan_group_sleep,
+    provider_transition_committed,
     running_local_session_ids,
     terminal_lifecycle_fallback_focus, titlebar_sleep_inactive_ids,
 };

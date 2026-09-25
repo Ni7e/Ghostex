@@ -157,6 +157,7 @@ pub struct GhostexGpuiApp {
     value — see `navigation_history` for why the titlebar owns no trail state.
     */
     pub(crate) navigation_history_state: navigation_history::GpuiNavigationHistoryState,
+    pub(crate) navigation_history: navigation_history::NavigationHistoryHost,
     /// The notification feed rows and unread count, pushed by the sidebar
     /// runtime whenever gxserver's feed changes. Render-path read only; see
     /// `notification_feed` for the ownership split.
@@ -540,10 +541,8 @@ pub struct GhostexGpuiApp {
     App Shot insertion needs a bounded runtime-only map from local gxserver presentation session ids to GPUI Agents shell tabs because those id spaces may differ. Populate it only from explicit sidebar focus-state handoffs and currently mounted Agents surfaces; store no prompts, app/window metadata, project paths, titles, command text, terminal output, or persistent state.
     */
     pub(crate) local_app_shot_session_mappings: HashMap<String, TerminalSessionId>,
-    /*
-    CDXC:CommandPane 2026-06-25-10:50:
-    Sidebar command-session indicator refresh is change-detected against a sanitized JSON summary of command-pane sessions. Cache only that safe summary string for CEF bridge dedupe; do not store command text, paths, status-file paths, env, output, or persisted shell-state JSON here.
-    */
+    /// The last command-tab summary `refresh_sidebar_command_pane_sessions_if_changed` saw, so it
+    /// reports only real changes.
     pub(crate) sidebar_command_pane_sessions_snapshot: String,
     /*
     Agents Delayed Send sidebar chrome crosses CEF as a sanitized list of

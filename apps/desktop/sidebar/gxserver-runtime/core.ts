@@ -21,7 +21,6 @@ import type { GpuiSidebarRuntimeCloseAfterDoneMethods } from './close-after-done
 import { gpuiSidebarRuntimeCloseAfterDoneMethods } from './close-after-done';
 import {
   GPUI_REMOTE_MACHINE_PRESENTATION_CLEAR_STATES,
-  GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
   GPUI_SIDEBAR_REMOTE_EVENT_NAME,
 } from './constants';
 import type { GpuiSidebarRuntimeGitMethods } from './git';
@@ -32,11 +31,6 @@ import {
   hasSameGpuiRuntimeSettings,
 } from './helpers/bootstrap';
 import { normalizeGpuiBrowserTabs } from './helpers/browser-tabs';
-import {
-  createGpuiSidebarHudState,
-  hasSameGpuiCommandPaneSessions,
-  normalizeGpuiCommandPaneSessions,
-} from './helpers/command-pane';
 import { readStoredGpuiRemoteGroupOrder, readStoredGpuiRemoteRecentProjects } from './helpers/recent-projects';
 import { normalizeNonEmptyString } from './helpers/records';
 import { GpuiRemoteLastSeenStore } from './helpers/remote-last-seen';
@@ -46,16 +40,10 @@ import {
 } from './helpers/remote-presentation';
 import type { GpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
 import { gpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
-import type { GpuiSidebarRuntimeProjectBoardMethods } from './project-board';
-import { gpuiSidebarRuntimeProjectBoardMethods } from './project-board';
 import type { GpuiSidebarRuntimeProjectAndCommandMethods } from './projects-and-commands';
 import { gpuiSidebarRuntimeProjectAndCommandMethods } from './projects-and-commands';
 import type { GpuiSidebarRuntimeRemoteMachineMethods } from './remote-machines';
 import { gpuiSidebarRuntimeRemoteMachineMethods } from './remote-machines';
-import type { GpuiSidebarRuntimeConversationJumpMethods } from './session-conversation-jump';
-import { gpuiSidebarRuntimeConversationJumpMethods } from './session-conversation-jump';
-import type { GpuiSidebarRuntimeDraftSessionMethods } from './draft-sessions';
-import { gpuiSidebarRuntimeDraftSessionMethods } from './draft-sessions';
 import type { GpuiSidebarRuntimeSessionCreateMethods } from './session-create';
 import { gpuiSidebarRuntimeSessionCreateMethods } from './session-create';
 import type { GpuiSidebarRuntimeSessionFocusMethods } from './sessions-and-focus';
@@ -66,8 +54,6 @@ import type { GpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-life
 import { gpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-lifecycle-queue';
 import type {
   GpuiBrowserTabSummary,
-  GpuiCommandPaneSessionSummary,
-  GpuiPendingNativeAppShotPromptInsertion,
   GpuiPendingRemoteGxserverRequest,
   GpuiPresentationSubscription,
   GpuiRemoteSidebarHud,
@@ -76,8 +62,6 @@ import type {
 } from './types-and-protocol';
 import type { GpuiSidebarRuntimeWorkspaceGroupMethods } from './workspace-groups-sync';
 import { gpuiSidebarRuntimeWorkspaceGroupMethods, installGpuiWorkspaceGroupsHandBack } from './workspace-groups-sync';
-import type { GpuiSidebarRuntimeWorktreeMethods } from './worktrees';
-import { gpuiSidebarRuntimeWorktreeMethods } from './worktrees';
 import type { WebviewApi } from '@/packages/core-ui/webview-api';
 import { reduceGxserverPresentationDelta } from '@/packages/shared/gxserver-presentation-cache';
 import type {
@@ -89,13 +73,10 @@ import type {
   GxserverSidebarProjectCollectionsState,
   GxserverSidebarSpacesState,
 } from '@/packages/shared/gxserver-protocol';
-import { NAVIGATION_HISTORY_SCOPE_GPUI } from '@/packages/shared/navigation-history/navigation-history-contract';
-import { NavigationHistoryController } from '@/packages/shared/navigation-history/navigation-history-controller';
 import type {
   ExtensionToSidebarMessage,
   SidebarGroupsChangedMessage,
   SidebarHudChangedMessage,
-  SidebarHudState,
   SidebarHydrateMessage,
   SidebarOrderSyncResultMessage,
   SidebarPreviousSessionItem,
@@ -219,13 +200,6 @@ export class GpuiSidebarRuntime {
 
   activeGroupId: string | undefined;
   activeProjectId: string | undefined;
-  lastNavigationHistoryStatePayload: string | undefined;
-  readonly navigationHistory = new NavigationHistoryController({
-    activate: (entry) => this.activateNavigationHistoryEntry(entry),
-    onStateChange: (state) => this.postNavigationHistoryState(state),
-    resolveRpc: () => this.navigationHistoryRpc(),
-    scopeId: NAVIGATION_HISTORY_SCOPE_GPUI,
-  });
   appUserData: GxserverAppUserData = createEmptyGpuiAppUserData();
   /**
    * Escalating presentation-stream recovery state. `AcknowledgedAt` is when the
@@ -246,7 +220,6 @@ export class GpuiSidebarRuntime {
   readonly staleRemotePresentationRefreshes = new Map<string, { lastStartedAt: number; trailingTimeoutId?: number }>();
   browserTabs: GpuiBrowserTabSummary[] = [];
   client: GpuiGxserverClient | undefined;
-  commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
   domainProjects: GxserverProjectDomainState[] = [];
   focusedSessionId: string | undefined;
   /**
@@ -259,11 +232,7 @@ export class GpuiSidebarRuntime {
   gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
   hasHydrated = false;
   latestGroups: SidebarSessionGroup[] = [];
-  latestHud: SidebarHudState = createGpuiSidebarHudState();
   localFirstHiddenPresentationSessionKeys = new Set<string>();
-  lastAppShotTargetAt = 0;
-  lastAppShotTargetSessionId: string | undefined;
-  pendingNativeAppShotPromptInsertions: GpuiPendingNativeAppShotPromptInsertion[] = [];
   pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
   presentation: GxserverPresentationSnapshot | undefined;
   previousSessionsByHistoryId = new Map<string, SidebarPreviousSessionItem>();
@@ -319,10 +288,6 @@ export class GpuiSidebarRuntime {
     this.remoteLastSeenPresentations = this.remoteLastSeenStore.read();
     this.workspaceGroups = readStoredGpuiWorkspaceSessionGroupsState();
     window.addEventListener(GPUI_SIDEBAR_REMOTE_EVENT_NAME, this.handleGpuiSidebarRemoteEvent);
-    window.addEventListener(
-      GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
-      this.handleGpuiSidebarNavigationHistoryCommand
-    );
     this.publishUnavailable('bootstrap-pending');
     // `service.ts` installs the bootstrap from the start config before `start()` runs (an empty
     // object when there is none), so there is nothing to poll for.
@@ -354,32 +319,8 @@ export class GpuiSidebarRuntime {
     };
     gpuiBridge.onBrowserTabsChanged = applyBrowserTabs;
     applyBrowserTabs(gpuiBridge.browserTabs);
-    const applyCommandPaneSessions = (sessions: readonly GpuiCommandPaneSessionSummary[] | undefined) => {
-      /*
-      CDXC:CommandPane 2026-06-25-10:50:
-      Rust owns GPUI command-pane session identity, activity, and active-tab state. The external bridge uses native-shaped `G...` local command-pane ids even though Rust internal shell state may still use numeric ids; the sidebar runtime only matches those sanitized summaries to current gxserver HUD command buttons by command id first and normalized title second, mirroring macOS without exposing command text, cwd, output, status-file paths, or shell-state JSON to React.
-      */
-      const next = normalizeGpuiCommandPaneSessions(sessions);
-      gpuiBridge.commandPaneSessions = next;
-      if (hasSameGpuiCommandPaneSessions(this.commandPaneSessions, next)) {
-        return;
-      }
-      this.commandPaneSessions = next;
-      this.publishHudPatch();
-    };
-    gpuiBridge.onCommandPaneSessionsChanged = applyCommandPaneSessions;
-    applyCommandPaneSessions(gpuiBridge.commandPaneSessions);
-    gpuiBridge.onNativeAppShotCaptured = (payload) => {
-      void this.handleNativeAppShotCaptured(payload);
-    };
-    gpuiBridge.onNativeAppShotPromptResult = (payload) => {
-      this.handleNativeAppShotPromptResult(payload);
-    };
     gpuiBridge.onMenuBarProjectActivation = (payload) => {
       this.handleGpuiMenuBarProjectActivation(payload);
-    };
-    gpuiBridge.onProjectBoardConversationRequest = (payload) => {
-      void this.handleGpuiProjectBoardConversationRequest(payload);
     };
     gpuiBridge.onWorkspaceTabSessionSelected = (payload) => {
       this.handleGpuiWorkspaceTabSessionSelected(payload);
@@ -410,17 +351,6 @@ export class GpuiSidebarRuntime {
         this.handleGpuiMenuBarProjectActivation(payload);
       }
     }
-    const pendingProjectBoardConversationRequests = Array.isArray(gpuiBridge.pendingProjectBoardConversationRequests)
-      ? gpuiBridge.pendingProjectBoardConversationRequests.splice(0)
-      : [];
-    for (const payload of pendingProjectBoardConversationRequests) {
-      /*
-      Kanban board conversation requests (getState first of all) routinely
-      arrive before the sidebar runtime installs callbacks at startup. Drain
-      them in order so early board loads answer instead of timing out.
-      */
-      void this.handleGpuiProjectBoardConversationRequest(payload);
-    }
     const pendingWorkspaceTabSessionSelections = Array.isArray(gpuiBridge.pendingWorkspaceTabSessionSelections)
       ? gpuiBridge.pendingWorkspaceTabSessionSelections.splice(0)
       : [];
@@ -440,32 +370,12 @@ export class GpuiSidebarRuntime {
       const message = asGpuiSidebarCommand(payload);
       if (message) void this.handleSidebarMessage(message);
     }
-    const pendingNativeAppShotPromptResults = Array.isArray(gpuiBridge.pendingNativeAppShotPromptResults)
-      ? gpuiBridge.pendingNativeAppShotPromptResults.splice(0)
-      : [];
-    for (const payload of pendingNativeAppShotPromptResults) {
-      this.handleNativeAppShotPromptResult(payload);
-    }
-    const pendingNativeAppShots = Array.isArray(gpuiBridge.pendingNativeAppShots)
-      ? gpuiBridge.pendingNativeAppShots.splice(0)
-      : [];
-    if (pendingNativeAppShots.length > 0) {
-      /*
-      CDXC:AppShots 2026-06-25-23:07:
-      Rust may deliver a native App Shot before the SidebarApp runtime finishes installing callbacks. Drain only the first-party queued capture payloads and keep them transient; do not persist app names, window titles, image paths, command text, terminal content, URLs, or side-channel metadata from this bridge.
-      */
-      for (const payload of pendingNativeAppShots) {
-        void this.handleNativeAppShotCaptured(payload);
-      }
-    }
     gpuiBridge.onRuntimeSettingsChanged = (runtimeSettings) => {
       const didChange = !hasSameGpuiRuntimeSettings(this.runtimeSettings, runtimeSettings);
       this.runtimeSettings = runtimeSettings;
       if (!didChange) {
         return;
       }
-      this.publishHudPatch();
-      this.postGpuiStatusPetState();
       this.postActiveProjectContext();
     };
     gpuiBridge.onGxserverBootstrapChanged = (bootstrap) => {
@@ -610,15 +520,6 @@ export class GpuiSidebarRuntime {
     }
   };
 
-  readonly handleGpuiSidebarNavigationHistoryCommand = (event: Event): void => {
-    const detail = (event as CustomEvent<unknown>).detail;
-    const direction = detail && typeof detail === 'object' ? (detail as { direction?: unknown }).direction : undefined;
-    if (direction !== 'back' && direction !== 'forward') {
-      return;
-    }
-    void this.navigationHistory.navigate(direction);
-  };
-
   async handleSidebarMessage(message: SidebarToExtensionMessage): Promise<void> {
     /*
      * CDXC:Diagnostics 2026-09-25 WHY:
@@ -661,33 +562,6 @@ export class GpuiSidebarRuntime {
         this.runSidebarCommand(commandId, message, message.scope ?? 'project');
         return;
       }
-      case 'setSessionSleeping':
-        await this.setSessionSleeping(message.sessionId, message.sleeping);
-        return;
-      case 'setSessionsSleeping':
-        await this.setSessionsSleeping(message.sessionIds, message.sleeping);
-        return;
-      case 'setGroupSleeping':
-        await this.setGroupSleeping(message.groupId, message.sleeping);
-        return;
-      case 'closeSession':
-        await this.transitionSession(message.sessionId, 'close');
-        return;
-      case 'closeSessions':
-        await Promise.all(message.sessionIds.map((sessionId) => this.transitionSession(sessionId, 'close')));
-        return;
-      case 'copySessionDetails':
-        this.copySessionDetails(message);
-        return;
-      case 'fullReloadSession':
-        await this.fullReloadSession(message.sessionId);
-        return;
-      case 'fullReloadProjectZmxSessions':
-        await this.fullReloadProjectZmxSessions(message.groupId);
-        return;
-      case 'fullReloadGroup':
-        await this.fullReloadWorkspaceGroup(message.groupId);
-        return;
       case 'openAutomationsPage':
         /*
         CDXC:Automations 2026-07-08:
@@ -697,59 +571,6 @@ export class GpuiSidebarRuntime {
         existing active-project context post carry the Automate workarea identity.
         */
         this.openQuickAutomationsPage();
-        return;
-      case 'closeInactiveProjectSessions':
-        await this.closeInactiveProjectSessions(message.groupId);
-        return;
-      case 'sleepInactiveProjectSessions':
-        await this.sleepInactiveProjectSessions(message.groupId);
-        return;
-      case 'wakeProjectSleepingSessions':
-        await this.wakeProjectSleepingSessions(message.groupId);
-        return;
-      case 'forkSession':
-        await this.forkSession(message.sessionId);
-        return;
-      case 'splitSessionRight':
-        await this.splitSessionRight(message.sessionId);
-        return;
-      case 'setSessionTag':
-        await this.updateSessionFlags(message.sessionId, {
-          isFavorite: message.sessionTag === 'favorite',
-          sessionTag: message.sessionTag ?? null,
-        });
-        return;
-      case 'setSessionPinned':
-        await this.updateSessionFlags(message.sessionId, {
-          isPinned: message.pinned,
-        });
-        return;
-      case 'setSessionParked':
-        await this.setSessionParked(message.sessionId, message.parked);
-        return;
-      /*
-      CDXC:StateSync 2026-07-29:
-      Sidebar V2's settle/snooze commands map 1:1 onto gxserver endpoints. They
-      are remote-allowed, so they route through the same machine resolution
-      every other session mutation uses; the client posts no optimistic patch
-      because the endpoints answer with a presentation delta and enforce guards
-      (a working or blocked session cannot settle) that the client must not
-      pre-empt.
-      */
-      case 'snoozeSession':
-        await this.snoozeSession(message.sessionId, message.snoozedUntil);
-        return;
-      case 'unsnoozeSession':
-        await this.runSessionLifecycleCommand(message.sessionId, '/api/unsnoozeSession', {});
-        return;
-      /*
-       * CDXC:Sessions 2026-09-25 WHY:
-       * A user-made group's order, New Group, Rename, Close Group, Move to New Group, a session
-       * dropped into a group and the project order are all Rust's (gx-core workspace_groups/ and
-       * sidebar_drag/, a remote row's included), so only a project group's session order is left.
-       */
-      case 'syncSessionOrder':
-        await this.syncSessionOrder(message.groupId, message.sessionIds);
         return;
       /*
       CDXC:Projects 2026-09-21 WHY:
@@ -802,15 +623,11 @@ moved method carries an explicit return type annotation.
 export interface GpuiSidebarRuntime
   extends
     GpuiSidebarRuntimeGitMethods,
-    GpuiSidebarRuntimeWorktreeMethods,
     GpuiSidebarRuntimeSidebarGroupMethods,
     GpuiSidebarRuntimePresentationStreamMethods,
     GpuiSidebarRuntimeSessionFocusMethods,
     GpuiSidebarRuntimeSessionCreateMethods,
-    GpuiSidebarRuntimeDraftSessionMethods,
     GpuiSidebarRuntimeAutoSleepMethods,
-    GpuiSidebarRuntimeProjectBoardMethods,
-    GpuiSidebarRuntimeConversationJumpMethods,
     GpuiSidebarRuntimeAttentionMethods,
     GpuiSidebarRuntimeCloseAfterDoneMethods,
     GpuiSidebarRuntimeTerminalLifecycleMethods,
@@ -831,15 +648,11 @@ function installGpuiSidebarRuntimeMethods(methods: Record<string, unknown>): voi
 }
 
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeGitMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeWorktreeMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSidebarGroupMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimePresentationStreamMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSessionFocusMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSessionCreateMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeDraftSessionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAutoSleepMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeProjectBoardMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeConversationJumpMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAttentionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeCloseAfterDoneMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeTerminalLifecycleMethods);

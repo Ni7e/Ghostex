@@ -53,6 +53,7 @@
 //! `diagnostics.rs` writes the log lines.
 
 mod activation_focus;
+mod app_shot;
 mod added_project;
 mod attention;
 mod burst;
@@ -70,6 +71,7 @@ mod effects;
 pub(crate) mod git;
 mod host;
 mod hud;
+mod indicators;
 mod layout_persist;
 mod primary_launcher;
 mod local_delayed_sends;

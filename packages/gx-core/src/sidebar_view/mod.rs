@@ -22,7 +22,7 @@ mod model;
 pub(crate) mod ordering;
 pub(crate) mod projects;
 mod reveal;
-mod rows;
+pub(crate) mod rows;
 mod sections;
 pub(crate) mod session_slot;
 mod session_text;

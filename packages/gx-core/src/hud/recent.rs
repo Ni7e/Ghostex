@@ -1,6 +1,6 @@
 //! `recentProjects`: this computer's parked projects from `/api/listRecentProjects`, and every
 //! remote machine's client-parked ones, newest close first
-//! (apps/desktop/sidebar/gxserver-runtime/helpers/recent-projects.ts).
+//! (the app runtime's `createGpuiRecentProjects` and `createGpuiRemoteRecentProjects`, deleted).
 //!
 //! CDXC:Projects 2026-06-24-12:27:
 //! GPUI Recent Projects hydrate from `/api/listRecentProjects`, a gxserver-owned parked-project

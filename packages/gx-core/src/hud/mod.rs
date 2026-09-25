@@ -7,7 +7,7 @@
 //! Spaces, the projects the sidebar lists, the active project) is read from the store.
 //!
 //! **The HUD's contract is what Rust reads.** These fields are produced, each as
-//! `createGpuiSidebarHudState` (apps/desktop/sidebar/gxserver-runtime/helpers/command-pane.ts)
+//! the app runtime's `createGpuiSidebarHudState` (deleted; the F2 parity gate runs it from git)
 //! built it and the sidebar store normalized it: `activeProjectId`, `activeProjectSpaceRefs`,
 //! `activeSessionsSortMode`, `agentManagerZoomPercent`, `agents`, `commandsByProject`,
 //! `createSessionOnSidebarDoubleClick`, `debuggingMode`, `globalCommands`, `projectViewProjects`,

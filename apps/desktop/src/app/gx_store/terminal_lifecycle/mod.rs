@@ -11,3 +11,4 @@ mod session_edits;
 mod lifecycle_requests;
 pub(crate) mod open_conversation;
 mod close_after_done;
+mod group_sleep;

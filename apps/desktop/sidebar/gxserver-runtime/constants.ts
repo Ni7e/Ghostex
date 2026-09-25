@@ -80,31 +80,10 @@ export const GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.openBrowserUrl";
 export const GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS = 16 * 1024;
 export const GPUI_SIDEBAR_BROWSER_FAVICON_URL_MAX_CHARS = 2048;
-export const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_VERSION = 1;
-export const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.projectBoardConversationRequest";
-export const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_VERSION = 1;
-export const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.projectBoardConversationResponse";
 export const GPUI_QUICK_AUTOMATIONS_PROJECT_ID = "quick-automations";
 export const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE = "All Automations";
 export const GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID =
   "__quick-automations__";
-export const GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_TTL_MS = 60_000;
-export const GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_CACHE_MAX = 512;
-export const GPUI_PROJECT_BOARD_LINK_AVAILABILITY_CONCURRENCY = 4;
-/*
-CDXC:ProjectBoard 2026-08-07:
-Resuming a bead's closed conversation runs through the daemon's fork plan,
-which only knows how to continue Codex, Claude, and Pi conversations. gxserver
-stays the authority and rejects anything else, so this set exists to keep the
-board from offering a Resume the daemon would refuse.
-*/
-export const GPUI_PROJECT_BOARD_RESUMABLE_AGENT_IDS = new Set([
-  "claude",
-  "codex",
-  "pi",
-]);
 export const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION = 1;
 export const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalEscapePressed";
@@ -138,27 +117,8 @@ export const GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_TYPE =
 export const GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_VERSION = 1;
 export const GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.commandPaletteRunSidebarCommand";
-export const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION = 1;
-export const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.nativeAppShotCaptured";
-export const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_VERSION = 1;
-export const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.nativeAppShotPrompt";
-export const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_VERSION = 1;
-export const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.nativeAppShotPromptResult";
 export const GPUI_SIDEBAR_REMOTE_EVENT_NAME =
   "ghostex-gpui-sidebar-remote-event";
-/*
-CDXC:Navigation 2026-08-19:
-The native titlebar owns the Back/Forward buttons but not the trail: Rust
-dispatches the click here and this runtime performs the same gxserver walk and
-sidebar activation the web app does, so both apps share one implementation.
-*/
-export const GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME =
-  "ghostex-gpui-sidebar-navigation-history-command";
-export const APP_SHOT_RECENT_TARGET_MS = 60_000;
-export const APP_SHOT_PROMPT_INSERT_RESULT_TIMEOUT_MS = 2_000;
 export const GPUI_STATUS_INDICATOR_MAX_CANDIDATES = 96;
 export const GPUI_STATUS_INDICATOR_MAX_PROJECTS = 32;
 export const GPUI_STATUS_INDICATOR_MAX_SESSIONS_PER_PROJECT = 16;
@@ -174,12 +134,6 @@ export const GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_STORAGE_KEY =
   "ghostex-gpui-remote-last-seen-presentations";
 
 export const GPUI_COMMAND_PANE_SESSION_SUMMARY_LIMIT = 128;
-export const GPUI_COMMAND_PANE_SESSION_STRING_MAX_LENGTH = 512;
-export const GPUI_COMMAND_PANE_TIMER_DEADLINE_MAX_LENGTH = 64;
-export const GPUI_COMMAND_PANE_TIMER_LABEL_MAX_LENGTH = 32;
-export const GPUI_COMMAND_PANE_TIMER_REMAINING_MS_MAX = 2_147_483_647;
-export const GPUI_GXSERVER_LOCAL_COMMAND_PANE_SESSION_ID_PATTERN =
-  /^G[0-9][0-9A-Za-z_-]*$/u;
 
 export const GPUI_PROJECT_BOARD_CONVERSATION_ACTIONS = new Set<string>([
   "appendDebugLog",

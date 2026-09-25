@@ -25,9 +25,7 @@ import type {
 } from '@/packages/shared/gxserver-protocol';
 import type {
   ExtensionToSidebarMessage,
-  SidebarCommandSessionIndicator,
   SidebarRemoteMachineStatusMessage,
-  SidebarSessionGroup,
   SidebarToExtensionMessage,
 } from '@/packages/shared/session-grid-contract';
 import type { ModelPickerProvider } from '@/packages/shared/session-chat-presentation/model-picker';
@@ -55,26 +53,6 @@ export type GpuiRemoteSidebarHud = Pick<
   GxserverSidebarHudResponse,
   'commands' | 'commandsByProject' | 'globalCommands'
 >;
-
-export type GpuiCommandPaneSessionSummary = {
-  commandId?: string;
-  closeAfterDone?: boolean;
-  closeAfterDoneDeadlineAt?: string;
-  closeAfterDoneRemainingLabel?: string;
-  closeAfterDoneRemainingMs?: number;
-  delayedSendDeadlineAt?: string;
-  delayedSendRemainingLabel?: string;
-  delayedSendRemainingMs?: number;
-  isActive?: boolean;
-  /*
-  CDXC:SessionSleep 2026-06-27-06:54:
-  Rust forwards this true-only bit for native-shaped external `G...` command-panel split pane owners so GPUI Auto Sleep can protect every active command leaf while keeping `isActive` scoped to HUD/responder focus. Rust shell internals may still use numeric ids, but those ids must not cross this TypeScript bridge as command-pane owners.
-  */
-  isPaneOwner?: true;
-  sessionId: string;
-  status: SidebarCommandSessionIndicator['status'];
-  title?: string;
-};
 
 export type GpuiFirstPromptTitleRuntimeSettings = {
   firstPromptTitleGenerationAgent: GxserverFirstPromptTitleGenerationAgent;
@@ -105,7 +83,6 @@ export type GpuiSidebarHostMessage = ExtensionToSidebarMessage;
 
 export type GhostexGpuiSidebarBridge = {
   browserTabs?: readonly GpuiBrowserTabSummary[];
-  commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
   /**
    * CDXC:SessionSleep 2026-08-20:
    * The local gxserver sessions the shell is rendering right now, terminal body
@@ -121,14 +98,10 @@ export type GhostexGpuiSidebarBridge = {
    * those rows, so Rust never has to know the sidebar's id format.
    */
   gxserverBootstrap?: GpuiGxserverBootstrap;
-  onCommandPaneSessionsChanged?: (sessions: readonly GpuiCommandPaneSessionSummary[]) => void;
   onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
   onExportTranscriptModalCommand?: (payload: unknown) => void;
   onGitCommitModalCommand?: (payload: unknown) => void;
   onMenuBarProjectActivation?: (payload: unknown) => void;
-  onNativeAppShotCaptured?: (payload: unknown) => void;
-  onNativeAppShotPromptResult?: (payload: unknown) => void;
-  onProjectBoardConversationRequest?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot) => void;
   /**
    * CDXC:Sidebar 2026-09-21 WHY:
@@ -166,31 +139,23 @@ export type GhostexGpuiSidebarBridge = {
   onWorkspaceSessionAttentionAcknowledge?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;
   onWorkspaceTerminalEscapePressed?: (payload: unknown) => void;
-  onWorkspaceTerminalRuntimeAction?: (payload: unknown) => void;
   pendingExportTranscriptModalCommands?: unknown[];
   pendingGitCommitModalCommands?: unknown[];
   pendingMenuBarProjectActivations?: unknown[];
-  pendingNativeAppShotPromptResults?: unknown[];
-  pendingNativeAppShots?: unknown[];
   pendingSidebarCommands?: unknown[];
-  pendingProjectBoardConversationRequests?: unknown[];
   pendingTitlebarGitActions?: unknown[];
   pendingWorktreeModalCommands?: unknown[];
   pendingWorkspaceSessionAttentionAcknowledgements?: unknown[];
   pendingWorkspaceTabSessionSelections?: unknown[];
   pendingWorkspaceTerminalEscapePresses?: unknown[];
-  pendingWorkspaceTerminalRuntimeActions?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
   postBrowserTabFocus?: (payload: string) => boolean;
   postCreateProjectAgent?: (payload: string) => boolean;
   postCreateProjectTerminal?: (payload: string) => boolean;
   postGxserverPresentationFocusState?: (payload: string) => boolean;
-  postGhostexHotkeyAction?: (payload: string) => boolean;
-  postNativeAppShotPromptToSession?: (payload: string) => boolean;
   postNativeProjectPathAction?: (payload: string) => boolean;
   postOpenBrowserUrl?: (payload: string) => boolean;
   postPetOverlayState?: (payload: string) => boolean;
-  postProjectBoardConversationResponse?: (payload: string) => boolean;
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
   postSessionCompletionSound?: (payload: string) => boolean;
@@ -217,13 +182,6 @@ export type GpuiValidatedGxserverBootstrap = {
   focusedSessionId?: string;
   initialActiveProjectId?: string;
   visibleSessionIds?: readonly string[];
-};
-
-export type GpuiSidebarGroupsPatch = {
-  groupOrder: string[];
-  groups: SidebarSessionGroup[];
-  removedGroupIds: string[];
-  removedSessionIds: string[];
 };
 
 export type GpuiGxserverRpcSuccess<TResult> = {
@@ -465,12 +423,6 @@ export type GpuiPendingGitCommitRequest = {
   subject: string;
 };
 
-export type GpuiPendingNativeAppShotPromptInsertion = {
-  resolve: (ok: boolean) => void;
-  sessionId: string;
-  timeoutId: number;
-};
-
 export type GpuiTrustedGitReviewFileSelection = {
   explicit: boolean;
   filePaths: string[];
@@ -489,16 +441,6 @@ export type GpuiGxserverCreatedSessionResult = {
     projectId?: string;
     sessionId?: string;
   };
-};
-
-export type GpuiNativeAppShotCapture = {
-  appName: string;
-  bundleIdentifier?: string;
-  imagePath: string;
-  trigger?: string;
-  windowHeight?: number;
-  windowTitle?: string;
-  windowWidth?: number;
 };
 
 export type GpuiWorktreeMetadata = {
@@ -591,11 +533,6 @@ export type GpuiPresentationSubscription = {
   close: () => void;
 };
 
-export type GpuiSidebarCommandSessionIndicatorScope = {
-  activeProjectId?: string;
-  presentation?: GxserverPresentationSnapshot;
-};
-
 export type GpuiWorktreeDeleteBranchMetadata = {
   branch: string | null;
   canDeleteLocalBranch: boolean;
@@ -627,29 +564,6 @@ export type GpuiCreatedProjectAgentSessionRecord = {
   projectId: string;
   sessionId: string;
   zmxName?: string;
-};
-
-export type GpuiProjectBoardConversationRequest = {
-  action:
-    | 'appendDebugLog'
-    | 'associateFocusedSession'
-    | 'getState'
-    | 'jumpToConversation'
-    | 'showToast'
-    | 'startWork'
-    | 'unlinkConversation';
-  agentId?: string;
-  beadDisplayId?: string;
-  beadId?: string;
-  projectId?: string;
-  projectPath?: string;
-  prompt?: string;
-  requestId: string;
-  sessionId?: string;
-  startLocation?: string;
-  toastDescription?: string;
-  toastLevel?: string;
-  toastTitle?: string;
 };
 
 export type GpuiWorkspaceTerminalEscapePressedPayload = {

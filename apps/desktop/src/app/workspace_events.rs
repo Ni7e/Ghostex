@@ -419,9 +419,6 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::NativeProjectPathAction(payload) => {
                 self.receive_sidebar_native_project_path_action_payload(&payload, cx);
             }
-            cef::SidebarBridgeEvent::NativeAppShotPrompt(payload) => {
-                self.receive_sidebar_native_app_shot_prompt_payload(&payload, cx);
-            }
             cef::SidebarBridgeEvent::SidebarRuntimeFacts(payload) => {
                 self.receive_sidebar_runtime_facts(&payload, cx);
             }
@@ -430,9 +427,6 @@ impl GhostexGpuiApp {
             }
             cef::SidebarBridgeEvent::SidebarCommandRunEnd(payload) => {
                 self.receive_sidebar_command_run_end_payload(&payload, cx);
-            }
-            cef::SidebarBridgeEvent::GhostexHotkeyAction(payload) => {
-                self.receive_sidebar_ghostex_hotkey_action_payload(&payload, window, cx);
             }
             cef::SidebarBridgeEvent::SessionCompletionSound(payload) => {
                 self.receive_sidebar_session_completion_sound_payload(&payload, cx);
