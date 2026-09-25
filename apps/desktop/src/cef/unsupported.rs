@@ -116,7 +116,6 @@ pub enum SidebarBridgeEvent {
     OpenBrowserUrl(String),
     BrowserTabFocus(String),
     ProjectBoardConversationResponse(String),
-    ResourcesSnapshotRequest(String),
     /// A first-party page tried to navigate its own main frame somewhere else; the payload is the refused URL.
     RefusedPageNavigation(String),
 }

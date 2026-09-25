@@ -428,9 +428,6 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::SidebarRuntimeFacts(payload) => {
                 self.receive_sidebar_runtime_facts(&payload, cx);
             }
-            cef::SidebarBridgeEvent::ResourcesSnapshotRequest(payload) => {
-                self.receive_sidebar_resources_snapshot_request_payload(&payload, cx);
-            }
             cef::SidebarBridgeEvent::SidebarCommandAction(payload) => {
                 self.receive_sidebar_command_action_payload(&payload, window, cx);
             }

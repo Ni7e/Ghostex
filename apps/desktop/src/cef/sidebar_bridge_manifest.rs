@@ -21,7 +21,6 @@ pub(crate) enum SidebarBridgeFunctionId {
     OpenBrowserUrl,
     BrowserTabFocus,
     ProjectBoardConversationResponse,
-    ResourcesSnapshotRequest,
     NativeQuickAccessSnapshot,
     SidebarRuntimeFacts,
 }
@@ -102,8 +101,6 @@ const SIDEBAR_OPEN_BROWSER_URL_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sideba
 const SIDEBAR_BROWSER_TAB_FOCUS_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.browserTabFocus";
 const SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.projectBoardConversationResponse";
-const SIDEBAR_RESOURCES_SNAPSHOT_REQUEST_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.resourcesSnapshotRequest";
 
 pub(crate) const SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE: &str = "ghostexGpui";
 const SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION: &str = "postActiveProjectContext";
@@ -130,7 +127,6 @@ const SIDEBAR_OPEN_BROWSER_URL_JS_FUNCTION: &str = "postOpenBrowserUrl";
 const SIDEBAR_BROWSER_TAB_FOCUS_JS_FUNCTION: &str = "postBrowserTabFocus";
 const SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_JS_FUNCTION: &str =
     "postProjectBoardConversationResponse";
-const SIDEBAR_RESOURCES_SNAPSHOT_REQUEST_JS_FUNCTION: &str = "postResourcesSnapshotRequest";
 
 /*
 Must fit the largest sidebar-bridge message: the project board conversation
@@ -397,7 +393,7 @@ The sidebar CEF post-function allowlist must have one Rust manifest shared by ma
 CDXC:CefRuntime 2026-06-29-14:45:
 GPUI CEF bridge names, payload budgets, and allowed app-modal/project-workarea surfaces live in this Rust manifest so the macOS browser process and helper renderer consume one ownership point. Keep sidebar, project-workarea, and app-modal handlers surface-specific; this manifest is an allowlist, not a generic IPC bus.
 */
-pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 24] = [
+pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 23] = [
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::SidebarRuntimeFacts,
         js_function_name: "postSidebarRuntimeFacts",
@@ -512,11 +508,6 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 24] 
         id: SidebarBridgeFunctionId::ProjectBoardConversationResponse,
         js_function_name: SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_JS_FUNCTION,
         process_message_name: SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::ResourcesSnapshotRequest,
-        js_function_name: SIDEBAR_RESOURCES_SNAPSHOT_REQUEST_JS_FUNCTION,
-        process_message_name: SIDEBAR_RESOURCES_SNAPSHOT_REQUEST_PROCESS_MESSAGE_NAME,
     },
 ];
 

@@ -11,20 +11,8 @@ import {
   parseObject,
   readJson,
 } from './helpers/records';
-import {
-  isCustomSessionTagsState,
-  isGpuiSessionChatEventMessage,
-  isPresentationDelta,
-  isPresentationSnapshot,
-  isSidebarProjectCollectionsState,
-  isSidebarSpacesState,
-} from './helpers/remote-presentation';
-import { handleGpuiRendererCommand, isGpuiRendererCommand } from './helpers/renderer-commands';
-import type {
-  GpuiPresentationSubscription,
-  GpuiRendererCommandHandler,
-  GpuiValidatedGxserverBootstrap,
-} from './types-and-protocol';
+import { isCustomSessionTagsState, isPresentationDelta, isPresentationSnapshot } from './helpers/remote-presentation';
+import type { GpuiPresentationSubscription, GpuiValidatedGxserverBootstrap } from './types-and-protocol';
 import type {
   GxserverAppUserData,
   GxserverCustomSessionTagsState,
@@ -41,8 +29,6 @@ import type {
   GxserverSidebarSpacesState,
 } from '@/packages/shared/gxserver-protocol';
 import { GXSERVER_PROTOCOL_VERSION } from '@/packages/shared/gxserver-protocol';
-import type { GxserverSessionChatEvent } from '@/packages/shared/session-chat';
-import { isSessionChatEventType } from '@/packages/shared/session-chat';
 
 export class GpuiGxserverRpcError extends Error {
   readonly code?: GxserverRpcErrorCode;
@@ -167,13 +153,8 @@ export class GpuiGxserverClient {
     onError,
     onGlobalSidebarCommands,
     onNotificationFeedChanged,
-    onRendererCommand,
-    onSessionChatEvent,
-    onSidebarProjectCollections,
-    onSidebarSpaces,
     onSnapshot,
     onSnapshotCurrent,
-    onWorkspaceGroups,
   }: {
     clientId: string;
     lastRevision: number;
@@ -183,10 +164,6 @@ export class GpuiGxserverClient {
     onError: () => void;
     onGlobalSidebarCommands?: () => void;
     onNotificationFeedChanged?: () => void;
-    onRendererCommand?: GpuiRendererCommandHandler;
-    onSessionChatEvent?: (event: GxserverSessionChatEvent) => void;
-    onSidebarProjectCollections?: (state: GxserverSidebarProjectCollectionsState) => void;
-    onSidebarSpaces?: (state: GxserverSidebarSpacesState) => void;
     onSnapshot: (snapshot: GxserverPresentationSnapshot) => void;
     /**
      * The daemon's answer when `lastRevision` already names its current
@@ -194,7 +171,6 @@ export class GpuiGxserverClient {
      * revision back for the caller to assert against.
      */
     onSnapshotCurrent?: (revision: number) => void;
-    onWorkspaceGroups?: (state: unknown) => void;
   }): GpuiPresentationSubscription {
     const url = new URL(`${this.bootstrap.baseUrl}/api/events`);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -203,12 +179,18 @@ export class GpuiGxserverClient {
 
     const socket = new WebSocket(url.toString());
     let closedByClient = false;
+    /*
+    CDXC:CefRuntime 2026-09-25 WHY:
+    This socket no longer asks for CLI renderer commands: the desktop store's
+    own gx-client socket registers for them and answers them in Rust
+    (apps/desktop/src/app/gx_store/renderer_commands/). Registering here too
+    would split the CLI's commands between two answerers.
+    */
     socket.addEventListener('open', () => {
       socket.send(
         JSON.stringify({
           clientId,
           lastRevision,
-          ...(onRendererCommand ? { rendererCommands: true } : {}),
           type: 'subscribePresentation',
         })
       );
@@ -234,32 +216,12 @@ export class GpuiGxserverClient {
         onDelta(message.delta, message.revision);
         return;
       }
-      if (message.type === 'rendererCommand' && onRendererCommand && isGpuiRendererCommand(message.command)) {
-        void handleGpuiRendererCommand(socket, message.command, onRendererCommand);
-        return;
-      }
-      if (
-        message.type === 'sidebarProjectCollectionsChanged' &&
-        onSidebarProjectCollections &&
-        isSidebarProjectCollectionsState(message.sidebarProjectCollections)
-      ) {
-        onSidebarProjectCollections(message.sidebarProjectCollections);
-        return;
-      }
-      if (message.type === 'sidebarSpacesChanged' && onSidebarSpaces && isSidebarSpacesState(message.sidebarSpaces)) {
-        onSidebarSpaces(message.sidebarSpaces);
-        return;
-      }
       if (
         message.type === 'customSessionTagsChanged' &&
         onCustomSessionTags &&
         isCustomSessionTagsState(message.customSessionTags)
       ) {
         onCustomSessionTags(message.customSessionTags);
-        return;
-      }
-      if (message.type === 'workspaceGroupsChanged' && onWorkspaceGroups && parseObject(message.groups)) {
-        onWorkspaceGroups(message.groups);
         return;
       }
       /*
@@ -275,23 +237,6 @@ export class GpuiGxserverClient {
       // The feed announcement carries no rows either; the handler refetches the feed.
       if (message.type === 'notificationFeedChanged' && onNotificationFeedChanged) {
         onNotificationFeedChanged();
-        return;
-      }
-      /*
-      CDXC:SessionChat 2026-07-31:
-      Session-chat frames ride the same local /api/events socket as
-      presentation. The runtime only forwards shape-validated frames to an
-      opted-in handler; the gpui chat CEF surface owns its own subscription,
-      so this branch exists for parity with the shared native client switch
-      and stays inert unless a handler is provided.
-      */
-      if (
-        typeof message.type === 'string' &&
-        isSessionChatEventType(message.type) &&
-        onSessionChatEvent &&
-        isGpuiSessionChatEventMessage(message)
-      ) {
-        onSessionChatEvent(message);
       }
     });
     socket.addEventListener('error', () => {

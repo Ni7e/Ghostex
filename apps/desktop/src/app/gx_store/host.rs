@@ -93,6 +93,9 @@ pub(crate) struct GxStoreHost {
     /// Shared with the client thread, which quotes it as `lastRevision` when it subscribes.
     held_revision: Arc<AtomicI64>,
     pub(super) counters: GxStoreCounters,
+    /// CLI renderer commands the local client handed over in the last pump, performed right after
+    /// it (renderer_commands/).
+    pending_renderer_commands: Vec<ghostex_gx_core::protocol::RendererCommand>,
     connecting_since: Option<Instant>,
     pub(super) shadow: ShadowDiff,
     pub(crate) sidebar_ui: SidebarUiHost,
@@ -198,6 +201,9 @@ impl GxStoreHost {
                 ClientOutput::Diagnostic(diagnostic) => {
                     self.counters.client_diagnostics += 1;
                     self.diagnostics.client_diagnostic(&diagnostic);
+                }
+                ClientOutput::RendererCommand(command) => {
+                    self.pending_renderer_commands.push(command);
                 }
             }
         }
@@ -399,6 +405,8 @@ impl GhostexGpuiApp {
                 client_id: GX_STORE_CLIENT_ID.to_string(),
                 held_revision: host.held_revision.clone(),
                 forward_chat_frames: false,
+                // This socket is the app's one renderer-command target (renderer_commands/).
+                renderer_commands: true,
             },
             move || {
                 let _ = wake.unbounded_send(());
@@ -474,6 +482,10 @@ impl GhostexGpuiApp {
     /// Returns `true` when the client's thread is gone.
     fn gx_store_pump(&mut self, cx: &mut gpui::Context<Self>) -> bool {
         let outcome = self.gx_store.pump();
+        let renderer_commands = std::mem::take(&mut self.gx_store.pending_renderer_commands);
+        if !renderer_commands.is_empty() {
+            self.gx_store_take_renderer_commands(renderer_commands, cx);
+        }
         // NOT `workspace_groups_changed` alone. This host seeds the core's side state with the
         // stored document itself, so on an ordinary launch the reducer compares the daemon's copy
         // against what this host just put there, agrees, and reports no change: the guard was then

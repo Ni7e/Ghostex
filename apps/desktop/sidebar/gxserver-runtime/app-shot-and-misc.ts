@@ -15,9 +15,6 @@ import {
   GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_VERSION,
   GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
   GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
-  GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS,
-  GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
-  GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import { activateGpuiProject } from './project-activation';
@@ -31,40 +28,27 @@ import {
   normalizeGpuiNativeAppShotPromptResult,
 } from './helpers/app-shot';
 import { createGpuiSidebarSettings } from './helpers/bootstrap';
-import { normalizeNonEmptyString, readGpuiRecordString } from './helpers/records';
+import { normalizeNonEmptyString } from './helpers/records';
 import {
   createGpuiRemotePresentationGroupId,
-  createGpuiRemotePresentationProjectId,
   parseGpuiRemotePresentationProjectId,
   parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
-import {
-  normalizeGpuiRendererCommandRenameTitle,
-  parseGpuiRendererCommandGlobalSessionRef,
-  readGpuiRendererCommandSessionTarget,
-} from './helpers/renderer-commands';
 import { normalizeGpuiMenuBarProjectActivation } from './helpers/status-indicators';
 import type {
   GpuiPendingNativeAppShotPromptInsertion,
-  GpuiRendererCommandResolvedSession,
   GpuiSidebarNativeProjectPathAction,
   GpuiWorkspaceTerminalFocusPlacement,
 } from './types-and-protocol';
 import { openAppModal, postAppModalHostMessage } from '@/packages/core-ui/app-modal-host-bridge';
 import type { AppToastLevel } from '@/packages/shared/app-toast-contract';
 import { createAppToastRequest } from '@/packages/shared/app-toast-contract';
-import type { PreferredAgentInterface, ghostexSettingsPatch } from '@/packages/shared/ghostex-settings';
-import { SETTINGS_MODAL_NAVIGATION_TABS } from '@/packages/shared/ghostex-settings';
-import {
-  createGxserverPresentationProjectSessionId,
-  parseGxserverPresentationProjectSessionId,
-} from '@/packages/shared/gxserver-presentation-sidebar-projection';
-import type { GxserverRendererCommand } from '@/packages/shared/gxserver-protocol';
+import type { PreferredAgentInterface } from '@/packages/shared/ghostex-settings';
 import type { NavigationHistoryEntry } from '@/packages/shared/navigation-history/navigation-history-contract';
 import type { NavigationHistoryRpc } from '@/packages/shared/navigation-history/navigation-history-controller';
 import type { SidebarSessionItem, SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
 import type { SidebarCommandButton } from '@/packages/shared/sidebar-commands';
-import { isSidebarCommandConfigured, isSidebarCommandRunMode } from '@/packages/shared/sidebar-commands';
+import { isSidebarCommandRunMode } from '@/packages/shared/sidebar-commands';
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -88,24 +72,6 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
   handleNativeAppShotPromptResult(payload: unknown): void;
   resolvePendingNativeAppShotPromptInsertion(pending: GpuiPendingNativeAppShotPromptInsertion, ok: boolean): void;
   rememberNativeAppShotTargetSessionId(sessionId: string): void;
-  handleGxserverRendererCommand(command: GxserverRendererCommand): Promise<Record<string, unknown>>;
-  applyRendererSettingsPatch(command: GxserverRendererCommand): Record<string, unknown>;
-  openSettingsFromRendererCommand(command: GxserverRendererCommand): Record<string, unknown>;
-  runGxserverRendererCommandButton(
-    rawCommandId: string | undefined,
-    rendererCommand: GxserverRendererCommand
-  ): Record<string, unknown>;
-  openEmbeddedBrowserFromRendererCommand(command: GxserverRendererCommand): Record<string, unknown>;
-  resolveEmbeddedBrowserRendererCommandProjectId(scope: {
-    groupId?: string;
-    projectId?: string;
-    projectPath?: string;
-  }): string | undefined;
-  resolveEmbeddedBrowserKnownProjectId(projectId: string): string | undefined;
-  resolveGxserverRendererCommandSession(
-    payload: Record<string, unknown>
-  ): GpuiRendererCommandResolvedSession | undefined;
-  hasGpuiRendererCommandLocalSession(projectId: string, sessionId: string): boolean;
   createNavigationHistoryEntry(): NavigationHistoryEntry | undefined;
   navigationHistoryRpc(): NavigationHistoryRpc | undefined;
   activateNavigationHistoryEntry(entry: NavigationHistoryEntry): boolean;
@@ -410,312 +376,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
     }
     this.lastAppShotTargetSessionId = normalizedSessionId;
     this.lastAppShotTargetAt = Date.now();
-  },
-
-  async handleGxserverRendererCommand(
-    this: GpuiSidebarRuntime,
-    command: GxserverRendererCommand
-  ): Promise<Record<string, unknown>> {
-    switch (command.action) {
-      case 'focusSession': {
-        const resolvedSession = this.resolveGxserverRendererCommandSession(command.payload);
-        if (!resolvedSession) {
-          throw new Error('No matching session was found.');
-        }
-        await this.focusSession(resolvedSession.sidebarSessionId, {
-          sessionId: resolvedSession.sidebarSessionId,
-          type: 'focusSession',
-        });
-        return {
-          ok: true,
-          session: {
-            ghostexId: resolvedSession.sidebarSessionId,
-            projectId: resolvedSession.projectId,
-            sessionId: resolvedSession.sessionId,
-          },
-        };
-      }
-      case 'renameCommand': {
-        const resolvedSession = this.resolveGxserverRendererCommandSession(command.payload);
-        if (!resolvedSession) {
-          throw new Error('No matching session was found.');
-        }
-        const title = normalizeGpuiRendererCommandRenameTitle(command.payload);
-        if (!title) {
-          throw new Error('Invalid renderer command title.');
-        }
-        this.postLocalWorkspaceTerminalRenameCommand(resolvedSession.projectId, resolvedSession.sessionId, title);
-        return {
-          accepted: true,
-          action: 'renameCommand',
-          ok: true,
-          session: {
-            ghostexId: resolvedSession.sidebarSessionId,
-            projectId: resolvedSession.projectId,
-            sessionId: resolvedSession.sessionId,
-          },
-        };
-      }
-      case 'runCommand':
-        return this.runGxserverRendererCommandButton(readGpuiRecordString(command.payload, 'commandId'), command);
-      case 'readResourcesSnapshot':
-        return this.requestNativeResourcesSnapshot();
-      case 'updateSettingsPatch':
-        return this.applyRendererSettingsPatch(command);
-      case 'openSettings':
-        return this.openSettingsFromRendererCommand(command);
-      case 'openBrowser':
-      case 'openBrowserPane':
-        return this.openEmbeddedBrowserFromRendererCommand(command);
-      case 'clickButton': {
-        const kind = readGpuiRecordString(command.payload, 'kind')?.trim();
-        if (kind !== 'command') {
-          throw new Error('Unsupported renderer command.');
-        }
-        return this.runGxserverRendererCommandButton(readGpuiRecordString(command.payload, 'id'), command);
-      }
-      default:
-        throw new Error('Unsupported renderer command.');
-    }
-  },
-
-  applyRendererSettingsPatch(this: GpuiSidebarRuntime, command: GxserverRendererCommand): Record<string, unknown> {
-    /*
-    CDXC:Settings 2026-09-09 DECISION:
-    User: `ghostex settings set` writes through the running desktop app, never
-    the settings file, so a CLI change takes the exact save and fan-out path a
-    Settings modal save takes (Rust merges the patch onto the stored snapshot
-    and hydrates every surface). The renderer command carries only a flat
-    key/value patch; the CLI validates keys and values against the generated
-    settings catalog before it dispatches.
-    SEE-ALSO: server/src/ghostex_cli/settings.rs, skills/ghostex-help.
-    */
-    const rawPatch = command.payload.patch;
-    if (typeof rawPatch !== 'object' || rawPatch === null || Array.isArray(rawPatch)) {
-      throw new Error('Invalid settings patch.');
-    }
-    const patch = rawPatch as Record<string, unknown>;
-    const keys = Object.keys(patch);
-    if (keys.length === 0 || keys.length > 50) {
-      throw new Error('Invalid settings patch.');
-    }
-    for (const key of keys) {
-      const value = patch[key];
-      const scalar = typeof value === 'boolean' || typeof value === 'string' || typeof value === 'number';
-      if (!scalar || (typeof value === 'number' && !Number.isFinite(value))) {
-        throw new Error('Invalid settings patch.');
-      }
-    }
-    const message: Extract<SidebarToExtensionMessage, { type: 'updateSettingsPatch' }> = {
-      patch: patch as ghostexSettingsPatch,
-      source: 'cli:settings',
-      type: 'updateSettingsPatch',
-    };
-    try {
-      postAppModalHostMessage({ message, type: 'sidebarCommand' }, 'GPUISidebarActions:updateSettingsPatch');
-    } catch {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    return { accepted: true, keys, ok: true };
-  },
-
-  openSettingsFromRendererCommand(this: GpuiSidebarRuntime, command: GxserverRendererCommand): Record<string, unknown> {
-    /*
-    `ghostex settings open [<key>]` lands on the Settings modal with the tab
-    and search prefilled, the same open message the titlebar Tips rows use, so
-    settings an agent may not write (accounts, remote pairing, tokens) are one
-    command away for the user instead of being edited blind.
-    */
-    const rawTab = readGpuiRecordString(command.payload, 'tab')?.trim();
-    const tab = rawTab || 'settings';
-    if (!(SETTINGS_MODAL_NAVIGATION_TABS as readonly string[]).includes(tab)) {
-      throw new Error('Invalid settings tab.');
-    }
-    const searchQuery = readGpuiRecordString(command.payload, 'searchQuery')?.trim().slice(0, 200) || undefined;
-    try {
-      postAppModalHostMessage(
-        {
-          ...(searchQuery ? { initialSearchQuery: searchQuery } : {}),
-          initialTab: tab,
-          modal: 'settings',
-          type: 'open',
-        },
-        'GPUISidebarActions:openSettings'
-      );
-    } catch {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    return { ok: true, searchQuery: searchQuery ?? null, tab };
-  },
-
-  runGxserverRendererCommandButton(
-    this: GpuiSidebarRuntime,
-    rawCommandId: string | undefined,
-    rendererCommand: GxserverRendererCommand
-  ): Record<string, unknown> {
-    /*
-    CDXC:CefRuntime 2026-06-27-05:51:
-    gxserver `runCommand` and `clickButton(kind:"command")` must launch the same trusted project Action button as native. Treat renderer payloads as selectors only; command text, URLs, close-on-exit normalization, completion-sound preference, cwd/env, paths, output, and logs must come from the live HUD command and fixed Rust command-action bridge.
-    */
-    const commandId = normalizeNonEmptyString(rawCommandId)?.trim();
-    if (!commandId) {
-      throw new Error('Unsupported renderer command.');
-    }
-    const command = this.resolveSidebarCommand(commandId);
-    if (!command || !isSidebarCommandConfigured(command)) {
-      throw new Error('Unsupported renderer command.');
-    }
-    const selectionMessage: Extract<SidebarToExtensionMessage, { type: 'runSidebarCommand' }> = {
-      commandId,
-      type: 'runSidebarCommand',
-    };
-    if (!this.postSidebarCommandAction(command, selectionMessage)) {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    return {
-      accepted: true,
-      action: rendererCommand.action,
-      ok: true,
-    };
-  },
-
-  openEmbeddedBrowserFromRendererCommand(
-    this: GpuiSidebarRuntime,
-    command: GxserverRendererCommand
-  ): Record<string, unknown> {
-    /*
-    macOS `openNativeBrowserPaneFromCli` parity for `ghostex browser open` /
-    `gx ln`. Resolve CLI project selectors against the live sidebar project
-    model, then forward only the validated project key; Rust re-normalizes the
-    address and owns project-model swapping plus tab reuse/creation. An
-    untargeted `--active-project` open keeps using the current Browser model.
-    */
-    const post = window.ghostexGpui?.postOpenBrowserUrl;
-    if (typeof post !== 'function') {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    const url = readGpuiRecordString(command.payload, 'url')?.trim() ?? '';
-    if (url.length > GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS) {
-      throw new Error('Invalid renderer command URL.');
-    }
-    const rawReuse = readGpuiRecordString(command.payload, 'reuse')?.trim().toLowerCase();
-    const reuse = rawReuse === 'exact' || rawReuse === 'none' ? rawReuse : 'similar';
-    const groupId = readGpuiRecordString(command.payload, 'groupId')?.trim();
-    const requestedProjectId = readGpuiRecordString(command.payload, 'projectId')?.trim();
-    const projectPath = readGpuiRecordString(command.payload, 'projectPath')?.trim();
-    const projectId = this.resolveEmbeddedBrowserRendererCommandProjectId({
-      groupId,
-      projectId: requestedProjectId,
-      projectPath,
-    });
-    if ((groupId || requestedProjectId || projectPath) && !projectId) {
-      throw new Error('No matching project was found.');
-    }
-    const payload = JSON.stringify({
-      ...(projectId ? { projectId } : {}),
-      reuse,
-      type: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
-      url,
-      version: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
-    });
-    if (!post(payload)) {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    return {
-      accepted: true,
-      action: command.action,
-      ok: true,
-    };
-  },
-
-  resolveEmbeddedBrowserRendererCommandProjectId(
-    this: GpuiSidebarRuntime,
-    scope: {
-      groupId?: string;
-      projectId?: string;
-      projectPath?: string;
-    }
-  ): string | undefined {
-    if (scope.groupId) {
-      const groupProjectId = this.resolveWorkspaceGroupProjectId(scope.groupId);
-      return groupProjectId ? this.resolveEmbeddedBrowserKnownProjectId(groupProjectId) : undefined;
-    }
-    if (scope.projectId) {
-      return this.resolveEmbeddedBrowserKnownProjectId(scope.projectId);
-    }
-    return this.resolveDomainProjectScope({ projectPath: scope.projectPath })?.projectId;
-  },
-
-  resolveEmbeddedBrowserKnownProjectId(this: GpuiSidebarRuntime, projectId: string): string | undefined {
-    const remoteScope = this.resolveRemotePresentationProjectScope({ projectId });
-    if (remoteScope) {
-      return createGpuiRemotePresentationProjectId(remoteScope.machineId, remoteScope.projectId);
-    }
-    return this.domainProjectById(projectId)?.projectId;
-  },
-
-  resolveGxserverRendererCommandSession(
-    this: GpuiSidebarRuntime,
-    payload: Record<string, unknown>
-  ): GpuiRendererCommandResolvedSession | undefined {
-    /*
-    CDXC:CefRuntime 2026-06-27-02:05:
-    gxserver renderer commands can target local sessions with raw project/session ids in `sessionTarget`, while the reused GPUI SidebarApp renders combined `combined-session:<project>:<session>` ids. Resolve those raw ids to the same combined sidebar id before invoking runtime focus logic, and keep the command result bounded to ids/status rather than paths, titles, command text, URLs, tokens, terminal output, or renderer payload echoes.
-    */
-    const target = readGpuiRendererCommandSessionTarget(payload);
-    const globalReference = parseGpuiRendererCommandGlobalSessionRef(
-      readGpuiRecordString(target, 'globalRef') ?? readGpuiRecordString(payload, 'globalRef')
-    );
-    const projectId =
-      readGpuiRecordString(target, 'projectId')?.trim() ||
-      readGpuiRecordString(payload, 'projectId')?.trim() ||
-      globalReference?.projectId;
-    const sessionId =
-      readGpuiRecordString(target, 'sessionId')?.trim() ||
-      readGpuiRecordString(payload, 'sessionId')?.trim() ||
-      globalReference?.sessionId;
-    if (!sessionId) {
-      return undefined;
-    }
-    const scopedSession = parseGxserverPresentationProjectSessionId(sessionId);
-    if (scopedSession) {
-      if (projectId && scopedSession.projectId !== projectId) {
-        return undefined;
-      }
-      if (!this.hasGpuiRendererCommandLocalSession(scopedSession.projectId, scopedSession.sessionId)) {
-        return undefined;
-      }
-      return {
-        projectId: scopedSession.projectId,
-        sessionId: scopedSession.sessionId,
-        sidebarSessionId: sessionId,
-      };
-    }
-    if (!projectId) {
-      return undefined;
-    }
-    if (!this.hasGpuiRendererCommandLocalSession(projectId, sessionId)) {
-      return undefined;
-    }
-    return {
-      projectId,
-      sessionId,
-      sidebarSessionId: createGxserverPresentationProjectSessionId(projectId, sessionId),
-    };
-  },
-
-  hasGpuiRendererCommandLocalSession(this: GpuiSidebarRuntime, projectId: string, sessionId: string): boolean {
-    if (
-      this.presentation?.sessions.some((session) => session.projectId === projectId && session.sessionId === sessionId)
-    ) {
-      return true;
-    }
-    return this.latestGroups.some((group) =>
-      group.sessions.some((session) => {
-        const reference = parseGxserverPresentationProjectSessionId(session.sessionId);
-        return reference?.projectId === projectId && reference.sessionId === sessionId;
-      })
-    );
   },
 
   /*

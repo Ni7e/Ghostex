@@ -3,10 +3,6 @@ CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
-import {
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION,
-} from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import { normalizeGpuiWorkspaceTabSessionSelection } from './helpers/command-palette';
 import { rememberGpuiProjectSession } from './project-activation';
@@ -14,10 +10,7 @@ import {
   parseGpuiRemotePresentationProjectId,
   parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
-import {
-  gpuiWorkspaceTerminalTitleCommandForAgent,
-  normalizeGpuiWorkspaceTerminalRuntimeAction,
-} from './helpers/terminal-lifecycle';
+import { normalizeGpuiWorkspaceTerminalRuntimeAction } from './helpers/terminal-lifecycle';
 import { createGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 
 /*
@@ -32,7 +25,6 @@ at the bottom of this file is what keeps the two in step.
 export interface GpuiSidebarRuntimeTerminalLifecycleMethods {
   handleGpuiWorkspaceTabSessionSelected(payload: unknown): void;
   handleGpuiWorkspaceTerminalRuntimeAction(payload: unknown): Promise<void>;
-  postLocalWorkspaceTerminalRenameCommand(projectId: string, sessionId: string, title: string): void;
 }
 
 export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
@@ -109,53 +101,6 @@ export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
       return;
     }
     await this.exportSessionTranscript(sessionId, request.target);
-  },
-
-  postLocalWorkspaceTerminalRenameCommand(
-    this: GpuiSidebarRuntime,
-    projectId: string,
-    sessionId: string,
-    title: string
-  ): void {
-    /*
-    CDXC:CefRuntime 2026-06-27-02:27:
-    GPUI `renameCommand` is accepted when TypeScript resolves gxserver's raw sessionTarget to the local workspace session and posts one fixed fire-and-forget Rust bridge payload. Keep the result and errors id-only, and pass the normalized title only through `postWorkspaceTerminalRenameCommand` so logs/results do not expose user title text, command text, paths, URLs, tokens, or terminal output.
-
-    CDXC:Sessions 2026-07-28:
-    Pi names its session with `/name <title>` and Hermes Agent uses
-    `/title <title>` instead of `/rename <title>`, so the payload carries a
-    fixed command selector resolved from the session's own agent identity.
-    Rust still owns turning that selector into the actual terminal input.
-    */
-    const postRename = window.ghostexGpui?.postWorkspaceTerminalRenameCommand;
-    if (typeof postRename !== 'function') {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    /*
-    CDXC:Sessions 2026-07-29:
-    Rust may only type the rename command into a mounted Ghostty surface, and
-    it accepts a sidebar-focus attach for this session only while gxserver
-    presentation focus agrees. Activate the session exactly like a session-card
-    click first so a rename of a background session mounts its terminal
-    instead of being dropped at the surface-ownership check.
-    */
-    this.focusLocalWorkspaceSession(projectId, sessionId);
-    this.publishPresentation('patch');
-    const session = this.findLocalPresentationSession(projectId, sessionId);
-    const agent = (session?.agentId ?? session?.agentName ?? '').trim().toLowerCase();
-    const bridgeSent = postRename(
-      JSON.stringify({
-        version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION,
-        type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE,
-        projectId,
-        sessionId,
-        title,
-        command: gpuiWorkspaceTerminalTitleCommandForAgent(agent),
-      })
-    );
-    if (!bridgeSent) {
-      throw new Error('Renderer command bridge unavailable.');
-    }
   },
 };
 

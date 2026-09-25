@@ -135,7 +135,6 @@ export type GxserverRpcErrorCode =
   | "unauthorized";
 
 export const GXSERVER_RENDERER_COMMAND_ACTIONS = [
-  "assertSidebarCard",
   "clickButton",
   "focusGroup",
   "focusSession",
@@ -149,14 +148,10 @@ export const GXSERVER_RENDERER_COMMAND_ACTIONS = [
   "restartSession",
   "renameCommand",
   "runCommand",
-  "saveAgent",
-  "sendMessage",
-  "setViewMode",
-  "setVisibleCount",
   "switchProject",
+  "toggleCloseAfterDone",
   "toggleSidebarCollapsed",
   "updateSettingsPatch",
-  "waitFor",
 ] as const;
 
 export type GxserverRendererCommandAction =

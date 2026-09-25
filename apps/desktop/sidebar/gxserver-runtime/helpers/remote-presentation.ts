@@ -32,7 +32,6 @@ import {
   parseRemoteProjectId,
   parseRemoteTerminalSessionId,
 } from '@/packages/shared/remote-terminal-selection';
-import type { GxserverSessionChatEvent } from '@/packages/shared/session-chat';
 import type { SidebarRemoteMachineStatusMessage, SidebarSessionGroup } from '@/packages/shared/session-grid-contract';
 import { resolveSidebarTheme } from '@/packages/shared/session-grid-contract';
 import type { SidebarAgentButton } from '@/packages/shared/sidebar-agents';
@@ -347,40 +346,6 @@ export function isCustomSessionTagsState(value: unknown): value is GxserverCusto
     !Array.isArray((value as GxserverCustomSessionTagsState).tags) &&
     Array.isArray((value as GxserverCustomSessionTagsState).order)
   );
-}
-
-export function isGpuiSessionChatEventMessage(
-  value: Record<string, unknown>
-): value is Record<string, unknown> & GxserverSessionChatEvent {
-  /*
-  CDXC:SessionChat 2026-07-31:
-  Shape validator for the four sessionChat* event frames, matching the
-  presentation-frame validator pattern: identity + epoch/seq cursors must be
-  present before a handler sees the frame. Message-array payloads are trusted
-  from the authenticated local socket like presentation snapshots are.
-  */
-  if (
-    typeof value.projectId !== 'string' ||
-    value.projectId.length === 0 ||
-    typeof value.sessionId !== 'string' ||
-    value.sessionId.length === 0 ||
-    typeof value.epoch !== 'number' ||
-    typeof value.seq !== 'number'
-  ) {
-    return false;
-  }
-  if (
-    (value.type === 'sessionChatSnapshot' ||
-      value.type === 'sessionChatAppended' ||
-      value.type === 'sessionChatReplaced') &&
-    !Array.isArray(value.messages)
-  ) {
-    return false;
-  }
-  if (value.type === 'sessionChatState' && typeof value.status !== 'string') {
-    return false;
-  }
-  return true;
 }
 
 export function normalizeGpuiSidebarRemoteEvent(value: unknown): GpuiSidebarRemoteEvent | undefined {

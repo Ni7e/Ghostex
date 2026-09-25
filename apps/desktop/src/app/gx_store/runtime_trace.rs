@@ -66,6 +66,17 @@ pub(crate) fn trace_gx_rpc(path: &str, params: &Value, remote: bool) {
     );
 }
 
+/// A CLI renderer command the desktop's own store answered (`gx_store/renderer_commands/`): its
+/// action and whether it succeeded. The old runtime answered these on its own socket, so the
+/// trace had no line for them; this one shows the move.
+pub(crate) fn trace_renderer_command(action: &str, ok: bool) {
+    if !runtime_trace_enabled() {
+        return;
+    }
+    let action = identifier(action).unwrap_or_else(|| "untyped".into());
+    write("renderer.command", json!({ "action": action, "ok": ok }));
+}
+
 /// A `trace` message from the runtime thread: `{kind:"trace", method, path, params, socket}`.
 pub(crate) fn trace_runtime_rpc(message: &Value) {
     write(

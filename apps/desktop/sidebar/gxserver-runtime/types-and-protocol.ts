@@ -18,7 +18,6 @@ import type {
   GxserverPresentationSession,
   GxserverPresentationSnapshot,
   GxserverProjectDomainState,
-  GxserverRendererCommand,
   GxserverSidebarHudResponse,
   GxserverSidebarProjectCollectionsState,
   GxserverSidebarSpacesState,
@@ -174,7 +173,6 @@ export type GhostexGpuiSidebarBridge = {
   onNativeAppShotCaptured?: (payload: unknown) => void;
   onNativeAppShotPromptResult?: (payload: unknown) => void;
   onOsIntegrationCommand?: (payload: unknown) => void;
-  onResourcesSnapshotResult?: (payload: unknown) => void;
   onProjectBoardConversationRequest?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot) => void;
   /**
@@ -223,7 +221,6 @@ export type GhostexGpuiSidebarBridge = {
   pendingNativeAppShotPromptResults?: unknown[];
   pendingNativeAppShots?: unknown[];
   pendingOsIntegrationCommands?: unknown[];
-  pendingResourcesSnapshotResults?: unknown[];
   pendingSidebarCommands?: unknown[];
   pendingProjectBoardConversationRequests?: unknown[];
   pendingStashedPromptSessionJumps?: unknown[];
@@ -243,7 +240,6 @@ export type GhostexGpuiSidebarBridge = {
   postNativeAppShotPromptToSession?: (payload: string) => boolean;
   postNativeProjectPathAction?: (payload: string) => boolean;
   postOpenBrowserUrl?: (payload: string) => boolean;
-  postResourcesSnapshotRequest?: (payload: string) => boolean;
   postPetOverlayState?: (payload: string) => boolean;
   postProjectBoardConversationResponse?: (payload: string) => boolean;
   postSidebarCommandAction?: (payload: string) => boolean;
@@ -467,12 +463,6 @@ export type GpuiBrowserTabSummary = {
   url: string;
 };
 
-export type GpuiRendererCommandResolvedSession = {
-  projectId: string;
-  sessionId: string;
-  sidebarSessionId: string;
-};
-
 /*
 CDXC:Git 2026-07-29:
 The two GitHub-CLI derived fields of `SidebarGitState`, memoized as one unit so
@@ -535,12 +525,6 @@ export type GpuiPendingNativeAppShotPromptInsertion = {
 export type GpuiTrustedGitReviewFileSelection = {
   explicit: boolean;
   filePaths: string[];
-};
-
-export type GpuiPendingResourcesSnapshotRequest = {
-  reject: (error: Error) => void;
-  resolve: (snapshot: Record<string, unknown>) => void;
-  timeoutId: number;
 };
 
 export type GpuiPendingRemoteGxserverRequest = {
@@ -653,10 +637,6 @@ export type GpuiRemoteCreatePullRequestResult = {
   };
   reason?: string;
 };
-
-export type GpuiRendererCommandHandler = (
-  command: GxserverRendererCommand
-) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
 
 export type GpuiPresentationSubscription = {
   close: () => void;

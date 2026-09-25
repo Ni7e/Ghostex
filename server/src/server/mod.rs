@@ -336,8 +336,8 @@ const GXSERVER_FIRST_PROMPT_TITLE_GENERATION_TIMEOUT_MS: u64 = 30_000;
 const GXSERVER_COMMIT_MESSAGE_GENERATION_TIMEOUT_MS: u64 = 120_000;
 const GXSERVER_SESSION_STATE_SIDECAR_MAX_BYTES: u64 = 1024 * 1024;
 
+// Six actions were retired on 2026-09-25 (why: packages/gx-core/src/renderer_commands/verbs.rs).
 const RENDERER_COMMAND_ACTIONS: &[&str] = &[
-    "assertSidebarCard",
     "clickButton",
     "focusGroup",
     "focusSession",
@@ -355,15 +355,10 @@ const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     */
     "renameCommand",
     "runCommand",
-    "saveAgent",
-    "sendMessage",
-    "setViewMode",
-    "setVisibleCount",
     "switchProject",
     "toggleCloseAfterDone",
     "toggleSidebarCollapsed",
     "updateSettingsPatch",
-    "waitFor",
 ];
 const PORTLESS_BACKGROUND_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const AGENT_METADATA_TITLE_SYNC_INTERVAL: Duration = Duration::from_secs(1);

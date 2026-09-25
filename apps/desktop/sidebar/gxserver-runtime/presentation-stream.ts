@@ -221,7 +221,6 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
       onGlobalSidebarCommands: () => {
         this.refreshSidebarHudFromClient();
       },
-      onRendererCommand: (command) => this.handleGxserverRendererCommand(command),
       /*
       CDXC:Projects 2026-09-21 WHY:
       This computer's project collections and Spaces documents are NOT taken off this socket any

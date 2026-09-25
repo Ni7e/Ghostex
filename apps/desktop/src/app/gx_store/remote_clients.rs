@@ -185,6 +185,8 @@ impl GxStoreHost {
                     self.counters.client_diagnostics += 1;
                     self.diagnostics.client_diagnostic(&diagnostic);
                 }
+                // Never produced: a remote machine's client does not register (see its config).
+                ClientOutput::RendererCommand(_) => {}
             }
         }
         self.remote.counters.events += events.len() as u64;
@@ -643,6 +645,8 @@ impl GhostexGpuiApp {
                 client_id: format!("ghostex-gpui-store:{machine_id}"),
                 held_revision,
                 forward_chat_frames: false,
+                // The renderer-command target is this computer's own store socket only.
+                renderer_commands: false,
             },
             move || {
                 let _ = wake.unbounded_send(());
