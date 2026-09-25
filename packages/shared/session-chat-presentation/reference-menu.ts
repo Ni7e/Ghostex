@@ -1,5 +1,5 @@
 import { classifySessionChatLinkHref, sessionChatFilePositionFromHref } from './links';
-import { sessionChatReferenceKind } from './reference-pills';
+import { sessionChatMediaKind, sessionChatPathNoun, sessionChatReferenceKind } from './reference-pills';
 
 export interface SessionChatReferenceMenuRow {
   command: Record<string, unknown>;
@@ -35,7 +35,15 @@ export function sessionChatReferenceMenuRows(href: string): SessionChatReference
   if (target.kind !== 'file') return [];
   const position = sessionChatFilePositionFromHref(href) ?? {};
   const rows: SessionChatReferenceMenuRow[] = [];
-  if (sessionChatReferenceKind('', target.path) !== 'folder') {
+  const noun = sessionChatPathNoun(target.path);
+  if (sessionChatMediaKind(target.path)) {
+    // No `view`: the host opens media with the OS default app.
+    rows.push({
+      command: { action: 'openFile', path: target.path, type: 'host' },
+      iconPath: 'titlebar/external-link.svg',
+      label: `Open ${noun}`,
+    });
+  } else if (sessionChatReferenceKind('', target.path) !== 'folder') {
     rows.push({
       command: { action: 'openFile', path: target.path, type: 'host', view: 'code', ...position },
       iconPath: 'titlebar/code.svg',
@@ -53,7 +61,7 @@ export function sessionChatReferenceMenuRows(href: string): SessionChatReference
   rows.push({
     command: { action: 'locateFile', path: target.path, type: 'host' },
     iconPath: 'titlebar/folder-open.svg',
-    label: 'Open File/Folder Location',
+    label: `Open ${noun} Location`,
   });
   return rows;
 }

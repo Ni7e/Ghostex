@@ -22,7 +22,7 @@ use gpui::{AnyElement, IntoElement as _, ParentElement as _, Styled as _, div, p
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 
 /// Unscaled track and thumb width, the value in session-chat-scrollbar.css.
-const THICKNESS: f32 = 5.0;
+pub(super) const THICKNESS: f32 = 5.0;
 
 impl NativeChatView {
     /// The thin thumb beside the transcript: it fades in while the list scrolls

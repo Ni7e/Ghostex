@@ -278,27 +278,6 @@ export function syncGpuiWorkspaceProjectOrder(
   return { ...state, projectOrder: deduped };
 }
 
-export function orderGpuiWorkspaceProjects<TProject extends { projectId: string }>(
-  projects: readonly TProject[],
-  projectOrder: readonly string[]
-): TProject[] {
-  if (projectOrder.length === 0) {
-    return [...projects];
-  }
-  const byId = new Map(projects.map((project) => [project.projectId, project]));
-  const orderedIds = new Set<string>();
-  const ordered: TProject[] = [];
-  for (const projectId of projectOrder) {
-    const project = byId.get(projectId);
-    if (project && !orderedIds.has(projectId)) {
-      ordered.push(project);
-      orderedIds.add(projectId);
-    }
-  }
-  const remaining = projects.filter((project) => !orderedIds.has(project.projectId));
-  return [...ordered, ...remaining];
-}
-
 function removeSessionFromSubgroups(
   current: GpuiProjectWorkspaceGroups,
   sessionId: string

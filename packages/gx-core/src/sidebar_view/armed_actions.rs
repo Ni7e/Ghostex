@@ -55,7 +55,8 @@ pub fn armed_actions_by_session(
                 session_id: session.session_id.clone(),
             };
             let sidebar_session_id = key.to_sidebar_session_id();
-            let close = host.close_after_done.get(&sidebar_session_id);
+            let close = CloseAfterDoneInput::from_session(session);
+            let close = close.as_ref();
             let local = host.local_delayed_sends.get(&sidebar_session_id);
             // Nothing to say about this row at all: the common case, and the one that keeps a tick
             // over a workspace with hundreds of sessions to one map lookup each.

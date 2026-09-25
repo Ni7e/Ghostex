@@ -53,7 +53,7 @@ export interface AgentAccount {
   status: 'ready' | 'loginRequired' | 'unavailable' | 'identityChanged';
   usage: AccountUsageWindow[];
   resetCredits?: number;
-  resetCreditDetails?: { id: string; expiresAt: string | null }[] | null;
+  resetCreditDetails?: { id: string; expiresAt: string | null; note?: string }[] | null;
   resetCreditsError?: string | null;
   showInTitlebar?: boolean;
   usageUpdatedAt?: string;
@@ -128,7 +128,7 @@ export function quickLaunchAccountId(state: AgentAccountsState, provider: Accoun
 }
 
 export type AgentAccountsRequest =
-  | { operation: 'prepareReset'; id: string }
+  | { operation: 'redeemReset'; id: string; creditId: string; requestId: string }
   | { operation: 'titlebar'; cachedOnly?: boolean }
   | { operation: 'setTitlebar'; id: string; shown: boolean }
   | {

@@ -128,10 +128,7 @@ impl GhostexGpuiApp {
         true
     }
 
-    /// What the `startGxserverFromTitlebar` bridge message does, so the Load Sessions row of the
-    /// empty state and the titlebar's own control cannot drift apart. The bridge arm calls this.
-    ///
-    /// SEE-ALSO: apps/desktop/src/app/remote_conn/app_modal_bridge.rs.
+    /// Starts the local gxserver for the Load Sessions row of the empty state.
     pub(crate) fn start_local_gxserver_from_sidebar(&mut self, cx: &mut gpui::Context<Self>) {
         self.show_gpui_gxserver_bootstrap_toast(
             "info",

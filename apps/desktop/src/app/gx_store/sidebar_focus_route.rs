@@ -21,8 +21,8 @@
 //!
 //! **What is deliberately not reproduced**, the same three the remote click dropped (declared
 //! difference 53): `applyLocalFocus` and `clearFocusedSessionScrollSuppression` are the zustand
-//! store's optimistic marks for the REACT sidebar, which the desktop does not draw (the only
-//! readers are `packages/core-ui/sidebar-app.tsx`; Quick Access and native chat settings read
+//! store's optimistic marks for the REACT sidebar, which the desktop does not draw (its only
+//! reader was the React sidebar, deleted on 2026-09-24; Quick Access and native chat settings read
 //! neither), and the store owns the highlight itself in the same frame. The runtime's own publish
 //! sets them a moment later exactly as it always did.
 //!

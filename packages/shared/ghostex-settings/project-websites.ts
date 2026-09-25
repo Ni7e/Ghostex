@@ -1,8 +1,11 @@
 import providers from '../project-website-providers.json';
-import { isRecord } from './primitives';
+import { isRecord, readBoolean } from './primitives';
 
-export type ProjectWebsiteId = 'linear' | 'jira' | 'github';
-export type ProjectWebsiteHiddenKey = `${ProjectWebsiteId}ViewTabHidden`;
+export type ProjectWebsiteId =
+  | 'linear' | 'jira' | 'github'
+  | 'sentry' | 'figma' | 'vercel' | 'supabase' | 'github-actions' | 'posthog' | 'custom-website';
+export type ProjectWebsiteHiddenKey =
+  `${Exclude<ProjectWebsiteId, 'github-actions' | 'custom-website'> | 'githubActions' | 'customWebsite'}ViewTabHidden`;
 export const PROJECT_WEBSITE_PROVIDERS = providers as readonly {
   id: ProjectWebsiteId;
   title: string;
@@ -10,7 +13,21 @@ export const PROJECT_WEBSITE_PROVIDERS = providers as readonly {
   workspaceKind: 'linear' | 'site' | 'repository';
   placeholder: string;
   description: string;
+  hiddenByDefault: boolean;
 }[];
+/**
+ * CDXC:Workarea 2026-09-24 DECISION:
+ * User: Sentry, Figma, Vercel, Supabase, GitHub Actions, PostHog, and Custom Website start disabled in Settings. All use the same user-chosen project/worktree home URL flow as Linear, including GitHub Actions.
+ */
+export function normalizeProjectWebsiteVisibility(source: Record<string, unknown>): Record<ProjectWebsiteHiddenKey, boolean> {
+  return Object.fromEntries(PROJECT_WEBSITE_PROVIDERS.map((provider) => [
+    provider.hiddenSettingsKey,
+    readBoolean(source, provider.hiddenSettingsKey, provider.hiddenByDefault),
+  ])) as Record<ProjectWebsiteHiddenKey, boolean>;
+}
+
+export const DEFAULT_PROJECT_WEBSITE_VISIBILITY = normalizeProjectWebsiteVisibility({});
+
 export type ProjectWebsiteSettings = Record<string, { homes: Record<string, string>; workspaces: string[] }>;
 
 /**

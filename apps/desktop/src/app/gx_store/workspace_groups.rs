@@ -49,6 +49,8 @@ use serde_json::Value;
 
 use super::sidebar_ui_storage;
 use crate::GhostexGpuiApp;
+
+mod group_commands;
 use crate::app::helpers::board_gxserver::gxserver_health_and_daemon::gpui_gxserver_rpc_result;
 
 /// `GPUI_WORKSPACE_SESSION_GROUPS_STORAGE_KEY`.
@@ -162,6 +164,10 @@ pub(crate) struct WorkspaceGroupsCounters {
     /// means the host saw it and did not act on it.
     pub(crate) reconcile_seen: u64,
     pub(crate) reconcile_entered: u64,
+    /// New Group, Rename and Close Group answered here (workspace_groups/group_commands.rs).
+    pub(crate) group_commands: u64,
+    /// Of those, commands made before the stored key was read that the drop queue could not hold.
+    pub(crate) group_commands_dropped: u64,
 }
 
 #[derive(Default)]

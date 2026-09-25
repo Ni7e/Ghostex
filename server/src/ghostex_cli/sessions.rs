@@ -1439,9 +1439,61 @@ pub fn resolve_gxserver_inventory_session(
             "Multiple gxserver sessions matched \"{selector}\". Use the full globalRef from ghostex sessions --json."
         )));
     }
+    /*
+     * CDXC:Cli 2026-09-24 WHY:
+     * Session-chat verbs resolved only a raw session id or a global ref, so the Session ID,
+     * Routing ID, Agent Session ID, zmx name and title a user pastes from Copy Details all failed
+     * here while attach/focus accepted them. Anything the exact match misses goes through the
+     * same selector rules those verbs use, over the inventory that includes sleeping sessions.
+     */
+    // A closed session keeps its title and agent session id, so an open one wins a tie with it;
+    // a selector only a closed session matches still reads that one.
+    let open: Vec<Value> = sessions
+        .iter()
+        .filter(|session| !is_stopped_inventory_session(session))
+        .cloned()
+        .collect();
+    for pool in [open.as_slice(), sessions.as_slice()] {
+        let matches = super::selector::resolve_listed_sessions(selector, pool, flags)?;
+        match matches.len() {
+            0 => continue,
+            1 => return Ok(Some(matches[0].clone())),
+            _ => {
+                let candidates = matches
+                    .iter()
+                    .map(|session| {
+                        let text = |key: &str| {
+                            session
+                                .get(key)
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_string()
+                        };
+                        format!(
+                            "  {}  {} · {} · {}",
+                            text("globalRef"),
+                            text("projectName"),
+                            text("displayTitle"),
+                            text("status")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                return Err(CliError::Other(format!(
+                    "Multiple sessions matched \"{selector}\"; pass one of these global refs:\n{candidates}"
+                )));
+            }
+        }
+    }
     Err(CliError::Other(format!(
-        "No gxserver session matched \"{selector}\"."
+        "No gxserver session matched \"{selector}\". Pass a title, a session id, a global ref (S…:P…:G…), a zmx name, an agent session id, or the Session ID or Routing ID from Copy Details; ghostex sessions --json lists them."
     )))
+}
+
+fn is_stopped_inventory_session(session: &Value) -> bool {
+    ["status", "lifecycleState"]
+        .iter()
+        .any(|key| session.get(*key).and_then(Value::as_str) == Some("stopped"))
 }
 
 // ---------------------------------------------------------------------------

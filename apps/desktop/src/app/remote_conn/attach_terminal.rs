@@ -186,7 +186,15 @@ impl GhostexGpuiApp {
             }
             return false;
         };
-        if self.agents_tab_selected_local_runtime_missing(pane_id, session_id)
+        // A sleeping tab still has a mapping, but Resume must prepare a new attach plan
+        // so the remote wakeSession request runs before this same tab is re-armed.
+        if self
+            .agents_workspace
+            .session(session_id)
+            .is_some_and(|session| {
+                session.presentation_state == TerminalSessionPresentationState::Sleeping
+            })
+            || self.agents_tab_selected_local_runtime_missing(pane_id, session_id)
             || (self.agents_chat_mode_sessions.contains(&session_id)
                 && self
                     .agents_workspace
@@ -305,25 +313,9 @@ impl GhostexGpuiApp {
         if self.focus_existing_gpui_remote_attach_terminal(&key, false, cx) {
             return;
         }
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        let env_vars = plan
-            .askpass
-            .as_ref()
-            .map(|askpass| {
-                vec![
-                    (
-                        "DISPLAY".to_string(),
-                        env::var("DISPLAY").unwrap_or_else(|_| "localhost:0".to_string()),
-                    ),
-                    (
-                        "SSH_ASKPASS".to_string(),
-                        gpui_path_string(askpass.script.as_path()),
-                    ),
-                    ("SSH_ASKPASS_REQUIRE".to_string(), "force".to_string()),
-                ]
-            })
-            .unwrap_or_default();
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+        let env_vars = gpui_remote_ssh_terminal_environment(plan.askpass.as_ref());
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
         let env_vars = Vec::new();
         let payload = AgentsTerminalExplicitLaunchPayload {
             working_directory: None,
@@ -400,7 +392,7 @@ impl GhostexGpuiApp {
                         false,
                     );
                 }
-                #[cfg(any(target_os = "macos", target_os = "linux"))]
+                #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
                 if let Some(askpass) = plan.askpass {
                     self.remote_attach_askpass_scripts
                         .insert(key.clone(), askpass);
@@ -484,7 +476,7 @@ impl GhostexGpuiApp {
         };
         self.agents_terminal_launch_payload_source
             .insert_explicit_payload_for_mount_slot(runtime_session_id, mount_slot_id, payload);
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         if let Some(askpass) = plan.askpass {
             self.remote_attach_askpass_scripts
                 .insert(key.clone(), askpass);

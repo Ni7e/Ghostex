@@ -245,7 +245,7 @@ pub(crate) fn register_project_worktree_path(
 pub(crate) async fn prepare_registered_worktree_project(
     state: &AppState,
     project: &Value,
-    setup_project_id: &str,
+    setup_project_id: Option<&str>,
 ) -> std::result::Result<(), ProjectWorktreeOperationError> {
     let project_id = value_text(project, "projectId")?;
     let projects = list_domain_projects(state)?;
@@ -265,6 +265,9 @@ pub(crate) async fn prepare_registered_worktree_project(
         }
         .into());
     }
+    let Some(setup_project_id) = setup_project_id else {
+        return Ok(());
+    };
     let setup_project = projects
         .iter()
         .find(|candidate| {

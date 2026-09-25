@@ -28,6 +28,12 @@ impl NativeChatView {
         let choices = notice["choices"].as_array().cloned().unwrap_or_default();
         let answerable = !choices.is_empty();
         let collapsed = answerable && !self.expanded.contains(&key);
+        // The card keeps its collapsed choices while shut, so an opening body grows from their
+        // height rather than from nothing.
+        let motion = answerable
+            .then(|| self.disclosure_frame(&key, !collapsed, cx))
+            .flatten();
+        let body_key = key.clone();
         let rate_limit = choices.iter().any(|choice| {
             text(choice, "label").starts_with("Wait here, then continue automatically")
         });
@@ -39,8 +45,13 @@ impl NativeChatView {
                 .is_some_and(Vec::is_empty)
         {
             let (body, actions) = self.render_terminal_dialog(&notice["dialog"], p, window, cx);
+            let copy_title = text(&notice["dialog"]["presentation"]["copy"], "title");
             return Some(self.status_card(
-                text(&notice["dialog"], "title"),
+                if copy_title.is_empty() {
+                    text(&notice["dialog"], "title")
+                } else {
+                    copy_title
+                },
                 "titlebar/terminal-2.svg",
                 body,
                 actions,
@@ -120,6 +131,8 @@ impl NativeChatView {
             } else {
                 let tail_key = format!("{key}:tail");
                 let tail_open = self.expanded.contains(&tail_key);
+                let tail_motion = self.disclosure_frame(&tail_key, tail_open, cx);
+                let tail_body_key = tail_key.clone();
                 let mut tail = div().flex().flex_col().gap(px(8.0 * p.scale)).child(
                     div()
                         .id("notice-terminal-output")
@@ -163,20 +176,26 @@ impl NativeChatView {
                             cx.notify();
                         })),
                 );
-                if tail_open {
+                if tail_open || tail_motion.is_some() {
                     tail = tail.child(
-                        div()
-                            .id("notice-terminal-output-text")
-                            .max_h(px(240.0 * p.scale))
-                            .overflow_y_scroll()
-                            .rounded(px(8.0 * p.scale))
-                            .border_1()
-                            .border_color(p.control_border.opacity(0.65))
-                            .bg(p.background.opacity(0.7))
-                            .p(px(12.0 * p.scale))
-                            .font_family("Menlo")
-                            .text_size(px(12.0 * p.scale))
-                            .child(text(notice, "screenTail")),
+                        self.disclosure_body_motion(
+                            &tail_body_key,
+                            tail_motion,
+                            8.0 * p.scale,
+                            div()
+                                .id("notice-terminal-output-text")
+                                .max_h(px(240.0 * p.scale))
+                                .overflow_y_scroll()
+                                .rounded(px(8.0 * p.scale))
+                                .border_1()
+                                .border_color(p.control_border.opacity(0.65))
+                                .bg(p.background.opacity(0.7))
+                                .p(px(12.0 * p.scale))
+                                .font_family("Menlo")
+                                .text_size(px(12.0 * p.scale))
+                                .child(text(notice, "screenTail"))
+                                .into_any_element(),
+                        ),
                     );
                 }
                 body.push(tail.into_any_element());
@@ -321,6 +340,17 @@ impl NativeChatView {
                         cx.notify();
                     }))
             });
-        Some(self.status_card_with_header(header.into_any_element(), body, actions, p))
+        Some(self.status_card_with_header_motion(
+            super::cards::CardBodyMotion {
+                key: &body_key,
+                frame: motion,
+                shut_body: true,
+                shut: collapsed,
+            },
+            header.into_any_element(),
+            body,
+            actions,
+            p,
+        ))
     }
 }

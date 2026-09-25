@@ -10,7 +10,6 @@ import { SessionChatSubagentContext, type SessionChatSubagentTarget } from './se
 import { SessionChatSubagentModel } from './session-chat-subagent-model';
 import type { SessionChatTransport } from './session-chat-transport';
 import { useSessionChatSubagent } from './use-session-chat-subagent';
-import { useSessionChatWorkingHold } from './use-session-chat-working-hold';
 import './session-chat-subagent.css';
 
 function SubagentTranscript({
@@ -31,7 +30,7 @@ function SubagentTranscript({
   theme: SessionChatTheme;
 }) {
   const { page, error, loadingEarlier, loadEarlier, retry } = useSessionChatSubagent(read, target.selector);
-  const isWorking = useSessionChatWorkingHold(page?.lifecycle?.state === 'working');
+  const isWorking = page?.lifecycle?.state === 'working';
   const context = useMemo(
     () => ({ open, readInfo, agentPath: page?.subagent?.name.startsWith('/') ? page.subagent.name : '/root' }),
     [open, readInfo, page?.subagent?.name]
@@ -54,9 +53,7 @@ function SubagentTranscript({
               />
             </DialogTitle>
           </AppTooltip>
-          <DialogDescription className='mt-1 text-xs'>
-            {target.task ?? 'Subagent transcript'}
-          </DialogDescription>
+          <DialogDescription className='mt-1 text-xs'>{target.task ?? 'Subagent transcript'}</DialogDescription>
         </div>
         <Button aria-label='Close subagent transcript' size='icon-sm' variant='ghost' onClick={onClose}>
           <IconX />

@@ -1,5 +1,6 @@
 import type { SessionChatDraft, SessionChatQueuedPrompt } from '../session-chat';
 import type { SessionChatDraftVersion } from '../session-chat-queue';
+import { parseSessionChatInterAgentMessage } from '../session-chat-presentation/agent-message';
 /**
  * How many rows the strip shows before it scrolls. The composer must stay the
  * dominant thing in the footer, so a long queue scrolls rather than pushing
@@ -14,8 +15,19 @@ export const SESSION_CHAT_QUEUE_LONG_PRESS_MS = 500;
  * A row is one line. Show the first line that has any content: a prompt that
  * opens with a blank line, a heading, or a fenced block would otherwise render
  * an empty row and look broken.
+ *
+ * CDXC:SessionChat 2026-09-24 WHY: a message from another agent opens with the same `Message from another agent` header line every time, so its row names the sender and shows the body instead.
+ * SEE-ALSO: packages/gx-chat-core/src/composer/queue.rs `queue_row_preview`.
  */
 export function sessionChatQueueRowPreview(text: string): string {
+  const agentMessage = parseSessionChatInterAgentMessage(text);
+  if (agentMessage) {
+    return `From ${agentMessage.agentName}: ${firstContentLine(agentMessage.body)}`;
+  }
+  return firstContentLine(text);
+}
+
+function firstContentLine(text: string): string {
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
     if (trimmed !== '') {
@@ -209,4 +221,3 @@ export function mergeSessionChatDraftState(
       .slice(0, 50),
   };
 }
-

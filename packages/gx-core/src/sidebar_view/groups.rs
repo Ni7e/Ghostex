@@ -253,6 +253,9 @@ pub(crate) fn group_summary(sessions: &[SessionView]) -> GroupSummary {
         if row.activity == "attention" || row.pending_question_count > 0 {
             summary.attention_count += 1;
         }
+        if row.shows_background_work() {
+            summary.background_work_count += 1;
+        }
         let is_terminal_or_browser = row.is_browser
             || row.session_kind.as_deref() == Some("terminal")
             || row.session_kind.as_deref() == Some("browser");

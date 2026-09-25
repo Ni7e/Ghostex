@@ -12,9 +12,15 @@ export async function deliverChatSubmission(options: {
   version?: SessionChatDraftVersion;
   mode: ChatSubmissionMode;
   push?: (text: string, version?: SessionChatDraftVersion) => Promise<void>;
-  send: (text: string, version?: SessionChatDraftVersion) => void | Promise<void>;
+  send: (
+    text: string,
+    version?: SessionChatDraftVersion,
+    hold?: () => Promise<void>
+  ) => void | Promise<void>;
   queue?: (text: string, version?: SessionChatDraftVersion) => Promise<unknown>;
   cancelled?: () => boolean;
+  /** Resolves once the send gate is clear; `send` awaits it after drawing its echo. */
+  hold?: () => Promise<void>;
   phase?: (phase: 'saveDraft' | 'deliverMessage' | 'queueAfterCompact') => void;
 }): Promise<void> {
   const checkCancelled = () => {
@@ -29,15 +35,17 @@ export async function deliverChatSubmission(options: {
   checkCancelled();
   options.phase?.('deliverMessage');
   if (options.mode === 'compact') {
-    await options.send('/compact');
+    await options.send('/compact', undefined, options.hold);
     checkCancelled();
     options.phase?.('queueAfterCompact');
   }
   if (options.mode !== 'send') {
     if (!options.queue) throw new Error('This session cannot queue prompts.');
+    await options.hold?.();
+    checkCancelled();
     await options.queue(options.mode === 'queue' ? options.text.trim() : options.text, options.version);
   } else {
-    await options.send(options.text, options.version);
+    await options.send(options.text, options.version, options.hold);
   }
 }
 

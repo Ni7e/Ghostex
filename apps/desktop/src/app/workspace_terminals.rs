@@ -227,35 +227,33 @@ impl GhostexGpuiApp {
         GpuiWorkspaceRenameCommandDelivery::Delivered
     }
 
-    pub(crate) fn receive_sidebar_workspace_terminal_enter_payload(
-        &mut self,
-        payload: &str,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Ok(message) = gpui_sidebar_workspace_terminal_enter_from_json(payload) else {
-            return;
-        };
-        let _ = self.send_enter_key_to_local_agents_workspace_session(&message, cx);
-    }
-
     pub(crate) fn receive_sidebar_session_completion_sound_payload(
         &mut self,
         payload: &str,
         cx: &mut gpui::Context<Self>,
     ) {
         /*
-        Session-attention completion sound (macOS parity): the sidebar runtime
-        owns the attention transition edge, the attention-event dedupe, and the
-        completionBellEnabled gate. Rust only validates the fixed message shape
-        and plays a bundled sound asset; the sound id goes through the existing
-        whitelist normalization so no renderer-provided path or file name can
-        reach the player.
+        The old runtime's completion sound post. Nothing posts it since the attention edge, the
+        event dedupe and the gate moved to gx-core (`attention.rs`, played through
+        gx_store/attention/); the bridge entry goes with the manifest in the app runtime port's
+        step 3. The sound id still goes through the whitelist normalization.
         */
         let Ok((sound, session_id)) = gpui_sidebar_session_completion_sound_from_json(payload)
         else {
             return;
         };
-        let _ = gpui_play_completion_sound(&sound);
+        self.play_session_completion(&sound, session_id, cx);
+    }
+
+    /// The completion sound and the sidebar card's completion flash, which are one event. Called by
+    /// the store's attention host (gx_store/attention/) and by the bridge payload above.
+    pub(crate) fn play_session_completion(
+        &mut self,
+        sound: &str,
+        session_id: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let _ = gpui_play_completion_sound(sound);
         /*
         CDXC:Sessions 2026-09-21 WHY:
         The card's completion flash rides the same message as the sound, because they are the same
@@ -273,31 +271,6 @@ impl GhostexGpuiApp {
             .completion_flashes
             .insert(session_id, std::time::Instant::now());
         cx.notify();
-    }
-
-    pub(crate) fn send_enter_key_to_local_agents_workspace_session(
-        &mut self,
-        message: &GpuiSidebarWorkspaceTerminalEnterMessage,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            let key = GpuiLocalWorkspaceSessionKey::from(message);
-            let Some(target) = self.local_workspace_rename_command_target(&key) else {
-                return false;
-            };
-            // macOS sendTerminalEnter preserves focus: press Return on the mapped
-            // surface without selecting its tab or moving focus. A session whose
-            // tab is not the active mounted tab has no surface to receive the key
-            // and is skipped rather than yanking the visible tab.
-            self.send_return_key_to_mounted_agents_terminal_surface(target.slot_id, cx)
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (message, cx);
-            false
-        }
     }
 
     pub(crate) fn set_sidebar_gxserver_presentation_focus_state(
@@ -665,13 +638,13 @@ impl GhostexGpuiApp {
             self.open_views.push(target_mode);
         }
         self.view_strip_layout = state.view_strip_layout.clone();
-        self.view_panel_maximized =
-            self.view_panel_maximized && target_mode != TitlebarMode::Agents;
         self.active_mode = target_mode;
         // The picker belongs to the panel, not to a project, so it survives a switch only while the
         // incoming project has no view of its own to show.
         self.view_panel_picker_open =
             self.view_panel_picker_open && target_mode == TitlebarMode::Agents;
+        self.view_panel_maximized = self.view_panel_maximized
+            && (target_mode != TitlebarMode::Agents || self.view_panel_picker_open);
         self.apply_view_pane_state(cx);
         self.seed_terminal_view_for_open(cx);
         self.focus_shell_target(
@@ -752,6 +725,8 @@ impl GhostexGpuiApp {
         focus, change the titlebar mode, or publish presentation focus: the
         restored layout already says what is surfaced, and a split's other
         panes must re-arm without fighting each other for focus.
+        Parked projects reuse shell ids, so both plan lookup and completion must
+        resolve the complete remote key in the currently active project.
         */
         let Some(active_project_id) = self.agents_workspace_project_id.clone() else {
             return;
@@ -786,10 +761,7 @@ impl GhostexGpuiApp {
                 self.agents_tab_selected_local_runtime_missing(*pane_id, *session_id)
             })
             .filter_map(|(pane_id, session_id)| {
-                self.remote_attach_sessions
-                    .iter()
-                    .find_map(|(key, mapped)| (*mapped == session_id).then(|| key.clone()))
-                    .filter(|key| key.remote_machine_id == remote_machine_id)
+                self.agents_chat_remote_key_for_session(session_id)
                     .map(|key| (pane_id, session_id, key))
             })
             .collect::<Vec<_>>();
@@ -828,32 +800,16 @@ impl GhostexGpuiApp {
         still hold, otherwise this payload belongs to a slot that no longer
         exists.
         */
-        if self.remote_attach_sessions.get(key).copied() != Some(session_id)
+        if self.agents_chat_remote_key_for_session(session_id).as_ref() != Some(key)
             || self.agents_workspace.pane_id_for_session(session_id) != Some(pane_id)
             || self.agents_workspace.active_session_in_pane(pane_id) != Some(session_id)
             || !self.agents_tab_selected_local_runtime_missing(pane_id, session_id)
         {
             return;
         }
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        let env_vars = plan
-            .askpass
-            .as_ref()
-            .map(|askpass| {
-                vec![
-                    (
-                        "DISPLAY".to_string(),
-                        env::var("DISPLAY").unwrap_or_else(|_| "localhost:0".to_string()),
-                    ),
-                    (
-                        "SSH_ASKPASS".to_string(),
-                        gpui_path_string(askpass.script.as_path()),
-                    ),
-                    ("SSH_ASKPASS_REQUIRE".to_string(), "force".to_string()),
-                ]
-            })
-            .unwrap_or_default();
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+        let env_vars = gpui_remote_ssh_terminal_environment(plan.askpass.as_ref());
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
         let env_vars = Vec::new();
         let payload = AgentsTerminalExplicitLaunchPayload {
             working_directory: None,
@@ -877,7 +833,7 @@ impl GhostexGpuiApp {
                 },
                 payload,
             );
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         if let Some(askpass) = plan.askpass {
             self.remote_attach_askpass_scripts
                 .insert(key.clone(), askpass);
@@ -1182,13 +1138,21 @@ impl GhostexGpuiApp {
         else {
             return;
         };
-        let Some(request) = self
-            .local_workspace_lifecycle_requests
-            .remove(&message.request_id)
-        else {
+        self.finish_local_workspace_lifecycle_request(message.request_id, message.ok, cx);
+    }
+
+    /// The daemon's answer to a pending Sleep or Wake of a tab: apply it when it succeeded, drop
+    /// the request either way. Close is never pending, so its answer finds nothing here.
+    pub(crate) fn finish_local_workspace_lifecycle_request(
+        &mut self,
+        request_id: u64,
+        ok: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(request) = self.local_workspace_lifecycle_requests.remove(&request_id) else {
             return;
         };
-        if !message.ok {
+        if !ok {
             return;
         }
         self.apply_local_workspace_terminal_lifecycle_result(request, cx);
@@ -1612,6 +1576,7 @@ impl GhostexGpuiApp {
             }),
         );
         self.activate_preferred_agents_chat_launch_intent(shell_session_id, cx);
+        self.adopt_preferred_chat_view_on_selection(shell_session_id, cx);
         // CDXC:Workarea 2026-09-20 WHY:
         // Selecting a session focuses its pane in the Agents column and leaves the view panel alone;
         // it used to have to choose between the companion and switching the whole workarea.
@@ -1847,6 +1812,7 @@ impl GhostexGpuiApp {
             }
         };
         self.activate_preferred_agents_chat_launch_intent(session_id, cx);
+        self.adopt_preferred_chat_view_on_selection(session_id, cx);
         {
             self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
             self.set_sidebar_focus_border_handoff_target(session_id);

@@ -1,10 +1,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SidebarBridgeFunctionId {
     ActiveProjectContext,
-    SourceWorkareaReadiness,
-    BrowserWorkareaReadiness,
-    ProjectWorkareaReadiness,
-    ManageFileWorkareaOperationRequest,
     NativeProjectPathAction,
     NativeAppShotPrompt,
     SidebarCommandAction,
@@ -16,7 +12,6 @@ pub(crate) enum SidebarBridgeFunctionId {
     CreateProjectTerminal,
     WorkspaceTerminalFocus,
     WorkspaceTerminalRenameCommand,
-    WorkspaceTerminalEnter,
     WorkspaceTerminalLifecycleResult,
     SessionCompletionSound,
     SessionStatusIndicators,
@@ -26,8 +21,6 @@ pub(crate) enum SidebarBridgeFunctionId {
     OpenBrowserUrl,
     BrowserTabFocus,
     ProjectBoardConversationResponse,
-    ResourcesSnapshotRequest,
-    NativeQuickAccessSnapshot,
     SidebarRuntimeFacts,
 }
 
@@ -73,14 +66,6 @@ pub(crate) struct AppModalHostBridgeSurfaceSpec {
 
 const SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.activeProjectContext";
-const SIDEBAR_SOURCE_WORKAREA_READINESS_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.sourceWorkareaReadiness";
-const SIDEBAR_BROWSER_WORKAREA_READINESS_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.browserWorkareaReadiness";
-const SIDEBAR_PROJECT_WORKAREA_READINESS_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.projectWorkareaReadiness";
-const SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.manageFileWorkareaOperationRequest";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.nativeProjectPathAction";
 const SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME: &str =
@@ -101,8 +86,6 @@ const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalFocus";
 const SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
-const SIDEBAR_WORKSPACE_TERMINAL_ENTER_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.workspaceTerminalEnter";
 const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
 const SIDEBAR_SESSION_COMPLETION_SOUND_PROCESS_MESSAGE_NAME: &str =
@@ -117,16 +100,9 @@ const SIDEBAR_OPEN_BROWSER_URL_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sideba
 const SIDEBAR_BROWSER_TAB_FOCUS_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.browserTabFocus";
 const SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.projectBoardConversationResponse";
-const SIDEBAR_RESOURCES_SNAPSHOT_REQUEST_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.resourcesSnapshotRequest";
 
 pub(crate) const SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE: &str = "ghostexGpui";
 const SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION: &str = "postActiveProjectContext";
-const SIDEBAR_SOURCE_WORKAREA_READINESS_JS_FUNCTION: &str = "postSourceWorkareaReadiness";
-const SIDEBAR_BROWSER_WORKAREA_READINESS_JS_FUNCTION: &str = "postBrowserWorkareaReadiness";
-const SIDEBAR_PROJECT_WORKAREA_READINESS_JS_FUNCTION: &str = "postProjectWorkareaReadiness";
-const SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_JS_FUNCTION: &str =
-    "postManageFileWorkareaOperationRequest";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION: &str = "postNativeProjectPathAction";
 const SIDEBAR_NATIVE_APP_SHOT_PROMPT_JS_FUNCTION: &str = "postNativeAppShotPromptToSession";
 const SIDEBAR_COMMAND_ACTION_JS_FUNCTION: &str = "postSidebarCommandAction";
@@ -139,7 +115,6 @@ const SIDEBAR_CREATE_PROJECT_TERMINAL_JS_FUNCTION: &str = "postCreateProjectTerm
 const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_JS_FUNCTION: &str = "postWorkspaceTerminalFocus";
 const SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_JS_FUNCTION: &str =
     "postWorkspaceTerminalRenameCommand";
-const SIDEBAR_WORKSPACE_TERMINAL_ENTER_JS_FUNCTION: &str = "postWorkspaceTerminalEnter";
 const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION: &str =
     "postWorkspaceTerminalLifecycleResult";
 const SIDEBAR_SESSION_COMPLETION_SOUND_JS_FUNCTION: &str = "postSessionCompletionSound";
@@ -151,7 +126,6 @@ const SIDEBAR_OPEN_BROWSER_URL_JS_FUNCTION: &str = "postOpenBrowserUrl";
 const SIDEBAR_BROWSER_TAB_FOCUS_JS_FUNCTION: &str = "postBrowserTabFocus";
 const SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_JS_FUNCTION: &str =
     "postProjectBoardConversationResponse";
-const SIDEBAR_RESOURCES_SNAPSHOT_REQUEST_JS_FUNCTION: &str = "postResourcesSnapshotRequest";
 
 /*
 Must fit the largest sidebar-bridge message: the project board conversation
@@ -418,41 +392,16 @@ The sidebar CEF post-function allowlist must have one Rust manifest shared by ma
 CDXC:CefRuntime 2026-06-29-14:45:
 GPUI CEF bridge names, payload budgets, and allowed app-modal/project-workarea surfaces live in this Rust manifest so the macOS browser process and helper renderer consume one ownership point. Keep sidebar, project-workarea, and app-modal handlers surface-specific; this manifest is an allowlist, not a generic IPC bus.
 */
-pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 29] = [
+pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 22] = [
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::SidebarRuntimeFacts,
         js_function_name: "postSidebarRuntimeFacts",
         process_message_name: "ghostex.gpui.sidebar.runtimeFacts",
     },
     SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::NativeQuickAccessSnapshot,
-        js_function_name: "postNativeQuickAccessSnapshot",
-        process_message_name: "ghostex.gpui.sidebar.nativeQuickAccess",
-    },
-    SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::ActiveProjectContext,
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
         process_message_name: SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::SourceWorkareaReadiness,
-        js_function_name: SIDEBAR_SOURCE_WORKAREA_READINESS_JS_FUNCTION,
-        process_message_name: SIDEBAR_SOURCE_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::BrowserWorkareaReadiness,
-        js_function_name: SIDEBAR_BROWSER_WORKAREA_READINESS_JS_FUNCTION,
-        process_message_name: SIDEBAR_BROWSER_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::ProjectWorkareaReadiness,
-        js_function_name: SIDEBAR_PROJECT_WORKAREA_READINESS_JS_FUNCTION,
-        process_message_name: SIDEBAR_PROJECT_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::ManageFileWorkareaOperationRequest,
-        js_function_name: SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_JS_FUNCTION,
-        process_message_name: SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::NativeProjectPathAction,
@@ -510,11 +459,6 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 29] 
         process_message_name: SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::WorkspaceTerminalEnter,
-        js_function_name: SIDEBAR_WORKSPACE_TERMINAL_ENTER_JS_FUNCTION,
-        process_message_name: SIDEBAR_WORKSPACE_TERMINAL_ENTER_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::WorkspaceTerminalLifecycleResult,
         js_function_name: SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION,
         process_message_name: SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME,
@@ -559,11 +503,6 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 29] 
         js_function_name: SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_JS_FUNCTION,
         process_message_name: SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_PROCESS_MESSAGE_NAME,
     },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::ResourcesSnapshotRequest,
-        js_function_name: SIDEBAR_RESOURCES_SNAPSHOT_REQUEST_JS_FUNCTION,
-        process_message_name: SIDEBAR_RESOURCES_SNAPSHOT_REQUEST_PROCESS_MESSAGE_NAME,
-    },
 ];
 
 pub(crate) const PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS: [ProjectWorkareaBridgeFunctionSpec; 4] = [
@@ -589,18 +528,10 @@ pub(crate) const PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS: [ProjectWorkareaBridgeF
     },
 ];
 
-pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_SPECS: [AppModalHostBridgeSurfaceSpec; 5] = [
+pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_SPECS: [AppModalHostBridgeSurfaceSpec; 4] = [
     AppModalHostBridgeSurfaceSpec {
         surface: AppModalHostBridgeSurface::NativeWindow,
         entry_file_name: "modal-host.html",
-        extra_info_value: APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW,
-        exposes_native_window_identity: true,
-    },
-    // CDXC:AppModal 2026-09-08 SEE-ALSO:
-    // model-picker.html uses the same native-window bridge as Settings; keep the renderer helper and main process on this shared manifest.
-    AppModalHostBridgeSurfaceSpec {
-        surface: AppModalHostBridgeSurface::NativeWindow,
-        entry_file_name: "model-picker.html",
         extra_info_value: APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW,
         exposes_native_window_identity: true,
     },

@@ -111,16 +111,16 @@ export const BUNDLED_GHOSTEX_AGENT_SKILLS: readonly BundledGhostexAgentSkill[] =
     tier: 'recommended',
   },
   /**
-   * CDXC:AgentSkills 2026-09-19 DECISION:
-   * User: add a bundled skill named "Ghostex Agents Orchestration" that just tells the agent to use the ghostex help commands to learn how to launch other agents with specific models and efforts and send and receive messages through the ghostex CLI, and remove the Fable 5.6 orchestration skill while keeping what was useful in it. It supersedes the pinned Fable plan / Codex implement / Fable verify pipeline skill, whose model-independent habits now live in the new skill text.
+   * CDXC:AgentSkills 2026-09-24 DECISION:
+   * User: add a bundled skill that just tells the agent to use the ghostex help commands to learn how to launch other agents with specific models and efforts and send and receive messages through the ghostex CLI, and remove the Fable 5.6 orchestration skill while keeping what was useful in it. On 2026-09-24 the user renamed it from `ghostex-agents-orchestration` ("Ghostex Agents Orchestration") to `ghostex-agents` ("Ghostex Agents"); the `agentsOrchestration` id and the `agents-orchestration install-skill` verb stay as internal contracts.
    */
   {
     command: 'ghostex agents-orchestration install-skill',
     description:
       'Let agents work as a team: teaches agents to launch other agents with the model and effort you ask for, message each other to hand off tasks and coordinate work, read the replies, and check the results, all through the `ghostex` CLI help.',
     id: 'agentsOrchestration',
-    name: 'Ghostex Agents Orchestration',
-    skillName: 'ghostex-agents-orchestration',
+    name: 'Ghostex Agents',
+    skillName: 'ghostex-agents',
     tier: 'recommended',
   },
   {

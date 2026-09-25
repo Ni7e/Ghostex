@@ -16,8 +16,9 @@ mod attachment_previews;
 mod attachments;
 mod binding;
 mod cards;
-mod child_window;
+pub(crate) mod child_window;
 mod choice_rows;
+mod completed_work_row;
 mod composer_animation;
 mod composer_not_ready;
 mod composer_references;
@@ -47,7 +48,6 @@ mod question;
 mod question_exchange;
 mod queue;
 mod reference_menu;
-mod replay_recording;
 mod rewind;
 mod row_click;
 mod rpc;
@@ -55,7 +55,6 @@ mod runtime_worker;
 mod scroll_bottom;
 mod scrollbar;
 mod search;
-mod shadow;
 mod startup_delivery;
 mod status_rows;
 mod subagent_view;
@@ -68,7 +67,7 @@ mod tool_run;
 mod code_block;
 mod keyboard;
 mod markdown_links;
-mod markdown_style;
+pub(crate) mod markdown_style;
 mod maximized;
 mod message_actions;
 mod rich_markdown;
@@ -78,11 +77,9 @@ mod toolbar;
 mod transcript_host;
 mod transcript_layout;
 mod transcript_menu;
-mod transcript_skeleton;
+mod transcript_reveal;
 
 mod terminal_dialog;
-
-mod model_picker;
 
 mod option_menu;
 
@@ -96,9 +93,12 @@ mod suggestions;
 
 mod clipboard;
 
+mod disclosure_motion;
 mod working_spark;
 mod working_strip;
 
 mod zoom;
 
 mod save_markdown;
+
+mod table_preview;

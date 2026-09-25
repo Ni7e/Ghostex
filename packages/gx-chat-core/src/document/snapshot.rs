@@ -41,8 +41,9 @@ pub struct Document {
     pub retired_async_question_ids: Tri<Vec<String>>,
     /// The turn is live, after the lifecycle settle folded in.
     pub working: bool,
-    /// The raw live signal before the settle, which the transcript keys off.
-    pub working_signal: bool,
+    /// Whether the transcript keeps the newest turn open: the live signal until the turn lifecycle
+    /// ends the run (`sessionChatTranscriptWorking`). The projection applies the sticky fold on top.
+    pub transcript_working: bool,
     /// The session activity gxserver presents, the same source the sidebar spinner uses.
     pub session_working: bool,
     /// Model and effort read off the agent's own terminal. Family e.

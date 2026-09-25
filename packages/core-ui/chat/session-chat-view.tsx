@@ -9,6 +9,7 @@ import {
 import { sessionChatAccountIndicator } from '@/packages/shared/session-chat-presentation/option-pills';
 import {
   sessionChatSendBlockedReason,
+  sessionChatSendRefusedReason,
   sessionChatComposerPlaceholder,
 } from '@/packages/shared/session-chat-controller/composer-policy';
 import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
@@ -92,7 +93,7 @@ import {
   sessionChatTerminalNoticeDismissKey,
 } from './session-chat-terminal-notice-card';
 import { SessionChatSessionOptionPills, useSessionChatSessionOptions } from './session-chat-option-pills';
-import { modelPickerProvider } from './session-chat-model-picker-request';
+import { modelPickerProvider } from '@/packages/shared/session-chat-presentation/model-picker-request';
 import {
   orderedSessionChatStarredRows,
   resolveSessionChatStarredContextDetails,
@@ -113,7 +114,6 @@ import {
   markSessionChatReturnedPromptApplied,
 } from './session-chat-returned-prompt';
 import { useSessionChat } from './use-session-chat';
-import { useSessionChatWorkingHold } from './use-session-chat-working-hold';
 import { useSessionChatComposerInset } from './use-session-chat-composer-inset';
 import { SessionChatLoadingState } from './session-chat-loading-state';
 import { playCopySound } from '../copy-sound';
@@ -571,21 +571,12 @@ export function SessionChatView({
     ...(diagnosticLog ? { diagnosticLog } : {}),
   });
   /*
-  The transcript's working gate. `chat.view.isWorking` settles the moment the
-  turn lifecycle looks terminal, but the session process can still be running
-  then (hooks, background tasks, an immediate follow-up turn) with the
-  user-visible session status still saying "working" — and the transcript
-  folding the turn into "Worked for Xs" in that window is exactly the mid-run
-  fold flash. So the list also holds on `chat.workingSignal`, the raw live
-  signal, and only settles once BOTH agree the session is quiet — and has
-  stayed quiet for the settle hold, because the live status flaps around turn
-  boundaries and each false blip would flash the fold in and out. Stop-vs-Send
-  and the composer keep `chat.working` so they cannot get stuck on a stale
-  signal.
+  The transcript's working gate: the live signal until the turn lifecycle ends
+  the run (`sessionChatTranscriptWorking`), so the fold lands with the final
+  reply. The list keeps a landed fold sticky through signal blips.
+  Stop-vs-Send and the composer keep `chat.working`.
   */
-  const transcriptWorking = useSessionChatWorkingHold(
-    (chat.view.kind === 'ready' && chat.view.isWorking) || chat.workingSignal
-  );
+  const transcriptWorking = chat.transcriptWorking;
   /*
   CDXC:Drafts 2026-08-28:
   The draft the switcher acts on. `availableAgents` is present only while the
@@ -1001,7 +992,7 @@ export function SessionChatView({
   }, [transport]);
   const pickPaths = useMemo(() => {
     const pickAttachmentPaths = transport.pickAttachmentPaths?.bind(transport);
-    return pickAttachmentPaths ? () => pickAttachmentPaths() : undefined;
+    return pickAttachmentPaths ? (selection?: 'files' | 'folders') => pickAttachmentPaths(selection) : undefined;
   }, [transport]);
   const nativeDropPaths = useMemo(() => {
     const readDropPaths = transport.readDropPaths?.bind(transport);
@@ -1304,13 +1295,20 @@ export function SessionChatView({
   reason as `sendBlockedReason`, keeps the draft editable, dims Send, and
   raises a red toast with this sentence when a send is attempted.
   */
-  const composerSendBlockedReason = sessionChatSendBlockedReason({
+  const composerSendHeld =
+    sessionChatSendBlockedReason({
+      canSend,
+      accountSwitchBusy: accountSwitch.busy,
+      conversationLocked: !!chat.terminalNotice?.conversationLock,
+      terminalChoicePending,
+      noticeCardVisible,
+      sessionOptionSwitching,
+    }) !== null;
+  const composerSendBlockedReason = sessionChatSendRefusedReason({
     canSend,
-    accountSwitchBusy: accountSwitch.busy,
     conversationLocked: !!chat.terminalNotice?.conversationLock,
     terminalChoicePending,
     noticeCardVisible,
-    sessionOptionSwitching,
   });
   /*
   CDXC:SessionChat 2026-09-02:
@@ -1387,10 +1385,10 @@ export function SessionChatView({
   const reconcileTypedCommand = sessionOptions.reconcileTypedCommand;
   const isDraft = draftAgents !== null;
   const send = useCallback(
-    async (text: string, draftVersion?: SessionChatDraftVersion): Promise<void> => {
+    async (text: string, draftVersion?: SessionChatDraftVersion, hold?: () => Promise<void>): Promise<void> => {
       await sendSessionChatOptionAware(text, draftVersion, {
         reconcileTypedCommand,
-        send: (text, version) => chatSend(text, undefined, version),
+        send: (text, version) => chatSend(text, undefined, version, hold),
         isDraft,
         refresh: chatRefresh,
       });
@@ -1975,6 +1973,7 @@ export function SessionChatView({
                               agentTasks={chat.agentTasks}
                               {...(diagnosticLog ? { diagnosticLog } : {})}
                               sendBlockedReason={composerSendBlockedReason}
+                              sendHeld={composerSendHeld}
                               draftSync={chat.draft}
                               isWorking={chat.working}
                               key={sessionKey}
@@ -2024,6 +2023,13 @@ export function SessionChatView({
                                     canSendKey={chat.sendKey !== undefined}
                                     controller={sessionOptions}
                                     accountIndicator={sessionChatAccountIndicator(accountState.data)}
+                                    {...(accountsEnabled && transport.accounts
+                                      ? {
+                                          accounts: accountState.data,
+                                          onSwitchAccount: (accountId: string) =>
+                                            void accountState.request({ operation: 'select', accountId }),
+                                        }
+                                      : {})}
                                     detectedOptions={detectedOptions}
                                     {...(draftAgents ? { draftAgents } : {})}
                                     {...(chat.sessionAgentId !== null ? { draftAgentId: chat.sessionAgentId } : {})}

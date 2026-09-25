@@ -143,7 +143,7 @@
     {
       "key": "showProjectIcons",
       "title": "Show project icons",
-      "subtitle": "Show project artwork or a folder or worktree icon beside project names.",
+      "subtitle": "Show project artwork or a square with the project’s first letter beside project names.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "sidebar",
@@ -1454,8 +1454,8 @@
     },
     {
       "key": "showQuickModelPickerInTerminal",
-      "title": "Show quick model & effort picker for Claude and Codex in terminal view",
-      "subtitle": "Use the model picker shortcut (⌥P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.",
+      "title": "Model picker in terminal view",
+      "subtitle": "Show a model button in the terminal bar and open the model picker with its shortcut (⌥P by default) in agent terminal sessions. Turn off to use terminal bindings.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "terminal",
@@ -2789,10 +2789,11 @@
       "type": "json",
       "default": {
         "scrollChatToBottom": "ctrl+shift+down",
-        "createSession": "cmd+t",
+        "createAgentSession": "cmd+t",
+        "createSession": "cmd+shift+t",
         "openCommandPalette": "cmd+shift+p",
         "openSessionSearchPalette": "cmd+p",
-        "openNewThreadPalette": "cmd+shift+t",
+        "openNewThreadPalette": "cmd+alt+t",
         "openCommandsPanel": "f12",
         "openSettings": "cmd+,",
         "openExtensions": "",
@@ -7214,7 +7215,7 @@
     {
       "key": "windowGlassSource",
       "title": "Glass shows",
-      "subtitle": "Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose.",
+      "subtitle": "Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose, and Video plays a video behind it.",
       "tab": "theme",
       "tabTitle": "Theme",
       "group": "appearance",
@@ -7235,6 +7236,10 @@
         {
           "label": "Custom image",
           "value": "customImage"
+        },
+        {
+          "label": "Video",
+          "value": "video"
         }
       ],
       "agentWritable": true
@@ -7242,7 +7247,7 @@
     {
       "key": "windowGlassImagePlacement",
       "title": "Glass picture position",
-      "subtitle": "Where the wallpaper or custom picture sits behind the glass. Stays with the desktop can trail the window while you drag it.",
+      "subtitle": "Where the wallpaper, custom picture or video sits behind the glass. Stays with the desktop can trail the window while you drag it.",
       "tab": "theme",
       "tabTitle": "Theme",
       "group": "appearance",
@@ -7289,6 +7294,48 @@
       "sectionTitle": "Theme",
       "type": "string",
       "default": "",
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassVideoDark",
+      "title": "Glass video for dark mode",
+      "subtitle": "The video the glass plays in dark mode when Glass shows is Video: an aerial wallpaper your computer has downloaded, or a video file you choose.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "string",
+      "default": "",
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassVideoLight",
+      "title": "Glass video for light mode",
+      "subtitle": "The video the glass plays in light mode when Glass shows is Video: an aerial wallpaper your computer has downloaded, or a video file you choose.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "string",
+      "default": "",
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassVideoOnlyOnPower",
+      "title": "Play glass video only when plugged in",
+      "subtitle": "Pause the glass video while your computer runs on battery. It always pauses when Ghostex is in the background.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "boolean",
+      "default": true,
       "agentWritable": true
     },
     {
@@ -7694,20 +7741,12 @@
           "value": "gpui-session-chat-debug.jsonl"
         },
         {
-          "label": "Chat recording for reproducing a problem (contains your conversation)",
-          "value": "native.chat.replay"
+          "label": "App runtime port trace",
+          "value": "native.runtime.trace"
         },
         {
-          "label": "/tmp/gx-chat/*.jsonl",
-          "value": "/tmp/gx-chat/*.jsonl"
-        },
-        {
-          "label": "Chat engine shadow comparison",
-          "value": "native.chat.shadow"
-        },
-        {
-          "label": "gpui-session-chat-debug.jsonl",
-          "value": "gpui-session-chat-debug.jsonl"
+          "label": "gpui-runtime-trace.jsonl",
+          "value": "gpui-runtime-trace.jsonl"
         },
         {
           "label": "Daemon lifecycle",
@@ -7759,28 +7798,6 @@
         }
       ],
       "agentWritable": false
-    },
-    {
-      "key": "chatBrain",
-      "title": "Chat brain",
-      "subtitle": "Which engine runs the chat. Leave this on QuickJS; the Rust engine is still in development.",
-      "tab": "debugging",
-      "tabTitle": "Debugging",
-      "section": "controls",
-      "sectionTitle": "Debug controls",
-      "type": "enum",
-      "default": "quickjs",
-      "options": [
-        {
-          "label": "QuickJS (shipped)",
-          "value": "quickjs"
-        },
-        {
-          "label": "Rust (in development)",
-          "value": "rust"
-        }
-      ],
-      "agentWritable": true
     },
     {
       "key": "showSessionCommandCopyActions",
@@ -8391,8 +8408,8 @@
           "value": "ghostex-embedded-browser-use"
         },
         {
-          "label": "Ghostex Agents Orchestration",
-          "value": "ghostex-agents-orchestration"
+          "label": "Ghostex Agents",
+          "value": "ghostex-agents"
         },
         {
           "label": "Ghostex Auto Rename Session",
@@ -8562,6 +8579,90 @@
       "agentWritable": true
     },
     {
+      "key": "sentryViewTabHidden",
+      "title": "Hide Sentry view",
+      "subtitle": "Enable Sentry in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "figmaViewTabHidden",
+      "title": "Hide Figma view",
+      "subtitle": "Enable Figma in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "vercelViewTabHidden",
+      "title": "Hide Vercel view",
+      "subtitle": "Enable Vercel in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "supabaseViewTabHidden",
+      "title": "Hide Supabase view",
+      "subtitle": "Enable Supabase in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "githubActionsViewTabHidden",
+      "title": "Hide GitHub Actions view",
+      "subtitle": "Enable GitHub Actions in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "posthogViewTabHidden",
+      "title": "Hide PostHog view",
+      "subtitle": "Enable PostHog in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
+      "key": "customWebsiteViewTabHidden",
+      "title": "Hide Custom Website view",
+      "subtitle": "Enable Custom Website in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "viewOrder",
+      "sectionTitle": "Views",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
       "key": "storybookViewTabHidden",
       "title": "Hide Storybook view",
       "subtitle": "Hide the built-in component workshop. When enabled, it appears only in projects with Storybook.",
@@ -8700,7 +8801,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8711,7 +8812,84 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "sentry",
+      "title": "Sentry",
+      "subtitle": "Investigate errors and stack traces beside your code. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Built-in",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "figma",
+      "title": "Figma",
+      "subtitle": "Keep designs and component specs beside your implementation. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Built-in",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "vercel",
+      "title": "Vercel",
+      "subtitle": "Check deployments and preview your changes. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Built-in",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "supabase",
+      "title": "Supabase",
+      "subtitle": "Browse your database, authentication, and project logs. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Built-in",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "github-actions",
+      "title": "GitHub Actions",
+      "subtitle": "Follow workflow runs, build results, and job logs. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Built-in",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "posthog",
+      "title": "PostHog",
+      "subtitle": "Explore product analytics and session replays. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Built-in",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "custom-website",
+      "title": "Custom Website",
+      "subtitle": "Keep any website beside your work. Choose a home URL for each project or worktree.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "official",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8722,7 +8900,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8733,7 +8911,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8744,7 +8922,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8755,7 +8933,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8766,7 +8944,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8777,7 +8955,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8788,7 +8966,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8799,7 +8977,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8810,7 +8988,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8821,7 +8999,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8832,7 +9010,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8843,7 +9021,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8854,7 +9032,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8865,7 +9043,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8876,7 +9054,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8887,7 +9065,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8898,18 +9076,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
-      "type": "ui",
-      "agentWritable": false
-    },
-    {
-      "key": "accountTitlebarUsage",
-      "title": "Account usage in the sidebar",
-      "subtitle": "Show or hide usage stats for saved Claude and Codex accounts at the bottom of the desktop sidebar. Star accounts to pin their usage.",
-      "tab": "extensions",
-      "tabTitle": "Extensions",
-      "section": "accountUsage",
-      "sectionTitle": "Account usage in the sidebar",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8934,6 +9101,17 @@
       "sectionTitle": "Your views",
       "type": "json",
       "default": [],
+      "agentWritable": false
+    },
+    {
+      "key": "accountTitlebarUsage",
+      "title": "Account usage in the sidebar",
+      "subtitle": "Show or hide usage stats for saved Claude and Codex accounts at the bottom of the desktop sidebar. Star accounts to pin their usage.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "accountUsage",
+      "sectionTitle": "Account usage in the sidebar",
+      "type": "ui",
       "agentWritable": false
     },
     {
@@ -9755,10 +9933,16 @@
       "windowsLinuxDefaultKey": "cmd+shift+down"
     },
     {
-      "id": "createSession",
-      "title": "Create Session",
-      "description": "Create a terminal session.",
+      "id": "createAgentSession",
+      "title": "New Agent Session",
+      "description": "Start your last-used agent in the active project, in your default interface.",
       "defaultKey": "cmd+t"
+    },
+    {
+      "id": "createSession",
+      "title": "New Terminal",
+      "description": "Create a terminal session.",
+      "defaultKey": "cmd+shift+t"
     },
     {
       "id": "openCommandPalette",
@@ -9776,7 +9960,7 @@
       "id": "openNewThreadPalette",
       "title": "New Thread in Active Project",
       "description": "Pick an agent, Browser, or Terminal to start in the active project.",
-      "defaultKey": "cmd+shift+t"
+      "defaultKey": "cmd+alt+t"
     },
     {
       "id": "openCommandsPanel",
@@ -9970,7 +10154,7 @@
     {
       "id": "openModelPicker",
       "title": "Model & Effort Picker",
-      "description": "Choose the chat model and effort with arrow keys, then Enter to save.",
+      "description": "Open the model picker: arrows choose a model and its reasoning, Enter uses it here, Shift+Enter saves it as the default.",
       "defaultKey": "alt+p"
     },
     {

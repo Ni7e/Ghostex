@@ -16,7 +16,12 @@ pub(crate) fn show_browser_dev_tools(
     };
     let browser_settings = cef::BrowserSettings::default();
     let mut devtools_client = Some(GhostexGpuiCefClient::new(
-        Some(GhostexGpuiLifeSpanHandler::new(None, None, true)),
+        Some(GhostexGpuiLifeSpanHandler::new(
+            None,
+            None,
+            true,
+            StdRc::new(Cell::new(false)),
+        )),
         None,
         None,
         None,
@@ -184,6 +189,7 @@ wrap_life_span_handler! {
         popup_open_handler: Option<BrowserPopupOpenHandler>,
         page_metadata_handler: Option<BrowserPageMetadataHandler>,
         register_created_native_view: bool,
+        app_initiated_close: StdRc<Cell<bool>>,
     }
 
     impl LifeSpanHandler {
@@ -225,11 +231,13 @@ wrap_life_span_handler! {
             DevTools Target.closeTarget and /json/close enter through this
             same CEF close request. Browser panes must hand that request back
             to the GPUI tab model before returning handled; otherwise CEF
-            accepts the request but the app-owned pane remains. App-initiated
-            closes may report this during teardown too, and the model close
-            path deliberately treats that as a no-op.
+            accepts the request but the app-owned pane remains. App-owned
+            surface disposal is identified before native teardown and does
+            not request a model close.
             */
-            if let Some(handler) = self.page_metadata_handler.as_ref() {
+            if !self.app_initiated_close.get()
+                && let Some(handler) = self.page_metadata_handler.as_ref()
+            {
                 handler(BrowserPageMetadataEvent::CloseRequested);
             }
             1

@@ -496,7 +496,8 @@ fi
 if command -v ghostex >/dev/null 2>&1; then
   exec ghostex prompt-editor "$@"
 fi
-exec /bin/sh -lc 'exec ${GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL:-${GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR:-vi}} "$@"' ghostex-prompt-editor "$@"
+printf '%s\n' 'Ghostex could not find its ghostex command, so the prompt editor did not open. Restart this session from Ghostex.' >&2
+exit 127
 __GHOSTEX_PROMPT_EDITOR_WRAPPER__
 chmod 755 "$ghostex_prompt_editor_wrapper" 2>/dev/null || true
 export GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL="$ghostex_prompt_editor_machine_visual"
@@ -506,11 +507,28 @@ export VISUAL="$ghostex_prompt_editor_wrapper"
 "#
     .trim()
     .to_string();
+    if let Some(cli) = session_ghostex_cli_executable() {
+        script.push_str(&format!(
+            "\nexport GHOSTEX_CLI_EXECUTABLE={}",
+            shell_quote(&cli)
+        ));
+    }
     if prompt_editor == Some("monaco") {
         script.push_str("\nexport GHOSTEX_PROMPT_EDITOR_BACKEND=monaco");
     }
     script.push_str("\nexport GHOSTEX_PROMPT_EDITING_ENABLED=1");
     script
+}
+
+/// CDXC:PromptEditor 2026-09-24 WHY:
+/// Chat sends reach the agent through its external editor (Ctrl+G), and the `$EDITOR` wrapper can only answer that handshake by running `ghostex prompt-editor`. The wrapper used to find the CLI through `GHOSTEX_CLI_EXECUTABLE`, which nothing had exported since the Swift host was retired, then through `ghostex` on PATH, then fell back to `vi`; on a computer without the CLI on PATH every chat send opened `vi`, the handshake never completed, and the agent stayed wedged in the editor. Every session is now pinned to the `ghostex` binary shipped beside this gxserver (the same pairing the Windows provider uses), and the wrapper fails with a message instead of opening an editor that cannot answer. The machine's own VISUAL/EDITOR still runs when the user chose it, through `ghostex prompt-editor`'s inherit backend.
+/// SEE-ALSO: `scripts_windows.rs` `start` pins the Windows CLI the same way; `gpui_auto_install_ghostex_cli_wrappers` in apps/desktop keeps `ghostex` on PATH for sessions started before the pin.
+fn session_ghostex_cli_executable() -> Option<String> {
+    let gxserver = std::env::current_exe().ok()?;
+    let gxserver = std::fs::canonicalize(&gxserver).unwrap_or(gxserver);
+    let cli = gxserver.with_file_name("ghostex");
+    crate::ghostex_cli::launchers::is_executable_file_sync(&cli)
+        .then(|| cli.to_string_lossy().into_owned())
 }
 
 fn zmx_prompt_editor_attach_args(prompt_editor: Option<&str>) -> &'static str {

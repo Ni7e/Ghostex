@@ -41,6 +41,7 @@ pub enum GpuiSupportLog {
     TitlebarPopupRepro,
     CrashReports,
     Performance,
+    RuntimeTrace,
 }
 
 impl GpuiSupportLog {
@@ -59,6 +60,7 @@ impl GpuiSupportLog {
             Self::TitlebarPopupRepro => "gpui-titlebar-popup-repro.jsonl",
             Self::CrashReports => "gpui-crash-reports.log",
             Self::Performance => "gpui-performance.jsonl",
+            Self::RuntimeTrace => "gpui-runtime-trace.jsonl",
         }
     }
 
@@ -73,6 +75,7 @@ impl GpuiSupportLog {
             Self::SessionChat => Some(GpuiDiagnosticScenario::SessionChat),
             Self::ProjectBoard => Some(GpuiDiagnosticScenario::ProjectBoard),
             Self::AppModal => Some(GpuiDiagnosticScenario::AppModal),
+            Self::RuntimeTrace => Some(GpuiDiagnosticScenario::RuntimeTrace),
             Self::TitlebarPopupRepro => None,
             // Crash reports are always-on failure diagnostics.
             Self::CrashReports => None,
@@ -89,14 +92,9 @@ pub enum GpuiDiagnosticScenario {
     SidebarRefresh,
     TerminalFocus,
     SessionChat,
-    /// Writes the chat brain's own recording under /tmp, never a support log
-    /// (apps/desktop/src/app/native_chat/replay_recording.rs).
-    ChatReplay,
-    /// Runs the Rust chat core beside the live QuickJS brain and counts what differs
-    /// (apps/desktop/src/app/native_chat/shadow/). Its records go to the session chat log.
-    ChatShadow,
     ProjectBoard,
     AppModal,
+    RuntimeTrace,
 }
 
 impl GpuiDiagnosticScenario {
@@ -111,10 +109,9 @@ impl GpuiDiagnosticScenario {
             Self::SidebarRefresh => "native.sidebar.refresh",
             Self::TerminalFocus => "native.terminal.focus",
             Self::SessionChat => "gpui.sessionChat.viewState",
-            Self::ChatReplay => "native.chat.replay",
-            Self::ChatShadow => "native.chat.shadow",
             Self::ProjectBoard => "native.project.board",
             Self::AppModal => "gpui.app.modal",
+            Self::RuntimeTrace => "native.runtime.trace",
         }
     }
 }
@@ -408,6 +405,7 @@ pub fn prune_gpui_support_logs() {
         GpuiSupportLog::TerminalFocus,
         GpuiSupportLog::ProjectBoard,
         GpuiSupportLog::AppModal,
+        GpuiSupportLog::RuntimeTrace,
         GpuiSupportLog::TitlebarPopupRepro,
         GpuiSupportLog::CrashReports,
     ] {

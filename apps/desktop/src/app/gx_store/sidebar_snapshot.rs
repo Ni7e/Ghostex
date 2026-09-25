@@ -368,6 +368,7 @@ pub(super) fn snapshot_from_view(
             .map(|machine| NativeSidebarMachine {
                 working_count: machine.working_count,
                 attention_count: machine.attention_count,
+                background_work_count: machine.background_work_count,
                 id: machine.id.clone(),
                 label: machine.label.clone(),
                 state: machine.state.clone(),
@@ -391,6 +392,7 @@ pub(super) fn snapshot_from_view(
                     contains_active_session: space.contains_active_session,
                     working_count: space.working_count,
                     attention_count: space.attention_count,
+                    background_work_count: space.background_work_count,
                 },
             )
             .collect(),
@@ -469,6 +471,7 @@ fn native_group(
         summary: json!({
             "workingCount": core.summary.working_count,
             "attentionCount": core.summary.attention_count,
+            "backgroundWorkCount": core.summary.background_work_count,
             "awakeCount": core.summary.awake_count,
         }),
         collapsed: core.collapsed,
@@ -488,6 +491,7 @@ fn native_group(
                 contains_active_session: section.contains_active_session,
                 working_count: section.working_count,
                 attention_count: section.attention_count,
+                background_work_count: section.background_work_count,
                 question_count: section.question_count,
                 session_ids: section.session_ids.clone(),
             })
@@ -614,6 +618,7 @@ fn native_collection(
         contains_active_session: collection.contains_active_session,
         working_count: collection.working_count,
         attention_count: collection.attention_count,
+        background_work_count: collection.background_work_count,
         menu: collection_menu(collection, view, menus, cache),
     }
 }

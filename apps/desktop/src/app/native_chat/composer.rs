@@ -47,6 +47,18 @@ impl NativeChatView {
     }
 
     pub(crate) fn submit(&mut self, mode: &str, window: &mut Window, cx: &mut Context<Self>) {
+        crate::support_logs::append_for_scenario(
+            crate::support_logs::GpuiSupportLog::SessionChat,
+            "gpui.sessionChat.viewState",
+            "sessionChat.nativeSubmit",
+            json!({
+                "composerReady": self.composer_ready,
+                "hasDraft": !self.draft.trim().is_empty(),
+                "pendingSend": self.pending_send,
+                "status": self.snapshot["status"],
+                "hasRuntime": self.runtime.is_some(),
+            }),
+        );
         if !self.composer_ready || self.draft.trim().is_empty() || self.pending_send {
             return;
         }

@@ -41,7 +41,7 @@ pub(crate) fn gpui_titlebar_gxserver_daemon_status() -> serde_json::Value {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) fn gpui_on_demand_gxserver_asset_key(
     target: &GpuiRemoteInstallTarget,
 ) -> Option<&'static str> {
@@ -55,7 +55,7 @@ pub(crate) fn gpui_on_demand_gxserver_asset_key(
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) fn gpui_on_demand_gxserver_archive(
     target: &GpuiRemoteInstallTarget,
     progress_tx: Option<&mpsc::UnboundedSender<GpuiRemoteGxserverConnectProgress>>,
@@ -119,7 +119,7 @@ pub(crate) fn gpui_on_demand_gxserver_archive(
         })
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) fn gpui_install_gxserver_archive_and_read_token(
     config: &GpuiRemoteMachineConfig,
     execution_target: &GpuiRemoteExecutionTarget,

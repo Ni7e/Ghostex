@@ -57,6 +57,9 @@ pub(crate) fn run_agent_metadata_title_sync_once(
         let Some(session_id) = read_session_text(&session, "sessionId") else {
             continue;
         };
+        if let Some(target) = fork_initial_rename_retry_target(&session) {
+            schedule_fork_initial_rename(state.as_ref().clone(), target);
+        }
         let Some(revision) = agent_metadata_title_revision(&state.paths.home_dir, &session) else {
             continue;
         };

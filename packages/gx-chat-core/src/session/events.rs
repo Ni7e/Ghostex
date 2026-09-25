@@ -334,12 +334,24 @@ fn frame_arrived(state: &mut ChatState, frame: &ChatFrame, context: &ChatContext
             // a frame that carries any of them carries all three (`controller.ts`, the
             // `'sessionAgentId' in event` test).
             let before = FrameIdentity::capture(state);
-            let moved = side_state_moves(state, snapshot.lifecycle.as_ref(), true, &snapshot.state);
-            if snapshot.session_agent_id.is_some()
-                || snapshot.available_agents.is_some()
-                || snapshot.switchable_agents.is_some()
-            {
+            let mut moved =
+                side_state_moves(state, snapshot.lifecycle.as_ref(), true, &snapshot.state);
+            if crate::session::fold::snapshot_owns_draft_agents(snapshot) {
+                // The read path's `carries_new_agents`, plus the clear an owned `null` makes: the
+                // switcher leaving is a change the document must publish too.
+                let agents_before = (
+                    state.session.session_agent_id.clone(),
+                    state.session.available_agents.clone(),
+                    state.session.switchable_agents.clone(),
+                );
                 apply_draft_agent_carriage(state, &own);
+                moved |= carries_new_agents(&own)
+                    || agents_before
+                        != (
+                            state.session.session_agent_id.clone(),
+                            state.session.available_agents.clone(),
+                            state.session.switchable_agents.clone(),
+                        );
             }
             apply_authoritative(state, &own, true, context);
             state.messages.snapshot = Some(folded);

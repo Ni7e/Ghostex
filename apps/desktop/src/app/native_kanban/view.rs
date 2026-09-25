@@ -119,18 +119,30 @@ impl GhostexGpuiApp {
             && self.native_kanban.tickets.is_empty();
         let lanes = self.native_kanban.derived().lanes.clone();
         let state = &self.native_kanban;
+        let loading = state.loading_first();
         state
             .columns
             .iter()
             .zip(lanes)
-            .map(|(column, indices)| {
+            .enumerate()
+            .map(|(position, (column, indices))| {
+                if loading {
+                    return self.render_native_kanban_lane(
+                        column,
+                        &[],
+                        None,
+                        Some(position),
+                        p,
+                        cx,
+                    );
+                }
                 let tickets = indices
                     .iter()
                     .filter_map(|index| state.tickets.get(*index))
                     .collect::<Vec<_>>();
                 let hint = (board_empty && column.key == "todo")
                     .then_some("No tickets yet. Use + Ticket to add one.");
-                self.render_native_kanban_lane(column, &tickets, hint, p, cx)
+                self.render_native_kanban_lane(column, &tickets, hint, None, p, cx)
             })
             .collect()
     }

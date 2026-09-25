@@ -210,6 +210,20 @@ Every knob below is a custom property on the chat scope so a future retune is on
   min-width: 0;
 }
 
+/* A transcript expansion animated by the same body: no card gap of its own, and the gap its
+   parent's layout puts before or after it carried inside, so a body eased to nothing leaves no
+   gap behind (the same rule GPUI's completed_work_row.rs applies). */
+.ghostex-chat-disclosure-body.is-plain {
+  margin-block-end: calc(-1 * var(--disclosure-gap-after, 0px));
+  margin-block-start: calc(-1 * var(--disclosure-gap-before, 0px));
+}
+
+.ghostex-chat-disclosure-body-plain {
+  min-width: 0;
+  padding-block-end: var(--disclosure-gap-after, 0px);
+  padding-block-start: var(--disclosure-gap-before, 0px);
+}
+
 /* A right-aligned annotation on a body row: the tool name beside "Allow this
    command?", the question counter beside the question. */
 .ghostex-chat-status-card-row {

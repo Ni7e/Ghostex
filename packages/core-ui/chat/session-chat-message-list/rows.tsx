@@ -26,6 +26,7 @@ import { SessionChatAgentMessageCard } from '../session-chat-agent-message-card'
 import { SessionChatInterAgentMessageCard } from '../session-chat-inter-agent-message-card';
 import { parseSessionChatInterAgentMessage } from '@/packages/shared/session-chat-presentation/agent-message';
 import { SessionChatExpansion, centerSessionChatExpansion } from '../session-chat-expansion';
+import { SessionChatDisclosureBody } from '../session-chat-disclosure-body';
 import { SessionChatFileChangeCards } from '../session-chat-file-change-card';
 import { splitSessionChatFileChanges } from '../session-chat-file-changes';
 import { SessionChatGoalCard } from '../session-chat-goal-card';
@@ -248,6 +249,29 @@ export function QueuedLabel() {
   );
 }
 
+/** The output Ghostex captured from a command it ran for the session, open by default. */
+function CommandOutputCard({ command, output }: { command: string; output: string }) {
+  const [open, setOpen] = useSessionChatDisclosureState('command-output', true);
+  return (
+    <div className='ghostex-chat-status-card min-w-0 rounded-lg border bg-muted/20'>
+      <button
+        aria-expanded={open}
+        className='flex w-full cursor-pointer items-center gap-1.5 px-3 py-2 text-left text-xs font-medium'
+        onClick={() => setOpen((value) => !value)}
+        type='button'
+      >
+        <IconChevronRight aria-hidden='true' className={cn('ghostex-chat-disclosure-chevron', open && 'is-open')} />
+        <span className='min-w-0 truncate'>{command}</span>
+      </button>
+      <SessionChatDisclosureBody gap={false} open={open}>
+        <pre className='max-h-96 overflow-auto whitespace-pre-wrap break-words border-t px-3 py-2 text-xs leading-relaxed'>
+          {output}
+        </pre>
+      </SessionChatDisclosureBody>
+    </div>
+  );
+}
+
 /**
  * A harness-injected turn the terminal prints too: one muted line that expands
  * to the verbatim text. Collapsed by default so orchestration chatter never
@@ -282,13 +306,13 @@ export function SuppressedTurn({ label, text }: { label: string; text: string })
         </span>
         <span className='truncate'>{label}</span>
       </button>
-      {expanded ? (
+      <SessionChatDisclosureBody gap={false} gapBefore='0.375rem' open={expanded}>
         <SessionChatExpansion label={`Collapse ${label}`} onCollapse={() => setExpanded(false)}>
           <div className='min-w-0 whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/30 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground'>
             {text}
           </div>
         </SessionChatExpansion>
-      ) : null}
+      </SessionChatDisclosureBody>
     </div>
   );
 }
@@ -500,17 +524,15 @@ export function AgentToolsDisclosure({
           </button>
           <SessionChatMarkdown isStreaming={isStreaming} markdown={markdown} preserveLineBreaks={preserveLineBreaks} />
         </div>
-        <div hidden={!open} id={bodyId}>
-          {open ? (
-            <SessionChatExpansion
-              className='ghostex-chat-thinking-detail'
-              label='Collapse tool calls'
-              onCollapse={() => setOpen(false)}
-            >
-              <SessionChatToolRun blocks={tools} questionPairsAsRows showAllRows />
-            </SessionChatExpansion>
-          ) : null}
-        </div>
+        <SessionChatDisclosureBody gap={false} gapBefore='0.375rem' id={bodyId} open={open}>
+          <SessionChatExpansion
+            className='ghostex-chat-thinking-detail'
+            label='Collapse tool calls'
+            onCollapse={() => setOpen(false)}
+          >
+            <SessionChatToolRun blocks={tools} questionPairsAsRows showAllRows />
+          </SessionChatExpansion>
+        </SessionChatDisclosureBody>
       </div>
       <QuestionExchangeCards exchanges={exchanges} />
     </>
@@ -578,7 +600,7 @@ export function ReasoningRow({
               <span data-ghostex-thinking-text>{headline}</span>
             </span>
           </button>
-          {open ? (
+          <SessionChatDisclosureBody gap={false} gapBefore='0.375rem' open={open}>
             <SessionChatExpansion
               className='ghostex-chat-thinking-detail'
               label='Collapse thinking'
@@ -587,7 +609,7 @@ export function ReasoningRow({
               {detail.length > 0 ? renderBody(detail) : null}
               <SessionChatToolRun blocks={tools} questionPairsAsRows showAllRows />
             </SessionChatExpansion>
-          ) : null}
+          </SessionChatDisclosureBody>
         </div>
         <QuestionExchangeCards exchanges={exchanges} />
       </>
@@ -760,14 +782,7 @@ export function MessageRowBody({
   }
 
   if (systemCard?.kind === 'command-output') {
-    return (
-      <details open className='ghostex-chat-status-card min-w-0 rounded-lg border bg-muted/20'>
-        <summary className='cursor-pointer px-3 py-2 text-xs font-medium'>{systemCard.command}</summary>
-        <pre className='max-h-96 overflow-auto whitespace-pre-wrap break-words border-t px-3 py-2 text-xs leading-relaxed'>
-          {systemCard.output}
-        </pre>
-      </details>
-    );
+    return <CommandOutputCard command={systemCard.command} output={systemCard.output} />;
   }
 
   if (systemCard?.kind === 'agent-message') {

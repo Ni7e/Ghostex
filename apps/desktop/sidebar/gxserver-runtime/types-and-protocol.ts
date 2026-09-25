@@ -18,7 +18,6 @@ import type {
   GxserverPresentationSession,
   GxserverPresentationSnapshot,
   GxserverProjectDomainState,
-  GxserverRendererCommand,
   GxserverSidebarHudResponse,
   GxserverSidebarProjectCollectionsState,
   GxserverSidebarSpacesState,
@@ -77,15 +76,6 @@ export type GpuiCommandPaneSessionSummary = {
   title?: string;
 };
 
-export type GpuiWorkspaceSessionDelayedSendSummary = {
-  delayedSendDeadlineAt?: string;
-  delayedSendRemainingLabel?: string;
-  delayedSendRemainingMs?: number;
-  sendWhenAllProjectSessionsStopActive?: boolean;
-  sendWhenAgentStopsActive?: boolean;
-  sessionId: string;
-};
-
 export type GpuiFirstPromptTitleRuntimeSettings = {
   firstPromptTitleGenerationAgent: GxserverFirstPromptTitleGenerationAgent;
   firstPromptTitleGenerationCommand?: string;
@@ -107,48 +97,11 @@ export type GpuiSidebarRuntimeSettingsSnapshot = {
 
 /**
  * Everything Rust's `dispatch_gpui_sidebar_host_message` can hand to
- * `onSidebarHostMessage`. Beside the extension-to-sidebar messages the React
- * app consumes, Rust also forwards exactly these sidebar-owned commands, which
- * the runtime answers itself through `handleSidebarMessage` — the React app has
- * no inbound branch for them, so relaying one into the message source would
- * silently drop it. Keep this union in step with the Rust dispatch sites.
+ * `onSidebarHostMessage`: the extension-to-sidebar messages the React app
+ * consumes. The sidebar-owned commands Rust used to forward here (rename,
+ * notes, delayed sends, creates) are answered in Rust.
  */
-export type GpuiSidebarHostMessage =
-  | ExtensionToSidebarMessage
-  | Extract<
-      SidebarToExtensionMessage,
-      {
-        /*
-         * CDXC:SessionNotes 2026-08-24:
-         * `setSessionNote` joins this list for the same reason `renameSession`
-         * is on it: the note editor is an app-modal window, so its confirm
-         * arrives through Rust rather than from the sidebar page itself.
-         *
-         * CDXC:AgentLauncher 2026-09-09 WHY:
-         * `runSidebarAgent`, `createSession`, and `openBrowserPaneInGroup`
-         * join it for the New Thread picker, another app-modal window whose
-         * launches must land in this runtime's active-project handlers.
-         *
-         * CDXC:Sessions 2026-09-11 WHY:
-         * `updateCustomSessionTags` joins it because the Settings modal
-         * creates tags from the app-modal host window, so its catalog write
-         * arrives through Rust exactly like a note or rename confirm.
-         */
-        type:
-          | 'cancelDelayedSend'
-          | 'confirmAgentHookLaunch'
-          | 'createSession'
-          | 'openBrowserPaneInGroup'
-          | 'removeProject'
-          | 'renameSession'
-          | 'runSidebarAgent'
-          | 'scheduleDelayedSend'
-          | 'postponeDelayedSend'
-          | 'setSessionNote'
-          | 'toggleCloseAfterDone'
-          | 'updateCustomSessionTags';
-      }
-    >;
+export type GpuiSidebarHostMessage = ExtensionToSidebarMessage;
 
 export type GhostexGpuiSidebarBridge = {
   browserTabs?: readonly GpuiBrowserTabSummary[];
@@ -159,9 +112,6 @@ export type GhostexGpuiSidebarBridge = {
    * or chat surface alike. Auto Sleep protects these instead of guessing
    * visibility from the rows this runtime last saw selected.
    */
-  displayedWorkspaceSessionIds?: readonly string[];
-  onDisplayedWorkspaceSessionIdsChanged?: (sessionIds: readonly string[]) => void;
-  workspaceSessionDelayedSends?: readonly GpuiWorkspaceSessionDelayedSendSummary[];
   onBrowserTabsChanged?: (tabs: readonly GpuiBrowserTabSummary[]) => void;
   /**
    * CDXC:Browser 2026-08-18:
@@ -171,19 +121,13 @@ export type GhostexGpuiSidebarBridge = {
    * those rows, so Rust never has to know the sidebar's id format.
    */
   gxserverBootstrap?: GpuiGxserverBootstrap;
-  onCommandPaletteRunSidebarCommand?: (payload: unknown) => void;
-  onCommandPaletteSessionFocus?: (payload: unknown) => void;
   onCommandPaneSessionsChanged?: (sessions: readonly GpuiCommandPaneSessionSummary[]) => void;
-  onWorkspaceSessionDelayedSendsChanged?: (sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[]) => void;
   onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
   onExportTranscriptModalCommand?: (payload: unknown) => void;
   onGitCommitModalCommand?: (payload: unknown) => void;
   onMenuBarProjectActivation?: (payload: unknown) => void;
-  onMenuBarSessionActivation?: (payload: unknown) => void;
   onNativeAppShotCaptured?: (payload: unknown) => void;
   onNativeAppShotPromptResult?: (payload: unknown) => void;
-  onOsIntegrationCommand?: (payload: unknown) => void;
-  onResourcesSnapshotResult?: (payload: unknown) => void;
   onProjectBoardConversationRequest?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot) => void;
   /**
@@ -201,8 +145,6 @@ export type GhostexGpuiSidebarBridge = {
    * from. Rust forwards the row's raw gxserver ids plus the durable provider
    * conversation id; this runtime resolves the best available target.
    */
-  onStashedPromptSessionJump?: (payload: unknown) => void;
-  onStatusPetActivation?: (payload: unknown) => void;
   onTitlebarGitAction?: (payload: unknown) => void;
   onWorktreeModalCommand?: (payload: unknown) => void;
   /**
@@ -221,40 +163,22 @@ export type GhostexGpuiSidebarBridge = {
    * because DOM wheel events cannot tell a new physical swipe from the
    * previous swipe's momentum tail.
    */
-  onNativeScrollGestureBegan?: () => void;
-  onWorkspaceFirstPromptTitleGenerationCancel?: (payload: unknown) => void;
-  onWorkspaceFolderPicked?: (payload: unknown) => void;
   onWorkspaceSessionAttentionAcknowledge?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;
-  onWorkspaceTerminalBell?: (payload: unknown) => void;
-  onWorkspaceTerminalTitleChanged?: (payload: unknown) => void;
   onWorkspaceTerminalEscapePressed?: (payload: unknown) => void;
-  onWorkspaceTerminalLifecycleRequest?: (payload: unknown) => void;
   onWorkspaceTerminalRuntimeAction?: (payload: unknown) => void;
-  pendingCommandPaletteRunSidebarCommands?: unknown[];
-  pendingCommandPaletteSessionFocusRequests?: unknown[];
   pendingExportTranscriptModalCommands?: unknown[];
   pendingGitCommitModalCommands?: unknown[];
   pendingMenuBarProjectActivations?: unknown[];
-  pendingMenuBarSessionActivations?: unknown[];
   pendingNativeAppShotPromptResults?: unknown[];
   pendingNativeAppShots?: unknown[];
-  pendingOsIntegrationCommands?: unknown[];
-  pendingResourcesSnapshotResults?: unknown[];
   pendingSidebarCommands?: unknown[];
   pendingProjectBoardConversationRequests?: unknown[];
-  pendingStashedPromptSessionJumps?: unknown[];
-  pendingStatusPetActivations?: unknown[];
   pendingTitlebarGitActions?: unknown[];
   pendingWorktreeModalCommands?: unknown[];
-  pendingWorkspaceFirstPromptTitleGenerationCancels?: unknown[];
-  pendingWorkspaceFolderPicks?: unknown[];
   pendingWorkspaceSessionAttentionAcknowledgements?: unknown[];
   pendingWorkspaceTabSessionSelections?: unknown[];
-  pendingWorkspaceTerminalBells?: unknown[];
-  pendingWorkspaceTerminalTitleChanges?: unknown[];
   pendingWorkspaceTerminalEscapePresses?: unknown[];
-  pendingWorkspaceTerminalLifecycleRequests?: unknown[];
   pendingWorkspaceTerminalRuntimeActions?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
   postBrowserTabFocus?: (payload: string) => boolean;
@@ -265,19 +189,15 @@ export type GhostexGpuiSidebarBridge = {
   postNativeAppShotPromptToSession?: (payload: string) => boolean;
   postNativeProjectPathAction?: (payload: string) => boolean;
   postOpenBrowserUrl?: (payload: string) => boolean;
-  postResourcesSnapshotRequest?: (payload: string) => boolean;
   postPetOverlayState?: (payload: string) => boolean;
   postProjectBoardConversationResponse?: (payload: string) => boolean;
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
-  postSidebarEditableFocus?: (payload: string) => boolean;
   postSessionCompletionSound?: (payload: string) => boolean;
   postGlobalActions?: (payload: string) => boolean;
   postSessionStatusIndicators?: (payload: string) => boolean;
   postTitlebarGitMenuState?: (payload: string) => boolean;
-  postWorkspaceTerminalEnter?: (payload: string) => boolean;
   postWorkspaceTerminalFocus?: (payload: string) => boolean;
-  postWorkspaceTerminalLifecycleResult?: (payload: string) => boolean;
   postWorkspaceTerminalRenameCommand?: (payload: string) => boolean;
   runtimeSettings?: GpuiSidebarRuntimeSettings;
 };
@@ -289,17 +209,6 @@ declare global {
 }
 
 export type GpuiSidebarRuntimeSnapshotKind = 'hydrate' | 'patch';
-
-export type GpuiWorkspaceTerminalLifecycleRequest = {
-  action: 'close' | 'sleep' | 'wake';
-  keepSidebarFocus: boolean;
-  projectId: string;
-  replacementProjectId?: string;
-  replacementSessionId?: string;
-  requestId: number;
-  sessionId: string;
-  skipReplacementFallback: boolean;
-};
 
 export type GpuiValidatedGxserverBootstrap = {
   authToken: string;
@@ -503,12 +412,6 @@ export type GpuiBrowserTabSummary = {
   url: string;
 };
 
-export type GpuiRendererCommandResolvedSession = {
-  projectId: string;
-  sessionId: string;
-  sidebarSessionId: string;
-};
-
 /*
 CDXC:Git 2026-07-29:
 The two GitHub-CLI derived fields of `SidebarGitState`, memoized as one unit so
@@ -571,12 +474,6 @@ export type GpuiPendingNativeAppShotPromptInsertion = {
 export type GpuiTrustedGitReviewFileSelection = {
   explicit: boolean;
   filePaths: string[];
-};
-
-export type GpuiPendingResourcesSnapshotRequest = {
-  reject: (error: Error) => void;
-  resolve: (snapshot: Record<string, unknown>) => void;
-  timeoutId: number;
 };
 
 export type GpuiPendingRemoteGxserverRequest = {
@@ -690,10 +587,6 @@ export type GpuiRemoteCreatePullRequestResult = {
   reason?: string;
 };
 
-export type GpuiRendererCommandHandler = (
-  command: GxserverRendererCommand
-) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
-
 export type GpuiPresentationSubscription = {
   close: () => void;
 };
@@ -759,23 +652,7 @@ export type GpuiProjectBoardConversationRequest = {
   toastTitle?: string;
 };
 
-export type GpuiWorkspaceTerminalBellPayload = {
-  projectId: string;
-  sessionId: string;
-};
-
-export type GpuiWorkspaceTerminalTitleChangedPayload = {
-  projectId: string;
-  rawTitle: string;
-  sessionId: string;
-};
-
 export type GpuiWorkspaceTerminalEscapePressedPayload = {
-  projectId: string;
-  sessionId: string;
-};
-
-export type GpuiWorkspaceFirstPromptTitleGenerationCancelPayload = {
   projectId: string;
   sessionId: string;
 };
@@ -812,20 +689,7 @@ export type GpuiWorkspaceTerminalFocusPlacement = 'splitRight';
 
 export type GpuiWorkspaceTerminalRuntimeActionPayload =
   | {
-      action:
-        'closeSession' | 'exportTranscript' | 'forkSession' | 'fullReloadSession' | 'openSessionNote' | 'sleepSession';
-      projectId: string;
-      sessionId: string;
-    }
-  | {
-      /**
-       * CDXC:AgentProviders 2026-09-03:
-       * Rust-origin Switch Account (terminal action bar, chat composer). The
-       * agent id is one of the rows the runtime itself forwarded to Rust on the
-       * tab session's `switchableAgents`.
-       */
-      action: 'switchSessionAgent';
-      agentId: string;
+      action: 'exportTranscript';
       projectId: string;
       sessionId: string;
     }
@@ -835,18 +699,10 @@ export type GpuiWorkspaceTerminalRuntimeActionPayload =
       projectId: string;
       sessionId: string;
       target: GpuiHandoffModelTarget;
-    }
-  | { action: 'sleepAllDaemonSessions' }
-  | { action: 'sleepInactiveSessions' };
+    };
 
 export type GpuiPresentationProjectProjectionMetadata = {
   chatProjectIds: ReadonlySet<string>;
   hiddenProjectIds: ReadonlySet<string>;
   projectOverlays: readonly GxserverPresentationSidebarProjectOverlay[];
-};
-
-export type GpuiCloseAfterDoneTimer = {
-  deadlineAtMs?: number;
-  doneSinceAtMs?: number;
-  timeoutId?: number;
 };

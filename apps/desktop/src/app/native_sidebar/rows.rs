@@ -21,6 +21,12 @@ impl GhostexGpuiApp {
         let group_id = group.group_id.clone();
         let key = format!("group:{}", group.group_id);
         let scale = appearance.scale;
+        // CDXC:Sidebar 2026-09-24 DECISION:
+        // User: don't show the Sessions label under a project or worktree when it's the only label there (no pinned, drafts or parked sessions). It comes back while a session is dragged, next to the Pinned and Parked drop headings.
+        let hide_lone_sessions_heading = matches!(group.sections.as_slice(), [only] if only.id == "sessions")
+            && self
+                .native_sidebar_missing_drop_sections(group, None, None)
+                .is_empty();
         let body = self
             .native_sidebar
             .disclosures
@@ -56,48 +62,89 @@ impl GhostexGpuiApp {
                             )
                         },
                     )
-                    .children(group.sections.iter().enumerate().map(|(index, section)| {
-                        let key = format!("section:{}:{}", group.group_id, section.id);
-                        let ids = self.native_sidebar.disclosures.section_ids(
-                            &key,
-                            &section.session_ids,
-                            section.collapsed,
-                        );
-                        let body = self
-                            .native_sidebar
-                            .disclosures
-                            .present(&key, section.collapsed)
-                            .then(|| {
-                                let sessions = group
-                                    .sessions
-                                    .iter()
-                                    .map(|session| (session.session_id.as_str(), session))
-                                    .collect::<std::collections::HashMap<_, _>>();
-                                let rows = self.render_native_session_list(
-                                    group,
-                                    ids.iter()
-                                        .filter_map(|id| {
-                                            sessions
-                                                .get(id.as_str())
-                                                .map(|session| (*session).clone())
-                                        })
-                                        .collect(),
-                                    appearance,
-                                    cx,
+                    .children(
+                        group
+                            .sections
+                            .iter()
+                            .enumerate()
+                            .flat_map(|(index, section)| {
+                                // A session drag shows the sections it can land in that are empty
+                                // (section_move.rs), each in its own place among the drawn ones.
+                                let placeholders = self
+                                    .native_sidebar_missing_drop_sections(
+                                        group,
+                                        index
+                                            .checked_sub(1)
+                                            .map(|previous| group.sections[previous].id.as_str()),
+                                        Some(section.id.as_str()),
+                                    )
+                                    .into_iter()
+                                    .map(|id| {
+                                        self.render_native_section_drop_placeholder(
+                                            group, id, appearance, cx,
+                                        )
+                                    })
+                                    .collect::<Vec<_>>();
+                                let key = format!("section:{}:{}", group.group_id, section.id);
+                                let ids = self.native_sidebar.disclosures.section_ids(
+                                    &key,
+                                    &section.session_ids,
+                                    section.collapsed,
                                 );
-                                self.render_native_disclosure(key, rows, cx)
-                            });
-                        v_flex()
-                            .w_full()
-                            .flex_shrink_0()
-                            .when(index > 0 && group.sections[index - 1].collapsed, |column| {
-                                column.mt(px(8.0 * scale))
-                            })
-                            .child(
-                                self.render_native_section_header(group, section, appearance, cx),
-                            )
-                            .children(body)
-                    }))
+                                let body = self
+                                    .native_sidebar
+                                    .disclosures
+                                    .present(&key, section.collapsed)
+                                    .then(|| {
+                                        let sessions = group
+                                            .sessions
+                                            .iter()
+                                            .map(|session| (session.session_id.as_str(), session))
+                                            .collect::<std::collections::HashMap<_, _>>();
+                                        let rows = self.render_native_session_list(
+                                            group,
+                                            ids.iter()
+                                                .filter_map(|id| {
+                                                    sessions
+                                                        .get(id.as_str())
+                                                        .map(|session| (*session).clone())
+                                                })
+                                                .collect(),
+                                            appearance,
+                                            cx,
+                                        );
+                                        self.render_native_disclosure(key, rows, cx)
+                                    });
+                                let section_column = v_flex()
+                                    .w_full()
+                                    .flex_shrink_0()
+                                    .when(
+                                        index > 0 && group.sections[index - 1].collapsed,
+                                        |column| column.mt(px(8.0 * scale)),
+                                    )
+                                    .when(!hide_lone_sessions_heading, |column| {
+                                        column.child(self.render_native_section_header(
+                                            group, section, appearance, cx,
+                                        ))
+                                    })
+                                    .children(body)
+                                    .into_any_element();
+                                placeholders
+                                    .into_iter()
+                                    .chain(std::iter::once(section_column))
+                            }),
+                    )
+                    .children(
+                        self.native_sidebar_missing_drop_sections(
+                            group,
+                            group.sections.last().map(|section| section.id.as_str()),
+                            None,
+                        )
+                        .into_iter()
+                        .map(|id| {
+                            self.render_native_section_drop_placeholder(group, id, appearance, cx)
+                        }),
+                    )
                     .when(
                         group.hidden_session_count > 0 && !group.expanded,
                         |column| {

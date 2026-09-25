@@ -46,7 +46,7 @@ export type GpuiSidebarActiveProjectGroupsInput = {
   groups: readonly SidebarSessionGroup[];
 };
 
-export function createGpuiSidebarActiveProjectSurfaceIds(
+function createGpuiSidebarActiveProjectSurfaceIds(
   surfaceIds: GpuiSidebarActiveProjectSurfaceIds = {}
 ): GpuiSidebarActiveProjectSurfaceIds {
   const strictSurfaceIds: GpuiSidebarActiveProjectSurfaceIds = {};
@@ -86,23 +86,6 @@ export function createGpuiSidebarActiveProjectSurfaceIds(
  * CDXC:CefRuntime 2026-06-23-12:56:
  * Kanban, Automate, and Manage surface identities may use the same native project-editor id format as macOS, but only from the explicit projectContext.editor.projectId value. Kanban receives the tasks-mode id, Automate receives the automate-mode id, and Manage receives the manage-mode id for real project payloads. This bridge still does not send Browser ids, readiness, paths beyond the explicit in-memory project path, filesystem probes, or fallback localhost state. Its sole Browser URL field is the explicit primary Git origin used transiently for project Home navigation.
  */
-export function createGpuiSidebarActiveProjectContextPayload(
-  workspace: SidebarStoryWorkspace
-): GpuiSidebarActiveProjectContextPayload {
-  const activeGroup = workspace.snapshot.groups.find((group) => group.groupId === workspace.snapshot.activeGroupId);
-  const activeGroupMetadata = activeGroup ? workspace.groupMetadataById[activeGroup.groupId] : undefined;
-  const projectContext = activeGroupMetadata?.projectContext;
-
-  if (activeGroup && projectContext && activeGroupMetadata?.isChatCollection !== true) {
-    return createGpuiProjectPayloadFromActiveGroup({
-      activeGroupTitle: activeGroup.title,
-      projectContext,
-    });
-  }
-
-  return createGpuiQuickProjectlessPayload();
-}
-
 export function createGpuiSidebarActiveProjectContextPayloadFromGroups({
   groups,
 }: GpuiSidebarActiveProjectGroupsInput): GpuiSidebarActiveProjectContextPayload {

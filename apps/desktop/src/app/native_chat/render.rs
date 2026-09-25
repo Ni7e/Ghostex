@@ -25,7 +25,7 @@ impl NativeChatView {
         }
         self.error.is_some()
             || (self.snapshot["hasMore"] == true && self.list.item_count() == 0)
-            || self.snapshot["transcriptSearch"]["open"] == true
+            || self.search_open()
             || self.snapshot["forkBranches"]["count"].as_u64().is_some()
     }
 
@@ -67,6 +67,11 @@ impl Render for NativeChatView {
         );
         let s = p.scale;
         self.sync_search_scroll();
+        // A card above the composer that is opening or closing needs the next frame; the
+        // transcript's rows ask for theirs as they are drawn.
+        if self.disclosure_motion.borrow().running() {
+            window.request_animation_frame();
+        }
         /*
         CDXC:SessionChat 2026-09-18 WHY:
         React's maximized composer is a fixed overlay across the whole chat pane, so nothing of the
@@ -76,13 +81,16 @@ impl Render for NativeChatView {
         its background only.
         */
         let maximized = self.maximized_window.is_some();
-        let search_bar = if maximized {
+        let glass = crate::app::helpers::window_glass_active_in(window);
+        // Under glass the subagent viewer sits straight on the pane's glass, so the chat behind it
+        // is not painted (subagent_view.rs, `render_subagent_viewer`).
+        let covered = maximized || (glass && self.snapshot["subagent"].is_object());
+        let search_bar = if covered {
             None
         } else {
             self.render_search_bar(&p, window, cx)
         };
-        let glass = crate::app::helpers::window_glass_active_in(window);
-        let fork_branch_badge = if maximized {
+        let fork_branch_badge = if covered {
             None
         } else {
             self.render_fork_branch_badge(&p, glass, cx)
@@ -94,7 +102,7 @@ impl Render for NativeChatView {
         } else {
             self.composer_frame(cx).transcript_inset
         };
-        crate::app::helpers::indicator_animation::render_indicators_at_display_rate(cx.entity_id());
+        crate::app::helpers::indicator_animation::render_indicator_frames_animation_only(cx.entity_id());
         let transcript = self.render_transcript_host(window, cx);
         let rows = self.list.item_count();
         /*
@@ -105,7 +113,7 @@ impl Render for NativeChatView {
         and anchored to the transcript alone a forked session with no rows yet would have lost its
         switcher entirely.
         */
-        let body = if maximized {
+        let body = if covered {
             None
         } else {
             let content = transcript;
@@ -126,16 +134,17 @@ impl Render for NativeChatView {
                     .into_any_element(),
             )
         };
-        let composer = if self.maximized_window.is_none() {
+        let composer = if !covered {
             self.render_composer(&p, window, cx)
-        } else {
+        } else if maximized {
             div().h(px(148.0 * s)).into_any_element()
+        } else {
+            div().into_any_element()
         };
         let bounds = self.bounds.clone();
-        // The picker window is a sibling frame sized to this pane, so the pane's painted size is what tells it the pane was resized.
-        let model_picker_open = self.model_picker_window.is_open();
         let picker_chat = cx.weak_entity();
-        let pane_windows_open = self.pane_windows_open();
+        // Whatever a pane-frame change has to act on: the windows that cover the pane, and any open menu.
+        let pane_frame_watched = self.pane_windows_open() || self.option_menu.is_some();
         let suggestion_shadow = self.render_suggestion_shadow(&p);
         let content_ready = self.error.is_none()
             && (rows > 0
@@ -192,6 +201,8 @@ impl Render for NativeChatView {
             .composer_input_actions(cx)
             .capture_key_up(cx.listener(|chat, _, _, _| chat.composer_held_key = None))
             .capture_action(cx.listener(Self::paste_attachments))
+            .capture_action(cx.listener(Self::composer_copy))
+            .capture_action(cx.listener(Self::composer_cut))
             .on_drop(cx.listener(|chat, paths: &gpui::ExternalPaths, _, cx| {
                 let paths = paths
                     .0
@@ -212,7 +223,7 @@ impl Render for NativeChatView {
             // Only React's one manual case: a transcript with no rows yet. A filled
             // one pages itself near the top and keeps its anchor (pagination.rs).
             .when(
-                !maximized && state["hasMore"] == true && self.list.item_count() == 0,
+                !covered && state["hasMore"] == true && self.list.item_count() == 0,
                 |this| {
                     this.child(
                         div().flex().justify_center().child(
@@ -242,18 +253,11 @@ impl Render for NativeChatView {
             .child(
                 gpui::canvas(
                     move |rect, window, cx| {
-                        if bounds.replace(rect) != rect && pane_windows_open {
+                        if bounds.replace(rect) != rect && pane_frame_watched {
                             let chat = picker_chat.clone();
                             window.defer(cx, move |_, cx| {
                                 let _ = chat.update(cx, |chat, cx| {
-                                    chat.follow_pane_windows(cx);
-                                });
-                            });
-                        }
-                        if model_picker_open {
-                            window.defer(cx, move |_, cx| {
-                                let _ = picker_chat.update(cx, |chat, cx| {
-                                    chat.report_model_picker_pane_size(rect.size, cx);
+                                    chat.pane_frame_changed(cx);
                                 });
                             });
                         }

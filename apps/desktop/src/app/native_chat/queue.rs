@@ -71,13 +71,25 @@ impl NativeChatView {
             .tooltip(move |window, cx| {
                 gpui_component::tooltip::Tooltip::new(label).build(window, cx)
             })
+            .group("native-chat-queue-action")
             .when(disabled, |this| this.opacity(0.4))
             .when(!disabled, |this| {
                 this.chat_cursor_pointer()
-                    .hover(|style| style.text_color(p.foreground))
+                    .hover(|style| style.bg(p.foreground.opacity(0.08)))
                     .on_click(cx.listener(move |this, _, _, cx| this.invoke(command.clone(), cx)))
             })
-            .child(gpui::svg().path(icon).size(px(14.0 * p.scale)))
+            // CDXC:SessionChat 2026-09-24 WHY: a GPUI svg paints only with its OWN text color; it does not inherit the parent's, so without one these icons took up space and drew nothing.
+            .child(
+                gpui::svg()
+                    .path(icon)
+                    .size(px(14.0 * p.scale))
+                    .text_color(p.muted)
+                    .when(!disabled, |this| {
+                        this.group_hover("native-chat-queue-action", |style| {
+                            style.text_color(p.foreground)
+                        })
+                    }),
+            )
             .into_any_element()
     }
 
@@ -107,15 +119,18 @@ impl NativeChatView {
                 appearance: p.clone(),
             };
             // CDXC:SessionChat 2026-09-22 WHY: the id is load-bearing. GPUI applies a group-hover refinement at LAYOUT time only from per-element hover state, which exists only for a div with an id; without one the `w_auto` never reaches layout and the buttons stay clipped at width 0 while the row is hovered.
+            // CDXC:SessionChat 2026-09-24 DECISION: a row that could not be delivered keeps its controls on screen; see failedRowLabel in packages/core-ui/chat/session-chat-queue-rows.tsx.
             let mut actions = div()
                 .id(format!("queue-actions:{id}"))
                 .flex()
                 .flex_shrink_0()
                 .items_center()
-                .w_0()
-                .overflow_hidden()
-                .opacity(0.0)
-                .group_hover("native-chat-queue-row", |style| style.w_auto().opacity(1.0));
+                .when(!failed, |this| {
+                    this.w_0()
+                        .overflow_hidden()
+                        .opacity(0.0)
+                        .group_hover("native-chat-queue-row", |style| style.w_auto().opacity(1.0))
+                });
             for (capability, label, icon, command) in [
                 (
                     "canRetry",
@@ -155,34 +170,13 @@ impl NativeChatView {
                 }
             }
             let source_session = session.clone();
-            div()
-                .id(format!("queued-prompt:{id}"))
-                .group("native-chat-queue-row")
+            let failed_color = gpui::Hsla::from(gpui::rgb(0xef9999));
+            let line = div()
                 .flex()
                 .items_center()
                 .min_w_0()
                 .gap(px(4.0 * s))
-                .min_h(px(28.0 * s))
-                .pr(px(2.0 * s))
-                .rounded(px(8.0 * s))
-                .border_1()
-                .border_color(p.border.opacity(0.58))
-                .text_color(p.muted)
-                .hover(|style| {
-                    style
-                        .bg(p.foreground.opacity(0.05))
-                        .border_color(gpui::transparent_black())
-                })
-                .when(can_drag, |this| {
-                    this.on_drop(cx.listener(move |this, drag: &QueuedPromptDrag, _, cx| {
-                        if drag.session == source_session {
-                            this.invoke(
-                                json!({"type":"moveQueue","promptId":drag.prompt,"targetId":id}),
-                                cx,
-                            );
-                        }
-                    }))
-                })
+                .min_h(px(26.0 * s))
                 .child(
                     div()
                         .id(format!("queue-grip:{}", text(prompt, "id")))
@@ -201,6 +195,7 @@ impl NativeChatView {
                             gpui::svg()
                                 .path("titlebar/loader2.svg")
                                 .size(px(13.0 * s))
+                                .text_color(p.muted)
                                 .into_any_element()
                         } else {
                             grip(p)
@@ -214,25 +209,72 @@ impl NativeChatView {
                         .text_size(px(12.0 * s))
                         .line_height(px(20.0 * s))
                         .when(busy, |this| this.opacity(0.7))
-                        .when(failed, |this| this.text_color(gpui::rgb(0xef9999)))
                         .child(preview),
                 )
+                .child(actions);
+            div()
+                .id(format!("queued-prompt:{id}"))
+                .group("native-chat-queue-row")
+                .flex()
+                .flex_col()
+                .min_w_0()
+                .pr(px(2.0 * s))
+                .rounded(px(8.0 * s))
+                .border_1()
+                .border_color(if failed {
+                    failed_color.opacity(0.35)
+                } else {
+                    p.border.opacity(0.58)
+                })
+                .text_color(p.muted)
+                .hover(|style| {
+                    let style = style.bg(p.foreground.opacity(0.05));
+                    if failed {
+                        style
+                    } else {
+                        style.border_color(gpui::transparent_black())
+                    }
+                })
+                .when(can_drag, |this| {
+                    this.on_drop(cx.listener(move |this, drag: &QueuedPromptDrag, _, cx| {
+                        if drag.session == source_session {
+                            this.invoke(
+                                json!({"type":"moveQueue","promptId":drag.prompt,"targetId":id}),
+                                cx,
+                            );
+                        }
+                    }))
+                })
+                .child(line)
+                // The reason gets its own wrapped line under the prompt, so neither is cut off.
                 .when(failed, |this| {
                     this.child(
                         div()
-                            .max_w(gpui::relative(0.45))
-                            .text_ellipsis()
+                            .flex()
+                            .items_start()
+                            .gap(px(5.0 * s))
+                            .pl(px(22.0 * s))
+                            .pr(px(8.0 * s))
+                            .pb(px(6.0 * s))
                             .text_size(px(11.0 * s))
-                            .text_color(gpui::rgb(0xef9999))
+                            .line_height(px(15.0 * s))
+                            .text_color(failed_color)
                             .child(
+                                gpui::svg()
+                                    .path("titlebar/alert-triangle.svg")
+                                    .flex_shrink_0()
+                                    .mt(px(1.0 * s))
+                                    .size(px(12.0 * s))
+                                    .text_color(failed_color),
+                            )
+                            .child(div().flex_1().min_w_0().child(format!(
+                                "Not delivered: {}",
                                 prompt["errorMessage"]
                                     .as_str()
-                                    .unwrap_or("Delivery failed.")
-                                    .to_owned(),
-                            ),
+                                    .unwrap_or("the send failed.")
+                            ))),
                     )
                 })
-                .child(actions)
         });
         Some(
             div()

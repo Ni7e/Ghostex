@@ -15,6 +15,7 @@
 // dismiss-on-outside-press menu surface, like the titlebar's dropdown panels —
 // and it occludes only its own visible rectangle.
 
+mod model_pill;
 mod palette;
 
 use palette::*;
@@ -435,6 +436,10 @@ impl GhostexGpuiApp {
                         .when_some(full_session_id, |this, full_session_id| {
                             this.child(terminal_agent_bar_session_id(full_session_id, &suffix, cx))
                         })
+                        .when_some(
+                            self.render_terminal_agent_bar_model_pill(session_id, &suffix, cx),
+                            |this, pill| this.child(pill),
+                        )
                         .child(div().flex_1().min_w_0())
                         .child(self.render_terminal_agent_bar_menu_anchor(
                             surface, session_id, menu_open, &suffix, cx,

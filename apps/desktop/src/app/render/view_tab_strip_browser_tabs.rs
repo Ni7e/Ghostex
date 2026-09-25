@@ -96,12 +96,6 @@ impl GhostexGpuiApp {
         let title = tab
             .map(BrowserTab::display_title)
             .unwrap_or_else(|| "New Tab".to_string());
-        let can_close = state != BrowserTabState::AddressOnly
-            || self
-                .browser_tabs
-                .pane_tab_count(pane_id)
-                .unwrap_or_default()
-                > 1;
         let profile_id = tab
             .map(|tab| tab.profile_id)
             .unwrap_or_else(BrowserProfileId::default_profile);
@@ -171,7 +165,7 @@ impl GhostexGpuiApp {
                     window.prevent_default();
                     cx.stop_propagation();
                     // A pinned tab closes from its menu only, never by a stray middle click.
-                    if can_close && !pinned {
+                    if !pinned {
                         this.close_browser_tab(tab_id, window, cx);
                     }
                 }),
@@ -207,7 +201,9 @@ impl GhostexGpuiApp {
                         .child(title),
                 )
             })
-            .when(can_close && !pinned, |this| {
+            // Every tab closes like a view tab, the empty "New Tab" placeholder included: closing
+            // the Browser's last tab closes the Browser view and brings back the view picker.
+            .when(!pinned, |this| {
                 this.child(self.render_view_strip_browser_tab_close_button(tab_id, is_showing, cx))
             })
             .into_any_element()

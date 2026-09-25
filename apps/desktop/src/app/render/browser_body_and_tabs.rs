@@ -291,8 +291,7 @@ impl GhostexGpuiApp {
             });
         let tab_hover_key = BrowserHoverTab { pane_id, tab_id };
         let is_tab_hovered = self.hovered_browser_tab == Some(tab_hover_key);
-        let can_close = state != BrowserTabState::AddressOnly || tab_group.tabs.len() > 1;
-        let show_close_button = can_close && is_tab_hovered;
+        let show_close_button = is_tab_hovered;
         let tab_tooltip = display_title.clone();
 
         div()
@@ -350,9 +349,7 @@ impl GhostexGpuiApp {
                 cx.listener(move |this, _event: &MouseUpEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
-                    if can_close {
-                        this.close_browser_tab(tab_id, window, cx);
-                    }
+                    this.close_browser_tab(tab_id, window, cx);
                 }),
             )
             .on_drag(dragged_tab, move |dragged, _offset, _window, cx| {

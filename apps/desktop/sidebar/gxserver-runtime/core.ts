@@ -1,5 +1,4 @@
-import { createAccountSwitchTransport } from '../account-switch';
-import type { AccountsTransport } from '@/packages/shared/agent-accounts';
+import { nativePost } from '@/packages/shared/native-runtime/bridge';
 /*
 CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
@@ -8,7 +7,6 @@ changed. See `core.ts` for how the runtime's methods are re-attached.
 import type { GpuiWorkspaceSessionGroupsState } from '../workspace-session-groups';
 import {
   createEmptyGpuiWorkspaceSessionGroupsState,
-  parseGpuiWorkspaceSessionSubgroupId,
   readStoredGpuiWorkspaceSessionGroupsState,
 } from '../workspace-session-groups';
 import type { GpuiSidebarRuntimeAppShotAndMiscMethods } from './app-shot-and-misc';
@@ -23,15 +21,9 @@ import type { GpuiSidebarRuntimeCloseAfterDoneMethods } from './close-after-done
 import { gpuiSidebarRuntimeCloseAfterDoneMethods } from './close-after-done';
 import {
   GPUI_REMOTE_MACHINE_PRESENTATION_CLEAR_STATES,
-  GPUI_REMOTE_MACHINE_RECONNECT_PROGRESS_STATES,
-  GPUI_REMOTE_MACHINE_RECONNECT_STOP_STATES,
-  GPUI_REMOTE_MACHINE_RETRY_STATES,
   GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
-  GPUI_SIDEBAR_NOTIFICATION_FEED_COMMAND_EVENT_NAME,
   GPUI_SIDEBAR_REMOTE_EVENT_NAME,
 } from './constants';
-import type { GpuiSidebarRuntimeExportTranscriptMethods } from './export-transcript';
-import { gpuiSidebarRuntimeExportTranscriptMethods } from './export-transcript';
 import type { GpuiSidebarRuntimeGitMethods } from './git';
 import { gpuiSidebarRuntimeGitMethods } from './git';
 import {
@@ -39,13 +31,11 @@ import {
   currentGpuiRuntimeSettings,
   hasSameGpuiRuntimeSettings,
 } from './helpers/bootstrap';
-import { normalizeGpuiBrowserTabs, normalizeGpuiDisplayedWorkspaceSessionIds } from './helpers/browser-tabs';
-import { readStoredGpuiCloseAfterDoneSessionIds } from './helpers/close-after-done';
+import { normalizeGpuiBrowserTabs } from './helpers/browser-tabs';
 import {
   createGpuiSidebarHudState,
   hasSameGpuiCommandPaneSessions,
   normalizeGpuiCommandPaneSessions,
-  normalizeGpuiWorkspaceSessionDelayedSends,
 } from './helpers/command-pane';
 import { readStoredGpuiRemoteGroupOrder, readStoredGpuiRemoteRecentProjects } from './helpers/recent-projects';
 import { normalizeNonEmptyString } from './helpers/records';
@@ -53,23 +43,15 @@ import { GpuiRemoteLastSeenStore } from './helpers/remote-last-seen';
 import {
   normalizeGpuiSidebarRemoteEvent,
   parseGpuiRemotePresentationProjectId,
-  parseGpuiRemotePresentationGroupId,
-  parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
-import type { GpuiSidebarRuntimeNotificationFeedMethods } from './notification-feed';
-import { gpuiSidebarRuntimeNotificationFeedMethods } from './notification-feed';
 import type { GpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
 import { gpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
-import type { GpuiSidebarRuntimePreviousSessionMethods } from './previous-sessions';
-import { gpuiSidebarRuntimePreviousSessionMethods } from './previous-sessions';
 import type { GpuiSidebarRuntimeProjectBoardMethods } from './project-board';
 import { gpuiSidebarRuntimeProjectBoardMethods } from './project-board';
 import type { GpuiSidebarRuntimeProjectAndCommandMethods } from './projects-and-commands';
 import { gpuiSidebarRuntimeProjectAndCommandMethods } from './projects-and-commands';
 import type { GpuiSidebarRuntimeRemoteMachineMethods } from './remote-machines';
 import { gpuiSidebarRuntimeRemoteMachineMethods } from './remote-machines';
-import type { GpuiSidebarRuntimeResourcesSnapshotMethods } from './resources-snapshot';
-import { gpuiSidebarRuntimeResourcesSnapshotMethods } from './resources-snapshot';
 import type { GpuiSidebarRuntimeConversationJumpMethods } from './session-conversation-jump';
 import { gpuiSidebarRuntimeConversationJumpMethods } from './session-conversation-jump';
 import type { GpuiSidebarRuntimeDraftSessionMethods } from './draft-sessions';
@@ -80,43 +62,23 @@ import type { GpuiSidebarRuntimeSessionFocusMethods } from './sessions-and-focus
 import { gpuiSidebarRuntimeSessionFocusMethods } from './sessions-and-focus';
 import type { GpuiSidebarRuntimeSidebarGroupMethods } from './sidebar-groups';
 import { gpuiSidebarRuntimeSidebarGroupMethods } from './sidebar-groups';
-import type { GpuiSidebarRuntimeStashedPromptJumpMethods } from './stashed-prompt-jump';
-import { gpuiSidebarRuntimeStashedPromptJumpMethods } from './stashed-prompt-jump';
 import type { GpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-lifecycle-queue';
 import { gpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-lifecycle-queue';
 import type {
   GpuiBrowserTabSummary,
-  GpuiCloseAfterDoneTimer,
   GpuiCommandPaneSessionSummary,
-  GpuiExportTranscriptRequestContext,
-  GpuiExportedTranscriptResult,
-  GpuiPendingGitCommitRequest,
   GpuiPendingNativeAppShotPromptInsertion,
   GpuiPendingRemoteGxserverRequest,
-  GpuiPendingResourcesSnapshotRequest,
   GpuiPresentationSubscription,
-  GpuiProjectWorktreesResultMessage,
   GpuiRemoteSidebarHud,
-  GpuiSidebarGitHubState,
   GpuiSidebarRuntimeSettings,
-  GpuiTrustedExistingWorktreeList,
   GpuiValidatedGxserverBootstrap,
-  GpuiWorkspaceSessionDelayedSendSummary,
-  GpuiWorkspaceTerminalTitleChangedPayload,
 } from './types-and-protocol';
 import type { GpuiSidebarRuntimeWorkspaceGroupMethods } from './workspace-groups-sync';
 import { gpuiSidebarRuntimeWorkspaceGroupMethods, installGpuiWorkspaceGroupsHandBack } from './workspace-groups-sync';
 import type { GpuiSidebarRuntimeWorktreeMethods } from './worktrees';
 import { gpuiSidebarRuntimeWorktreeMethods } from './worktrees';
 import type { WebviewApi } from '@/packages/core-ui/webview-api';
-import {
-  PRIMARY_AGENT_LAUNCHER_CHANGED_EVENT,
-  readPrimaryAgentLauncherId,
-  writePrimaryAgentLauncherId,
-  type PrimaryAgentLauncherChangedEvent,
-} from '@/packages/core-ui/primary-agent-launcher';
-import type { AgentAccountsState } from '@/packages/shared/agent-accounts';
-import { parseGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import { reduceGxserverPresentationDelta } from '@/packages/shared/gxserver-presentation-cache';
 import type {
   GxserverAppUserData,
@@ -126,13 +88,9 @@ import type {
   GxserverSidebarHudResponse,
   GxserverSidebarProjectCollectionsState,
   GxserverSidebarSpacesState,
-  GxserverCustomSessionTagsState,
 } from '@/packages/shared/gxserver-protocol';
 import { NAVIGATION_HISTORY_SCOPE_GPUI } from '@/packages/shared/navigation-history/navigation-history-contract';
-import { EMPTY_NOTIFICATION_FEED_STATE } from '@/packages/shared/notification-feed/notification-feed-contract';
-import type { NotificationFeedState } from '@/packages/shared/notification-feed/notification-feed-contract';
 import { NavigationHistoryController } from '@/packages/shared/navigation-history/navigation-history-controller';
-import type { SidebarProjectDiffStats } from '@/packages/shared/project-diff-stats';
 import type {
   ExtensionToSidebarMessage,
   SidebarGroupsChangedMessage,
@@ -146,13 +104,6 @@ import type {
   SidebarToExtensionMessage,
 } from '@/packages/shared/session-grid-contract';
 import { isSidebarCommandScope } from '@/packages/shared/sidebar-commands';
-import type { SidebarGitState } from '@/packages/shared/sidebar-git';
-import { createDefaultSidebarGitState } from '@/packages/shared/sidebar-git';
-import {
-  SIDEBAR_GIT_HUB_MEMO_TTL_MS,
-  SIDEBAR_GIT_STATE_MEMO_TTL_MS,
-  SidebarGitTtlMemo,
-} from '@/packages/shared/sidebar-git-state-memo';
 
 /*
 CDXC:StateSync 2026-06-24-11:00:
@@ -167,41 +118,11 @@ Reused SidebarApp project path actions in GPUI may send only fixed action names 
 CDXC:Projects 2026-06-24-13:49:
 Reused SidebarApp IDE-open messages in GPUI use the same pathless native project action bridge. The renderer maps group IDE opens to a Settings-owned fixed action and active workspace IDE opens to fixed VS Code/Zed action names plus gxserver project ids only; targetApp, editor commands, app names, paths, labels, URLs, and shell snippets stay out of the bridge payload so Rust owns editor selection and launch.
 
-CDXC:Worktrees 2026-06-24-18:21:
-The reused Add Worktree modal in GPUI must run local worktree create/open flows through gxserver typed endpoints instead of shelling from TypeScript or accepting arbitrary renderer paths. Remote worktree create/open must use id-scoped gxserver endpoints where the owning daemon derives target paths, branch refs, and Open Existing selections from project ids plus daemon-issued keys; do not route remote checkout paths or branch text through the renderer as authority.
-
-CDXC:Worktrees 2026-06-24-14:06:
-Open Existing prompt starts come from the reused modal's real prompt and
-visible agent selector. Blank prompts keep the project-open-only behavior, but
-a non-blank prompt must fail if the submitted agent is not configured instead
-of silently opening the worktree without starting the requested session.
-
 CDXC:ServerDaemon 2026-06-24-13:30:
 Pinned Prompts in the reused GPUI SidebarApp must hydrate and save through
 gxserver app-user-data, matching the app-modal host. Keep prompt bodies inside
 authenticated RPC payloads only; do not log them or persist them in a
 GPUI-only JSON file.
-
-CDXC:Git 2026-06-24-15:22:
-GPUI Git controls may use gxserver-owned project ids and typed Git/GitHub/Beads endpoints for status, diffs, commit, push, and direct remote sync. Commit and PR creation paths must use the reused review modal or visible gxserver agent sessions, with remote-machine actions routed through the Rust-owned saved-machine tunnel and the owning remote gxserver.
-
-CDXC:Git 2026-06-24-15:43:
-Existing pull-request browser open and changed-file IDE open are native GPUI side effects. React may send only fixed action names, gxserver project ids, and normalized project-relative file candidates from current HUD/review state; Rust must re-resolve PR URLs and changed-file membership through gxserver before launching a browser or editor.
-
-CDXC:Git 2026-06-24-15:55:
-GPUI worktree completion may run direct merge-to-main and delete-after-cleanup only from a confirmed Git review request. The renderer uses the pending machine-scoped gxserver project id plus gxserver worktree parent metadata, fixed Git action names, and `/api/deleteWorktreeProject`; renderer paths, branch text, shell snippets, command output, and modal labels are never authority for side effects.
-
-CDXC:Git 2026-06-24-16:11:
-Blank GPUI commit messages use a local gxserver generation endpoint after the reused commit modal validates the selected review files. The renderer sends only the trusted project id, review-approved relative paths, and selected prompt-agent id; gxserver stages/diffs the registered project and returns the subject/body used by the same commit pipeline.
-
-CDXC:Git 2026-06-24-16:28:
-Direct/background GPUI PR creation must complete through gxserver before the UI opens a PR or removes a worktree. Reused review confirmations commit only validated review files, push with fixed Git action names, call the sanitized `/api/createPullRequest` project-id RPC, and run delete-after cleanup only after that result confirms an open PR; visible-agent PR workflows remain non-delete because they have no gxserver-owned PR completion signal.
-
-CDXC:Git 2026-06-24-16:45:
-Visible PR-agent sessions expose gxserver lifecycle/activity only, not a trusted PR-created result. Preserve visible PR sessions for non-delete-after workflows, but route every delete-after PR request through the direct/background gxserver PR result before removing the original validated worktree.
-
-CDXC:Git 2026-06-24-17:47:
-Remote GPUI Git/GitHub/worktree actions must route through the Rust-owned saved-machine gxserver tunnel with machine-scoped project ids, reviewed file paths, fixed endpoint action names, and id-scoped worktree/branch operations only. Native side effects stay explicit: terminal focus uses remote attach, PR browser opens and copy-path use Rust revalidation, local Finder dereference remains unsupported for remote paths, and remote IDE opens require Rust-owned fixed editor support.
 
 CDXC:RemoteMachines 2026-06-24-19:06:
 Remote terminal focus and copy-attach commands may leave React only as fixed native action names plus machine-scoped remote presentation session ids. Rust owns saved-machine SSH details, gxserver attach/resume metadata, GPUI terminal launch payloads, and clipboard command construction so renderer state never carries tokens, hostnames, paths, or command text.
@@ -229,7 +150,6 @@ export function createGpuiSidebarRuntime(): {
   persistWorkspaceGroups: () => void;
   messageSource: GpuiSidebarLocalMessageSource;
   start: () => void;
-  startLocalGxserver: () => void;
   vscode: WebviewApi;
 } {
   const runtime = new GpuiSidebarRuntime();
@@ -238,7 +158,6 @@ export function createGpuiSidebarRuntime(): {
     persistWorkspaceGroups: () => runtime.persistWorkspaceGroups(),
     messageSource: runtime.messageSource,
     start: () => runtime.start(),
-    startLocalGxserver: () => runtime.startLocalGxserver(),
     vscode: runtime.vscode,
   };
 }
@@ -270,7 +189,6 @@ export class GpuiSidebarLocalMessageSource {
       | SidebarHudChangedMessage
       | SidebarOrderSyncResultMessage
       | SidebarPreviousSessionsResultMessage
-      | GpuiProjectWorktreesResultMessage
   ): void {
     this.eventTarget.dispatchEvent(
       new MessageEvent('message', {
@@ -281,67 +199,12 @@ export class GpuiSidebarLocalMessageSource {
 }
 
 export class GpuiSidebarRuntime {
-  private readonly accountTransports = new Map<string, AccountsTransport>();
   readonly messageSource = new GpuiSidebarLocalMessageSource();
   readonly vscode: WebviewApi = {
-    requestGroupAccounts: async (groupId, params) => {
-      const remote = parseGpuiRemotePresentationGroupId(groupId);
-      if (remote) return this.requestRemoteGxserver<AgentAccountsState>(remote.machineId, '/api/agentAccounts', params);
-      if (!this.client) throw new Error('The project’s computer is unavailable.');
-      return this.client.rpc<AgentAccountsState>('/api/agentAccounts', params);
-    },
-    requestSessionAccounts: async (sessionId, params) => {
-      let transport = this.accountTransports.get(sessionId);
-      if (!transport) {
-        const remote = parseGpuiRemotePresentationSessionId(sessionId);
-        const local = parseGxserverPresentationProjectSessionId(sessionId);
-        const target = remote ?? local;
-        if (!target) throw new Error('The session’s computer is unavailable.');
-        transport = createAccountSwitchTransport(
-          async (request) => {
-            const payload = { ...request, projectId: target.projectId, sessionId: target.sessionId };
-            if (remote)
-              return this.requestRemoteGxserver<AgentAccountsState>(remote.machineId, '/api/agentAccounts', payload);
-            if (!this.client) throw new Error('The session’s computer is unavailable.');
-            return this.client.rpc<AgentAccountsState>('/api/agentAccounts', payload);
-          },
-          (progress) => {
-            window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
-              type: 'accountSwitchProgress',
-              projectId: target.projectId,
-              sessionId: target.sessionId,
-              machineId: remote?.machineId,
-              progress,
-            });
-          }
-        );
-        this.accountTransports.set(sessionId, transport);
-      }
-      return transport(params);
-    },
     postMessage: (message) => {
       void this.handleSidebarMessage(message);
     },
   };
-
-  /**
-   * CDXC:AgentLauncher 2026-09-09 WHY:
-   * The last-used agent lives in this page's localStorage (the project-header
-   * dropdown's key). The native New Thread picker is GPUI, which cannot read
-   * it, so the sidebar publishes the value once at startup and on every change.
-   */
-  publishPrimaryAgentLauncher(agentId: string | undefined): void {
-    window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
-      agentId: agentId ?? '',
-      type: 'primaryAgentLauncherChanged',
-    });
-  }
-
-  startLocalGxserver(): void {
-    window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
-      type: 'startGxserverFromTitlebar',
-    });
-  }
 
   notifyNativeGxserverPresentationReady(): void {
     window.requestAnimationFrame(() => {
@@ -354,28 +217,9 @@ export class GpuiSidebarRuntime {
     });
   }
 
-  openSidebarContextMenuCount = 0;
-  sidebarContextMenuFocusHeld = false;
-  activeProjectContextRetryId: number | undefined;
-  titlebarGitMenuStateRetryId: number | undefined;
-  lastTitlebarGitMenuStatePayload: string | undefined;
-  gitPollingCycleTimeoutId: number | undefined;
-  gitPollingTimeoutIds = new Set<number>();
-  pendingProjectDiffRefreshProjectIds = new Set<string>();
-  projectDiffStatsByProjectId = new Map<string, SidebarProjectDiffStats>();
-  /*
-  CDXC:Git 2026-08-16:
-  Projects (plain local ids, machine-scoped remote ids) whose cwd answered
-  `isInsideWorkTree` with true. Repo-ness effectively never changes at runtime,
-  so steady-state polling skips that probe and goes straight to `diffNumstat`;
-  a failed numstat drops the entry so the next cycle re-probes from scratch.
-  */
-  gitRepoProjectIds = new Set<string>();
   activeGroupId: string | undefined;
   activeProjectId: string | undefined;
   lastNavigationHistoryStatePayload: string | undefined;
-  lastNotificationFeedStatePayload: string | undefined;
-  notificationFeedState: NotificationFeedState = EMPTY_NOTIFICATION_FEED_STATE;
   readonly navigationHistory = new NavigationHistoryController({
     activate: (entry) => this.activateNavigationHistoryEntry(entry),
     onStateChange: (state) => this.postNavigationHistoryState(state),
@@ -383,15 +227,6 @@ export class GpuiSidebarRuntime {
     scopeId: NAVIGATION_HISTORY_SCOPE_GPUI,
   });
   appUserData: GxserverAppUserData = createEmptyGpuiAppUserData();
-  attentionAcknowledgementTimeoutsBySessionKey = new Map<string, number>();
-  attentionCompletionSoundEventKeys = new Set<string>();
-  attentionCompletionSoundEventKeyOrder: string[] = [];
-  attentionCompletionSoundSuppressedUntilBySessionKey = new Map<string, number>();
-  attentionEnteredAtBySessionKey = new Map<string, number>();
-  attentionEventIdBySessionKey = new Map<string, string>();
-  autoSleepMonitorIntervalId: number | undefined;
-  autoSleepMonitorRunning = false;
-  bootstrapPollTimeoutId: number | undefined;
   /**
    * Escalating presentation-stream recovery state. `AcknowledgedAt` is when the
    * daemon last answered a `subscribePresentation` (with a snapshot or with
@@ -411,13 +246,7 @@ export class GpuiSidebarRuntime {
   readonly staleRemotePresentationRefreshes = new Map<string, { lastStartedAt: number; trailingTimeoutId?: number }>();
   browserTabs: GpuiBrowserTabSummary[] = [];
   client: GpuiGxserverClient | undefined;
-  closeAfterDoneCountdownTickerId: number | undefined;
-  closeAfterDoneTimersBySessionId = new Map<string, GpuiCloseAfterDoneTimer>();
   commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
-  displayedWorkspaceSessionIds: string[] = [];
-  workspaceSessionDelayedSends = new Map<string, GpuiWorkspaceSessionDelayedSendSummary>();
-  workspaceTerminalTitleObservations = new Map<string, GpuiWorkspaceTerminalTitleChangedPayload>();
-  workspaceTerminalTitleSettleTimeouts = new Map<string, number>();
   domainProjects: GxserverProjectDomainState[] = [];
   focusedSessionId: string | undefined;
   /**
@@ -428,67 +257,14 @@ export class GpuiSidebarRuntime {
    */
   gpuiFocusStamp: number | undefined;
   gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
-  gitState: SidebarGitState = createDefaultSidebarGitState();
   hasHydrated = false;
   latestGroups: SidebarSessionGroup[] = [];
   latestHud: SidebarHudState = createGpuiSidebarHudState();
   localFirstHiddenPresentationSessionKeys = new Set<string>();
   lastAppShotTargetAt = 0;
   lastAppShotTargetSessionId: string | undefined;
-  /**
-   * Which project the active Git HUD slot currently reflects. This is a
-   * *presentation* marker, not a cache: it stops every republish of the same
-   * project from re-entering the refresh path. Cross-project freshness lives in
-   * `gitStateMemoByProjectId` below.
-   */
-  lastGitRefreshProjectId: string | undefined;
-  /*
-  CDXC:Git 2026-07-29:
-  Per-project TTL memo for the local Git fan-out. Before this existed the
-  runtime only remembered the last refreshed project, so switching A -> B -> A
-  re-ran ~10 subprocess-spawning gxserver RPCs every time and starved terminal
-  attach traffic. A switch back to a project with a fresh entry now publishes
-  the memoized state and issues zero RPCs. Explicit and forced refreshes never
-  read the memo, so manual refresh and every Git mutation still re-probe and
-  then overwrite the entry.
-  */
-  gitStateMemoByProjectId = new SidebarGitTtlMemo<SidebarGitState>({
-    ttlMs: SIDEBAR_GIT_STATE_MEMO_TTL_MS,
-  });
-  /*
-  CDXC:Git 2026-07-29:
-  GitHub CLI results get their own, much longer lease because `gh pr view` is a
-  network round trip and pull-request state changes on a human timescale. Kept
-  separate from the Git-state memo so a deferred probe landing later can be
-  overlaid onto an already-published (or already-memoized) local Git state.
-  */
-  gitHubStateMemoByProjectId = new SidebarGitTtlMemo<GpuiSidebarGitHubState>({
-    ttlMs: SIDEBAR_GIT_HUB_MEMO_TTL_MS,
-  });
-  pendingGitHubProbeProjectIds = new Set<string>();
-  gitHubProbeTimeoutIds = new Set<number>();
-  locallyAcknowledgedAttentionEventKeys = new Set<string>();
-  locallyAcknowledgedAttentionEventKeyOrder: string[] = [];
   pendingNativeAppShotPromptInsertions: GpuiPendingNativeAppShotPromptInsertion[] = [];
-  pendingGitCommitRequests = new Map<string, GpuiPendingGitCommitRequest>();
   pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
-  pendingResourcesSnapshotRequests = new Map<string, GpuiPendingResourcesSnapshotRequest>();
-  /*
-  CDXC:TranscriptExport 2026-08-20:
-  What the open Export Transcript result dialog is describing. The dialog is a
-  separate child window with no gxserver client, so it sends back only the agent
-  the user picked; the exported path and the project the export came from stay
-  here, where "Start new conversation" can create the follow-up session in the
-  same project without trusting a path posted back by a page.
-  */
-  pendingExportedTranscript: GpuiExportedTranscriptResult | undefined;
-  /*
-  CDXC:TranscriptExport 2026-08-24:
-  Which session the open Export Transcript dialog is about while the user is
-  still on the include-toggle stage; the dialog's export request carries only
-  the toggles back.
-  */
-  pendingExportTranscriptRequest: GpuiExportTranscriptRequestContext | undefined;
   presentation: GxserverPresentationSnapshot | undefined;
   previousSessionsByHistoryId = new Map<string, SidebarPreviousSessionItem>();
   projectBoardRestorableLinkChecks = new Map<
@@ -506,7 +282,6 @@ export class GpuiSidebarRuntime {
     | undefined;
   recentProjects: GxserverRecentProjectDomainState[] = [];
   remoteGxserverRequestSequence = 0;
-  resourcesSnapshotRequestSequence = 0;
   remotePresentations = new Map<string, GxserverPresentationSnapshot>();
   /*
    * CDXC:RemoteMachines 2026-08-29:
@@ -517,76 +292,44 @@ export class GpuiSidebarRuntime {
   remoteSidebarHuds = new Map<string, GpuiRemoteSidebarHud>();
   remoteLastSeenPresentations = new Map<string, GxserverPresentationSnapshot>();
   remoteLastSeenStore = new GpuiRemoteLastSeenStore();
-  remoteLastSeenPersistTimeoutId: number | undefined;
-  remoteReconnectAttempts = new Map<string, number>();
-  remoteReconnectInFlight = new Set<string>();
-  remoteReconnectTimeouts = new Map<string, number>();
   remoteRecentProjectsByMachineId = new Map<string, GxserverRecentProjectDomainState[]>();
   remoteGroupOrderByMachineId = new Map<string, string[]>();
   revision = 0;
   runtimeSettings: GpuiSidebarRuntimeSettings | undefined;
-  sidebarHudState: GxserverSidebarHudResponse | undefined;
-  postedGlobalActionsPayload: string | undefined;
-
   /*
-   * CDXC:AgentLauncher 2026-08-01:
-   * The gpui tab strip renders Global Actions natively and cannot read this
-   * runtime's state, so every HUD change has to push the list across the
-   * bridge. Routing all HUD writes through this accessor is what guarantees a
-   * new assignment site cannot forget the push and leave the strip stale.
+   * The HUD read this runtime still keeps for its own remaining readers. The tab strip's Global
+   * Actions come from the Rust HUD since the app runtime port's F2 (gx_store/hud/).
    */
-  get sidebarHud(): GxserverSidebarHudResponse | undefined {
-    return this.sidebarHudState;
-  }
-
-  set sidebarHud(hud: GxserverSidebarHudResponse | undefined) {
-    this.sidebarHudState = hud;
-    this.postGpuiGlobalActions();
-  }
+  sidebarHud: GxserverSidebarHudResponse | undefined;
   sleepingLocalSidebarSessionIds = new Set<string>();
   subscription: GpuiPresentationSubscription | undefined;
-  trustedExistingWorktreeList: GpuiTrustedExistingWorktreeList | undefined;
   visibleSessionIds = new Set<string>();
   didAutoMaterializeStartupSession = false;
-  didConnectSavedRemoteMachinesOnStartup = false;
-  enabledRemoteMachineIdsForReconnect = new Set<string>();
   workspaceGroups: GpuiWorkspaceSessionGroupsState = createEmptyGpuiWorkspaceSessionGroupsState();
   lastForwardedRemoteSidebarProjectCollectionsJsonByMachineId = new Map<string, string>();
   lastForwardedRemoteSidebarSpacesJsonByMachineId = new Map<string, string>();
-  latestCustomSessionTagsUpdate: GxserverCustomSessionTagsState | undefined;
-  customSessionTagsServerSyncTimeoutId: number | undefined;
-  customSessionTagsServerSyncPending = false;
   lastForwardedCustomSessionTagsJson: string | undefined;
   lastForwardedRemoteCustomSessionTagsJsonByMachineId = new Map<string, string>();
-  workspaceTerminalLifecycleBridgeRetryId: number | undefined;
 
   start(): void {
     this.installGpuiBridgeCallbacks();
-    this.publishPrimaryAgentLauncher(readPrimaryAgentLauncherId());
-    window.addEventListener(PRIMARY_AGENT_LAUNCHER_CHANGED_EVENT, (event) => {
-      this.publishPrimaryAgentLauncher((event as PrimaryAgentLauncherChangedEvent).detail.agentId);
-    });
     this.runtimeSettings = currentGpuiRuntimeSettings();
     this.remoteRecentProjectsByMachineId = readStoredGpuiRemoteRecentProjects();
     this.remoteGroupOrderByMachineId = readStoredGpuiRemoteGroupOrder();
     this.remoteLastSeenPresentations = this.remoteLastSeenStore.read();
     this.workspaceGroups = readStoredGpuiWorkspaceSessionGroupsState();
-    for (const sessionId of readStoredGpuiCloseAfterDoneSessionIds()) {
-      this.closeAfterDoneTimersBySessionId.set(sessionId, {});
-    }
     window.addEventListener(GPUI_SIDEBAR_REMOTE_EVENT_NAME, this.handleGpuiSidebarRemoteEvent);
     window.addEventListener(
       GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
       this.handleGpuiSidebarNavigationHistoryCommand
     );
-    window.addEventListener(GPUI_SIDEBAR_NOTIFICATION_FEED_COMMAND_EVENT_NAME, (event) =>
-      this.handleGpuiSidebarNotificationFeedCommand(event)
-    );
     this.publishUnavailable('bootstrap-pending');
-    this.tryStartFromInstalledBootstrap(0);
-    this.startGpuiAutoSleepMonitor();
-    this.startGitPollingDriver();
-    window.setTimeout(() => this.connectSavedRemoteMachinesOnStartup(), 0);
+    // `service.ts` installs the bootstrap from the start config before `start()` runs (an empty
+    // object when there is none), so there is nothing to poll for.
+    const bootstrap = window.ghostexGpui?.gxserverBootstrap;
+    if (bootstrap) {
+      this.startFromBootstrap(bootstrap);
+    }
   }
 
   installGpuiBridgeCallbacks(): void {
@@ -595,50 +338,7 @@ export class GpuiSidebarRuntime {
       /*
       CDXC:CommandPane 2026-06-24-23:49:
       Rust-owned command-pane Action lifecycle feedback enters the reused SidebarApp through the same local message source as gxserver presentation patches. Keep this callback typed to existing sidebar messages so GPUI can update button run-state without exposing generic IPC, command text, paths, terminal output, or persisted state to React.
-
-      CDXC:Sessions 2026-07-29:
-      Rust also forwards sidebar-owned app-modal commands (Rename Session
-      confirm, focused-session Close After Done toggles) through this one
-      bridge callback. Those are sidebar-to-extension commands: posting them
-      into the inbound React message source silently dropped them because
-      SidebarApp has no inbound branch for them, so a modal rename never
-      reached `handleSidebarMessage`/gxserver and no `/rename` was staged in
-      the terminal. Route exactly these known command types to the runtime's
-      own sidebar-message handler instead.
-
-      CDXC:RepoStructure 2026-08-22:
-      `removeProject` (Settings → Projects → Remove) is dispatched by Rust over
-      this same bridge and belongs in that list: it too has no inbound React
-      branch, so it was reaching the message source and dying there. The union
-      in `GpuiSidebarHostMessage` is what makes the remaining fall-through
-      provably an extension-to-sidebar message.
       */
-      if (message.type === 'runSidebarAgent') {
-        /*
-        CDXC:AgentLauncher 2026-09-09 WHY:
-        A launch forwarded from the New Thread picker must also become the
-        sidebar's highlighted default agent, which the sidebar keeps in React
-        state and refreshes only through this page's storage event.
-        */
-        writePrimaryAgentLauncherId(message.agentId);
-      }
-      if (
-        message.type === 'renameSession' ||
-        message.type === 'scheduleDelayedSend' ||
-        message.type === 'cancelDelayedSend' ||
-        message.type === 'postponeDelayedSend' ||
-        message.type === 'confirmAgentHookLaunch' ||
-        message.type === 'createSession' ||
-        message.type === 'openBrowserPaneInGroup' ||
-        message.type === 'removeProject' ||
-        message.type === 'runSidebarAgent' ||
-        message.type === 'setSessionNote' ||
-        message.type === 'toggleCloseAfterDone' ||
-        message.type === 'updateCustomSessionTags'
-      ) {
-        void this.handleSidebarMessage(message);
-        return;
-      }
       this.messageSource.postMessage(message);
     };
     const applyBrowserTabs = (tabs: readonly GpuiBrowserTabSummary[] | undefined) => {
@@ -654,16 +354,6 @@ export class GpuiSidebarRuntime {
     };
     gpuiBridge.onBrowserTabsChanged = applyBrowserTabs;
     applyBrowserTabs(gpuiBridge.browserTabs);
-    gpuiBridge.onWorkspaceTerminalLifecycleRequest = (payload) => {
-      /*
-      CDXC:Workarea 2026-06-26-07:25:
-      GPUI native workspace lifecycle must follow macOS ownership: Rust commits Close locally before this callback and uses the sidebar only for asynchronous provider cleanup, while Sleep/Wake still report transition success through the fixed result bridge. Payloads are bounded ids plus action/request enums only; no titles, paths, commands, terminal text, URLs, tokens, or daemon bodies cross this callback.
-
-      CDXC:Workarea 2026-06-26-05:23:
-      The callback may be installed before CEF exposes `postWorkspaceTerminalLifecycleResult`. Queue normalized requests until that bridge exists so Close provider cleanup and acknowledged Sleep/Wake transitions are not lost during startup.
-      */
-      this.handleOrQueueWorkspaceTerminalLifecycleRequest(payload);
-    };
     const applyCommandPaneSessions = (sessions: readonly GpuiCommandPaneSessionSummary[] | undefined) => {
       /*
       CDXC:CommandPane 2026-06-25-10:50:
@@ -679,77 +369,20 @@ export class GpuiSidebarRuntime {
     };
     gpuiBridge.onCommandPaneSessionsChanged = applyCommandPaneSessions;
     applyCommandPaneSessions(gpuiBridge.commandPaneSessions);
-    const applyDisplayedWorkspaceSessionIds = (sessionIds: readonly string[] | undefined) => {
-      /*
-      CDXC:SessionSleep 2026-08-20:
-      Rust owns what is actually on screen. This runtime's own visible/focused
-      sets are a click-history projection: they cannot see that a session's
-      terminal is parked behind its chat surface, and they are dropped whenever
-      gxserver goes away, so a session the user was sitting in front of could be
-      retired by the "Sleep idle agent sessions" sweep. Cache the ids the same
-      way the command-pane bridge does so a restored tab hydrates before React
-      installs listeners.
-      */
-      const next = normalizeGpuiDisplayedWorkspaceSessionIds(sessionIds);
-      gpuiBridge.displayedWorkspaceSessionIds = next;
-      this.displayedWorkspaceSessionIds = next;
-    };
-    gpuiBridge.onDisplayedWorkspaceSessionIdsChanged = applyDisplayedWorkspaceSessionIds;
-    applyDisplayedWorkspaceSessionIds(gpuiBridge.displayedWorkspaceSessionIds);
-    const applyWorkspaceSessionDelayedSends = (
-      sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[] | undefined
-    ) => {
-      const next = normalizeGpuiWorkspaceSessionDelayedSends(sessions);
-      gpuiBridge.workspaceSessionDelayedSends = next;
-      const nextBySessionId = new Map(next.map((session) => [session.sessionId, session]));
-      if (JSON.stringify([...this.workspaceSessionDelayedSends.values()]) === JSON.stringify(next)) {
-        return;
-      }
-      this.workspaceSessionDelayedSends = nextBySessionId;
-      if (this.presentation) {
-        this.publishPresentation('patch');
-      }
-    };
-    gpuiBridge.onWorkspaceSessionDelayedSendsChanged = applyWorkspaceSessionDelayedSends;
-    applyWorkspaceSessionDelayedSends(gpuiBridge.workspaceSessionDelayedSends);
     gpuiBridge.onNativeAppShotCaptured = (payload) => {
       void this.handleNativeAppShotCaptured(payload);
     };
     gpuiBridge.onNativeAppShotPromptResult = (payload) => {
       this.handleNativeAppShotPromptResult(payload);
     };
-    gpuiBridge.onResourcesSnapshotResult = (payload) => {
-      this.handleResourcesSnapshotResult(payload);
-    };
-    gpuiBridge.onStatusPetActivation = (payload) => {
-      this.handleGpuiStatusPetActivation(payload);
-    };
     gpuiBridge.onMenuBarProjectActivation = (payload) => {
       this.handleGpuiMenuBarProjectActivation(payload);
-    };
-    gpuiBridge.onMenuBarSessionActivation = (payload) => {
-      void this.handleGpuiMenuBarSessionActivation(payload);
-    };
-    gpuiBridge.onCommandPaletteSessionFocus = (payload) => {
-      void this.handleGpuiCommandPaletteSessionFocus(payload);
-    };
-    gpuiBridge.onCommandPaletteRunSidebarCommand = (payload) => {
-      this.handleGpuiCommandPaletteRunSidebarCommand(payload);
-    };
-    gpuiBridge.onStashedPromptSessionJump = (payload) => {
-      void this.handleGpuiStashedPromptSessionJump(payload);
     };
     gpuiBridge.onProjectBoardConversationRequest = (payload) => {
       void this.handleGpuiProjectBoardConversationRequest(payload);
     };
     gpuiBridge.onWorkspaceTabSessionSelected = (payload) => {
       this.handleGpuiWorkspaceTabSessionSelected(payload);
-    };
-    gpuiBridge.onWorkspaceFolderPicked = (payload) => {
-      void this.handleGpuiWorkspaceFolderPicked(payload);
-    };
-    gpuiBridge.onWorkspaceSessionAttentionAcknowledge = (payload) => {
-      this.handleGpuiWorkspaceSessionAttentionAcknowledge(payload);
     };
     /*
     CDXC:Sidebar 2026-09-21 WHY:
@@ -765,57 +398,6 @@ export class GpuiSidebarRuntime {
       if (message) void this.handleSidebarMessage(message);
     };
     installGpuiWorkspaceGroupsHandBack(this);
-    gpuiBridge.onWorkspaceTerminalBell = (payload) => {
-      void this.handleGpuiWorkspaceTerminalBell(payload);
-    };
-    gpuiBridge.onWorkspaceTerminalTitleChanged = (payload) => {
-      this.handleGpuiWorkspaceTerminalTitleChanged(payload);
-    };
-    // Bridge handler for `ghostex.gpui.sidebar.workspaceTerminalEscapePressed`.
-    gpuiBridge.onWorkspaceTerminalEscapePressed = (payload) => {
-      this.handleGpuiWorkspaceTerminalEscapePressed(payload);
-    };
-    // Bridge handler for
-    // `ghostex.gpui.sidebar.workspaceFirstPromptTitleGenerationCancel`.
-    gpuiBridge.onWorkspaceFirstPromptTitleGenerationCancel = (payload) => {
-      void this.handleGpuiWorkspaceFirstPromptTitleGenerationCancel(payload);
-    };
-    gpuiBridge.onWorkspaceTerminalRuntimeAction = (payload) => {
-      void this.handleGpuiWorkspaceTerminalRuntimeAction(payload);
-    };
-    gpuiBridge.onTitlebarGitAction = (payload) => {
-      this.handleGpuiTitlebarGitAction(payload);
-    };
-    gpuiBridge.onGitCommitModalCommand = (payload) => {
-      void this.handleGpuiGitCommitModalCommand(payload);
-    };
-    gpuiBridge.onExportTranscriptModalCommand = (payload) => {
-      void this.handleGpuiExportTranscriptModalCommand(payload);
-    };
-    gpuiBridge.onWorktreeModalCommand = (payload) => {
-      this.handleGpuiWorktreeModalCommand(payload);
-    };
-    gpuiBridge.onOsIntegrationCommand = (payload) => {
-      void this.handleGpuiOsIntegrationCommand(payload);
-    };
-    const pendingOsIntegrationCommands = Array.isArray(gpuiBridge.pendingOsIntegrationCommands)
-      ? gpuiBridge.pendingOsIntegrationCommands.splice(0)
-      : [];
-    for (const payload of pendingOsIntegrationCommands) {
-      void this.handleGpuiOsIntegrationCommand(payload);
-    }
-    const pendingStatusPetActivations = Array.isArray(gpuiBridge.pendingStatusPetActivations)
-      ? gpuiBridge.pendingStatusPetActivations.splice(0)
-      : [];
-    if (pendingStatusPetActivations.length > 0) {
-      /*
-      CDXC:StatusPet 2026-06-26-05:07:
-      GPUI status clicks, and a later pet slice using the same fixed shape, can arrive before the runtime installs callbacks. Drain only first-party activation payloads carrying bounded session ids, then route through focusSession; do not persist payloads or expose paths, titles, commands, URLs, tokens, terminal text, or a generic native event bus.
-      */
-      for (const payload of pendingStatusPetActivations) {
-        this.handleGpuiStatusPetActivation(payload);
-      }
-    }
     const pendingMenuBarProjectActivations = Array.isArray(gpuiBridge.pendingMenuBarProjectActivations)
       ? gpuiBridge.pendingMenuBarProjectActivations.splice(0)
       : [];
@@ -827,38 +409,6 @@ export class GpuiSidebarRuntime {
       for (const payload of pendingMenuBarProjectActivations) {
         this.handleGpuiMenuBarProjectActivation(payload);
       }
-    }
-    const pendingMenuBarSessionActivations = Array.isArray(gpuiBridge.pendingMenuBarSessionActivations)
-      ? gpuiBridge.pendingMenuBarSessionActivations.splice(0)
-      : [];
-    if (pendingMenuBarSessionActivations.length > 0) {
-      /*
-      CDXC:StatusPet 2026-06-26-06:05:
-      GPUI menu-bar session clicks use a fixed first-party payload with bounded project/session ids. Drain queued clicks into the existing focusSession path so local clicks still use WorkspaceTerminalFocus and remote-shaped ids stay within reviewed focus routing.
-      */
-      for (const payload of pendingMenuBarSessionActivations) {
-        void this.handleGpuiMenuBarSessionActivation(payload);
-      }
-    }
-    const pendingCommandPaletteSessionFocusRequests = Array.isArray(
-      gpuiBridge.pendingCommandPaletteSessionFocusRequests
-    )
-      ? gpuiBridge.pendingCommandPaletteSessionFocusRequests.splice(0)
-      : [];
-    for (const payload of pendingCommandPaletteSessionFocusRequests) {
-      void this.handleGpuiCommandPaletteSessionFocus(payload);
-    }
-    const pendingCommandPaletteRunSidebarCommands = Array.isArray(gpuiBridge.pendingCommandPaletteRunSidebarCommands)
-      ? gpuiBridge.pendingCommandPaletteRunSidebarCommands.splice(0)
-      : [];
-    for (const payload of pendingCommandPaletteRunSidebarCommands) {
-      this.handleGpuiCommandPaletteRunSidebarCommand(payload);
-    }
-    const pendingStashedPromptSessionJumps = Array.isArray(gpuiBridge.pendingStashedPromptSessionJumps)
-      ? gpuiBridge.pendingStashedPromptSessionJumps.splice(0)
-      : [];
-    for (const payload of pendingStashedPromptSessionJumps) {
-      void this.handleGpuiStashedPromptSessionJump(payload);
     }
     const pendingProjectBoardConversationRequests = Array.isArray(gpuiBridge.pendingProjectBoardConversationRequests)
       ? gpuiBridge.pendingProjectBoardConversationRequests.splice(0)
@@ -883,26 +433,6 @@ export class GpuiSidebarRuntime {
         this.handleGpuiWorkspaceTabSessionSelected(payload);
       }
     }
-    const pendingWorkspaceTerminalLifecycleRequests = Array.isArray(
-      gpuiBridge.pendingWorkspaceTerminalLifecycleRequests
-    )
-      ? gpuiBridge.pendingWorkspaceTerminalLifecycleRequests.splice(0)
-      : [];
-    this.drainPendingWorkspaceTerminalLifecycleRequests(pendingWorkspaceTerminalLifecycleRequests);
-    const pendingWorkspaceFolderPicks = Array.isArray(gpuiBridge.pendingWorkspaceFolderPicks)
-      ? gpuiBridge.pendingWorkspaceFolderPicks.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceFolderPicks) {
-      void this.handleGpuiWorkspaceFolderPicked(payload);
-    }
-    const pendingWorkspaceSessionAttentionAcknowledgements = Array.isArray(
-      gpuiBridge.pendingWorkspaceSessionAttentionAcknowledgements
-    )
-      ? gpuiBridge.pendingWorkspaceSessionAttentionAcknowledgements.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceSessionAttentionAcknowledgements) {
-      this.handleGpuiWorkspaceSessionAttentionAcknowledge(payload);
-    }
     const pendingSidebarCommands = Array.isArray(gpuiBridge.pendingSidebarCommands)
       ? gpuiBridge.pendingSidebarCommands.splice(0)
       : [];
@@ -910,73 +440,11 @@ export class GpuiSidebarRuntime {
       const message = asGpuiSidebarCommand(payload);
       if (message) void this.handleSidebarMessage(message);
     }
-    const pendingWorkspaceTerminalBells = Array.isArray(gpuiBridge.pendingWorkspaceTerminalBells)
-      ? gpuiBridge.pendingWorkspaceTerminalBells.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceTerminalBells) {
-      void this.handleGpuiWorkspaceTerminalBell(payload);
-    }
-    const pendingWorkspaceTerminalTitleChanges = Array.isArray(gpuiBridge.pendingWorkspaceTerminalTitleChanges)
-      ? gpuiBridge.pendingWorkspaceTerminalTitleChanges.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceTerminalTitleChanges) {
-      this.handleGpuiWorkspaceTerminalTitleChanged(payload);
-    }
-    const pendingWorkspaceTerminalEscapePresses = Array.isArray(gpuiBridge.pendingWorkspaceTerminalEscapePresses)
-      ? gpuiBridge.pendingWorkspaceTerminalEscapePresses.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceTerminalEscapePresses) {
-      this.handleGpuiWorkspaceTerminalEscapePressed(payload);
-    }
-    const pendingWorkspaceFirstPromptTitleGenerationCancels = Array.isArray(
-      gpuiBridge.pendingWorkspaceFirstPromptTitleGenerationCancels
-    )
-      ? gpuiBridge.pendingWorkspaceFirstPromptTitleGenerationCancels.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceFirstPromptTitleGenerationCancels) {
-      void this.handleGpuiWorkspaceFirstPromptTitleGenerationCancel(payload);
-    }
-    const pendingWorkspaceTerminalRuntimeActions = Array.isArray(gpuiBridge.pendingWorkspaceTerminalRuntimeActions)
-      ? gpuiBridge.pendingWorkspaceTerminalRuntimeActions.splice(0)
-      : [];
-    for (const payload of pendingWorkspaceTerminalRuntimeActions) {
-      void this.handleGpuiWorkspaceTerminalRuntimeAction(payload);
-    }
-    const pendingTitlebarGitActions = Array.isArray(gpuiBridge.pendingTitlebarGitActions)
-      ? gpuiBridge.pendingTitlebarGitActions.splice(0)
-      : [];
-    for (const payload of pendingTitlebarGitActions) {
-      this.handleGpuiTitlebarGitAction(payload);
-    }
-    const pendingGitCommitModalCommands = Array.isArray(gpuiBridge.pendingGitCommitModalCommands)
-      ? gpuiBridge.pendingGitCommitModalCommands.splice(0)
-      : [];
-    for (const payload of pendingGitCommitModalCommands) {
-      void this.handleGpuiGitCommitModalCommand(payload);
-    }
-    const pendingExportTranscriptModalCommands = Array.isArray(gpuiBridge.pendingExportTranscriptModalCommands)
-      ? gpuiBridge.pendingExportTranscriptModalCommands.splice(0)
-      : [];
-    for (const payload of pendingExportTranscriptModalCommands) {
-      void this.handleGpuiExportTranscriptModalCommand(payload);
-    }
-    const pendingWorktreeModalCommands = Array.isArray(gpuiBridge.pendingWorktreeModalCommands)
-      ? gpuiBridge.pendingWorktreeModalCommands.splice(0)
-      : [];
-    for (const payload of pendingWorktreeModalCommands) {
-      this.handleGpuiWorktreeModalCommand(payload);
-    }
     const pendingNativeAppShotPromptResults = Array.isArray(gpuiBridge.pendingNativeAppShotPromptResults)
       ? gpuiBridge.pendingNativeAppShotPromptResults.splice(0)
       : [];
     for (const payload of pendingNativeAppShotPromptResults) {
       this.handleNativeAppShotPromptResult(payload);
-    }
-    const pendingResourcesSnapshotResults = Array.isArray(gpuiBridge.pendingResourcesSnapshotResults)
-      ? gpuiBridge.pendingResourcesSnapshotResults.splice(0)
-      : [];
-    for (const payload of pendingResourcesSnapshotResults) {
-      this.handleResourcesSnapshotResult(payload);
     }
     const pendingNativeAppShots = Array.isArray(gpuiBridge.pendingNativeAppShots)
       ? gpuiBridge.pendingNativeAppShots.splice(0)
@@ -993,15 +461,12 @@ export class GpuiSidebarRuntime {
     gpuiBridge.onRuntimeSettingsChanged = (runtimeSettings) => {
       const didChange = !hasSameGpuiRuntimeSettings(this.runtimeSettings, runtimeSettings);
       this.runtimeSettings = runtimeSettings;
-      this.connectSavedRemoteMachinesOnStartup();
-      this.reconcileRemoteMachineRetryTargets();
       if (!didChange) {
         return;
       }
       this.publishHudPatch();
       this.postGpuiStatusPetState();
       this.postActiveProjectContext();
-      void this.runGpuiAutoSleepMonitor('settings-change');
     };
     gpuiBridge.onGxserverBootstrapChanged = (bootstrap) => {
       this.applyGxserverBootstrapChanged(bootstrap);
@@ -1015,22 +480,7 @@ export class GpuiSidebarRuntime {
     }
     if (remoteEvent.type === 'remoteMachineStatus') {
       this.messageSource.postMessage(remoteEvent);
-      if (remoteEvent.state === 'connected') {
-        this.resetRemoteReconnect(remoteEvent.machineId);
-      } else if (GPUI_REMOTE_MACHINE_RECONNECT_PROGRESS_STATES.has(remoteEvent.state)) {
-        this.remoteReconnectInFlight.add(remoteEvent.machineId);
-        this.clearRemoteReconnectTimeout(remoteEvent.machineId);
-      } else if (GPUI_REMOTE_MACHINE_RETRY_STATES.has(remoteEvent.state)) {
-        this.remoteReconnectInFlight.delete(remoteEvent.machineId);
-        this.scheduleRemoteReconnect(remoteEvent.machineId);
-      } else if (GPUI_REMOTE_MACHINE_RECONNECT_STOP_STATES.has(remoteEvent.state)) {
-        this.resetRemoteReconnect(remoteEvent.machineId);
-      }
       if (GPUI_REMOTE_MACHINE_PRESENTATION_CLEAR_STATES.has(remoteEvent.state)) {
-        const previousPresentation = this.remotePresentations.get(remoteEvent.machineId);
-        if (previousPresentation) {
-          this.syncRemotePresentationAttentionTracking(remoteEvent.machineId, previousPresentation.sessions, []);
-        }
         this.remotePresentations.delete(remoteEvent.machineId);
         // A queued stale-revision refetch is for a cache this just dropped, and
         // the machine is no longer reachable to serve it.
@@ -1054,18 +504,13 @@ export class GpuiSidebarRuntime {
     }
 
     if (remoteEvent.payload.type === 'presentationSnapshot') {
-      const previousSessions = this.remotePresentations.get(remoteEvent.remoteMachineId)?.sessions ?? [];
-      const snapshot = this.projectRemotePresentationAttentionAcknowledgementGuards(
-        remoteEvent.remoteMachineId,
-        remoteEvent.payload.snapshot
-      );
+      const snapshot = remoteEvent.payload.snapshot;
       const previous = this.remotePresentations.get(remoteEvent.remoteMachineId);
       if (previous && previous.revision > snapshot.revision) {
         return;
       }
       this.remotePresentations.set(remoteEvent.remoteMachineId, snapshot);
       this.pruneRemoteWorkspaceGroupAssignments(remoteEvent.remoteMachineId, snapshot);
-      this.syncRemotePresentationAttentionTracking(remoteEvent.remoteMachineId, previousSessions, snapshot.sessions);
       this.publishRemotePresentationPatch();
       /*
       CDXC:RemoteMachines 2026-08-29:
@@ -1150,13 +595,9 @@ export class GpuiSidebarRuntime {
       this.scheduleStaleRemotePresentationRefresh(remoteEvent.remoteMachineId);
       return;
     }
-    const snapshot = this.projectRemotePresentationAttentionAcknowledgementGuards(
-      remoteEvent.remoteMachineId,
-      reduceGxserverPresentationDelta(previous, remoteEvent.payload.delta, remoteEvent.payload.revision)
-    );
+    const snapshot = reduceGxserverPresentationDelta(previous, remoteEvent.payload.delta, remoteEvent.payload.revision);
     this.remotePresentations.set(remoteEvent.remoteMachineId, snapshot);
     this.pruneRemoteWorkspaceGroupAssignments(remoteEvent.remoteMachineId, snapshot);
-    this.syncRemotePresentationAttentionTracking(remoteEvent.remoteMachineId, previous.sessions, snapshot.sessions);
     this.publishRemotePresentationPatch();
     /*
     CDXC:RemoteMachines 2026-08-29:
@@ -1179,56 +620,20 @@ export class GpuiSidebarRuntime {
   };
 
   async handleSidebarMessage(message: SidebarToExtensionMessage): Promise<void> {
+    /*
+     * CDXC:Diagnostics 2026-09-25 WHY:
+     * The app runtime port's meter counts every handler call here, whichever of the four doors
+     * delivered it (onSidebarCommand, onSidebarHostMessage, the Git modal commands, Quick Access).
+     * The service drops this message unless the `native.runtime.trace` scenario armed it.
+     */
+    nativePost({ kind: 'traceEntry', name: `handleSidebarMessage:${message.type}` });
     switch (message.type) {
-      case 'sidebarDebugLog':
-        window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
-          details: message.details,
-          event: message.event,
-          scenarioId: message.scenarioId,
-          type: 'sidebarDiagnosticLog',
-        });
-        return;
       case 'focusGroup':
         this.focusGroup(message.groupId, message);
         return;
       case 'focusSession':
         await this.focusSession(message.sessionId, message);
         this.postSidebarSessionFocusConfirmation(message.sessionId);
-        return;
-      case 'jumpToStashedPromptSession':
-        await this.jumpToStashedPromptSession(message);
-        return;
-      case 'focusSessionMode':
-        if (parseGpuiRemotePresentationSessionId(message.sessionId)) {
-          await this.focusSession(message.sessionId, message);
-          this.postSidebarSessionFocusConfirmation(message.sessionId);
-          return;
-        }
-        this.handleUnsupportedSidebarMessage(message);
-        return;
-      case 'createSession':
-        await this.createSession();
-        return;
-      case 'createSessionInGroup':
-        await this.createSession(message.groupId);
-        return;
-      case 'createProjectTerminal':
-        await this.createProjectTerminal(message);
-        return;
-      case 'createChat':
-        await this.createQuickTerminal();
-        return;
-      case 'openBrowserChat':
-        this.openQuickBrowserTab();
-        return;
-      case 'openBrowserPaneInGroup':
-        this.openBrowserPaneInGroup(message.groupId);
-        return;
-      case 'runSidebarAgent':
-        await this.requestAgentSessionLaunch(message.agentId, message.groupId, message.accountId);
-        return;
-      case 'confirmAgentHookLaunch':
-        await this.confirmAgentHookLaunch(message);
         return;
       case 'runSidebarCommand': {
         /*
@@ -1256,23 +661,6 @@ export class GpuiSidebarRuntime {
         this.runSidebarCommand(commandId, message, message.scope ?? 'project');
         return;
       }
-      case 'runGhostexHotkeyAction': {
-        this.postGhostexHotkeyAction(message);
-        return;
-      }
-      case 'endSidebarCommandRun': {
-        /*
-        CDXC:CommandPane 2026-06-26-05:22:
-        Closing a command-pane Action run is command-id-only. Validate the selector at the runtime boundary so malformed renderer messages with command text, URLs, paths, cwd/env, logs, or output are unsupported no-ops instead of crashing before the run-end bridge can decline them.
-        */
-        const commandId = normalizeNonEmptyString(message.commandId);
-        if (!commandId) {
-          this.handleUnsupportedSidebarMessage(message);
-          return;
-        }
-        this.endSidebarCommandRun(commandId, message);
-        return;
-      }
       case 'setSessionSleeping':
         await this.setSessionSleeping(message.sessionId, message.sleeping);
         return;
@@ -1291,36 +679,14 @@ export class GpuiSidebarRuntime {
       case 'copySessionDetails':
         this.copySessionDetails(message);
         return;
-      case 'sidebarContextMenuOpened':
-        this.noteSidebarContextMenuOpened();
-        return;
-      case 'sidebarContextMenuClosed':
-        this.noteSidebarContextMenuClosed();
-        return;
       case 'fullReloadSession':
-      case 'restartSession':
         await this.fullReloadSession(message.sessionId);
-        return;
-      case 'switchSessionAgent':
-        await this.switchSessionAgent(message.sessionId, message.agentId);
         return;
       case 'fullReloadProjectZmxSessions':
         await this.fullReloadProjectZmxSessions(message.groupId);
         return;
       case 'fullReloadGroup':
         await this.fullReloadWorkspaceGroup(message.groupId);
-        return;
-      case 'toggleCloseAfterDone':
-        this.toggleCloseAfterDone(message.sessionId);
-        return;
-      case 'scheduleDelayedSend':
-        await this.scheduleRemoteDelayedSend(message);
-        return;
-      case 'postponeDelayedSend':
-        await this.postponeDelayedSend(message.sessionId, message.delayMs);
-        return;
-      case 'cancelDelayedSend':
-        await this.cancelDelayedSend(message.sessionId);
         return;
       case 'openAutomationsPage':
         /*
@@ -1347,18 +713,6 @@ export class GpuiSidebarRuntime {
       case 'splitSessionRight':
         await this.splitSessionRight(message.sessionId);
         return;
-      case 'exportSessionTranscript':
-        await this.exportSessionTranscript(message.sessionId);
-        return;
-      case 'renameSession':
-        await this.renameSession(message);
-        return;
-      case 'setSessionFavorite':
-        await this.updateSessionFlags(message.sessionId, {
-          isFavorite: message.favorite,
-          sessionTag: message.favorite ? 'favorite' : null,
-        });
-        return;
       case 'setSessionTag':
         await this.updateSessionFlags(message.sessionId, {
           isFavorite: message.sessionTag === 'favorite',
@@ -1373,9 +727,6 @@ export class GpuiSidebarRuntime {
       case 'setSessionParked':
         await this.setSessionParked(message.sessionId, message.parked);
         return;
-      case 'setSessionNote':
-        await this.saveSessionNote(message.sessionId, message.note);
-        return;
       /*
       CDXC:StateSync 2026-07-29:
       Sidebar V2's settle/snooze commands map 1:1 onto gxserver endpoints. They
@@ -1385,42 +736,20 @@ export class GpuiSidebarRuntime {
       (a working or blocked session cannot settle) that the client must not
       pre-empt.
       */
-      case 'settleSession':
-        await this.runSessionLifecycleCommand(message.sessionId, '/api/settleSession', {});
-        return;
-      case 'unsettleSession':
-        await this.runSessionLifecycleCommand(message.sessionId, '/api/unsettleSession', {});
-        return;
       case 'snoozeSession':
         await this.snoozeSession(message.sessionId, message.snoozedUntil);
         return;
       case 'unsnoozeSession':
         await this.runSessionLifecycleCommand(message.sessionId, '/api/unsnoozeSession', {});
         return;
+      /*
+       * CDXC:Sessions 2026-09-25 WHY:
+       * A user-made group's order, New Group, Rename, Close Group, Move to New Group, a session
+       * dropped into a group and the project order are all Rust's (gx-core workspace_groups/ and
+       * sidebar_drag/, a remote row's included), so only a project group's session order is left.
+       */
       case 'syncSessionOrder':
-        if (parseGpuiWorkspaceSessionSubgroupId(message.groupId)) {
-          this.syncWorkspaceSubgroupSessionOrder(message.groupId, message.sessionIds);
-          return;
-        }
         await this.syncSessionOrder(message.groupId, message.sessionIds);
-        return;
-      case 'createGroup':
-        this.createWorkspaceGroup(message.groupId);
-        return;
-      case 'createGroupFromSession':
-        this.createWorkspaceGroupFromSession(message.sessionId);
-        return;
-      case 'renameGroup':
-        this.renameWorkspaceGroup(message.groupId, message.title);
-        return;
-      case 'closeGroup':
-        await this.closeWorkspaceGroup(message.groupId);
-        return;
-      case 'moveSessionToGroup':
-        this.moveSessionToWorkspaceGroup(message);
-        return;
-      case 'syncGroupOrder':
-        await this.syncWorkspaceGroupOrder(message.groupIds);
         return;
       /*
       CDXC:Projects 2026-09-21 WHY:
@@ -1439,249 +768,6 @@ export class GpuiSidebarRuntime {
         if (message.remoteMachineId) {
           await this.updateRemoteSidebarSpaces(message.remoteMachineId, message.state);
         }
-        return;
-      case 'updateCustomSessionTags':
-        if (message.remoteMachineId) {
-          await this.updateRemoteCustomSessionTags(message.remoteMachineId, message.state);
-          return;
-        }
-        this.queueCustomSessionTagsServerSync(message.state);
-        return;
-      case 'requestPreviousSessions':
-        await this.requestPreviousSessions(message);
-        return;
-      case 'searchPreviousSessionsByText':
-        this.searchPreviousSessionsByText();
-        return;
-      case 'restorePreviousSession':
-        await this.restorePreviousSession(message.historyId);
-        return;
-      case 'deletePreviousSession':
-        await this.deletePreviousSession(message.historyId);
-        return;
-      case 'copyAttachCommand': {
-        const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
-        if (remoteSession) {
-          this.postRemoteSessionNativeAction('copyRemoteAttachCommand', remoteSession, message);
-          return;
-        }
-        this.handleUnsupportedSidebarMessage(message);
-        return;
-      }
-      case 'copyResumeCommand': {
-        const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
-        if (remoteSession) {
-          this.postRemoteSessionNativeAction('copyRemoteResumeCommand', remoteSession, message);
-          return;
-        }
-        this.handleUnsupportedSidebarMessage(message);
-        return;
-      }
-      case 'requestProjectWorktrees':
-        await this.requestProjectWorktrees(message);
-        return;
-      case 'savePinnedPrompt':
-        await this.savePinnedPrompt(message);
-        return;
-      case 'createProjectWorktree':
-        await this.createProjectWorktree(message);
-        return;
-      case 'createWorktreeSession':
-        await this.createWorktreeSession(message);
-        return;
-      case 'removeSessionWorktree':
-        await this.removeSessionWorktree(message);
-        return;
-      case 'promptDeleteWorktreeForGroup':
-        await this.promptDeleteWorktreeForGroup(message.groupId);
-        return;
-      case 'confirmDeleteWorktree':
-        await this.confirmDeleteWorktree(message);
-        return;
-      case 'promptRenameWorktreeForGroup':
-        await this.promptRenameWorktreeForGroup(message.groupId);
-        return;
-      case 'confirmRenameWorktree':
-        await this.confirmRenameWorktree(message);
-        return;
-      case 'updateSettingsPatch':
-        this.saveSidebarSettingsPatch(message);
-        return;
-      case 'openExternalUrl':
-        this.openExternalUrl(message);
-        return;
-      case 'openSettings':
-        this.openAppModal('settings');
-        return;
-      /*
-       * CDXC:Onboarding 2026-09-15 DECISION:
-       * User: "i want setup button in the tips dropdown to open this new one instead of the old one". The
-       * Tips "Setup" button and the Quick Access "Setup" command share this one `openWorkspaceWelcome`
-       * message, so it opens the Onboarding modal on every host that handles it; the automatic first run
-       * opens the same modal (with `firstRun`) from apps/desktop/src/app/modals.rs. The old
-       * FirstLaunchSetup modal stays in the tree under its own id and nothing opens it by default.
-       * SEE-ALSO: apps/desktop/src/app/delayed_send.rs handles the same message natively.
-       */
-      case 'openWorkspaceWelcome':
-        this.openAppModal('onboarding');
-        return;
-      case 'openHighlightedFeatures':
-      case 'openGhostexTutorialVideo':
-        this.openAppModal('watchGhostexVideo');
-        return;
-      case 'reconnectRemoteMachine':
-        this.reconnectRemoteMachine(message.remoteMachineId, message.installApproved === true);
-        return;
-      case 'pickWorkspaceFolder':
-        this.pickWorkspaceFolder(message);
-        return;
-      case 'removeProject':
-        await this.removeProject(message.projectId);
-        return;
-      case 'restoreRecentProject':
-        await this.restoreRecentProject(message.projectId);
-        return;
-      case 'removeRecentProject':
-        await this.removeRecentProject(message.projectId);
-        return;
-      case 'copyRecentProjectPath':
-        {
-          const remoteProject = parseGpuiRemotePresentationProjectId(message.projectId);
-          if (remoteProject) {
-            this.postRemoteProjectNativeAction('copyRemoteProjectPath', remoteProject, message);
-            return;
-          }
-        }
-        this.postNativeProjectPathAction('copyRecentProjectPath', message.projectId, message);
-        return;
-      case 'openRecentProjectInFinder':
-        {
-          const remoteProject = parseGpuiRemotePresentationProjectId(message.projectId);
-          if (remoteProject) {
-            this.postRemoteProjectNativeAction('openRemoteProjectTerminal', remoteProject, message);
-            return;
-          }
-        }
-        this.postNativeProjectPathAction('openRecentProjectInFinder', message.projectId, message);
-        return;
-      case 'openRecentProjectTerminal':
-        {
-          const remoteProject = parseGpuiRemotePresentationProjectId(message.projectId);
-          if (remoteProject) {
-            this.postRemoteProjectNativeAction('openRemoteProjectTerminal', remoteProject, message);
-          }
-        }
-        return;
-      case 'closeWorkspaceProjectForGroup':
-        await this.closeProjectForGroup(message.groupId, message.successorSessionId);
-        return;
-      case 'copyWorkspaceProjectPathForGroup':
-        this.postProjectPathActionForGroup('copyWorkspaceProjectPath', message.groupId, message);
-        return;
-      case 'copyWorkspaceProjectRemoteUrl':
-        this.copyWorkspaceProjectRemoteUrl(message);
-        return;
-      case 'openWorkspaceProjectInFinderForGroup':
-        this.postProjectPathActionForGroup('openWorkspaceProjectInFinder', message.groupId, message);
-        return;
-      case 'openWorkspaceProjectInIdeForGroup':
-        this.postProjectPathActionForGroup('openWorkspaceProjectInIde', message.groupId, message);
-        return;
-      case 'openActiveWorkspaceProjectInFinder':
-        this.postActiveProjectPathAction('openActiveWorkspaceProjectInFinder', message);
-        return;
-      case 'openActiveWorkspaceProjectInIde':
-        if (message.targetApp !== 'vscode' && message.targetApp !== 'zed') {
-          this.handleUnsupportedSidebarMessage(message);
-          return;
-        }
-        this.postActiveProjectPathAction(
-          message.targetApp === 'vscode' ? 'openActiveWorkspaceProjectInVscode' : 'openActiveWorkspaceProjectInZed',
-          message
-        );
-        return;
-      case 'removeWorkspaceProjectForGroup':
-        await this.removeProjectForGroup(message.groupId);
-        return;
-      case 'setProjectWorktreeCommand':
-        await this.updateProjectWorktreeCommand(message.projectId, message.command);
-        return;
-      case 'setProjectBeadsDisplayKey':
-        await this.updateProjectBeadsDisplayKey(message.projectId, message.displayKey);
-        return;
-      case 'setProjectBeadsDirectory':
-        await this.updateProjectBeadsDirectory(message.projectId, message.directory);
-        return;
-      case 'setProjectDocsDirectory':
-        await this.updateProjectDocsDirectory(message.projectId, message.directory);
-        return;
-      case 'refreshGitState':
-        await this.refreshGitStateForMessage(message);
-        return;
-      case 'setSidebarGitPrimaryAction':
-        await this.persistGitPreferences({ primaryAction: message.action }, message);
-        return;
-      case 'setSidebarGitCommitConfirmationEnabled':
-        await this.persistGitPreferences({ confirmCommit: message.enabled }, message);
-        return;
-      case 'setSidebarGitGenerateCommitBodyEnabled':
-        await this.persistGitPreferences({ generateCommitBody: message.enabled }, message);
-        return;
-      case 'runSidebarGitAction':
-        await this.runSidebarGitAction(message);
-        return;
-      case 'confirmSidebarGitCommit':
-        await this.confirmSidebarGitCommit(message);
-        return;
-      case 'cancelSidebarGitCommit':
-        this.pendingGitCommitRequests.delete(message.requestId);
-        this.publishHudPatch();
-        return;
-      case 'runSidebarGitMultipleCommits':
-        await this.runSidebarGitMultipleCommits(message.requestId, message.agentId);
-        return;
-      case 'confirmSidebarGitDirectMerge':
-        await this.confirmSidebarGitDirectMerge(message);
-        return;
-      case 'commitWorktreeBeforeDelete':
-        await this.runSidebarGitAction({
-          action: 'commit',
-          groupId: message.groupId,
-          type: 'runSidebarGitAction',
-        });
-        return;
-      case 'openSidebarGitChangedFileDiff':
-        await this.openSidebarGitChangedFileDiff(message.filePath, message.requestId);
-        return;
-      case 'openSidebarGitChangedFile':
-        await this.openSidebarGitChangedFileInIde(message);
-        return;
-      case 'saveSidebarAgent':
-        await this.saveSidebarAgent(message);
-        return;
-      case 'deleteSidebarAgent':
-        await this.deleteSidebarAgent(message.agentId);
-        return;
-      case 'syncSidebarAgentOrder':
-        await this.syncSidebarAgentOrder(message.requestId, message.agentIds);
-        return;
-      case 'saveSidebarCommand':
-        await this.saveSidebarCommand(message);
-        return;
-      case 'deleteSidebarCommand':
-        await this.deleteSidebarCommand(message.commandId);
-        return;
-      case 'syncSidebarCommandOrder':
-        await this.syncSidebarCommandOrder(message.requestId, message.commandIds);
-        return;
-      case 'saveGlobalSidebarCommand':
-        await this.saveGlobalSidebarCommand(message);
-        return;
-      case 'deleteGlobalSidebarCommand':
-        await this.deleteGlobalSidebarCommand(message.commandId);
-        return;
-      case 'syncGlobalSidebarCommandOrder':
-        await this.syncGlobalSidebarCommandOrder(message.requestId, message.commandIds);
         return;
       default:
         this.handleUnsupportedSidebarMessage(message);
@@ -1723,19 +809,14 @@ export interface GpuiSidebarRuntime
     GpuiSidebarRuntimeSessionCreateMethods,
     GpuiSidebarRuntimeDraftSessionMethods,
     GpuiSidebarRuntimeAutoSleepMethods,
-    GpuiSidebarRuntimePreviousSessionMethods,
     GpuiSidebarRuntimeProjectBoardMethods,
     GpuiSidebarRuntimeConversationJumpMethods,
-    GpuiSidebarRuntimeStashedPromptJumpMethods,
     GpuiSidebarRuntimeAttentionMethods,
     GpuiSidebarRuntimeCloseAfterDoneMethods,
     GpuiSidebarRuntimeTerminalLifecycleMethods,
-    GpuiSidebarRuntimeExportTranscriptMethods,
     GpuiSidebarRuntimeWorkspaceGroupMethods,
     GpuiSidebarRuntimeRemoteMachineMethods,
     GpuiSidebarRuntimeAppShotAndMiscMethods,
-    GpuiSidebarRuntimeResourcesSnapshotMethods,
-    GpuiSidebarRuntimeNotificationFeedMethods,
     GpuiSidebarRuntimeProjectAndCommandMethods {}
 
 function installGpuiSidebarRuntimeMethods(methods: Record<string, unknown>): void {
@@ -1757,17 +838,12 @@ installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSessionFocusMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSessionCreateMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeDraftSessionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAutoSleepMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimePreviousSessionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeProjectBoardMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeConversationJumpMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeStashedPromptJumpMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAttentionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeCloseAfterDoneMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeTerminalLifecycleMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeExportTranscriptMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeWorkspaceGroupMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeRemoteMachineMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAppShotAndMiscMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeResourcesSnapshotMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeNotificationFeedMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeProjectAndCommandMethods);

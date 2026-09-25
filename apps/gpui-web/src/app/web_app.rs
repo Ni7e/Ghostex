@@ -130,8 +130,22 @@ impl GhostexGpuiApp {
     ) {
     }
 
-    /// The desktop's quick model picker hotkey; the chat's own model pill opens the picker here.
-    pub(crate) fn request_focused_session_model_picker(&mut self, _cx: &mut Context<Self>) -> bool {
+    /// The desktop's model picker hotkey; the chat's own model pill opens the picker here.
+    pub(crate) fn request_focused_session_model_picker(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> bool {
+        false
+    }
+
+    /// Cmd+T in a Browser pane opens a browser tab on desktop; the browser build has no Browser panes.
+    pub(crate) fn run_new_session_hotkey(
+        &mut self,
+        _action_id: &str,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> bool {
         false
     }
 

@@ -38,7 +38,29 @@ impl GhostexGpuiApp {
         through the http/https-only OS open helper after the same toolbar
         normalization as typed addresses.
         */
+        let remote_project = self.active_gpui_remote_project_reference();
         for link in links {
+            // CDXC:RemoteMachines 2026-09-23 WHY:
+            // An Action's localhost belongs to its project host. Opening an external saved link in the OS browser instead reaches the client's own service; keep the same machine-scoped Browser route used by remote chat and terminal links.
+            if gpui_remote_link_is_loopback(&link.url)
+                && let Some(reference) = remote_project.as_ref()
+            {
+                self.open_browser_url_from_renderer_command_with_machine(
+                    GpuiSidebarOpenBrowserUrlMessage {
+                        url: link.url.clone(),
+                        reuse: GpuiBrowserRendererOpenReuse::Similar,
+                        from_quick_header: false,
+                        project_id: Some(gpui_remote_scoped_project_id(
+                            &reference.remote_machine_id,
+                            &reference.project_id,
+                        )),
+                    },
+                    Some(reference.remote_machine_id.clone()),
+                    window,
+                    cx,
+                );
+                continue;
+            }
             match link.target {
                 GpuiTitlebarActionLinkTarget::Integrated => {
                     self.open_browser_url_from_renderer_command(
@@ -257,6 +279,10 @@ impl GhostexGpuiApp {
             session_id,
         };
         let run_id = create_gpui_command_action_run_id();
+        let action_scope = self.gpui_action_scope_for_command(&command_id);
+        if let Some(session) = self.command_pane.session_mut(session_id) {
+            session.action_scope = action_scope;
+        }
         let status_file_path = gpui_command_action_status_file_path(session_id);
         let execution_text = gpui_command_action_execution_text_for_current_backend(
             &command,

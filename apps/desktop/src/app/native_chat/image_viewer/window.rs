@@ -5,7 +5,7 @@
 //! ratio, clicking it steps through zoom levels and back to the fitted size, Escape, a right-click, or a click on
 //! the surround closes it, and Copy image / Copy path / Save image sit beside the close button.
 //! A native child window owns its own frame and input, which is how every other chat overlay here
-//! is built (save_markdown, model_picker).
+//! is built (save_markdown, the context editor).
 
 use super::super::state::NativeChatView;
 use gpui::{
@@ -109,12 +109,12 @@ impl NativeChatView {
     }
 
     pub(in crate::app::native_chat) fn sync_image_viewer_window(&mut self, cx: &mut Context<Self>) {
-        if self.image_viewer.request.is_none() {
+        if self.pane_hidden || self.image_viewer.request.is_none() {
             // The closed-window observer belongs to the window that is going away; keeping it would
             // leave a stale watcher able to close a viewer the reader opened next.
             self.image_viewer.subscription = None;
             if let Some(handle) = self.image_viewer.handle.take() {
-                let main = self.main_window;
+                let main = self.main_window.filter(|_| !self.pane_hidden);
                 cx.defer(move |cx| {
                     let _ = handle.update(cx, |_, window, _| window.remove_window());
                     if let Some(main) = main {
@@ -158,6 +158,8 @@ impl NativeChatView {
                     cx.open_window(
                         WindowOptions {
                             kind: crate::app::window::popup_frame::child_window_kind(),
+                            #[cfg(target_os = "linux")]
+                            x11_parent: Some(main),
                             window_bounds: Some(WindowBounds::Windowed(bounds)),
                             display_id,
                             app_id: crate::gpui_platform_window_app_id(),

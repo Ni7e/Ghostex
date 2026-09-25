@@ -1,12 +1,31 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fireEvent, waitFor } from 'storybook/test';
-import { findRequiredElement } from '../sidebar-app.interactions.helpers';
 import { ADD_PROJECT_STORY_LOCAL_MACHINE, ADD_PROJECT_STORY_REMOTE_MACHINE } from './add-project-modal-mocks';
 import {
   AddProjectStoryHarness,
   findAddProjectStoryCall,
   getAddProjectStoryMocks,
 } from './add-project-modal.story-harness';
+
+async function findRequiredElement(root: ParentNode, selector: string, description: string) {
+  let matchedElement: HTMLElement | undefined;
+
+  await waitFor(() => {
+    const element = root.querySelector(selector);
+    if (!(element instanceof HTMLElement)) {
+      throw new Error(`Could not find ${description} with selector: ${selector}`);
+    }
+
+    matchedElement = element;
+    return expect(element).toBeTruthy();
+  });
+
+  if (!matchedElement) {
+    throw new Error(`Could not find ${description} with selector: ${selector}`);
+  }
+
+  return matchedElement;
+}
 
 /*
  * CDXC:AddProject 2026-07-30:

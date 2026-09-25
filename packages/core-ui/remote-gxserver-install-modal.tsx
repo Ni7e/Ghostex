@@ -1,4 +1,8 @@
-import { Card, CardDescription, CardHeader } from '@/packages/components/ui/card';
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+} from "@/packages/components/ui/card";
 import {
   AppModalButton,
   AppModalColumn,
@@ -8,7 +12,7 @@ import {
   AppModalShell,
   AppModalStack,
   AppModalTitle,
-} from './app-modal-shell';
+} from "./app-modal-shell";
 
 export type RemoteGxserverInstallModalProps = {
   isOpen: boolean;
@@ -42,34 +46,45 @@ export function RemoteGxserverInstallModal({
    * measures that selector for the one-shot native fit-height pass.
    */
   return (
-    <AppModalShell className='remote-gxserver-install-modal' isOpen={isOpen} onClose={onCancel}>
+    <AppModalShell
+      className="remote-gxserver-install-modal"
+      isOpen={isOpen}
+      onClose={onCancel}
+    >
       <AppModalColumn>
         <AppModalHeader>
           <AppModalTitle>Install remote gxserver</AppModalTitle>
           <AppModalDescription>
-            Ghostex can connect to {machineName}, but gxserver is not installed there. Ghostex needs gxserver on that
-            machine to browse folders, add projects, clone repositories, and manage sessions remotely.
+            Ghostex can connect to {machineName}, but gxserver is not installed
+            there. Ghostex needs gxserver on that machine to browse folders, add
+            projects, clone repositories, and manage sessions remotely.
           </AppModalDescription>
         </AppModalHeader>
-        <AppModalStack className='remote-gxserver-install-modal-body'>
-          <Card size='sm'>
+        <AppModalStack className="remote-gxserver-install-modal-body">
+          <Card size="sm">
             <CardHeader>
               <CardDescription>
-                If you continue, Ghostex will copy its compatible bundled remote package over SSH into{' '}
-                <code>{'${XDG_DATA_HOME:-~/.local/share}/ghostex/gxserver'}</code>, expose <code>gxserver</code>,{' '}
-                <code>zmx</code>, <code>bd</code>, <code>ghostex</code>, and <code>gx</code> from{' '}
-                <code>~/.local/bin</code> when possible, start gxserver, then connect through an SSH tunnel. Windows
-                machines use the selected or default WSL2 distribution, and Ghostex installs the Linux package in that
-                distribution&apos;s home directory.
+                If you continue, Ghostex will copy its compatible bundled remote
+                package over SSH, start gxserver, then connect through an SSH
+                tunnel. On macOS, Linux, or WSL, the package is installed into{" "}
+                <code>
+                  {"${XDG_DATA_HOME:-~/.local/share}/ghostex/gxserver"}
+                </code>
+                , exposing <code>gxserver</code>, <code>zmx</code>,{" "}
+                <code>bd</code>, <code>ghostex</code>, and <code>gx</code> from{" "}
+                <code>~/.local/bin</code> when possible. Windows connections
+                follow Windows Environment on the remote computer, which
+                defaults to native PowerShell. Selecting a WSL distribution in
+                Advanced uses that distribution instead.
               </CardDescription>
             </CardHeader>
           </Card>
         </AppModalStack>
         <AppModalFooter>
-          <AppModalButton onClick={onCancel} type='button'>
+          <AppModalButton onClick={onCancel} type="button">
             Cancel
           </AppModalButton>
-          <AppModalButton onClick={onApprove} type='button'>
+          <AppModalButton onClick={onApprove} type="button">
             Install gxserver
           </AppModalButton>
         </AppModalFooter>

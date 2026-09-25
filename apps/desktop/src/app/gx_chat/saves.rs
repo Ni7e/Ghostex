@@ -19,7 +19,7 @@ use ghostex_gx_chat_core::HostRequest;
 
 use super::host_records::{self, DraftVersion, PendingDraft, RecoveryCheckpoint};
 use super::outbox::{self, DraftWorker};
-use super::worker::{World, now_millis, publish};
+use super::world::{World, now_millis, publish};
 
 /// How many saves may be in flight before the oldest is forgotten.
 ///

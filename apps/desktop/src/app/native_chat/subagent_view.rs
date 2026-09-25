@@ -71,6 +71,12 @@ impl NativeChatView {
     /// CDXC:SessionChat 2026-09-18 DECISION:
     /// User: clicking a subagent's name in the chat transcript shows that subagent's transcript in a popup with a backdrop over the main chat, and that transcript uses the same normal display as the main chat, with verbose and summarized off.
     /// GPUI paints the popup inside the chat pane rather than in a child window, and the backdrop takes the pointer so nothing behind it is clickable while it is open.
+    ///
+    /// CDXC:SessionChat 2026-09-25 DECISION:
+    /// User: "please make this modal for sub agents fit our glass look. should look similar to gpui chat view main area so they look cohesive". Under window glass the card is the composer's frosted wash and border on the pane's own glass, with the same frosted rows as the main transcript, instead of a solid dark panel; its header line is the same faint border. Outside glass it keeps the chat's own background.
+    ///
+    /// CDXC:SessionChat 2026-09-25 WHY:
+    /// GPUI cannot blur behind an element inside a window, so a see-through card over the chat would show the main transcript's text through it. Under glass the pane therefore stops painting the chat behind the viewer (render.rs, `covered`), and the backdrop is the pane's glass itself rather than a dark scrim.
     pub(super) fn render_subagent_viewer(
         &mut self,
         p: &ChatAppearance,
@@ -93,6 +99,13 @@ impl NativeChatView {
             self.subagent_focus.focus(window, cx);
         }
         let s = p.scale;
+        let glass = crate::app::helpers::window_glass_active_in(window);
+        let card_fill = if glass {
+            p.composer_background
+        } else {
+            p.background
+        };
+        let card_border = if glass { p.composer_border } else { p.border };
         let title = text(&state, "title");
         let tooltip = text(&state, "tooltip");
         let mut header = div()
@@ -103,7 +116,7 @@ impl NativeChatView {
             .px(px(16.0 * s))
             .py(px(12.0 * s))
             .border_b_1()
-            .border_color(p.border);
+            .border_color(card_border);
         if state["canBack"] == true {
             header = header.child(self.subagent_icon_button(
                 "subagent-back",
@@ -168,10 +181,10 @@ impl NativeChatView {
             .h_full()
             .max_w(px(960.0 * s))
             .max_h(px(860.0 * s))
-            .rounded(px(8.0 * s))
+            .rounded(px(if glass { 16.0 } else { 8.0 } * s))
             .border_1()
-            .border_color(p.border)
-            .bg(p.background)
+            .border_color(card_border)
+            .bg(card_fill)
             .text_color(p.primary)
             .overflow_hidden()
             // A click inside the card is not a click on the backdrop that closes it.
@@ -280,8 +293,12 @@ impl NativeChatView {
                 // caps it, so a narrow pane still shows the backdrop on both sides of the card.
                 .px(px(16.0 * s))
                 .py(px(24.0 * s))
-                // The dialog's own backdrop tone, dark enough to read the card against a light transcript.
-                .bg(rgba(if p.light { 0x00000061 } else { 0x00000094 }))
+                // The dialog's own backdrop tone, dark enough to read the card against a light
+                // transcript. Under glass nothing is painted behind the card, so the pane's glass is
+                // the backdrop.
+                .when(!glass, |this| {
+                    this.bg(rgba(if p.light { 0x00000061 } else { 0x00000094 }))
+                })
                 .font_family(p.font.clone())
                 .on_click(
                     cx.listener(|this, _, _, cx| this.invoke(json!({"type":"subagentClose"}), cx)),

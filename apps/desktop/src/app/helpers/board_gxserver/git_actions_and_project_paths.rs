@@ -18,24 +18,6 @@ pub(crate) fn gpui_project_board_conversation_request_script(
     )
 }
 
-pub(crate) fn gpui_worktree_modal_command_script(message: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorktreeModalCommand==='function'){{bridge.onWorktreeModalCommand(payload);}}else{{const pending=Array.isArray(bridge.pendingWorktreeModalCommands)?bridge.pendingWorktreeModalCommands:[];pending.push(payload);bridge.pendingWorktreeModalCommands=pending;}}}})(); undefined;"
-    )
-}
-
-pub(crate) fn gpui_git_commit_modal_command_script(message: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onGitCommitModalCommand==='function'){{bridge.onGitCommitModalCommand(payload);}}else{{const pending=Array.isArray(bridge.pendingGitCommitModalCommands)?bridge.pendingGitCommitModalCommands:[];pending.push(payload);bridge.pendingGitCommitModalCommands=pending;}}}})(); undefined;"
-    )
-}
-
-pub(crate) fn gpui_export_transcript_modal_command_script(message: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onExportTranscriptModalCommand==='function'){{bridge.onExportTranscriptModalCommand(payload);}}else{{const pending=Array.isArray(bridge.pendingExportTranscriptModalCommands)?bridge.pendingExportTranscriptModalCommands:[];pending.push(payload);bridge.pendingExportTranscriptModalCommands=pending;}}}})(); undefined;"
-    )
-}
-
 pub(crate) fn gpui_gxserver_git_action_result(
     project_id: &str,
     action: &str,

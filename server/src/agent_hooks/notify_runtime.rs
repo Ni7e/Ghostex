@@ -144,6 +144,13 @@ pub fn run_notify_hook(args: Vec<String>) -> Result<(), DomainStateError> {
         state.insert("agent".to_string(), json!(agent_key.clone()));
     }
     if let Some(session_id) = session_id.clone() {
+        // CDXC:SessionIdentity 2026-09-24 WHY:
+        // A new conversation id must not inherit the previous conversation's transcript path; the pair let an unwritten Claude id pass the transcript guard as if it were the old conversation.
+        if transcript_path.is_none()
+            && read_state_string(&state, "agentSessionId").as_deref() != Some(session_id.as_str())
+        {
+            state.remove("agentSessionPath");
+        }
         state.insert("agentSessionId".to_string(), json!(session_id.clone()));
         write_hook_store(
             &hook_state_dir,

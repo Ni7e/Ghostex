@@ -72,7 +72,7 @@ impl GhostexGpuiApp {
                     let app = cx.entity().downgrade();
                     cx.defer(move |cx| {
                         let _ = app.update(cx, |app, cx| {
-                            app.resume_native_chat_runtime_for_session(session_id, cx)
+                            app.note_native_chat_pane_painted(session_id, cx)
                         });
                     });
                 }

@@ -25,7 +25,7 @@ export interface AddProjectMachineOption {
   readonly label: string;
   /** Bounded id. Safe for logs. */
   readonly machineId: string;
-  /** navigator.platform-style string for the machine's OS ("MacIntel" | "Linux" | "Win32"). */
+  /** Host filesystem platform ("MacIntel" | "Linux" | "Win32" | "POSIX"); omitted means host validation. */
   readonly platform?: string;
 }
 
@@ -45,6 +45,8 @@ export interface AddProjectBrowseEntry {
 
 export interface AddProjectBrowseResult {
   readonly entries: readonly AddProjectBrowseEntry[];
+  /** Host drive chooser; not a directory that can be added or written into. */
+  readonly isDriveList?: boolean;
   /** Server-resolved absolute directory (`~` expanded, path.resolve'd). */
   readonly parentPath: string;
   readonly inspection?: AddProjectPathInspection;
@@ -52,7 +54,7 @@ export interface AddProjectBrowseResult {
 
 export interface AddProjectPathInspection {
   readonly path: string;
-  readonly kind: 'directory' | 'file' | 'missing';
+  readonly kind: "directory" | "file" | "missing";
   readonly projectPath?: string;
   readonly projectId?: string;
   readonly gitRoot?: string;
@@ -94,17 +96,20 @@ export interface AddProjectAddResult {
   readonly projectId?: string;
 }
 
-export type AddProjectProviderId = 'azure-devops' | 'bitbucket' | 'github' | 'gitlab';
-export type AddProjectSourceId = AddProjectProviderId | 'url';
+export type AddProjectProviderId =
+  "azure-devops" | "bitbucket" | "github" | "gitlab";
+export type AddProjectSourceId = AddProjectProviderId | "url";
 
-export type AddProjectProviderAuthStatus = 'authenticated' | 'unauthenticated' | 'unknown';
+export type AddProjectProviderAuthStatus =
+  "authenticated" | "unauthenticated" | "unknown";
 /**
  * Mirrors gxserver's `GxserverSourceControlDiscoveryStatus` (Part A) plus a
  * generic `error`: `missing` means the provider CLI is not installed on that
  * machine, `unsupported` means gxserver has no implementation for the provider
  * at all (Bitbucket / Azure DevOps today).
  */
-export type AddProjectProviderStatus = 'available' | 'error' | 'missing' | 'unsupported';
+export type AddProjectProviderStatus =
+  "available" | "error" | "missing" | "unsupported";
 
 export interface AddProjectProviderDiscovery {
   readonly auth?: {
@@ -159,7 +164,7 @@ export interface AddProjectClonePreview {
   readonly cloneUrl: string;
   readonly destinationBlocked: boolean;
   readonly destinationExists: boolean;
-  readonly destinationExistsKind?: 'directory' | 'file' | 'other';
+  readonly destinationExistsKind?: "directory" | "file" | "other";
   readonly destinationFolderName: string;
   readonly destinationIsEmpty?: boolean;
   readonly destinationPath: string;
@@ -179,7 +184,8 @@ export interface AddProjectCloneJobInput {
 }
 
 /** Mirrors gxserver's `GxserverRepositoryCloneJobState` (Part A) verbatim. */
-export type AddProjectCloneJobState = 'canceled' | 'completed' | 'failed' | 'running';
+export type AddProjectCloneJobState =
+  "canceled" | "completed" | "failed" | "running";
 
 /**
  * A projection of gxserver's `GxserverRepositoryCloneJobStatus`: field names are
@@ -197,18 +203,34 @@ export interface AddProjectCloneJob {
 
 /** Every server round trip the dialog performs. */
 export interface AddProjectModalCallbacks {
-  readonly addProject: (input: AddProjectAddInput) => Promise<AddProjectAddResult>;
-  readonly browse: (input: AddProjectBrowseInput) => Promise<AddProjectBrowseResult | null>;
+  readonly addProject: (
+    input: AddProjectAddInput,
+  ) => Promise<AddProjectAddResult>;
+  readonly browse: (
+    input: AddProjectBrowseInput,
+  ) => Promise<AddProjectBrowseResult | null>;
   readonly cancelCloneJob?: (input: AddProjectCloneJobInput) => Promise<void>;
-  readonly createDirectory: (input: AddProjectCreateDirectoryInput) => Promise<AddProjectCreateDirectoryResult>;
+  readonly createDirectory: (
+    input: AddProjectCreateDirectoryInput,
+  ) => Promise<AddProjectCreateDirectoryResult>;
   readonly discoverSourceControl: (input: {
     readonly machineId: string;
   }) => Promise<AddProjectSourceControlDiscovery | null>;
-  readonly listMachineOptions: () => Promise<readonly AddProjectMachineOption[]>;
-  readonly lookupRepository: (input: AddProjectRepositoryLookupInput) => Promise<AddProjectRepositoryInfo>;
-  readonly previewClone: (input: AddProjectClonePreviewInput) => Promise<AddProjectClonePreview>;
-  readonly readCloneJob: (input: AddProjectCloneJobInput) => Promise<AddProjectCloneJob>;
-  readonly startClone: (input: AddProjectCloneStartInput) => Promise<AddProjectCloneJobHandle>;
+  readonly listMachineOptions: () => Promise<
+    readonly AddProjectMachineOption[]
+  >;
+  readonly lookupRepository: (
+    input: AddProjectRepositoryLookupInput,
+  ) => Promise<AddProjectRepositoryInfo>;
+  readonly previewClone: (
+    input: AddProjectClonePreviewInput,
+  ) => Promise<AddProjectClonePreview>;
+  readonly readCloneJob: (
+    input: AddProjectCloneJobInput,
+  ) => Promise<AddProjectCloneJob>;
+  readonly startClone: (
+    input: AddProjectCloneStartInput,
+  ) => Promise<AddProjectCloneJobHandle>;
 }
 
 export interface AddProjectModalProps extends AddProjectModalCallbacks {
@@ -223,8 +245,10 @@ export interface AddProjectModalProps extends AddProjectModalCallbacks {
   /** Fired after a project was registered; the dialog closes right after. */
   readonly onProjectAdded?: (result: AddProjectAddResult) => void;
   /** "Setup Required" affordance on a not-ready provider row. */
-  readonly onOpenSourceControlSettings?: (provider: AddProjectProviderId) => void;
-  /** navigator.platform fallback when a machine option omits `platform`. */
+  readonly onOpenSourceControlSettings?: (
+    provider: AddProjectProviderId,
+  ) => void;
+  /** Client platform used only before a machine is selected; host options own filesystem validation. */
   readonly platform?: string;
   /** How long a pending server call may run before the "still working" notice. Default 8000ms. */
   readonly slowOperationNoticeMs?: number;

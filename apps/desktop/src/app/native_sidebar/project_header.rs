@@ -184,12 +184,29 @@ impl GhostexGpuiApp {
                             .size(px(16.0 * scale))
                             .flex_shrink_0()
                             .into_any_element(),
-                        None => titlebar_svg_icon(
-                            TITLEBAR_ICON_FOLDER_OPEN,
-                            16.0 * scale,
-                            appearance.muted,
-                        )
-                        .into_any_element(),
+                        // CDXC:Icons 2026-09-24 DECISION: User: when a project has no favicon, show a square with the first letter of its name instead of the folder icon.
+                        None => div()
+                            .size(px(16.0 * scale))
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(3.0 * scale))
+                            .bg(appearance.muted.opacity(0.12))
+                            .text_color(appearance.muted)
+                            .text_size(px(10.0 * scale))
+                            .line_height(px(16.0 * scale))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(
+                                group
+                                    .title
+                                    .trim()
+                                    .chars()
+                                    .next()
+                                    .map(|letter| letter.to_uppercase().to_string())
+                                    .unwrap_or_else(|| "?".to_owned()),
+                            )
+                            .into_any_element(),
                     })
                 },
             )

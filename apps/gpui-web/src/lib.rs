@@ -114,7 +114,6 @@ pub fn run() -> Result<(), JsValue> {
             let shell = cx.new(|cx| {
                 let mut app = GhostexGpuiApp::new();
                 app.gx_store_start(cx);
-                app.web_start_chat_broker(cx);
                 app
             });
             cx.new(|cx| Root::new(shell, window, cx))

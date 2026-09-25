@@ -779,7 +779,7 @@ impl GhostexGpuiApp {
                     else {
                         return None;
                     };
-                    Some((runtime_session_id, url.clone()))
+                    Some((runtime_session_id, slot_id.session_id, url.clone()))
                 }));
                 if action_events.iter().any(|event| {
                     matches!(
@@ -804,12 +804,17 @@ impl GhostexGpuiApp {
                 );
             }
         }
-        for (runtime_session_id, url) in terminal_link_requests {
+        for (runtime_session_id, session_id, url) in terminal_link_requests {
             let working_directory = self
                 .agents_terminal_runtime_osc_states
                 .get(&runtime_session_id)
                 .and_then(|state| state.pwd.clone());
-            self.open_gpui_engine_terminal_action_url(&url, working_directory.as_deref(), cx);
+            self.open_gpui_engine_terminal_action_url(
+                &url,
+                working_directory.as_deref(),
+                GpuiEngineTerminalEventTarget::Agents(session_id),
+                cx,
+            );
         }
         for shell_session_id in bell_shell_session_ids {
             self.dispatch_gpui_workspace_terminal_bell(shell_session_id, cx);

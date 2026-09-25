@@ -62,6 +62,14 @@ pub fn refresh(state: &mut ChatState, context: &ChatContext) {
     // back the SAME result object otherwise, which is what `take`'s identity comparison reads. The
     // core has no identities, so the five inputs are remembered here and the revision below stands
     // in for "this is a new array".
+    // `update()` runs the sticky fold before its change check, so a working blip over an unchanged
+    // transcript rebuilds nothing.
+    let live = crate::session::working::transcript_working(state);
+    crate::transcript::turns::sticky_transcript_working(
+        &state.messages.composed,
+        live,
+        &mut state.transcript_view.fold_settled_at,
+    );
     let inputs = ProjectionInputs {
         composed: Vec::new(),
         composition_identity: state.messages.compose_generation,

@@ -16,6 +16,7 @@ pub(crate) struct DetailsGroup<'a> {
     pub(crate) worktree_branch: Option<&'a str>,
     pub(crate) parent_project_name: Option<&'a str>,
     pub(crate) remote_machine_name: Option<&'a str>,
+    pub(crate) server_id: Option<&'a str>,
 }
 
 /// `buildSidebarSessionDetailsClipboardText`.
@@ -45,6 +46,18 @@ pub(crate) fn session_details_text(row: &SessionRow, group: &DetailsGroup<'_>) -
             .as_deref()
             .filter(|routing| *routing != row.sidebar_session_id),
     );
+    /*
+    CDXC:Cli 2026-09-24 DECISION:
+    The user asked that the copied block carry the one id every `ghostex` verb takes, so an agent
+    handed it can read or message that thread without guessing: `<server>:<project>:<session>`.
+    */
+    let global_ref = match (group.server_id, row.key.as_ref()) {
+        (Some(server_id), Some(key)) => {
+            Some(format!("{server_id}:{}:{}", key.project_id, key.session_id))
+        }
+        _ => None,
+    };
+    line("Global Ref", global_ref.as_deref());
     let kind = format_identifier(row.session_kind.as_deref().unwrap_or("terminal"));
     line("Kind", Some(&kind));
     line("Status", Some(&row.lifecycle_state));

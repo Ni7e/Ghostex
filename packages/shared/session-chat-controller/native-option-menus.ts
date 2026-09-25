@@ -65,28 +65,27 @@ export function nativeOptionMenus(
           command: { ...command, value: presentation.value, exitPlan: presentation.exitPlan },
         },
       ];
-    return presentation.sections
-      .flatMap((section): NativeChatMenuItem[] => {
-        const choices = section.choices.map((choice) => ({
-          id: `${descriptor.id}:${choice.value}`,
-          label: choice.label,
-          description: choice.description,
-          checked: presentation.current === choice.value,
-          disabled,
-          command: { ...command, value: choice.value },
-        }));
-        return section.kind === 'choices'
-          ? choices
-          : [
-              {
-                id: section.key,
-                label: section.group.label,
-                description: section.group.description,
-                detail: section.choices.find((choice) => choice.value === presentation.current)?.label,
-                children: choices,
-              },
-            ];
-      });
+    return presentation.sections.flatMap((section): NativeChatMenuItem[] => {
+      const choices = section.choices.map((choice) => ({
+        id: `${descriptor.id}:${choice.value}`,
+        label: choice.label,
+        description: choice.description,
+        checked: presentation.current === choice.value,
+        disabled,
+        command: { ...command, value: choice.value },
+      }));
+      return section.kind === 'choices'
+        ? choices
+        : [
+            {
+              id: section.key,
+              label: section.group.label,
+              description: section.group.description,
+              detail: section.choices.find((choice) => choice.value === presentation.current)?.label,
+              children: choices,
+            },
+          ];
+    });
   };
   const model: NativeChatMenuItem[] = [];
   if (params.draftAgents?.length) {
@@ -106,18 +105,11 @@ export function nativeOptionMenus(
     );
   }
   if (!catalog) return { model, options: [], mode: [] };
-  if (params.quickPicker)
-    model.push({
-      id: 'quick-picker',
-      label: 'Quick picker',
-      hotkeyAction: 'openModelPicker',
-      command: { type: 'toggleModelPicker' },
-    });
   /**
-    * CDXC:SessionChat 2026-09-18 DECISION:
-    * User: when a model choice cannot be applied, say so where it was chosen.
-    * A queued selection retries quietly, so only an abandoned one reaches this row; the next choice replaces it.
-    */
+   * CDXC:SessionChat 2026-09-18 DECISION:
+   * User: when a model choice cannot be applied, say so where it was chosen.
+   * A queued selection retries quietly, so only an abandoned one reaches this row; the next choice replaces it.
+   */
   if (params.selectionError)
     model.push(
       { id: 'model-error', heading: true, label: 'Not applied', description: params.selectionError },

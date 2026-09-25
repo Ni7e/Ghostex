@@ -527,7 +527,18 @@ impl GhostexGpuiApp {
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            self.request_session_chat_attachment_picks(session_id, request_id, cx);
+            let directories_only =
+                match message.get("selection").and_then(serde_json::Value::as_str) {
+                    Some("files") => Some(false),
+                    Some("folders") => Some(true),
+                    _ => None,
+                };
+            self.request_session_chat_attachment_picks(
+                session_id,
+                request_id,
+                directories_only,
+                cx,
+            );
             return;
         }
         if self.receive_session_chat_image_save_action(session_id, action, &message, cx) {
@@ -554,7 +565,14 @@ impl GhostexGpuiApp {
                 .get("forceEmbedded")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
-            self.open_session_chat_link(url, external, force_embedded, window, cx);
+            self.open_session_chat_link(
+                url,
+                Some(session_id),
+                external,
+                force_embedded,
+                window,
+                cx,
+            );
             return;
         }
         if action == "locateFile" {
@@ -724,17 +742,14 @@ impl GhostexGpuiApp {
         &mut self,
         session_id: TerminalSessionId,
         request_id: String,
+        directories_only: Option<bool>,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(generation) = self.begin_session_chat_native_request(session_id) else {
             return;
         };
-        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
-            files: true,
-            directories: true,
-            multiple: true,
-            prompt: Some("Attach an Image, File, or Folder".into()),
-        });
+        let receiver =
+            cx.prompt_for_paths(Self::attachment_path_prompt_options(true, directories_only));
         cx.spawn(async move |this, cx| {
             let picked = match receiver.await {
                 Ok(Ok(Some(paths))) => paths,
@@ -978,16 +993,28 @@ impl GhostexGpuiApp {
 
     The transcript context menu is explicit: its embedded row bypasses that
     ordinary-click preference, while its external row uses the OS browser.
+    Remote loopback links retain their machine through the embedded tunnel;
+    the OS browser cannot interpret that machine's localhost address.
     */
     pub(crate) fn open_session_chat_link(
         &mut self,
         url: &str,
+        source_session_id: Option<TerminalSessionId>,
         external: bool,
         force_embedded: bool,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         if url.chars().count() > GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS {
+            return;
+        }
+        if let Some(session_id) = source_session_id
+            && self.try_open_remote_loopback_link(
+                url,
+                GpuiEngineTerminalEventTarget::Agents(session_id),
+                cx,
+            )
+        {
             return;
         }
         let open_in_app =
@@ -1050,6 +1077,21 @@ impl GhostexGpuiApp {
         if trimmed.is_empty() || trimmed.chars().count() > GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS {
             return;
         }
+        if self
+            .agents_chat_remote_key_for_session(session_id)
+            .is_some()
+        {
+            self.open_remote_session_chat_file(
+                session_id,
+                trimmed,
+                line,
+                column,
+                requested_view,
+                window,
+                cx,
+            );
+            return;
+        }
         let resolved = match self.resolve_session_chat_file(session_id, trimmed) {
             Ok(resolved) => resolved,
             Err(GpuiSessionChatFileResolutionError::InvalidPath) => return,
@@ -1070,8 +1112,8 @@ impl GhostexGpuiApp {
             }
         };
         let file_path = resolved.file_path;
-        // CDXC:SessionChat 2026-09-12 DECISION:
-        // User: clicking a folder link in GPUI chat opens it in the system file explorer.
+        // CDXC:SessionChat 2026-09-23 DECISION:
+        // User: local folder links open in the system file explorer; remote folder links are browsed in this computer's Code view. This replaces the earlier explorer-only rule for remote folders.
         if resolved.is_directory {
             if gpui_open_path(&file_path).is_err() {
                 self.report_session_chat_file_open_failure(
@@ -1092,6 +1134,50 @@ impl GhostexGpuiApp {
             .extension()
             .and_then(|extension| extension.to_str())
             .map(str::to_ascii_lowercase);
+        // CDXC:SessionChat 2026-09-24 DECISION:
+        // User: clicking a video in chat opens it normally with the OS default app on macOS, Windows, and Linux, never in the code editor. Audio and PDFs follow the same rule.
+        // SEE-ALSO: `sessionChatMediaKind` in `packages/shared/session-chat-presentation/reference-pills.ts` keeps the same extension list for the labels and menu rows.
+        if requested_view.is_none()
+            && matches!(
+                extension.as_deref(),
+                Some(
+                    "3gp"
+                        | "avi"
+                        | "flv"
+                        | "m2ts"
+                        | "m4v"
+                        | "mkv"
+                        | "mov"
+                        | "mp4"
+                        | "mpeg"
+                        | "mpg"
+                        | "mts"
+                        | "ogv"
+                        | "webm"
+                        | "wmv"
+                        | "aac"
+                        | "aif"
+                        | "aiff"
+                        | "flac"
+                        | "m4a"
+                        | "mp3"
+                        | "oga"
+                        | "ogg"
+                        | "opus"
+                        | "wav"
+                        | "wma"
+                        | "pdf"
+                )
+            )
+        {
+            if gpui_open_path(&file_path).is_err() {
+                self.report_session_chat_file_open_failure(
+                    "The operating system could not open that file.",
+                    cx,
+                );
+            }
+            return;
+        }
         let settings = shared_settings::shared_sidebar_settings_snapshot();
         let document_preferred_view = match extension.as_deref() {
             Some("md" | "markdown" | "mdown" | "mkdn") => Some(settings.markdown_file_open_view()),
@@ -1192,6 +1278,7 @@ impl GhostexGpuiApp {
             };
             self.report_session_chat_file_opening("Docs view", &file_path, cx);
             self.pending_docs_file_open = Some(relative_path);
+            self.native_docs.pending_origin = Some(session_id);
             self.switch_workarea_from_hotkey(TitlebarMode::Manage, window, cx);
             self.mark_project_editor_mode_awake(TitlebarMode::Manage, cx);
             self.focus_project_editor_surface(TitlebarMode::Manage, window, cx);
@@ -1207,6 +1294,8 @@ impl GhostexGpuiApp {
             line,
             origin: PendingSourceFileOpenOrigin::SessionChat,
             project_path: resolved.project_path,
+            remote_target: None,
+            remote_working_directory: None,
         });
         self.switch_workarea_from_hotkey(TitlebarMode::Source, window, cx);
         self.mark_project_editor_mode_awake(TitlebarMode::Source, cx);
@@ -1398,6 +1487,11 @@ impl GhostexGpuiApp {
         let Some(relative_path) = self.pending_docs_file_open.clone() else {
             return false;
         };
+        if crate::app::native_docs::render::native_docs_enabled() {
+            self.pending_docs_file_open = None;
+            self.native_docs_open_external(relative_path, cx);
+            return true;
+        }
         let Some(surface) = self
             .project_workarea_runtime_cef_surfaces
             .get(&ProjectWorkareaCefSurfaceSlotKey::Manage)

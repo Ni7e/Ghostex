@@ -1,13 +1,13 @@
-//! Native GPUI New Thread picker (Cmd+Shift+T), the desktop twin of the React
-//! `NewThreadPalette` in packages/core-ui/new-thread-palette.tsx.
+//! Native GPUI New Thread picker (Cmd+Shift+T). Its React twin, `NewThreadPalette` in
+//! packages/core-ui/new-thread-palette.tsx, was deleted with the React web app on 2026-09-24.
 //!
 //! CDXC:AgentLauncher 2026-09-09 DECISION:
-//! User: the desktop New Thread picker (Cmd+Shift+T) is drawn natively in GPUI so it opens instantly and is sized to its rows (up to twelve agents plus the Browser and Terminal rows, then it scrolls); the web app keeps the React palette because it is React-based.
+//! User: the desktop New Thread picker (Cmd+Shift+T) is drawn natively in GPUI so it opens instantly and is sized to its rows (up to twelve agents plus the Browser and Terminal rows, then it scrolls).
 //! It mirrors the project-header agent dropdown: every agent with its account count and chat badge, the last-used agent first and preselected, typing filters, Up/Down move, Enter starts, Tab or Right on Claude or Codex opens that provider's account list (Left, Backspace on an empty query, or Esc goes back), Esc closes. The highlighted row uses the sidebar's focused-session chrome and is never bolded.
 //!
 //! CDXC:AppModal 2026-09-16 DECISION:
 //! User: "please fix this modal, also please ensure that we use the gpui components that we created in the gpui app and we're not using the older modals": the picker takes its colours from the shared native modal kit palette in both appearances. It used dark-only white tints that vanished on the light theme (search border, key hints, divider, white agent logos) while the highlighted row stayed black.
-//! SEE-ALSO: packages/core-ui/new-thread-palette.tsx and packages/core-ui/styles/new-thread-palette.css (the React twin), packages/core-ui/accounts/agent-launcher-menu.tsx (the dropdown this mirrors), apps/desktop/src/app/window/native_modal_kit.rs (the shared palette), apps/desktop/src/app/new_thread_picker_lifecycle.rs (open, close, preload, data), apps/desktop/src/bin/native_modal_demo.rs (standalone preview).
+//! SEE-ALSO: apps/desktop/src/app/native_sidebar/agent_launcher_menu.rs (the dropdown this mirrors), apps/desktop/src/app/window/native_modal_kit.rs (the shared palette), apps/desktop/src/app/new_thread_picker_lifecycle.rs (open, close, preload, data), apps/desktop/src/bin/native_modal_demo.rs (standalone preview).
 //!
 //! This module depends only on the kit, gpui and gpui-component so the preview binary can include it with `#[path]`.
 use super::native_modal_kit::*;
@@ -293,6 +293,8 @@ pub(crate) struct GpuiNewThreadPickerWindow {
     colors: PickerColors,
     /// Set by the app when the picker's window is blurred under window glass.
     pub(crate) glass: bool,
+    /// The app's frosted menu fill for this picker's surface, set with `glass`.
+    pub(crate) frosted_fill: Option<gpui::Hsla>,
     input: Entity<InputState>,
     agents: Vec<NewThreadPickerAgent>,
     agents_loaded: bool,
@@ -310,6 +312,11 @@ pub(crate) struct GpuiNewThreadPickerWindow {
 }
 
 impl GpuiNewThreadPickerWindow {
+    /// The picker's own surface colour, which the app thins into its frosted menu fill.
+    pub(crate) fn surface_color(&self) -> gpui::Hsla {
+        hsla(self.colors.surface)
+    }
+
     pub(crate) fn new(
         config: NewThreadPickerConfig,
         host: NewThreadPickerHost,
@@ -341,6 +348,7 @@ impl GpuiNewThreadPickerWindow {
         input.update(cx, |input, cx| input.focus(window, cx));
         Self {
             glass: false,
+            frosted_fill: None,
             host,
             colors: PickerColors::resolve(&config.palette),
             input,
@@ -707,21 +715,29 @@ impl GpuiNewThreadPickerWindow {
     and Backspace propagate to the field whenever the picker has no use for
     them, so cursor editing still works.
     */
+    /*
+    CDXC:AgentLauncher 2026-09-24 WHY:
+    A capture-phase action keeps propagating unless its listener stops it, and the single-line field registers no Up, Down, or Tab handler. An unstopped Up or Down was therefore re-dispatched through every other matching binding and the retried native keystroke (the selection jumped several rows) and finally reported unhandled, so AppKit beeped. Every key the picker uses stops propagation.
+    */
     fn on_move_up(&mut self, _: &MoveUp, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         self.move_selection(-1, cx);
     }
 
     fn on_move_down(&mut self, _: &MoveDown, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         self.move_selection(1, cx);
     }
 
     fn on_enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         if let Some(row) = self.selected_row() {
             self.activate(row, window, cx);
         }
     }
 
     fn on_escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         if self.scope.is_some() {
             self.leave_scope(window, cx);
         } else {
@@ -731,6 +747,7 @@ impl GpuiNewThreadPickerWindow {
 
     /// Tab: open the highlighted Claude or Codex agent's account list.
     fn on_tab(&mut self, _: &IndentInline, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         if self.scope.is_none() {
             if let Some(PickerRow::Agent(index)) = self.selected_row() {
                 self.enter_scope(index, window, cx);
@@ -742,6 +759,7 @@ impl GpuiNewThreadPickerWindow {
         if self.scope.is_none() {
             if let Some(PickerRow::Agent(index)) = self.selected_row() {
                 if self.agents[index].provider().is_some() {
+                    cx.stop_propagation();
                     self.enter_scope(index, window, cx);
                     return;
                 }
@@ -752,6 +770,7 @@ impl GpuiNewThreadPickerWindow {
 
     fn on_move_left(&mut self, _: &MoveLeft, window: &mut Window, cx: &mut Context<Self>) {
         if self.scope.is_some() {
+            cx.stop_propagation();
             self.leave_scope(window, cx);
             return;
         }
@@ -760,6 +779,7 @@ impl GpuiNewThreadPickerWindow {
 
     fn on_backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.scope.is_some() && self.query.is_empty() {
+            cx.stop_propagation();
             self.leave_scope(window, cx);
             return;
         }
@@ -1287,11 +1307,9 @@ impl Render for GpuiNewThreadPickerWindow {
             .border_1()
             .border_color(hsla(c.frame_border))
             // Under window glass the picker's window blurs what is behind it, so its fill thins.
-            .bg(hsla(if self.glass {
-                rgba_of(c.surface, 0.78)
-            } else {
-                c.surface
-            }))
+            // Under glass it takes the app's frosted menu fill, passed in by the app because this
+            // file also builds into the demo binary (`frosted_menu_fill` in helpers/window_glass.rs).
+            .bg(self.frosted_fill.unwrap_or_else(|| hsla(c.surface)))
             .font_family(PICKER_FONT)
             .text_size(px(ROW_TEXT_SIZE))
             .line_height(px(ROW_LINE_HEIGHT))

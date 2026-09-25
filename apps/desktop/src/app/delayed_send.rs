@@ -19,6 +19,16 @@ use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
 use crate::*;
+
+struct GpuiDeletedActionSession {
+    session_id: CommandSessionId,
+    command_id: String,
+    scope: GpuiSidebarCommandScope,
+    local_key: Option<GpuiLocalWorkspaceSessionKey>,
+    remote_reference: Option<GpuiRemoteAttachSessionReference>,
+    run_id: Option<String>,
+}
+
 impl GhostexGpuiApp {
     pub(crate) fn handle_gpui_sidebar_agent_metadata_command(
         &mut self,
@@ -85,15 +95,30 @@ impl GhostexGpuiApp {
                 }
             };
         let failure_order_sync_result = write.order_sync_result("error", Vec::new());
-        if let Some(command_id) = write.deleted_command_id().map(str::to_string) {
-            self.close_gpui_deleted_sidebar_command_session(command_id.as_str(), cx);
-        }
+        let remote_target = (write.scope() == GpuiSidebarCommandScope::Project)
+            .then(|| {
+                gpui_remote_project_reference_from_project_id(
+                    gpui_sidebar_command_write_active_project_id(&write),
+                )
+            })
+            .flatten()
+            .and_then(|project| {
+                self.gpui_remote_gxserver_request_target(&project.remote_machine_id)
+            });
+        let deleted_session = self.gpui_session_for_deleted_action(&write);
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let result = background
-                .spawn(async move { gpui_apply_sidebar_command_metadata_write(write) })
+                .spawn(
+                    async move { gpui_apply_sidebar_command_metadata_write(write, remote_target) },
+                )
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if result.is_ok()
+                    && let Some(deleted_session) = deleted_session
+                {
+                    this.close_gpui_deleted_sidebar_command_session(deleted_session, cx);
+                }
                 this.finish_gpui_sidebar_metadata_write(
                     GpuiSidebarMetadataWriteKind::Commands,
                     result,
@@ -105,17 +130,91 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    pub(crate) fn close_gpui_deleted_sidebar_command_session(
+    /// CDXC:AgentLauncher 2026-09-23 WHY:
+    /// Built-in Action IDs repeat across projects and computers. A delete captures only its proven owner tab, then verifies that same run after the daemon accepts the mutation; failed writes and newer runs must keep their terminals.
+    fn gpui_session_for_deleted_action(
+        &self,
+        write: &GpuiSidebarCommandMetadataWrite,
+    ) -> Option<GpuiDeletedActionSession> {
+        let command_id = write.deleted_command_id()?;
+        self.command_pane
+            .flat_tab_ids()
+            .into_iter()
+            .find_map(|(_, session_id)| {
+                let session = self.command_pane.session(session_id)?;
+                if session.action_command_id.as_deref() != Some(command_id)
+                    || session.action_scope != Some(write.scope())
+                {
+                    return None;
+                }
+                let local_key = session.gxserver_session_key.clone();
+                let remote_reference =
+                    self.command_remote_action_session_for_command_tab(session_id);
+                if write.scope() == GpuiSidebarCommandScope::Project {
+                    let project_id = gpui_sidebar_command_write_active_project_id(write);
+                    let matches = match gpui_remote_project_reference_from_project_id(project_id) {
+                        Some(project) => remote_reference.as_ref().is_some_and(|session| {
+                            session.remote_machine_id == project.remote_machine_id
+                                && session.project_id == project.project_id
+                        }),
+                        None => {
+                            remote_reference.is_none()
+                                && local_key
+                                    .as_ref()
+                                    .is_some_and(|key| key.project_id == project_id)
+                        }
+                    };
+                    if !matches {
+                        return None;
+                    }
+                }
+                Some(GpuiDeletedActionSession {
+                    session_id,
+                    command_id: command_id.to_string(),
+                    scope: write.scope(),
+                    local_key,
+                    remote_reference,
+                    run_id: session.action_run_id.clone(),
+                })
+            })
+    }
+
+    fn close_gpui_deleted_sidebar_command_session(
         &mut self,
-        command_id: &str,
+        deleted: GpuiDeletedActionSession,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        let Some((group_id, session_id)) = self
+        let session_id = deleted.session_id;
+        if self.command_remote_action_session_for_command_tab(session_id)
+            != deleted.remote_reference
+        {
+            return false;
+        }
+        let Some((group_id, _)) = self
             .command_pane
-            .take_action_session_slot_for_action_close(command_id)
+            .flat_tab_ids()
+            .into_iter()
+            .find(|(_, id)| *id == session_id)
         else {
             return false;
         };
+        let Some(session) = self.command_pane.session_mut(session_id) else {
+            return false;
+        };
+        if session.action_command_id.as_deref() != Some(deleted.command_id.as_str())
+            || session.action_scope != Some(deleted.scope)
+            || session.gxserver_session_key != deleted.local_key
+            || session.action_run_id != deleted.run_id
+        {
+            return false;
+        }
+        session.activity = CommandTerminalActivity::Idle;
+        session.action_command_id = None;
+        session.action_scope = None;
+        session.action_close_terminal_on_exit = false;
+        session.action_play_completion_sound = false;
+        session.action_run_id = None;
+        session.action_status_file_path = None;
         self.clear_gpui_command_delayed_send_timer(session_id);
         self.clear_gpui_command_close_after_done_timer(session_id);
         if !self
@@ -148,6 +247,7 @@ impl GhostexGpuiApp {
         match result {
             Ok(order_sync_result) => {
                 self.refresh_open_gpui_app_modal_sidebar_state_in_background(cx);
+                self.refresh_titlebar_actions_in_background(cx);
                 if let Some(order_sync_result) = order_sync_result {
                     self.dispatch_open_gpui_app_modal_message(order_sync_result, cx);
                 }
@@ -1550,16 +1650,11 @@ impl GhostexGpuiApp {
         let Some(key) = self.local_workspace_key_for_shell_session(shell_session_id) else {
             return false;
         };
-        self.dispatch_gpui_sidebar_host_message(
-            serde_json::json!({
-                "sessionId": gpui_combined_presentation_session_id(
-                    &key.project_id,
-                    &key.session_id,
-                ),
-                "type": "toggleCloseAfterDone",
-            }),
+        self.gx_store_toggle_close_after_done(
+            &gpui_combined_presentation_session_id(&key.project_id, &key.session_id),
             cx,
-        )
+        );
+        true
     }
 
     pub(crate) fn toggle_gpui_command_close_after_done_for_command_pane_tab(
@@ -1890,6 +1985,15 @@ impl GhostexGpuiApp {
                     cx,
                 );
             }
+            "listWindowGlassVideos" => {
+                self.handle_gpui_list_window_glass_videos_message(cx);
+            }
+            "pickWindowGlassVideoFile" => {
+                self.handle_gpui_pick_window_glass_video_message(
+                    &serde_json::Value::Object(command.clone()),
+                    cx,
+                );
+            }
             "pickFirstLaunchProjectFolder" => {
                 self.handle_gpui_pick_first_launch_project_folder_message(cx);
             }
@@ -1907,9 +2011,6 @@ impl GhostexGpuiApp {
             }
             "probeRemoteGxserverInstall" => {
                 self.handle_gpui_probe_remote_gxserver_install_message(command, cx);
-            }
-            "remoteGxserverSubscribePresentation" => {
-                self.handle_gpui_remote_gxserver_subscribe_presentation_message(command, cx);
             }
             "browseRemoteProjectDirectories" => {
                 self.handle_gpui_browse_remote_project_directories_message(command, cx);
@@ -1981,12 +2082,12 @@ impl GhostexGpuiApp {
                 self.forward_gpui_sidebar_space_editor_result_to_sidebar(command, cx);
             }
             /*
-            CDXC:Sessions 2026-09-11 WHY:
+            CDXC:Sessions 2026-09-25 WHY:
             The Settings modal creates custom session tags from the app-modal
             host window, so its catalog write arrives here instead of from the
-            sidebar page. Like `setSessionNote` it is forwarded to the sidebar
-            runtime, which owns the gxserver client, the write-through debounce,
-            and the local/remote machine routing, and nothing is applied here.
+            sidebar page. It is bounded and then pushed from Rust
+            (gx_store/custom_tags_sync.rs); supersedes the 2026-09-11 note that
+            forwarded it to the sidebar runtime.
             */
             "updateCustomSessionTags" => {
                 self.forward_gpui_custom_session_tags_update_to_sidebar(command, cx);
@@ -2116,6 +2217,10 @@ impl GhostexGpuiApp {
                     self.toggle_gpui_new_thread_picker(cx);
                     return;
                 }
+                if action_id == "createAgentSession" {
+                    self.start_new_agent_session(cx);
+                    return;
+                }
                 /*
                 CDXC:FocusMode 2026-06-25-15:01:
                 The shared command palette posts focused-session commands as `runGhostexHotkeyAction`. Handle command-pane Sleep/Wake/Close focused-session ids directly in GPUI before modal routing so command-palette rows operate on the shell-focused command tab instead of no-oping or trying to open another modal.
@@ -2160,7 +2265,7 @@ impl GhostexGpuiApp {
                     return;
                 }
                 if action_id == "openModelPicker" {
-                    self.request_focused_session_model_picker(cx);
+                    self.request_focused_session_model_picker(window, cx);
                     return;
                 }
                 if action_id == "toggleChatView" {
@@ -3397,6 +3502,12 @@ impl GhostexGpuiApp {
                     .detach();
                 }
             }
+            command_type
+                if crate::app::quick_access::commands::QUICK_ACCESS_COMMAND_ROW_TYPES
+                    .contains(&command_type) =>
+            {
+                self.run_quick_access_command_row(command_type, command, window, cx);
+            }
             "searchPreviousSessionsByText" => {
                 /*
                 CDXC:Sessions 2026-06-24-11:53:
@@ -3408,6 +3519,7 @@ impl GhostexGpuiApp {
                 self.refresh_open_gpui_app_modal_sidebar_state_in_background(cx);
             }
             command_type if gpui_app_modal_unsupported_settings_command_noop(command_type) => {}
+            command_type if self.gx_store_run_app_modal_create_command(command_type, cx) => {}
             _ => {}
         }
     }

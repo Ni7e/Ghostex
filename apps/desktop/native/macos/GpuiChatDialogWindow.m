@@ -32,6 +32,19 @@ void GhostexGpuiStripPopupWindowFrame(void *nativeView) {
   window.backgroundColor = NSColor.clearColor;
   window.hasShadow = NO;
   [window invalidateShadow];
+  // CDXC:AppModal 2026-09-24 WHY:
+  // Rows of the chat menus (More actions, Mode, Context window, Switch Account) showed no hover:
+  // AppKit hands a normal window's mouse moves to the key window's first responder, and these
+  // popups never received them. They get the tracking area GPUI gives its own popup windows, which
+  // delivers moves to the view whichever window is key, and stop the first-responder path so no
+  // move arrives twice.
+  window.acceptsMouseMovedEvents = NO;
+  [view addTrackingArea:[[NSTrackingArea alloc]
+                            initWithRect:NSZeroRect
+                                 options:NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
+                                         NSTrackingActiveAlways | NSTrackingInVisibleRect
+                                   owner:view
+                                userInfo:nil]];
 }
 
 static NSTimeInterval GhostexGpuiLastPointerPressAt = 0;

@@ -15,9 +15,6 @@ import {
   GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_VERSION,
   GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
   GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
-  GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS,
-  GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
-  GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import { activateGpuiProject } from './project-activation';
@@ -31,50 +28,27 @@ import {
   normalizeGpuiNativeAppShotPromptResult,
 } from './helpers/app-shot';
 import { createGpuiSidebarSettings } from './helpers/bootstrap';
-import {
-  normalizeGpuiCommandPaletteRunSidebarCommand,
-  normalizeGpuiCommandPaletteSessionFocus,
-} from './helpers/command-palette';
-import { normalizeNonEmptyString, readGpuiRecordString } from './helpers/records';
+import { normalizeNonEmptyString } from './helpers/records';
 import {
   createGpuiRemotePresentationGroupId,
-  createGpuiRemotePresentationProjectId,
-  parseGpuiRemotePresentationGroupId,
   parseGpuiRemotePresentationProjectId,
   parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
-import {
-  normalizeGpuiRendererCommandRenameTitle,
-  parseGpuiRendererCommandGlobalSessionRef,
-  readGpuiRendererCommandSessionTarget,
-} from './helpers/renderer-commands';
-import {
-  gpuiMenuBarStatusSessionFocusRoutingId,
-  normalizeGpuiMenuBarProjectActivation,
-  normalizeGpuiMenuBarSessionActivation,
-  normalizeGpuiStatusPetActivation,
-} from './helpers/status-indicators';
+import { normalizeGpuiMenuBarProjectActivation } from './helpers/status-indicators';
 import type {
   GpuiPendingNativeAppShotPromptInsertion,
-  GpuiRendererCommandResolvedSession,
   GpuiSidebarNativeProjectPathAction,
   GpuiWorkspaceTerminalFocusPlacement,
 } from './types-and-protocol';
 import { openAppModal, postAppModalHostMessage } from '@/packages/core-ui/app-modal-host-bridge';
 import type { AppToastLevel } from '@/packages/shared/app-toast-contract';
 import { createAppToastRequest } from '@/packages/shared/app-toast-contract';
-import type { PreferredAgentInterface, ghostexSettingsPatch } from '@/packages/shared/ghostex-settings';
-import { SETTINGS_MODAL_NAVIGATION_TABS } from '@/packages/shared/ghostex-settings';
-import {
-  createGxserverPresentationProjectSessionId,
-  parseGxserverPresentationProjectSessionId,
-} from '@/packages/shared/gxserver-presentation-sidebar-projection';
-import type { GxserverRendererCommand } from '@/packages/shared/gxserver-protocol';
+import type { PreferredAgentInterface } from '@/packages/shared/ghostex-settings';
 import type { NavigationHistoryEntry } from '@/packages/shared/navigation-history/navigation-history-contract';
 import type { NavigationHistoryRpc } from '@/packages/shared/navigation-history/navigation-history-controller';
 import type { SidebarSessionItem, SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
 import type { SidebarCommandButton } from '@/packages/shared/sidebar-commands';
-import { isSidebarCommandConfigured, isSidebarCommandRunMode } from '@/packages/shared/sidebar-commands';
+import { isSidebarCommandRunMode } from '@/packages/shared/sidebar-commands';
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -86,11 +60,7 @@ reports as a circular base type. `gpuiSidebarRuntimeAppShotAndMiscMethodsShapeCh
 at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
-  handleGpuiStatusPetActivation(payload: unknown): void;
   handleGpuiMenuBarProjectActivation(payload: unknown): void;
-  handleGpuiMenuBarSessionActivation(payload: unknown): Promise<void>;
-  handleGpuiCommandPaletteSessionFocus(payload: unknown): Promise<void>;
-  handleGpuiCommandPaletteRunSidebarCommand(payload: unknown): void;
   handleNativeAppShotCaptured(payload: unknown): Promise<void>;
   stageNativeAppShotInAgentSession(prompt: string): Promise<{ ok: true } | { description: string; ok: false }>;
   stageNativeAppShotInExistingAgentSession(session: SidebarSessionItem, prompt: string): Promise<boolean>;
@@ -102,24 +72,6 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
   handleNativeAppShotPromptResult(payload: unknown): void;
   resolvePendingNativeAppShotPromptInsertion(pending: GpuiPendingNativeAppShotPromptInsertion, ok: boolean): void;
   rememberNativeAppShotTargetSessionId(sessionId: string): void;
-  handleGxserverRendererCommand(command: GxserverRendererCommand): Promise<Record<string, unknown>>;
-  applyRendererSettingsPatch(command: GxserverRendererCommand): Record<string, unknown>;
-  openSettingsFromRendererCommand(command: GxserverRendererCommand): Record<string, unknown>;
-  runGxserverRendererCommandButton(
-    rawCommandId: string | undefined,
-    rendererCommand: GxserverRendererCommand
-  ): Record<string, unknown>;
-  openEmbeddedBrowserFromRendererCommand(command: GxserverRendererCommand): Record<string, unknown>;
-  resolveEmbeddedBrowserRendererCommandProjectId(scope: {
-    groupId?: string;
-    projectId?: string;
-    projectPath?: string;
-  }): string | undefined;
-  resolveEmbeddedBrowserKnownProjectId(projectId: string): string | undefined;
-  resolveGxserverRendererCommandSession(
-    payload: Record<string, unknown>
-  ): GpuiRendererCommandResolvedSession | undefined;
-  hasGpuiRendererCommandLocalSession(projectId: string, sessionId: string): boolean;
   createNavigationHistoryEntry(): NavigationHistoryEntry | undefined;
   navigationHistoryRpc(): NavigationHistoryRpc | undefined;
   activateNavigationHistoryEntry(entry: NavigationHistoryEntry): boolean;
@@ -132,24 +84,6 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
     }
   ): void;
   postSidebarActionToast(level: AppToastLevel, title: string, options?: { description?: string }): void;
-  copyWorkspaceProjectRemoteUrl(
-    message: Extract<SidebarToExtensionMessage, { type: 'copyWorkspaceProjectRemoteUrl' }>
-  ): void;
-  postProjectPathActionForGroup(
-    action: Extract<
-      GpuiSidebarNativeProjectPathAction,
-      'copyWorkspaceProjectPath' | 'openWorkspaceProjectInFinder' | 'openWorkspaceProjectInIde'
-    >,
-    groupId: string,
-    originalMessage: SidebarToExtensionMessage
-  ): void;
-  postActiveProjectPathAction(
-    action: Extract<
-      GpuiSidebarNativeProjectPathAction,
-      'openActiveWorkspaceProjectInFinder' | 'openActiveWorkspaceProjectInVscode' | 'openActiveWorkspaceProjectInZed'
-    >,
-    originalMessage: SidebarToExtensionMessage
-  ): void;
   postNativeProjectPathAction(
     action: GpuiSidebarNativeProjectPathAction,
     projectId: string,
@@ -169,102 +103,18 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
     originalMessage: Extract<SidebarToExtensionMessage, { type: 'runGhostexHotkeyAction' }>
   ): boolean;
   postSidebarCommandRunEnd(commandId: string, originalMessage: SidebarToExtensionMessage): boolean;
-  saveSidebarSettingsPatch(message: Extract<SidebarToExtensionMessage, { type: 'updateSettingsPatch' }>): void;
-  openExternalUrl(message: Extract<SidebarToExtensionMessage, { type: 'openExternalUrl' }>): void;
   openAppModal(modal: 'firstLaunchSetup' | 'onboarding' | 'settings' | 'watchGhostexVideo'): void;
   savePinnedPrompt(message: Extract<SidebarToExtensionMessage, { type: 'savePinnedPrompt' }>): Promise<void>;
   publishAppUserDataHydrate(): void;
 }
 
 export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
-  copyWorkspaceProjectRemoteUrl(
-    this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'copyWorkspaceProjectRemoteUrl' }>
-  ): void {
-    const remoteUrl = normalizeNonEmptyString(message.remoteUrl);
-    if (!remoteUrl) {
-      this.handleUnsupportedSidebarMessage(message);
-      return;
-    }
-    try {
-      postAppModalHostMessage(
-        { detailsText: remoteUrl, type: 'copySessionDetails' },
-        'GPUISidebarActions:copyRemoteUrl'
-      );
-    } catch {
-      this.handleUnsupportedSidebarMessage(message);
-    }
-  },
-
-  handleGpuiStatusPetActivation(this: GpuiSidebarRuntime, payload: unknown): void {
-    const activation = normalizeGpuiStatusPetActivation(payload);
-    if (!activation) {
-      return;
-    }
-    /*
-    CDXC:StatusPet 2026-06-26-05:07:
-    Visible GPUI status activation, and later pet activation, must re-enter the sidebar runtime's existing focusSession route. Keep this as a fixed callback with one bounded session id so local focus stays local, remote focus uses the reviewed remote native action path, and Rust never creates or wakes unrelated sessions for indicator clicks.
-    */
-    void this.focusSession(activation.sessionId, {
-      sessionId: activation.sessionId,
-      type: 'focusSession',
-    });
-  },
-
   handleGpuiMenuBarProjectActivation(this: GpuiSidebarRuntime, payload: unknown): void {
     const activation = normalizeGpuiMenuBarProjectActivation(payload);
     if (!activation) {
       return;
     }
     void activateGpuiProject(this, activation.projectId);
-  },
-
-  async handleGpuiMenuBarSessionActivation(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
-    const activation = normalizeGpuiMenuBarSessionActivation(payload);
-    if (!activation) {
-      return;
-    }
-    /*
-    CDXC:StatusPet 2026-06-26-06:05:
-    Running Agents session rows should behave like sidebar session-card clicks. Normalize raw local gxserver ids into the existing project-scoped presentation id when needed, then reuse focusSession so local clicks update presentation focus and post WorkspaceTerminalFocus back to Rust for terminal selection/materialization.
-    */
-    const sessionId = gpuiMenuBarStatusSessionFocusRoutingId(activation.projectId, activation.sessionId);
-    await this.focusSession(sessionId, {
-      sessionId,
-      type: 'focusSession',
-    });
-  },
-
-  async handleGpuiCommandPaletteSessionFocus(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
-    /*
-    Command-palette current-session rows post {type:"focusSession"} from the
-    app-modal host window; Rust forwards only the bounded projected session id
-    here so palette selection reuses the same reviewed focusSession routing as
-    sidebar card clicks (local materialize/wake, remote-shaped ids included).
-    */
-    const sessionId = normalizeGpuiCommandPaletteSessionFocus(payload);
-    if (!sessionId) {
-      return;
-    }
-    await this.focusSession(sessionId, {
-      sessionId,
-      type: 'focusSession',
-    });
-  },
-
-  handleGpuiCommandPaletteRunSidebarCommand(this: GpuiSidebarRuntime, payload: unknown): void {
-    /*
-    Command-palette Action rows post {type:"runSidebarCommand"} from the
-    app-modal host window; Rust forwards only the selector (command id +
-    optional runMode). Execution resolves the trusted saved/HUD command and
-    goes through the same strict SidebarCommandAction bridge as sidebar-surface
-    Action clicks.
-    */
-    const selection = normalizeGpuiCommandPaletteRunSidebarCommand(payload);
-    if (!selection) {
-      return;
-    }
-    this.runSidebarCommand(selection.message.commandId, selection.message, selection.scope);
   },
 
   async handleNativeAppShotCaptured(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
@@ -527,312 +377,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
     this.lastAppShotTargetAt = Date.now();
   },
 
-  async handleGxserverRendererCommand(
-    this: GpuiSidebarRuntime,
-    command: GxserverRendererCommand
-  ): Promise<Record<string, unknown>> {
-    switch (command.action) {
-      case 'focusSession': {
-        const resolvedSession = this.resolveGxserverRendererCommandSession(command.payload);
-        if (!resolvedSession) {
-          throw new Error('No matching session was found.');
-        }
-        await this.focusSession(resolvedSession.sidebarSessionId, {
-          sessionId: resolvedSession.sidebarSessionId,
-          type: 'focusSession',
-        });
-        return {
-          ok: true,
-          session: {
-            ghostexId: resolvedSession.sidebarSessionId,
-            projectId: resolvedSession.projectId,
-            sessionId: resolvedSession.sessionId,
-          },
-        };
-      }
-      case 'renameCommand': {
-        const resolvedSession = this.resolveGxserverRendererCommandSession(command.payload);
-        if (!resolvedSession) {
-          throw new Error('No matching session was found.');
-        }
-        const title = normalizeGpuiRendererCommandRenameTitle(command.payload);
-        if (!title) {
-          throw new Error('Invalid renderer command title.');
-        }
-        this.postLocalWorkspaceTerminalRenameCommand(resolvedSession.projectId, resolvedSession.sessionId, title);
-        return {
-          accepted: true,
-          action: 'renameCommand',
-          ok: true,
-          session: {
-            ghostexId: resolvedSession.sidebarSessionId,
-            projectId: resolvedSession.projectId,
-            sessionId: resolvedSession.sessionId,
-          },
-        };
-      }
-      case 'runCommand':
-        return this.runGxserverRendererCommandButton(readGpuiRecordString(command.payload, 'commandId'), command);
-      case 'readResourcesSnapshot':
-        return this.requestNativeResourcesSnapshot();
-      case 'updateSettingsPatch':
-        return this.applyRendererSettingsPatch(command);
-      case 'openSettings':
-        return this.openSettingsFromRendererCommand(command);
-      case 'openBrowser':
-      case 'openBrowserPane':
-        return this.openEmbeddedBrowserFromRendererCommand(command);
-      case 'clickButton': {
-        const kind = readGpuiRecordString(command.payload, 'kind')?.trim();
-        if (kind !== 'command') {
-          throw new Error('Unsupported renderer command.');
-        }
-        return this.runGxserverRendererCommandButton(readGpuiRecordString(command.payload, 'id'), command);
-      }
-      default:
-        throw new Error('Unsupported renderer command.');
-    }
-  },
-
-  applyRendererSettingsPatch(this: GpuiSidebarRuntime, command: GxserverRendererCommand): Record<string, unknown> {
-    /*
-    CDXC:Settings 2026-09-09 DECISION:
-    User: `ghostex settings set` writes through the running desktop app, never
-    the settings file, so a CLI change takes the exact save and fan-out path a
-    Settings modal save takes (Rust merges the patch onto the stored snapshot
-    and hydrates every surface). The renderer command carries only a flat
-    key/value patch; the CLI validates keys and values against the generated
-    settings catalog before it dispatches.
-    SEE-ALSO: server/src/ghostex_cli/settings.rs, skills/ghostex-help.
-    */
-    const rawPatch = command.payload.patch;
-    if (typeof rawPatch !== 'object' || rawPatch === null || Array.isArray(rawPatch)) {
-      throw new Error('Invalid settings patch.');
-    }
-    const patch = rawPatch as Record<string, unknown>;
-    const keys = Object.keys(patch);
-    if (keys.length === 0 || keys.length > 50) {
-      throw new Error('Invalid settings patch.');
-    }
-    for (const key of keys) {
-      const value = patch[key];
-      const scalar = typeof value === 'boolean' || typeof value === 'string' || typeof value === 'number';
-      if (!scalar || (typeof value === 'number' && !Number.isFinite(value))) {
-        throw new Error('Invalid settings patch.');
-      }
-    }
-    const message: Extract<SidebarToExtensionMessage, { type: 'updateSettingsPatch' }> = {
-      patch: patch as ghostexSettingsPatch,
-      source: 'cli:settings',
-      type: 'updateSettingsPatch',
-    };
-    try {
-      postAppModalHostMessage({ message, type: 'sidebarCommand' }, 'GPUISidebarActions:updateSettingsPatch');
-    } catch {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    return { accepted: true, keys, ok: true };
-  },
-
-  openSettingsFromRendererCommand(this: GpuiSidebarRuntime, command: GxserverRendererCommand): Record<string, unknown> {
-    /*
-    `ghostex settings open [<key>]` lands on the Settings modal with the tab
-    and search prefilled, the same open message the titlebar Tips rows use, so
-    settings an agent may not write (accounts, remote pairing, tokens) are one
-    command away for the user instead of being edited blind.
-    */
-    const rawTab = readGpuiRecordString(command.payload, 'tab')?.trim();
-    const tab = rawTab || 'settings';
-    if (!(SETTINGS_MODAL_NAVIGATION_TABS as readonly string[]).includes(tab)) {
-      throw new Error('Invalid settings tab.');
-    }
-    const searchQuery = readGpuiRecordString(command.payload, 'searchQuery')?.trim().slice(0, 200) || undefined;
-    try {
-      postAppModalHostMessage(
-        {
-          ...(searchQuery ? { initialSearchQuery: searchQuery } : {}),
-          initialTab: tab,
-          modal: 'settings',
-          type: 'open',
-        },
-        'GPUISidebarActions:openSettings'
-      );
-    } catch {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    return { ok: true, searchQuery: searchQuery ?? null, tab };
-  },
-
-  runGxserverRendererCommandButton(
-    this: GpuiSidebarRuntime,
-    rawCommandId: string | undefined,
-    rendererCommand: GxserverRendererCommand
-  ): Record<string, unknown> {
-    /*
-    CDXC:CefRuntime 2026-06-27-05:51:
-    gxserver `runCommand` and `clickButton(kind:"command")` must launch the same trusted project Action button as native. Treat renderer payloads as selectors only; command text, URLs, close-on-exit normalization, completion-sound preference, cwd/env, paths, output, and logs must come from the live HUD command and fixed Rust command-action bridge.
-    */
-    const commandId = normalizeNonEmptyString(rawCommandId)?.trim();
-    if (!commandId) {
-      throw new Error('Unsupported renderer command.');
-    }
-    const command = this.resolveSidebarCommand(commandId);
-    if (!command || !isSidebarCommandConfigured(command)) {
-      throw new Error('Unsupported renderer command.');
-    }
-    const selectionMessage: Extract<SidebarToExtensionMessage, { type: 'runSidebarCommand' }> = {
-      commandId,
-      type: 'runSidebarCommand',
-    };
-    if (!this.postSidebarCommandAction(command, selectionMessage)) {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    return {
-      accepted: true,
-      action: rendererCommand.action,
-      ok: true,
-    };
-  },
-
-  openEmbeddedBrowserFromRendererCommand(
-    this: GpuiSidebarRuntime,
-    command: GxserverRendererCommand
-  ): Record<string, unknown> {
-    /*
-    macOS `openNativeBrowserPaneFromCli` parity for `ghostex browser open` /
-    `gx ln`. Resolve CLI project selectors against the live sidebar project
-    model, then forward only the validated project key; Rust re-normalizes the
-    address and owns project-model swapping plus tab reuse/creation. An
-    untargeted `--active-project` open keeps using the current Browser model.
-    */
-    const post = window.ghostexGpui?.postOpenBrowserUrl;
-    if (typeof post !== 'function') {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    const url = readGpuiRecordString(command.payload, 'url')?.trim() ?? '';
-    if (url.length > GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS) {
-      throw new Error('Invalid renderer command URL.');
-    }
-    const rawReuse = readGpuiRecordString(command.payload, 'reuse')?.trim().toLowerCase();
-    const reuse = rawReuse === 'exact' || rawReuse === 'none' ? rawReuse : 'similar';
-    const groupId = readGpuiRecordString(command.payload, 'groupId')?.trim();
-    const requestedProjectId = readGpuiRecordString(command.payload, 'projectId')?.trim();
-    const projectPath = readGpuiRecordString(command.payload, 'projectPath')?.trim();
-    const projectId = this.resolveEmbeddedBrowserRendererCommandProjectId({
-      groupId,
-      projectId: requestedProjectId,
-      projectPath,
-    });
-    if ((groupId || requestedProjectId || projectPath) && !projectId) {
-      throw new Error('No matching project was found.');
-    }
-    const payload = JSON.stringify({
-      ...(projectId ? { projectId } : {}),
-      reuse,
-      type: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
-      url,
-      version: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
-    });
-    if (!post(payload)) {
-      throw new Error('Renderer command bridge unavailable.');
-    }
-    return {
-      accepted: true,
-      action: command.action,
-      ok: true,
-    };
-  },
-
-  resolveEmbeddedBrowserRendererCommandProjectId(
-    this: GpuiSidebarRuntime,
-    scope: {
-      groupId?: string;
-      projectId?: string;
-      projectPath?: string;
-    }
-  ): string | undefined {
-    if (scope.groupId) {
-      const groupProjectId = this.resolveWorkspaceGroupProjectId(scope.groupId);
-      return groupProjectId ? this.resolveEmbeddedBrowserKnownProjectId(groupProjectId) : undefined;
-    }
-    if (scope.projectId) {
-      return this.resolveEmbeddedBrowserKnownProjectId(scope.projectId);
-    }
-    return this.resolveDomainProjectScope({ projectPath: scope.projectPath })?.projectId;
-  },
-
-  resolveEmbeddedBrowserKnownProjectId(this: GpuiSidebarRuntime, projectId: string): string | undefined {
-    const remoteScope = this.resolveRemotePresentationProjectScope({ projectId });
-    if (remoteScope) {
-      return createGpuiRemotePresentationProjectId(remoteScope.machineId, remoteScope.projectId);
-    }
-    return this.domainProjectById(projectId)?.projectId;
-  },
-
-  resolveGxserverRendererCommandSession(
-    this: GpuiSidebarRuntime,
-    payload: Record<string, unknown>
-  ): GpuiRendererCommandResolvedSession | undefined {
-    /*
-    CDXC:CefRuntime 2026-06-27-02:05:
-    gxserver renderer commands can target local sessions with raw project/session ids in `sessionTarget`, while the reused GPUI SidebarApp renders combined `combined-session:<project>:<session>` ids. Resolve those raw ids to the same combined sidebar id before invoking runtime focus logic, and keep the command result bounded to ids/status rather than paths, titles, command text, URLs, tokens, terminal output, or renderer payload echoes.
-    */
-    const target = readGpuiRendererCommandSessionTarget(payload);
-    const globalReference = parseGpuiRendererCommandGlobalSessionRef(
-      readGpuiRecordString(target, 'globalRef') ?? readGpuiRecordString(payload, 'globalRef')
-    );
-    const projectId =
-      readGpuiRecordString(target, 'projectId')?.trim() ||
-      readGpuiRecordString(payload, 'projectId')?.trim() ||
-      globalReference?.projectId;
-    const sessionId =
-      readGpuiRecordString(target, 'sessionId')?.trim() ||
-      readGpuiRecordString(payload, 'sessionId')?.trim() ||
-      globalReference?.sessionId;
-    if (!sessionId) {
-      return undefined;
-    }
-    const scopedSession = parseGxserverPresentationProjectSessionId(sessionId);
-    if (scopedSession) {
-      if (projectId && scopedSession.projectId !== projectId) {
-        return undefined;
-      }
-      if (!this.hasGpuiRendererCommandLocalSession(scopedSession.projectId, scopedSession.sessionId)) {
-        return undefined;
-      }
-      return {
-        projectId: scopedSession.projectId,
-        sessionId: scopedSession.sessionId,
-        sidebarSessionId: sessionId,
-      };
-    }
-    if (!projectId) {
-      return undefined;
-    }
-    if (!this.hasGpuiRendererCommandLocalSession(projectId, sessionId)) {
-      return undefined;
-    }
-    return {
-      projectId,
-      sessionId,
-      sidebarSessionId: createGxserverPresentationProjectSessionId(projectId, sessionId),
-    };
-  },
-
-  hasGpuiRendererCommandLocalSession(this: GpuiSidebarRuntime, projectId: string, sessionId: string): boolean {
-    if (
-      this.presentation?.sessions.some((session) => session.projectId === projectId && session.sessionId === sessionId)
-    ) {
-      return true;
-    }
-    return this.latestGroups.some((group) =>
-      group.sessions.some((session) => {
-        const reference = parseGxserverPresentationProjectSessionId(session.sessionId);
-        return reference?.projectId === projectId && reference.sessionId === sessionId;
-      })
-    );
-  },
-
   /*
   CDXC:Navigation 2026-08-19:
   Trail stops are recorded from the SAME projection the titlebar label reads,
@@ -960,72 +504,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
     } catch {
       // Toast-host availability must never gate the underlying action.
     }
-  },
-
-  postProjectPathActionForGroup(
-    this: GpuiSidebarRuntime,
-    action: Extract<
-      GpuiSidebarNativeProjectPathAction,
-      'copyWorkspaceProjectPath' | 'openWorkspaceProjectInFinder' | 'openWorkspaceProjectInIde'
-    >,
-    groupId: string,
-    originalMessage: SidebarToExtensionMessage
-  ): void {
-    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
-    if (remoteGroup) {
-      if (action === 'copyWorkspaceProjectPath') {
-        this.postRemoteProjectNativeAction('copyRemoteProjectPath', remoteGroup, originalMessage);
-        return;
-      }
-      if (action === 'openWorkspaceProjectInIde') {
-        this.postRemoteProjectNativeAction('openRemoteWorkspaceProjectInIde', remoteGroup, originalMessage);
-        return;
-      }
-      this.postRemoteToast('warning', 'Remote project open unavailable', {
-        description: 'Remote project locations cannot be opened in the local file manager.',
-      });
-      return;
-    }
-    const projectId = this.resolveProjectIdForGroup(groupId);
-    if (!projectId) {
-      this.handleUnsupportedSidebarMessage(originalMessage);
-      return;
-    }
-    this.postNativeProjectPathAction(action, projectId, originalMessage);
-  },
-
-  postActiveProjectPathAction(
-    this: GpuiSidebarRuntime,
-    action: Extract<
-      GpuiSidebarNativeProjectPathAction,
-      'openActiveWorkspaceProjectInFinder' | 'openActiveWorkspaceProjectInVscode' | 'openActiveWorkspaceProjectInZed'
-    >,
-    originalMessage: SidebarToExtensionMessage
-  ): void {
-    const remoteGroup = this.activeGroupId ? parseGpuiRemotePresentationGroupId(this.activeGroupId) : undefined;
-    if (remoteGroup) {
-      if (action === 'openActiveWorkspaceProjectInVscode') {
-        this.postRemoteProjectNativeAction('openRemoteWorkspaceProjectInVscode', remoteGroup, originalMessage);
-        return;
-      }
-      if (action === 'openActiveWorkspaceProjectInZed') {
-        this.postRemoteProjectNativeAction('openRemoteWorkspaceProjectInZed', remoteGroup, originalMessage);
-        return;
-      }
-      this.postRemoteToast('warning', 'Remote project open unavailable', {
-        description:
-          action === 'openActiveWorkspaceProjectInFinder'
-            ? 'Remote project locations cannot be opened in the local file manager.'
-            : 'That editor is not supported for GPUI remote project opens.',
-      });
-      return;
-    }
-    const projectId = this.activeProjectId;
-    if (!projectId || !this.domainProjectById(projectId)) {
-      this.handleUnsupportedSidebarMessage(originalMessage);
-      return;
-    }
-    this.postNativeProjectPathAction(action, projectId, originalMessage);
   },
 
   postNativeProjectPathAction(
@@ -1194,45 +672,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
     } catch {
       this.handleUnsupportedSidebarMessage(originalMessage);
       return false;
-    }
-  },
-
-  saveSidebarSettingsPatch(
-    this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'updateSettingsPatch' }>
-  ): void {
-    /*
-    CDXC:StateSync 2026-07-29:
-    Sidebar-origin settings writes (sidebar version, Group by Project, remote
-    machine ordering) are real Settings saves, so they take the same route the
-    Settings modal uses: the app-modal host bridge installed on the GPUI sidebar
-    surface, where Rust merges the patch onto the stored snapshot and hydrates
-    every surface back. Do not persist settings inside this adapter.
-    */
-    try {
-      postAppModalHostMessage({ message, type: 'sidebarCommand' }, 'GPUISidebarActions:updateSettingsPatch');
-    } catch {
-      this.handleUnsupportedSidebarMessage(message);
-    }
-  },
-
-  openExternalUrl(
-    this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'openExternalUrl' }>
-  ): void {
-    /*
-    CDXC:Sidebar 2026-08-07:
-    The shared sidebar's external links must enter the same native command
-    route as Settings and first-launch links. The GPUI sidebar adapter used to
-    drop openExternalUrl as unsupported after the React click had already
-    closed the menu, so Join Discord appeared inert. Forward the typed command
-    through the existing app-modal host bridge; Rust remains responsible for
-    validating and opening the http/https URL.
-    */
-    try {
-      postAppModalHostMessage({ message, type: 'sidebarCommand' }, 'GPUISidebarActions:openExternalUrl');
-    } catch {
-      this.handleUnsupportedSidebarMessage(message);
     }
   },
 

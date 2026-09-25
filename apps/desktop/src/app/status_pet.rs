@@ -550,19 +550,7 @@ impl GhostexGpuiApp {
         if !gpui_status_bridge_id_allowed(session_id) {
             return false;
         }
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let message = serde_json::json!({
-            "sessionId": session_id,
-            "type": GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_TYPE,
-            "version": GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_VERSION,
-        });
-        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
-        self.gx_store_flush_old_runtime_tell(cx);
-        let script = gpui_status_pet_activation_script(&message);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
-        true
+        self.gx_store_focus_activated_session(session_id.trim(), cx)
     }
 
     pub(crate) fn dispatch_gpui_menu_bar_project_activation(
@@ -606,20 +594,12 @@ impl GhostexGpuiApp {
         {
             return false;
         }
-        let Some(sidebar) = self.sidebar.clone() else {
+        let (project_id, session_id) = (project_id.trim(), session_id.trim());
+        if project_id.is_empty() || session_id.is_empty() {
             return false;
-        };
-        let message = serde_json::json!({
-            "projectId": project_id,
-            "sessionId": session_id,
-            "type": GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_TYPE,
-            "version": GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_VERSION,
-        });
-        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
-        self.gx_store_flush_old_runtime_tell(cx);
-        let script = gpui_menu_bar_session_activation_script(&message);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
-        true
+        }
+        let focus_id = crate::app::gx_store::menu_bar_session_focus_id(project_id, session_id);
+        self.gx_store_focus_activated_session(&focus_id, cx)
     }
 
     pub(crate) fn dispatch_gpui_project_board_conversation_request(
@@ -687,27 +667,18 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         // Palette rows carry projected sidebar session ids (combined local or
-        // remote-shaped). Rust only bounds the string; the sidebar runtime
-        // validates the shape and reuses the reviewed focusSession routing.
+        // remote-shaped). The string is bounded and its shape checked here, then it
+        // takes the reviewed focusSession routing (gx_store/activation_focus.rs).
         if session_id.is_empty()
             || session_id.chars().count() > GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
             || session_id.chars().any(char::is_control)
         {
             return false;
         }
-        let Some(sidebar) = self.sidebar.clone() else {
+        let Some(session_id) = crate::app::gx_store::palette_session_focus_id(session_id) else {
             return false;
         };
-        let message = serde_json::json!({
-            "sessionId": session_id,
-            "type": GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_TYPE,
-            "version": GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_VERSION,
-        });
-        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
-        self.gx_store_flush_old_runtime_tell(cx);
-        let script = gpui_command_palette_session_focus_script(&message);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
-        true
+        self.gx_store_focus_activated_session(session_id, cx)
     }
 
     pub(crate) fn dispatch_gpui_command_palette_run_sidebar_command(
@@ -746,25 +717,7 @@ impl GhostexGpuiApp {
         if !bounded(command_id) || run_mode.is_some_and(|run_mode| !bounded(run_mode)) {
             return false;
         }
-        // A sidebar command can change focus in the runtime: it must hear the newest local selection first (gx_store/burst.rs).
-        self.gx_store_flush_old_runtime_tell(cx);
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let mut message = serde_json::json!({
-            "commandId": command_id,
-            "type": GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_TYPE,
-            "version": GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_VERSION,
-        });
-        if let Some(run_mode) = run_mode {
-            message["runMode"] = serde_json::json!(run_mode);
-        }
-        if let Some(scope) = scope {
-            message["scope"] = serde_json::json!(scope);
-        }
-        let script = gpui_command_palette_run_sidebar_command_script(&message);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
-        true
+        self.gx_store_run_activated_sidebar_command(command_id, run_mode, scope, cx)
     }
 
     pub(crate) fn dispatch_gpui_workspace_tab_session_selected(

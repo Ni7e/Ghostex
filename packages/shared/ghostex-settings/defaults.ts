@@ -1,3 +1,4 @@
+import { DEFAULT_PROJECT_WEBSITE_VISIBILITY } from './project-websites';
 import { DEFAULT_AGENT_MANAGER_ZOOM_PERCENT } from '../session-grid-contract-core';
 import { DEFAULT_COMMANDS_PANEL_HEIGHT_PX } from '../session-grid-contract-session';
 import { DEFAULT_COMPLETION_SOUND } from '../completion-sound';
@@ -127,9 +128,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   docsViewTabHidden: false,
   terminalViewTabHidden: false,
   storybookViewTabHidden: false,
-  linearViewTabHidden: false,
-  jiraViewTabHidden: false,
-  githubViewTabHidden: false,
+  ...DEFAULT_PROJECT_WEBSITE_VISIBILITY,
   projectWebsiteViews: {},
   tipsAndTricksTitlebarButtonHidden: false,
   notificationsTitlebarButtonHidden: false,
@@ -246,7 +245,6 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   analyticsEnabled: true,
   debuggingMode: false,
-  chatBrain: 'quickjs',
   diagnosticLogging: {
     scenarios: DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS,
     version: 1,
@@ -560,6 +558,9 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   windowGlassImagePlacement: 'static',
   windowGlassImageDark: '',
   windowGlassImageLight: '',
+  windowGlassVideoDark: '',
+  windowGlassVideoLight: '',
+  windowGlassVideoOnlyOnPower: true,
   windowGlassSidebarOpacityDark: DEFAULT_WINDOW_GLASS_SIDEBAR_OPACITY_DARK_PERCENT,
   windowGlassWorkAreaTintDark: DEFAULT_WINDOW_GLASS_WORK_AREA_TINT_DARK_PERCENT,
   windowGlassSidebarOpacityLight: DEFAULT_WINDOW_GLASS_SIDEBAR_OPACITY_LIGHT_PERCENT,

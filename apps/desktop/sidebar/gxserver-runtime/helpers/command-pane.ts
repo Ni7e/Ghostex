@@ -18,7 +18,6 @@ import type {
   GpuiRemoteSidebarHud,
   GpuiSidebarCommandSessionIndicatorScope,
   GpuiSidebarRuntimeSettings,
-  GpuiWorkspaceSessionDelayedSendSummary,
 } from '../types-and-protocol';
 import { createGpuiSidebarSettings } from './bootstrap';
 import { createGpuiProjectSettingsProjects } from './presentation-projection';
@@ -49,55 +48,6 @@ import type { SidebarCommandButton } from '@/packages/shared/sidebar-commands';
 import { createSidebarCommandButtons } from '@/packages/shared/sidebar-commands';
 import type { SidebarGitState } from '@/packages/shared/sidebar-git';
 import { createDefaultSidebarGitState } from '@/packages/shared/sidebar-git';
-
-export function normalizeGpuiWorkspaceSessionDelayedSends(
-  sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[] | unknown
-): GpuiWorkspaceSessionDelayedSendSummary[] {
-  if (!Array.isArray(sessions)) {
-    return [];
-  }
-  return sessions.slice(0, GPUI_COMMAND_PANE_SESSION_SUMMARY_LIMIT).flatMap((session) => {
-    if (!session || typeof session !== 'object') {
-      return [];
-    }
-    const record = session as Partial<Record<keyof GpuiWorkspaceSessionDelayedSendSummary, unknown>>;
-    const sessionId = normalizeGpuiCommandPaneSessionString(record.sessionId);
-    if (!sessionId || !parseGxserverPresentationProjectSessionId(sessionId)) {
-      return [];
-    }
-    const delayedSendDeadlineAt = normalizeGpuiCommandPaneTimerDeadlineAt(record.delayedSendDeadlineAt);
-    const delayedSendRemainingLabel = normalizeGpuiWorkspaceDelayedSendRemainingLabel(record.delayedSendRemainingLabel);
-    const delayedSendRemainingMs = normalizeGpuiCommandPaneTimerRemainingMs(record.delayedSendRemainingMs);
-    const sendWhenAllProjectSessionsStopActive = record.sendWhenAllProjectSessionsStopActive === true;
-    const sendWhenAgentStopsActive = record.sendWhenAgentStopsActive === true;
-    if (
-      !delayedSendDeadlineAt &&
-      !delayedSendRemainingLabel &&
-      delayedSendRemainingMs === undefined &&
-      !sendWhenAllProjectSessionsStopActive &&
-      !sendWhenAgentStopsActive
-    ) {
-      return [];
-    }
-    return [
-      {
-        ...(delayedSendDeadlineAt ? { delayedSendDeadlineAt } : {}),
-        ...(delayedSendRemainingLabel ? { delayedSendRemainingLabel } : {}),
-        ...(delayedSendRemainingMs !== undefined ? { delayedSendRemainingMs } : {}),
-        ...(sendWhenAllProjectSessionsStopActive ? { sendWhenAllProjectSessionsStopActive: true } : {}),
-        ...(sendWhenAgentStopsActive ? { sendWhenAgentStopsActive: true } : {}),
-        sessionId,
-      },
-    ];
-  });
-}
-
-export function normalizeGpuiWorkspaceDelayedSendRemainingLabel(value: unknown): string | undefined {
-  if (value === 'Waiting for agent' || value === 'Waiting for agents') {
-    return value;
-  }
-  return normalizeGpuiCommandPaneTimerRemainingLabel(value);
-}
 
 export function normalizeGpuiCommandPaneSessions(
   sessions: readonly GpuiCommandPaneSessionSummary[] | unknown

@@ -825,6 +825,11 @@ impl GhostexGpuiApp {
         self.gx_store.core.focus().local_stamp
     }
 
+    /// The session the store has focused, on any machine.
+    pub(crate) fn gx_store_focused_session(&self) -> Option<SessionKey> {
+        self.gx_store.core.focus().focused_session.clone()
+    }
+
     /// An active project context for another project was refused because the old runtime produced
     /// it before it heard of the newest local selection.
     pub(crate) fn gx_store_note_stale_project_context(&mut self, observed_stamp: u64) {

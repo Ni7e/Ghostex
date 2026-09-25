@@ -4,6 +4,7 @@
 //! (packages/shared/session-chat-presentation/agent-tasks.ts), the same
 //! projection `session-chat-agent-tasks-panel.tsx` renders.
 
+use super::disclosure_motion::measured;
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
 use crate::app::helpers::ThrottledAnimationExt;
 use crate::app::native_chat::cursor::ChatCursor as _;
@@ -43,6 +44,7 @@ impl NativeChatView {
                     .bg(p.control_primary),
             )
             .into_any_element();
+        let motion = self.disclosure_frame("agent-tasks", open, cx);
         let header = self.panel_header(
             super::panel_card::PanelHeader {
                 id: "chat-agent-tasks-header",
@@ -50,6 +52,7 @@ impl NativeChatView {
                 title: "Tasks",
                 meta: text(&panel, "meta"),
                 open,
+                has_body: open || motion.is_some(),
                 toggle_label: if open { "Hide tasks" } else { "Show tasks" },
                 trailing: Some(bar),
                 command: json!({"type":"toggleAgentTasks","open":!open}),
@@ -58,7 +61,12 @@ impl NativeChatView {
             cx,
         );
         let mut body = Vec::new();
-        if open {
+        if open || motion.is_some() {
+            let expanded = panel["showCompleted"] == true;
+            let fold = text(&panel, "foldLabel");
+            let fold_motion = (!fold.is_empty())
+                .then(|| self.disclosure_frame("agent-tasks:completed", expanded, cx))
+                .flatten();
             let mut rows = div()
                 .id("chat-agent-tasks-rows")
                 .flex()
@@ -69,11 +77,22 @@ impl NativeChatView {
             for row in panel["rows"].as_array().into_iter().flatten() {
                 rows = rows.child(self.task_row(row, p));
             }
-            body.push(rows.into_any_element());
+            // "N more tasks" eases the list between its short and its full height.
+            body.push(match fold_motion {
+                Some(frame) => self.capped_body_motion(
+                    "agent-tasks:completed",
+                    frame,
+                    0.0,
+                    rows.into_any_element(),
+                ),
+                None if !fold.is_empty() && !expanded => measured(
+                    self.disclosure_floor("agent-tasks:completed"),
+                    rows.into_any_element(),
+                ),
+                None => rows.into_any_element(),
+            });
             // CDXC:SessionChat 2026-09-16 DECISION: User: the fold is a text line, not a button, and reads "N more task(s)" / "Show less tasks". Rows are the Subagents row size. The panel is the shared status card with a list icon.
-            let fold = text(&panel, "foldLabel");
             if !fold.is_empty() {
-                let expanded = panel["showCompleted"] == true;
                 body.push(
                     div()
                         .id("chat-agent-tasks-fold")
@@ -100,7 +119,18 @@ impl NativeChatView {
                 .role(gpui::Role::Group)
                 .aria_label("Agent tasks")
                 .w_full()
-                .child(self.status_card_with_header(header, body, Vec::new(), p))
+                .child(self.status_card_with_header_motion(
+                    super::cards::CardBodyMotion {
+                        key: "agent-tasks",
+                        frame: motion,
+                        shut_body: false,
+                        shut: !open,
+                    },
+                    header,
+                    body,
+                    Vec::new(),
+                    p,
+                ))
                 .into_any_element(),
         )
     }

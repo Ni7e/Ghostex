@@ -71,6 +71,7 @@ pub const GXSERVER_CAPABILITIES: &[&str] = &[
     the prompt-editor selector this daemon accepts before sending the create.
     */
     "codeServerPromptEditor",
+    "browserTcpWebSocketV1",
     /*
     CDXC:SessionNotes 2026-08-24:
     Session notes are keyed by the agent session id and published on the

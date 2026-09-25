@@ -1,3 +1,4 @@
+use super::disclosure_motion::measured;
 use super::{appearance::ChatAppearance, state::NativeChatView};
 use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
@@ -63,6 +64,38 @@ impl NativeChatView {
         let expanded = self.expanded.contains(&key);
         let capped = estimated_lines(&body) > (CAP_HEIGHT / LINE_HEIGHT) as usize;
         let toggle_key = key.clone();
+        let motion = capped
+            .then(|| self.disclosure_frame(&key, expanded, cx))
+            .flatten();
+        let prose = self.markdown(format!("body:{id}"), body, references, &lane, cx);
+        let text_body = match motion {
+            // "Show more" and "Show less" ease between the capped height and the full one.
+            Some(frame) => self.capped_body_motion(
+                &key,
+                frame,
+                0.0,
+                div()
+                    .id(format!("thinking-body:{id}"))
+                    .min_w_0()
+                    .child(prose)
+                    .into_any_element(),
+            ),
+            None => {
+                let block = div()
+                    .id(format!("thinking-body:{id}"))
+                    .min_w_0()
+                    .when(capped && !expanded, |body| {
+                        body.max_h(px(CAP_HEIGHT * s)).overflow_y_scroll()
+                    })
+                    .child(prose)
+                    .into_any_element();
+                if capped && !expanded {
+                    measured(self.disclosure_floor(&key), block)
+                } else {
+                    block
+                }
+            }
+        };
         div()
             .flex()
             .items_start()
@@ -78,21 +111,7 @@ impl NativeChatView {
                     .flex()
                     .flex_col()
                     .gap(px(4.0 * s))
-                    .child(
-                        div()
-                            .id(format!("thinking-body:{id}"))
-                            .min_w_0()
-                            .when(capped && !expanded, |body| {
-                                body.max_h(px(CAP_HEIGHT * s)).overflow_y_scroll()
-                            })
-                            .child(self.markdown(
-                                format!("body:{id}"),
-                                body,
-                                references,
-                                &lane,
-                                cx,
-                            )),
-                    )
+                    .child(text_body)
                     .when(capped, |column| {
                         column.child(
                             div()

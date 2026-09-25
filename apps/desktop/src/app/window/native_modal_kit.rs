@@ -221,6 +221,12 @@ impl ModalPalette {
     pub(crate) fn primary_hover(&self) -> Rgba {
         css_mix(self.primary, 0.88, rgb(0xffffff))
     }
+
+    /// The Windows modal window's system border: 16% ink over the surface, so it stays visible against the same-coloured app chrome.
+    pub(crate) fn window_border(&self) -> Rgba {
+        let ink = if self.light { 0x000000 } else { 0xffffff };
+        css_mix(rgb(ink), 0.16, self.surface)
+    }
 }
 
 /// Dialog title (16px/400, line-height 1.3) and description (13px muted, line-height 1.55), 6px apart.

@@ -31,6 +31,8 @@ impl NativeChatView {
         let detail = text(activity, "detail").trim().to_string();
         let expandable = !detail.is_empty();
         let open = expandable && self.expanded.contains(EXPANDED_KEY);
+        let motion = self.disclosure_frame(EXPANDED_KEY, open, cx);
+        let has_body = open || motion.is_some();
         // React's header row is `align-items: flex-start` and puts each glyph in a
         // one-line-tall box that centres it (`.ghostex-chat-status-card-lead`), so a label that
         // wraps keeps the dot and the chevron on its first line instead of drifting to the middle
@@ -83,12 +85,12 @@ impl NativeChatView {
                 ))
             });
         let header = if expandable {
-            super::cards::status_card_press_header(header, open, false, p)
+            super::cards::status_card_press_header(header, has_body, false, p)
         } else {
             header
         }
         .into_any_element();
-        let body = if open {
+        let body = if has_body {
             vec![
                 div()
                     .id("terminal-tool-detail")
@@ -109,6 +111,17 @@ impl NativeChatView {
         } else {
             Vec::new()
         };
-        self.status_card_with_header(header, body, Vec::new(), p)
+        self.status_card_with_header_motion(
+            super::cards::CardBodyMotion {
+                key: EXPANDED_KEY,
+                frame: motion,
+                shut_body: false,
+                shut: !open,
+            },
+            header,
+            body,
+            Vec::new(),
+            p,
+        )
     }
 }

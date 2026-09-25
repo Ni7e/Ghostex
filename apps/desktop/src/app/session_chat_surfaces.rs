@@ -507,6 +507,36 @@ impl GhostexGpuiApp {
         true
     }
 
+    /// CDXC:SessionChat 2026-09-24 DECISION:
+    /// User: a session opened by clicking its sidebar row or picking it from Cmd+P (which always wakes it) must not show the "Resume" pill in its chat view. The automatic Chat switch waits for a live terminal, so a sleeping tab whose agent prefers Chat drew its sleeping terminal body until the wake finished; the selection now opens it in Chat at once, like a first click on an unmapped session (sidebar_direct_focus.rs). A session the automatic switch already considered keeps the view it has, so a tab the user moved back to Terminal stays there.
+    pub(crate) fn adopt_preferred_chat_view_on_selection(
+        &mut self,
+        session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.agents_chat_mode_sessions.contains(&session_id)
+            || self
+                .agents_chat_auto_switch_observed_sessions
+                .contains_key(&session_id)
+        {
+            return;
+        }
+        let settings = shared_settings::shared_sidebar_settings_snapshot();
+        let interface = gpui_effective_preferred_agent_interface_for_agent_icon(
+            settings.object(),
+            self.agents_workspace
+                .session(session_id)
+                .and_then(|session| session.agent_icon),
+        );
+        if interface != GpuiPreferredAgentInterface::Chat {
+            return;
+        }
+        if self.show_agents_session_chat_mode(session_id, cx) {
+            self.agents_chat_auto_switch_observed_sessions
+                .insert(session_id, interface);
+        }
+    }
+
     pub(crate) fn agents_terminal_runtime_is_live_for_chat_launch(
         &self,
         session_id: TerminalSessionId,
@@ -832,6 +862,7 @@ impl GhostexGpuiApp {
             }
         }
         self.dismiss_native_chat_windows_leaving_view(&visible_session_ids, cx);
+        self.restore_native_chat_windows_entering_view(&visible_session_ids, cx);
         self.native_chat_visible_sessions = visible_session_ids.clone();
         self.resume_visible_native_chat_runtimes(cx);
         self.schedule_native_chat_prewarm(cx);
@@ -843,7 +874,9 @@ impl GhostexGpuiApp {
         session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.native_chat_views.remove(&session_id);
+        if let Some(view) = self.native_chat_views.remove(&session_id) {
+            view.update(cx, |view, cx| view.dismiss_windows_for_hidden_pane(cx));
+        }
         let caller = std::panic::Location::caller();
         let file = std::path::Path::new(caller.file())
             .file_name()
@@ -866,7 +899,6 @@ impl GhostexGpuiApp {
             if let Some(key) = state.account_key.as_ref() {
                 self.forget_session_chat_presentation(key);
             }
-            self.release_session_chat_runtime_subscription(state.generation, cx);
         }
         self.drop_pending_keyboard_handoff_for_session(session_id);
         self.pending_session_chat_composer_insert

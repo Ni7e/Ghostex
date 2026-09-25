@@ -71,8 +71,9 @@ pub fn begin(
     version: Option<crate::composer::queue::DraftVersion>,
     image_paths: Vec<String>,
 ) -> Vec<Effect> {
-    if let Some(blocked) = crate::composer::document::send_blocked(state, context) {
-        state.core.fail(blocked.clone(), None);
+    // A block that clears on its own does not refuse: the delivery phase waits for it instead.
+    if let Some(refused) = crate::composer::document::send_refused(state) {
+        state.core.fail(refused, None);
         return vec![submission_failed(mode, text)];
     }
     let capabilities = crate::composer::document::queue(state).capabilities;
@@ -119,6 +120,7 @@ pub fn begin(
         marker: None,
         refresh_after_send: state.session.available_agents.is_some(),
         handoff: false,
+        awaiting_gate: false,
     });
     run_head(state, context)
 }
@@ -135,7 +137,13 @@ fn run_head(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
     // Escape can arrive while a draft save is pending, before the daemon has a send to cancel.
     // Both renderers must cancel here as well so the recovered draft is not delivered after the
     // interrupt.
-    if submission.cancelled && matches!(phase, SendPhase::SendCompact | SendPhase::SendText) {
+    if submission.cancelled
+        && matches!(
+            phase,
+            SendPhase::SendCompact | SendPhase::SendText | SendPhase::QueueText
+        )
+    {
+        undo_optimistic(state);
         return fail(state, "The session chat send was cancelled.");
     }
     let text = submission.text.clone();
@@ -181,18 +189,26 @@ fn run_head(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
                 })),
             }]
         }
-        SendPhase::SendCompact => {
-            let (sent, effects) = send_to_agent(state, context, "/compact", None, &[]);
-            adopt_send(state, sent);
-            effects
-        }
-        SendPhase::SendText => {
-            let images = submission.image_paths.clone();
-            let (sent, effects) = send_to_agent(state, context, &text, version, &images);
-            adopt_send(state, sent);
-            effects
+        SendPhase::SendCompact | SendPhase::SendText => {
+            let (body, version, images) = match phase {
+                SendPhase::SendCompact => ("/compact".to_string(), None, Vec::new()),
+                _ => (text, version, submission.image_paths.clone()),
+            };
+            if !submission.awaiting_gate {
+                let drawn = draw_agent_send(state, context, &body, &images);
+                adopt_send(state, drawn);
+            }
+            if hold_for_gate(state, context) {
+                return Vec::new();
+            }
+            let request_id = state.core.allocate_request_id();
+            wait_request(state, request_id);
+            vec![agent_send_rpc(request_id, &body, version, &images)]
         }
         SendPhase::QueueText => {
+            if hold_for_gate(state, context) {
+                return Vec::new();
+            }
             let request_id = state.core.allocate_request_id();
             wait_request(state, request_id);
             vec![Effect::SendRpc {
@@ -249,6 +265,20 @@ pub fn send_to_agent(
     version: Option<crate::composer::queue::DraftVersion>,
     image_paths: &[String],
 ) -> (AgentSend, Vec<Effect>) {
+    let mut sent = draw_agent_send(state, context, text, image_paths);
+    sent.request_id = state.core.allocate_request_id();
+    let effect = agent_send_rpc(sent.request_id, text, version, image_paths);
+    (sent, vec![effect])
+}
+
+/// The half of [`send_to_agent`] the user sees at once: the pills move and the echo or the marker
+/// is recorded. `request_id` is left 0 for the caller to fill when the call leaves.
+fn draw_agent_send(
+    state: &mut ChatState,
+    context: &ChatContext,
+    text: &str,
+    image_paths: &[String],
+) -> AgentSend {
     let catalog = crate::menus::option_catalog::session_option_catalog(
         &state.menus.model_catalog,
         state.session.agent.as_deref(),
@@ -276,33 +306,75 @@ pub fn send_to_agent(
         }
         _ => {}
     }
-    let request_id = state.core.allocate_request_id();
-    (
-        AgentSend {
-            request_id,
-            pending_id,
-            marker,
-        },
-        vec![Effect::SendRpc {
-            request_id,
-            method: ChatRpcMethod::SendSessionChatMessage,
-            params: Box::new(json!({
-                "text": text,
-                "imagePaths": if image_paths.is_empty() { Value::Null } else { json!(image_paths) },
-                "draftVersion": version,
-            })),
-        }],
-    )
+    AgentSend {
+        request_id: 0,
+        pending_id,
+        marker,
+    }
 }
 
-/// The submission is the one waiting for this call.
+/// `chat.send`'s gxserver call.
+fn agent_send_rpc(
+    request_id: u64,
+    text: &str,
+    version: Option<crate::composer::queue::DraftVersion>,
+    image_paths: &[String],
+) -> Effect {
+    Effect::SendRpc {
+        request_id,
+        method: ChatRpcMethod::SendSessionChatMessage,
+        params: Box::new(json!({
+            "text": text,
+            "imagePaths": if image_paths.is_empty() { Value::Null } else { json!(image_paths) },
+            "draftVersion": version,
+        })),
+    }
+}
+
+/// The submission's echo or marker, so a refusal can take it back.
 fn adopt_send(state: &mut ChatState, sent: AgentSend) {
     if let Some(submission) = state.composer.submitting.as_mut() {
-        submission.request = Some(sent.request_id);
-        submission.storage = None;
         submission.pending_id = sent.pending_id;
         submission.marker = sent.marker;
     }
+}
+
+/// Parks the head delivery phase while the send gate is shut, answering whether it did.
+///
+/// The TypeScript's `holdUntilSendable`: [`release_held`] runs the phase again once the gate
+/// clears, and an interrupt fails it at once.
+fn hold_for_gate(state: &mut ChatState, context: &ChatContext) -> bool {
+    let blocked = crate::composer::document::send_blocked(state, context).is_some();
+    if let Some(submission) = state.composer.submitting.as_mut() {
+        submission.awaiting_gate = blocked;
+        if blocked {
+            submission.request = None;
+            submission.storage = None;
+        }
+    }
+    blocked
+}
+
+/// Settle hook: a delivery phase parked by [`hold_for_gate`] resumes once the gate is clear.
+///
+/// Runs after family e's settle, because the option dispatch that clears `optionSwitching` answers
+/// there.
+pub fn release_held(
+    state: &mut ChatState,
+    _event: &crate::event::Event,
+    context: &ChatContext,
+) -> Vec<Effect> {
+    let parked = state
+        .composer
+        .submitting
+        .as_ref()
+        .is_some_and(|submission| submission.awaiting_gate);
+    if !parked || crate::composer::document::send_blocked(state, context).is_some() {
+        return Vec::new();
+    }
+    let effects = run_head(state, context);
+    state.core.publish_after(&effects);
+    effects
 }
 
 /// Undoes one [`AgentSend`] whose call never reached the agent.
@@ -552,6 +624,7 @@ pub fn handoff(
         marker: None,
         refresh_after_send: false,
         handoff: true,
+        awaiting_gate: false,
     });
     let key = draft_key(state);
     wait_storage(state, key.clone());
@@ -706,16 +779,24 @@ pub fn settle_handoff_acknowledgement(
 
 /// Escape: cancel a send that has not left, then ask the agent to stop.
 pub fn interrupt(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
+    let mut parked = false;
     if let Some(submission) = state.composer.submitting.as_mut() {
         submission.cancelled = true;
+        parked = submission.awaiting_gate;
     }
+    // A send parked behind the gate has no answer coming to notice the cancel, so it ends here.
+    let mut effects = if parked {
+        run_head(state, context)
+    } else {
+        Vec::new()
+    };
     // CDXC:SessionChat 2026-09-08 DECISION:
     // User: Escape closing /usage or a similar dialog must not report "Interrupted the agent" when
     // no turn was interrupted. The dialog's cancel lane verifies the live screen and avoids the
     // stop lane's queue cancellation and activity reset.
     if let Some(dialog) = cancellable_dialog(state) {
         let request_id = state.core.allocate_request_id();
-        return vec![Effect::SendRpc {
+        effects.push(Effect::SendRpc {
             request_id,
             method: ChatRpcMethod::AnswerSessionChatPrompt,
             params: Box::new(json!({
@@ -723,15 +804,17 @@ pub fn interrupt(state: &mut ChatState, context: &ChatContext) -> Vec<Effect> {
                 "dialogId": dialog,
                 "dialogAction": "cancel",
             })),
-        }];
+        });
+        return effects;
     }
     sends::begin_interrupt(state, context);
     let request_id = state.core.allocate_request_id();
-    vec![Effect::SendRpc {
+    effects.push(Effect::SendRpc {
         request_id,
         method: ChatRpcMethod::InterruptSessionChat,
         params: Box::new(json!({})),
-    }]
+    });
+    effects
 }
 
 /// The open terminal dialog's id, when it offers a cancel action.

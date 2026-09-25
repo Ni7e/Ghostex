@@ -15,6 +15,30 @@ pub(super) fn register(cx: &mut gpui::App) {
         return;
     }
     cx.set_global(ComposerKeysRegistered);
+    // CDXC:SessionChat 2026-09-23 SEE-ALSO:
+    // React's session-chat-lexical-input.tsx uses the primary modifier with Home/End for document movement and Shift selection. The native input only supplies macOS document-arrow defaults.
+    cx.bind_keys([
+        gpui::KeyBinding::new(
+            "secondary-home",
+            gpui_component::input::MoveToStart,
+            Some("NativeChat > Input"),
+        ),
+        gpui::KeyBinding::new(
+            "secondary-end",
+            gpui_component::input::MoveToEnd,
+            Some("NativeChat > Input"),
+        ),
+        gpui::KeyBinding::new(
+            "secondary-shift-home",
+            gpui_component::input::SelectToStart,
+            Some("NativeChat > Input"),
+        ),
+        gpui::KeyBinding::new(
+            "secondary-shift-end",
+            gpui_component::input::SelectToEnd,
+            Some("NativeChat > Input"),
+        ),
+    ]);
     cx.bind_keys(
         [
             ("enter", "enter"),
@@ -26,6 +50,12 @@ pub(super) fn register(cx: &mut gpui::App) {
             ("alt-up", "up"),
             ("down", "down"),
             ("shift-down", "down"),
+            // Line commands (`composer_line_command` in `edit_shortcuts.rs`).
+            ("alt-down", "down"),
+            ("alt-shift-up", "up"),
+            ("alt-shift-down", "down"),
+            ("secondary-l", "l"),
+            ("secondary-shift-k", "k"),
             ("tab", "tab"),
             ("shift-tab", "tab"),
             ("escape", "escape"),
@@ -345,6 +375,10 @@ impl NativeChatView {
             && (!key.modifiers.alt || this.draft.trim().is_empty())
         {
             this.invoke(json!({"type":"recallHistory","direction":key.key}), cx);
+            cx.stop_propagation();
+            window.prevent_default();
+        } else if let Some(command) = super::edit_shortcuts::composer_line_command(key) {
+            this.composer_line_edit(command, window, cx);
             cx.stop_propagation();
             window.prevent_default();
         } else if key.key == "tab"

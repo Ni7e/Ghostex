@@ -595,6 +595,20 @@ impl NoticeScreen {
             .any(|line| is_codex_composer_line(line))
     }
 
+    /// CDXC:AgentScreenDetection 2026-09-24 WHY:
+    /// Claude's dialogs replace its input box, so a ready composer painted below the newest line carrying a dialog phrase proves that line is transcript text: an agent reply quoting "Do you trust the files in this folder?" refused every send with a hidden folder-trust notice.
+    fn has_claude_composer_after(&self, needle: &str) -> bool {
+        let Some(index) = self.folded.iter().rposition(|line| line.contains(needle)) else {
+            return false;
+        };
+        crate::session_chat_composer::detect_session_chat_composer_ready(
+            Some("claude"),
+            &self.display[index + 1..].join("\n"),
+        )
+        .state
+            == crate::session_chat_composer::SessionChatComposerState::Ready
+    }
+
     /// CDXC:AgentScreenDetection 2026-09-05 WHY:
     /// A successful `/model` command can leave the previous model's quota error within the banner window indefinitely.
     /// Its confirmation followed by a normal composer supersedes that evidence, but says nothing about the new model's quota; any later limit still counts.
@@ -1928,6 +1942,14 @@ pub fn classify_session_chat_terminal_notice(
             if agent == SessionChatOptionAgent::Claude
                 && rule.kind == SESSION_CHAT_NOTICE_USAGE_LIMIT
                 && screen.has_claude_model_switch_after(signature)
+            {
+                return false;
+            }
+            if agent == SessionChatOptionAgent::Claude
+                && rule.blocks_input
+                && matches!(signature.scope, NoticeScope::Dialog)
+                && signature_needle(signature)
+                    .is_some_and(|needle| screen.has_claude_composer_after(needle))
             {
                 return false;
             }

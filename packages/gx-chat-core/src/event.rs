@@ -112,6 +112,10 @@ pub struct StartConfig {
     /// nothing, which is what the Chat Lab and an old recording look like.
     #[serde(default)]
     pub retained_key: String,
+    /// The host's composer is a touch field with no Enter-to-send (the phone): the composer's
+    /// resting placeholder then names the tap and hold gestures instead of the keys.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub touch_composer: bool,
 }
 
 /// Everything `composer('read')` answers with, in the order that host writes it.

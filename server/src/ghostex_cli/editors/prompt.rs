@@ -71,7 +71,7 @@ pub fn prompt_editor_command(args: &[String]) -> CliResult<()> {
             Err(error) => {
                 return Err(CliError::Other(format!(
                     "Could not read the prompt before editing: {error}"
-                )))
+                )));
             }
         };
         let status = floating_monaco_editor_command_with_trace(args, &trace)?;
@@ -265,20 +265,38 @@ pub(super) fn select_prompt_editor_command_with(
     }
 }
 
+/// CDXC:PromptEditor 2026-09-23 WHY:
+/// The managed Windows CLI lives under Data/gxserver, separate from the installed app's native Code payload. Prefer the installer's Program Files payload over legacy per-user copies, matching the remote Code launcher.
+/// SEE-ALSO: apps/desktop/src/app/helpers/remote/windows_code.rs.
 pub(super) fn code_server_prompt_editor_command(file_path: &str) -> Vec<String> {
     let code_root = rpc::ghostex_data_home().join("code-server");
     let package = code_root.join("package");
     #[cfg(windows)]
-    let package = std::env::current_exe()
-        .ok()
-        .and_then(|exe| {
+    let package = [
+        std::env::var_os("ProgramW6432")
+            .filter(|root| !root.is_empty())
+            .or_else(|| std::env::var_os("ProgramFiles"))
+            .map(PathBuf::from)
+            .map(|root| root.join("Ghostex/code-server")),
+        std::env::current_exe().ok().and_then(|exe| {
             exe.parent()?
                 .parent()?
                 .parent()
                 .map(|app| app.join("code-server"))
-        })
-        .filter(|path| path.join("lib/node.exe").is_file())
-        .unwrap_or(package);
+        }),
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .map(|root| root.join("Ghostex/current/code-server")),
+        Some(package.clone()),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|path| {
+        path.join("lib/node.exe").is_file()
+            && path.join("out/node/vscodeSocket.js").is_file()
+            && path.join("lib/vscode/out/server-main.js").is_file()
+    })
+    .unwrap_or(package);
     let user_data = code_root.join("runtime/user-data");
     #[cfg(not(windows))]
     let socket = user_data.join("code-server-ipc.sock");
@@ -303,26 +321,27 @@ pub(super) fn code_server_prompt_editor_command(file_path: &str) -> Vec<String> 
             })
             .to_string_lossy()
             .into_owned(),
+        "-e".to_string(),
+        include_str!("code_server_prompt_editor.cjs").to_string(),
         package
-            .join("out/node/entry.js")
+            .join("out/node/vscodeSocket.js")
             .to_string_lossy()
             .into_owned(),
-        "--user-data-dir".to_string(),
-        user_data.to_string_lossy().into_owned(),
-        "--session-socket".to_string(),
         socket.to_string_lossy().into_owned(),
-        "--reuse-window".to_string(),
-        "--wait".to_string(),
         file_path.to_string(),
     ]
 }
 
 pub(super) fn run_code_server_prompt_editor(command_args: &[String], cwd: &Path) -> CliResult<()> {
+    let mut command_args = command_args.to_vec();
+    if prompt_editor_diagnostic_logging_enabled() {
+        command_args.push(floating_editor_log_path().to_string_lossy().into_owned());
+    }
     let node = command_args.first().map(Path::new);
-    let entrypoint = command_args.get(1).map(Path::new);
-    let session_socket = command_args.get(5).map(Path::new);
+    let session_manager = command_args.get(3).map(Path::new);
+    let session_socket = command_args.get(4).map(Path::new);
     if !node.is_some_and(|path| path.to_str().is_some_and(is_executable_file))
-        || !entrypoint.is_some_and(|path| path.is_file())
+        || !session_manager.is_some_and(|path| path.is_file())
         || !cwd.is_dir()
     {
         return Err(CliError::Other(
@@ -338,7 +357,7 @@ pub(super) fn run_code_server_prompt_editor(command_args: &[String], cwd: &Path)
     {
         // The editor itself connects to the named pipe; filesystem existence is not a pipe readiness check.
         let _ = session_socket;
-        return run_editor_inline(command_args, cwd);
+        return run_editor_inline(&command_args, cwd);
     }
     #[cfg(not(windows))]
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -353,7 +372,7 @@ pub(super) fn run_code_server_prompt_editor(command_args: &[String], cwd: &Path)
         ));
     }
     #[cfg(not(windows))]
-    run_editor_inline(command_args, cwd)
+    run_editor_inline(&command_args, cwd)
 }
 
 pub(super) fn machine_prompt_editor_command_from_environment() -> String {
@@ -453,12 +472,10 @@ pub(super) fn machine_editor_args(command: &str, file_path: &str) -> Vec<String>
     }
     #[cfg(not(windows))]
     {
-        vec![
-            "/bin/zsh".into(),
-            "-lc".into(),
-            format!("exec {command} \"$@\""),
-            "ghostex-prompt-editor".into(),
-            file_path.into(),
-        ]
+        let shell = crate::platform::shell::command_shell();
+        let mut args = vec![shell.executable.clone()];
+        args.extend(shell.script_args(&format!("exec {command} \"$@\"")));
+        args.extend(["ghostex-prompt-editor".into(), file_path.into()]);
+        args
     }
 }

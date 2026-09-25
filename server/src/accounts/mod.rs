@@ -1,4 +1,5 @@
 pub(crate) mod claude_background;
+mod claude_resets;
 pub(crate) mod continuation;
 pub(crate) mod default_account;
 pub(crate) mod drafts;
@@ -11,6 +12,7 @@ pub(crate) mod launch;
 pub(crate) mod model;
 mod process_login;
 pub(crate) mod recovery;
+mod reset_claim;
 mod reset_credits;
 pub(crate) mod restart;
 pub(crate) mod restart_verification;

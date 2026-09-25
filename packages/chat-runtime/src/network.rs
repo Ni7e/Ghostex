@@ -105,6 +105,45 @@ impl Drop for Network {
     }
 }
 
+/// The `native.runtime.trace` record for a request or socket the runtime is about to open:
+/// method, path and parameter NAMES, never a value, a host or a header. `None` for any other
+/// message.
+///
+/// CDXC:Diagnostics 2026-09-25 WHY:
+/// This is the one place every gxserver call of the old app runtime passes, so it is where the
+/// port's meter counts what the runtime still sends (docs/2026-09-25/app-runtime-port/PLAN.md,
+/// step 0 item 5). The desktop arms it only while the scenario is on.
+pub(crate) fn trace_record(message: &Value) -> Option<Value> {
+    let (method, url, socket) = match message["kind"].as_str()? {
+        "http" => (
+            message["method"].as_str().unwrap_or("GET"),
+            message["url"].as_str()?,
+            false,
+        ),
+        "socketOpen" => ("WS", message["url"].as_str()?, true),
+        _ => return None,
+    };
+    let parsed = url::Url::parse(url).ok()?;
+    let params: Vec<String> = if socket {
+        parsed
+            .query_pairs()
+            .map(|(name, _)| name.into_owned())
+            .collect()
+    } else {
+        serde_json::from_str::<Value>(message["body"].as_str().unwrap_or_default())
+            .ok()
+            .and_then(|body| {
+                body["params"]
+                    .as_object()
+                    .map(|params| params.keys().cloned().collect())
+            })
+            .unwrap_or_default()
+    };
+    Some(
+        json!({"kind":"trace","method":method,"path":parsed.path(),"params":params,"socket":socket}),
+    )
+}
+
 fn fetch(request: &Value) -> Result<(u16, String)> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)

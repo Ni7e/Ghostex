@@ -74,6 +74,8 @@ DELIVERY
                 a busy agent at its next input boundary, and keep --queue for
                 the case it is meant for: you have read an agent's final
                 message and want its next task waiting when it wakes.
+                If it cannot be delivered, it stays in the recipient's queue
+                marked Not delivered and a note is queued back to you.
 
   Default and interrupt sends require a running session. Wake it first with
   ghostex wake <session-ref>, or use --queue. Sending never wakes it implicitly.
@@ -92,6 +94,25 @@ READ AND REPLY
   ghostex read-session-chat-queue <session-ref> --json
 
   Reply with agents send using the sender's Reply to reference.
+
+READ ANOTHER THREAD (past or present)
+  ghostex read-session-chat <session> --all --format text
+  ghostex read-session-chat <session> --grep "mobile|react native" --context 1 --format text
+  ghostex read-session-chat <session> --all --role user --format text
+  ghostex read-session-chat <session> --since 2026-09-21 --last 10 --format text
+
+  <session> can be any id from the sidebar's Copy Details block (Session ID,
+  Routing ID, Agent Session ID, the zmx name in Persistence), a global ref,
+  or the title. Sleeping sessions work too; reading never wakes them.
+  --all walks the thread back to its first turn: prompts and final replies,
+  with each turn's tool work collapsed. --grep implies --all and matches any
+  of the |-separated words, case-insensitive. --context n adds the n rows
+  around each match, so a found prompt comes with its reply. Rows the agent
+  harness injected (task notifications, system reminders) read as role
+  "harness", not "user". --since <local date or time> and --last <n> trim
+  the result; text output marks matched rows and gives times in local time
+  with the UTC offset. Add --history-mode detail for every tool call.
+  ghostex read-session-chat --help lists every flag.
 
 CLOSE
   close ends one session and stops its agent, including unfinished work.

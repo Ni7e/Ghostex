@@ -21,6 +21,7 @@ use crate::server::{
 use crate::session_chat::{SessionChatQuestion, SessionChatQuestionSelection};
 use crate::session_chat_follower::session_chat_agent_for_session;
 use crate::session_chat_options::schedule_session_chat_option_redetect;
+use crate::session_chat_question_row_align::QuestionRowAction;
 use crate::session_chat_queue_runtime::SessionChatMessageSource;
 use crate::storage::open_gxserver_database;
 use axum::http::StatusCode;
@@ -177,7 +178,6 @@ pub(crate) use composer_repaint::claude_composer_needs_redraw;
 // Ask-answer keystrokes (upstream chat spec §8.4/§8.5).
 const ASK_ENTER: &str = "\r";
 const ASK_NEXT_TAB: &str = "\u{1b}[C"; // Right arrow → next question / Submit tab
-const ASK_PREVIOUS_ROW: &str = "\u{1b}[A"; // Up
 const ASK_NEXT_ROW: &str = "\u{1b}[B"; // Down
 const ASK_NOTES: &str = "\t"; // Tab → open notes (Codex)
 const ASK_DELETE: &str = "\u{7f}"; // DEL — clear/skip a Codex row
@@ -303,6 +303,63 @@ pub enum AskAnswerKeyGroup {
     Raw(String),
     /// Free text; goes through the paste sanitizer when written.
     Text(String),
+    /// Put Codex's question overlay on this question (and row, for a note)
+    /// from the screen as it is when the step runs.
+    AlignCodexQuestion { question: usize, row: Option<usize> },
+    /// Put an arrow-driven list (Cursor, pi, omp) on a question and row from
+    /// the screen as it is when the step runs.
+    AlignQuestionRow(crate::session_chat_question_row_align::QuestionRowTarget),
+    /// Empty Claude's "Type something" field, set a multi-select tab's ticks
+    /// and bring the highlight to the tab's first row, from the screen as it
+    /// is when the step runs.
+    PrepareClaudeQuestion(crate::session_chat_claude_question_prep::ClaudeQuestionPrep),
+}
+
+/// The step that puts `ui`'s list on `row` of question `question`.
+fn align_question_row(
+    ui: crate::session_chat_question_row_align::QuestionListUi,
+    questions: &[SessionChatQuestion],
+    question: usize,
+    row: usize,
+) -> AskAnswerKeyGroup {
+    question_row_step(
+        ui,
+        questions,
+        question,
+        row,
+        crate::session_chat_question_row_align::QuestionRowAction::Move,
+    )
+}
+
+/// The step that runs `action` on question `question` of `ui`'s list, leaving
+/// the highlight on `row` (see QuestionRowAction for where each ends).
+fn question_row_step(
+    ui: crate::session_chat_question_row_align::QuestionListUi,
+    questions: &[SessionChatQuestion],
+    question: usize,
+    row: usize,
+    action: crate::session_chat_question_row_align::QuestionRowAction,
+) -> AskAnswerKeyGroup {
+    AskAnswerKeyGroup::AlignQuestionRow(crate::session_chat_question_row_align::QuestionRowTarget {
+        ui,
+        questions: questions
+            .iter()
+            .map(|question| question.question.clone())
+            .collect(),
+        question,
+        labels: questions
+            .get(question)
+            .map(|question| {
+                question
+                    .options
+                    .iter()
+                    .map(|option| option.label.clone())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        row,
+        action,
+    })
 }
 
 fn selection_other(selection: Option<&SessionChatQuestionSelection>) -> &str {
@@ -346,7 +403,10 @@ the HIGHLIGHTED default and pasted label text does NOT move the highlight
 by each option's stable 1-based number, which matches the card's badge.
 Groups are paced NATIVE_CHAT_QUESTION_STEP_MS apart by the queue because a
 navigation keystroke batched with Enter commits before the selector applied
-it.
+it. Every question's keys start with a step that reads its tab when it runs
+(session_chat_claude_question_prep.rs): it empties leftover "Type something"
+text, sets a multi-select tab's ticks to exactly the picked options, and puts
+the highlight on the tab's first row.
 */
 pub fn build_claude_ask_answer_keys(
     questions: &[SessionChatQuestion],
@@ -361,11 +421,22 @@ pub fn build_claude_ask_answer_keys(
         let indices: &[usize] = selection
             .map(|selection| selection.indices.as_slice())
             .unwrap_or_default();
+        groups.push(AskAnswerKeyGroup::PrepareClaudeQuestion(
+            crate::session_chat_claude_question_prep::ClaudeQuestionPrep {
+                questions: questions.to_vec(),
+                question: question_index,
+                // Each digit TOGGLES a checkbox, so the step ticks only the
+                // rows that differ from the pick.
+                ticked: question.multi_select.then(|| {
+                    indices
+                        .iter()
+                        .copied()
+                        .filter(|index| *index < question.options.len())
+                        .collect()
+                }),
+            },
+        ));
         if question.multi_select {
-            for index in indices {
-                // Each digit TOGGLES a checkbox; the highlight stays on row 1.
-                groups.push(AskAnswerKeyGroup::Raw((index + 1).to_string()));
-            }
             if !other.is_empty() {
                 /*
                 CDXC:SessionChat 2026-09-23 WHY: Claude Code 2.1.280 edits the multi-select "Type something" row in place while it is highlighted: its digit only ticks the box, so text typed after it was dropped, and the Enter that followed toggled the highlighted first option off (Cheese + Peppers + a note arrived as "Peppers"). Typing on the highlighted row ticks it; Right is a caret move there, so the row below it (Next, or Submit on the last question) takes the Enter that moves on.
@@ -409,8 +480,15 @@ pub fn build_claude_ask_answer_keys(
             groups.push(AskAnswerKeyGroup::Raw(ASK_NEXT_TAB.to_string()));
         }
     }
+    if groups
+        .iter()
+        .all(|group| matches!(group, AskAnswerKeyGroup::PrepareClaudeQuestion(_)))
+    {
+        // Nothing to answer: leave the selector as the terminal has it.
+        return Vec::new();
+    }
     let ends_on_submit_tab = multi_question || (questions.len() == 1 && questions[0].multi_select);
-    if ends_on_submit_tab && !groups.is_empty() {
+    if ends_on_submit_tab {
         // Final Submit confirmation.
         groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string()));
     }
@@ -431,9 +509,11 @@ pub(crate) fn claude_preview_question_without_option<'a>(
 }
 
 /*
-Codex's request_user_input overlay submits on the final option digit,
-attaches free text as NOTES to the highlighted row, and starts on the first
-row. Notes navigation moves WITHOUT committing via the shortest arrow path.
+Codex's request_user_input overlay submits on the final option digit and
+attaches free text as NOTES to the highlighted row. Each question keeps its
+own highlight, so every question's keys start with an alignment step that
+reads the screen when it runs (see session_chat_codex_question_align.rs):
+it lands on the question and, for a note, on its row WITHOUT committing.
 */
 pub fn build_codex_ask_answer_keys(
     questions: &[SessionChatQuestion],
@@ -446,21 +526,14 @@ pub fn build_codex_ask_answer_keys(
         let selection = selections.get(question_index);
         let selected_index = selection.and_then(|selection| selection.indices.first().copied());
         let note = selection_other(selection);
-        if !note.is_empty() {
-            // Default target: the notes row (one past the last option).
-            let target_index = selected_index.unwrap_or(question.options.len());
-            let row_count = question.options.len() + 1;
-            let next_steps = target_index;
-            let previous_steps = row_count - target_index;
-            let use_previous = previous_steps < next_steps; // pick the shorter path
-            let (key, steps) = if use_previous {
-                (ASK_PREVIOUS_ROW, previous_steps)
-            } else {
-                (ASK_NEXT_ROW, next_steps)
-            };
-            for _ in 0..steps {
-                groups.push(AskAnswerKeyGroup::Raw(key.to_string()));
-            }
+        // A note goes on its option's row; the notes row (one past the last
+        // option) takes a note with no option.
+        let note_row = (!note.is_empty()).then(|| selected_index.unwrap_or(question.options.len()));
+        groups.push(AskAnswerKeyGroup::AlignCodexQuestion {
+            question: question_index,
+            row: note_row,
+        });
+        if note_row.is_some() {
             groups.push(AskAnswerKeyGroup::Raw(ASK_NOTES.to_string()));
             groups.push(AskAnswerKeyGroup::Text(note.to_string()));
             groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string()));
@@ -489,8 +562,9 @@ pub fn build_codex_ask_answer_keys(
 /*
 Cursor Agent's AskQuestion panel is a checkbox list. Up/down move the
 highlight, Space toggles the current option, Enter advances or submits, and
-Escape skips. Each question starts on its first option. The final row is the
-free-text Other choice; typing while it is highlighted opens the input.
+Escape skips. The final row is the free-text Other choice; typing while it is
+highlighted opens the input. Rows are reached through the screen-reading
+alignment step, not counted from where the list opened.
 */
 pub fn build_cursor_ask_answer_keys(
     questions: &[SessionChatQuestion],
@@ -508,32 +582,45 @@ pub fn build_cursor_ask_answer_keys(
             break;
         }
 
-        let mut cursor = 0usize;
-        for index in indices {
-            if *index >= question.options.len() {
-                continue;
+        let ui = crate::session_chat_question_row_align::QuestionListUi::Cursor;
+        let other_row = question.options.len();
+        let picked: Vec<usize> = indices
+            .iter()
+            .copied()
+            .filter(|index| *index < question.options.len())
+            .collect();
+        // Other text left in the terminal would be joined to the typed answer
+        // or submitted beside the picked option.
+        groups.push(question_row_step(
+            ui,
+            questions,
+            question_index,
+            other_row,
+            QuestionRowAction::ClearText,
+        ));
+        if question.multi_select {
+            // Space toggles, so the step ticks only rows that differ from the
+            // pick. Enter ticks the highlighted row, so it rests on a picked
+            // row, or on Other when it takes the typed answer.
+            let rest = match picked.first() {
+                Some(first) if other.is_empty() => *first,
+                _ => other_row,
+            };
+            groups.push(question_row_step(
+                ui,
+                questions,
+                question_index,
+                rest,
+                QuestionRowAction::SetTicks(picked),
+            ));
+        } else {
+            for index in picked {
+                groups.push(align_question_row(ui, questions, question_index, index));
+                groups.push(AskAnswerKeyGroup::Raw(ASK_SPACE.to_string()));
             }
-            if *index > cursor {
-                groups.push(AskAnswerKeyGroup::Raw(ASK_NEXT_ROW.repeat(*index - cursor)));
-            } else if cursor > *index {
-                groups.push(AskAnswerKeyGroup::Raw(
-                    ASK_PREVIOUS_ROW.repeat(cursor - *index),
-                ));
-            }
-            groups.push(AskAnswerKeyGroup::Raw(ASK_SPACE.to_string()));
-            cursor = *index;
         }
         if !other.is_empty() {
-            let other_row = question.options.len();
-            if other_row > cursor {
-                groups.push(AskAnswerKeyGroup::Raw(
-                    ASK_NEXT_ROW.repeat(other_row - cursor),
-                ));
-            } else if cursor > other_row {
-                groups.push(AskAnswerKeyGroup::Raw(
-                    ASK_PREVIOUS_ROW.repeat(cursor - other_row),
-                ));
-            }
+            groups.push(align_question_row(ui, questions, question_index, other_row));
             groups.push(AskAnswerKeyGroup::Text(other.to_string()));
         }
         groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string()));
@@ -550,7 +637,8 @@ A question that allows a custom answer appends one "Type a custom answer" row
 after its options, and committing that row opens a one-line input
 (ctx.ui.input) that submits on Enter. An optionless question shows that bare
 input directly. Cancelling any question ends pi's whole question loop, so an
-unanswered question emits the cancel and nothing after it.
+unanswered question emits the cancel and nothing after it. Rows are reached
+through the screen-reading alignment step, not counted from the first row.
 */
 pub fn build_pi_ask_answer_keys(
     questions: &[SessionChatQuestion],
@@ -576,8 +664,11 @@ pub fn build_pi_ask_answer_keys(
             // Single-value answer: any picked labels join the free text as one
             // string through the custom-answer input (the Claude single-select
             // rule). The custom row sits one past the last option.
-            groups.push(AskAnswerKeyGroup::Raw(
-                ASK_NEXT_ROW.repeat(question.options.len()),
+            groups.push(align_question_row(
+                crate::session_chat_question_row_align::QuestionListUi::Pi,
+                questions,
+                question_index,
+                question.options.len(),
             ));
             groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string()));
             groups.push(AskAnswerKeyGroup::Text(
@@ -587,9 +678,12 @@ pub fn build_pi_ask_answer_keys(
             continue;
         }
         if let Some(index) = selected_index {
-            if index > 0 {
-                groups.push(AskAnswerKeyGroup::Raw(ASK_NEXT_ROW.repeat(index)));
-            }
+            groups.push(align_question_row(
+                crate::session_chat_question_row_align::QuestionListUi::Pi,
+                questions,
+                question_index,
+                index,
+            ));
             groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string()));
             continue;
         }
@@ -691,11 +785,11 @@ pub fn build_hermes_ask_answer_keys(
 /*
 omp's built-in `ask` tool opens its rich dialog (one tab per question plus a
 Submit tab whenever there is more than one question or any multi question).
-The cursor starts on the `recommended` row (default 0, clamped) and ↑/↓ move
-it WITHOUT wrapping; rows are the options in order plus a trailing
-"Other (type your own)" row. Single-select Enter picks the row and
-auto-advances (submitting a single-question dialog directly); Enter on Other
-opens a custom-answer prompt that submits on Enter. Multi-select Space
+The cursor opens on the `recommended` row and ↑/↓ move it WITHOUT wrapping;
+rows are the options in order plus a trailing "Other (type your own)" row,
+reached through the screen-reading alignment step. Single-select Enter picks
+the row and auto-advances (submitting a single-question dialog directly);
+Enter on Other opens a custom-answer prompt that submits on Enter. Multi-select Space
 toggles, and the plan advances with Tab instead of Enter because Enter on the
 Other row would re-open the prompt. The final Enter confirms the Submit tab.
 Esc cancels the whole dialog, so it is only sent for an unanswered
@@ -705,13 +799,7 @@ pub fn build_omp_ask_answer_keys(
     questions: &[SessionChatQuestion],
     selections: &[SessionChatQuestionSelection],
 ) -> Vec<AskAnswerKeyGroup> {
-    fn move_cursor(groups: &mut Vec<AskAnswerKeyGroup>, from: usize, to: usize) {
-        if to > from {
-            groups.push(AskAnswerKeyGroup::Raw(ASK_NEXT_ROW.repeat(to - from)));
-        } else if from > to {
-            groups.push(AskAnswerKeyGroup::Raw(ASK_PREVIOUS_ROW.repeat(from - to)));
-        }
-    }
+    let ui = crate::session_chat_question_row_align::QuestionListUi::Omp;
     let has_submit_tab =
         questions.len() > 1 || questions.iter().any(|question| question.multi_select);
     let mut cancelled = false;
@@ -724,6 +812,24 @@ pub fn build_omp_ask_answer_keys(
             .unwrap_or_default();
         if indices.is_empty() && other.is_empty() {
             if has_submit_tab {
+                if question.multi_select {
+                    // Rows the terminal ticked would still answer it.
+                    let other_row = question.options.len();
+                    groups.push(question_row_step(
+                        ui,
+                        questions,
+                        question_index,
+                        other_row,
+                        QuestionRowAction::UntickFreeRow,
+                    ));
+                    groups.push(question_row_step(
+                        ui,
+                        questions,
+                        question_index,
+                        0,
+                        QuestionRowAction::SetTicks(Vec::new()),
+                    ));
+                }
                 // Skip: step to the next question tab, leaving no answer.
                 groups.push(AskAnswerKeyGroup::Raw(ASK_TAB.to_string()));
                 continue;
@@ -733,20 +839,32 @@ pub fn build_omp_ask_answer_keys(
             break;
         }
         let other_row = question.options.len();
-        // The dialog clamps the initial cursor to [0, other_row].
-        let start = question.recommended.unwrap_or(0).min(other_row);
         if question.multi_select {
-            let mut cursor = start;
-            for index in indices {
-                if *index >= question.options.len() {
-                    continue;
-                }
-                move_cursor(&mut groups, cursor, *index);
-                groups.push(AskAnswerKeyGroup::Raw(ASK_SPACE.to_string()));
-                cursor = *index;
-            }
+            let picked: Vec<usize> = indices
+                .iter()
+                .copied()
+                .filter(|index| *index < question.options.len())
+                .collect();
+            // An Other answer left in the terminal is dropped first; the
+            // chat's own text goes in below.
+            groups.push(question_row_step(
+                ui,
+                questions,
+                question_index,
+                other_row,
+                QuestionRowAction::UntickFreeRow,
+            ));
+            // Space toggles, so the step ticks only rows that differ from
+            // the pick.
+            groups.push(question_row_step(
+                ui,
+                questions,
+                question_index,
+                picked.first().copied().unwrap_or(other_row),
+                QuestionRowAction::SetTicks(picked),
+            ));
             if !other.is_empty() {
-                move_cursor(&mut groups, cursor, other_row);
+                groups.push(align_question_row(ui, questions, question_index, other_row));
                 groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string())); // open the prompt
                 groups.push(AskAnswerKeyGroup::Text(other.to_string()));
                 groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string())); // prompt submits
@@ -756,9 +874,17 @@ pub fn build_omp_ask_answer_keys(
         }
         if !other.is_empty() {
             // Single-value answer: picked labels join the free text as one
-            // string through the custom-answer prompt (the Claude rule).
-            move_cursor(&mut groups, start, other_row);
+            // string through the custom-answer prompt (the Claude rule). The
+            // prompt reopens holding an earlier answer, so it is emptied first.
+            groups.push(align_question_row(ui, questions, question_index, other_row));
             groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string())); // open the prompt
+            groups.push(question_row_step(
+                ui,
+                questions,
+                question_index,
+                other_row,
+                QuestionRowAction::ClearText,
+            ));
             groups.push(AskAnswerKeyGroup::Text(
                 answer_labels(question, selection).join(", "),
             ));
@@ -766,7 +892,19 @@ pub fn build_omp_ask_answer_keys(
             continue;
         }
         let index = (*indices.first().expect("indices checked non-empty")).min(other_row);
-        move_cursor(&mut groups, start, index);
+        // A note the terminal left on the picked row would go with it.
+        let action = if index < other_row {
+            QuestionRowAction::DropNote
+        } else {
+            QuestionRowAction::Move
+        };
+        groups.push(question_row_step(
+            ui,
+            questions,
+            question_index,
+            index,
+            action,
+        ));
         groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string())); // pick + advance/submit
     }
     if has_submit_tab && !cancelled && !groups.is_empty() {
@@ -812,6 +950,8 @@ pub enum SessionChatSendStep {
     DriveCodexAsyncQuestion(crate::session_chat_codex_async_answer::AsyncAnswer),
     /// Stop this interrupt job if Escape would open Codex's message-editing pager.
     GuardCodexInterrupt,
+    /// Stop this interrupt job if its Escape would be Claude's double-tap rewind.
+    GuardClaudeInterrupt,
     /// Recheck the transcript pager and cross-client visibility at the front of the queue.
     CloseUnwatchedCodexTranscriptPager,
     StopLocalCommandOutput,
@@ -851,6 +991,15 @@ pub enum SessionChatSendStep {
         payload: String,
     },
     SleepMs(u64),
+    /// See CDXC:SessionChat in session_chat_codex_question_align.rs.
+    AlignCodexQuestion {
+        question: usize,
+        row: Option<usize>,
+    },
+    /// See CDXC:SessionChat in session_chat_question_row_align.rs.
+    AlignQuestionRow(crate::session_chat_question_row_align::QuestionRowTarget),
+    /// See CDXC:SessionChat in session_chat_claude_question_prep.rs.
+    PrepareClaudeQuestion(crate::session_chat_claude_question_prep::ClaudeQuestionPrep),
     /// Close Claude Code's positively identified Settings screen, then require
     /// its real composer to appear before any later input-line write can run.
     DismissClaudeSettings {
@@ -904,6 +1053,17 @@ pub enum SessionChatSendStep {
     },
     ClearComposer {
         agent: String,
+    },
+    /// CDXC:SessionFork 2026-09-24 WHY:
+    /// A startup rename can wait behind a prompt or manual rename in the input queue. Recheck persisted ownership before pasting and submitting. A failed send can leave its exact rename staged, so that retry completes only the owned command's Enter without clearing or repasting; different input remains untouched.
+    GuardForkRename {
+        agent: String,
+        title: String,
+        state_db_file: PathBuf,
+        server_id: String,
+        first_user_message: Option<String>,
+        rename_requested_at: Option<String>,
+        expected_composer: Option<String>,
     },
     /// Hold the sequence until the session's screen proves `text` reached the
     /// agent's composer (CDXC:Clipboard). Settles `settle_ms`,
@@ -1180,13 +1340,36 @@ pub fn build_terminal_picker_answer_steps(answer_key: &str) -> Vec<SessionChatSe
 pub fn build_ask_answer_steps(groups: &[AskAnswerKeyGroup]) -> Vec<SessionChatSendStep> {
     let mut steps = Vec::new();
     for (index, group) in groups.iter().enumerate() {
-        if index > 0 {
+        // An alignment step returns only once the screen shows the row it
+        // wanted, so the key after it needs no settle time of its own.
+        let after_alignment = index > 0
+            && matches!(
+                groups[index - 1],
+                AskAnswerKeyGroup::AlignCodexQuestion { .. }
+                    | AskAnswerKeyGroup::AlignQuestionRow(_)
+                    | AskAnswerKeyGroup::PrepareClaudeQuestion(_)
+            );
+        if index > 0 && !after_alignment {
             steps.push(SessionChatSendStep::SleepMs(SESSION_CHAT_QUESTION_STEP_MS));
         }
-        steps.push(SessionChatSendStep::Write(match group {
-            AskAnswerKeyGroup::Raw(raw) => raw.clone(),
-            AskAnswerKeyGroup::Text(text) => build_session_chat_paste_bytes(text),
-        }));
+        steps.push(match group {
+            AskAnswerKeyGroup::Raw(raw) => SessionChatSendStep::Write(raw.clone()),
+            AskAnswerKeyGroup::Text(text) => {
+                SessionChatSendStep::Write(build_session_chat_paste_bytes(text))
+            }
+            AskAnswerKeyGroup::AlignCodexQuestion { question, row } => {
+                SessionChatSendStep::AlignCodexQuestion {
+                    question: *question,
+                    row: *row,
+                }
+            }
+            AskAnswerKeyGroup::AlignQuestionRow(target) => {
+                SessionChatSendStep::AlignQuestionRow(target.clone())
+            }
+            AskAnswerKeyGroup::PrepareClaudeQuestion(prep) => {
+                SessionChatSendStep::PrepareClaudeQuestion(prep.clone())
+            }
+        });
     }
     steps
 }
@@ -1536,6 +1719,64 @@ async fn run_session_chat_send_worker(
                         break;
                     }
                 }
+                SessionChatSendStep::AlignCodexQuestion { question, row } => {
+                    if let Err(message) =
+                        crate::session_chat_codex_question_align::align_codex_question(
+                            &project_id,
+                            &session_id,
+                            &zmx_name,
+                            &source,
+                            question,
+                            row,
+                            &|| job_generation != generation.load(Ordering::SeqCst),
+                        )
+                        .await
+                    {
+                        outcome = Err(SessionChatSendError::new(
+                            SessionChatSendFailure::Write,
+                            message,
+                        ));
+                        break;
+                    }
+                }
+                SessionChatSendStep::AlignQuestionRow(target) => {
+                    if let Err(message) =
+                        crate::session_chat_question_row_align::align_question_row(
+                            &project_id,
+                            &session_id,
+                            &zmx_name,
+                            &source,
+                            &target,
+                            &|| job_generation != generation.load(Ordering::SeqCst),
+                        )
+                        .await
+                    {
+                        outcome = Err(SessionChatSendError::new(
+                            SessionChatSendFailure::Write,
+                            message,
+                        ));
+                        break;
+                    }
+                }
+                SessionChatSendStep::PrepareClaudeQuestion(prep) => {
+                    if let Err(message) =
+                        crate::session_chat_claude_question_prep::prepare_claude_question(
+                            &project_id,
+                            &session_id,
+                            &zmx_name,
+                            &source,
+                            &prep,
+                            &|| job_generation != generation.load(Ordering::SeqCst),
+                        )
+                        .await
+                    {
+                        outcome = Err(SessionChatSendError::new(
+                            SessionChatSendFailure::Write,
+                            message,
+                        ));
+                        break;
+                    }
+                }
                 SessionChatSendStep::DriveCodexAsyncQuestion(answer) => {
                     if let Err(message) = crate::session_chat_codex_async_answer::run(
                         &project_id,
@@ -1670,6 +1911,51 @@ async fn run_session_chat_send_worker(
                         break;
                     }
                 }
+                SessionChatSendStep::GuardForkRename {
+                    agent,
+                    title,
+                    state_db_file,
+                    server_id,
+                    first_user_message,
+                    rename_requested_at,
+                    expected_composer,
+                } => {
+                    let matches_composer = capture_session_terminal_text_vt(&zmx_name)
+                        .await
+                        .and_then(|screen| {
+                            crate::session_chat_composer::session_chat_composer_input(
+                                &agent, &screen,
+                            )
+                        })
+                        .is_some_and(|input| match expected_composer.as_deref() {
+                            Some(expected) => !input.is_empty() && input.text == expected,
+                            None => input.is_empty(),
+                        });
+                    let owned = rusqlite::Connection::open_with_flags(
+                        state_db_file,
+                        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                    )
+                    .ok()
+                    .and_then(|db| {
+                        DomainRepository::new(&db, &server_id)
+                            .get_session(&project_id, &session_id)
+                            .ok()
+                            .flatten()
+                    })
+                    .is_some_and(|session| {
+                        crate::server::fork_initial_rename_is_current(&session, &title)
+                            && read_runtime_text(&session, "firstUserMessage") == first_user_message
+                            && read_runtime_text(&session, "pendingAgentTitleRequestRequestedAt")
+                                == rename_requested_at
+                    });
+                    if !matches_composer || !owned {
+                        outcome = Err(SessionChatSendError::not_attempted(
+                            "The fork rename no longer owns the expected agent composer."
+                                .to_string(),
+                        ));
+                        break;
+                    }
+                }
                 SessionChatSendStep::ClearComposer { agent } => {
                     if let Err(error) = clear_session_chat_composer(
                         &project_id,
@@ -1682,6 +1968,14 @@ async fn run_session_chat_send_worker(
                     .await
                     {
                         outcome = Err(error);
+                        break;
+                    }
+                }
+                SessionChatSendStep::GuardClaudeInterrupt => {
+                    if !crate::session_chat_claude_interrupt::claim_claude_interrupt_escape(
+                        &project_id,
+                        &session_id,
+                    ) {
                         break;
                     }
                 }
@@ -2771,6 +3065,20 @@ mod tests {
         assert!(normalized.contains("firstlinehere"));
     }
 
+    fn claude_prep(
+        questions: &[SessionChatQuestion],
+        question: usize,
+        ticked: Option<&[usize]>,
+    ) -> AskAnswerKeyGroup {
+        AskAnswerKeyGroup::PrepareClaudeQuestion(
+            crate::session_chat_claude_question_prep::ClaudeQuestionPrep {
+                questions: questions.to_vec(),
+                question,
+                ticked: ticked.map(<[usize]>::to_vec),
+            },
+        )
+    }
+
     #[test]
     fn claude_single_question_single_select_commits_by_digit() {
         let questions = vec![question("Pick one", false, &["A", "B", "C"])];
@@ -2779,7 +3087,7 @@ mod tests {
         // Submit tab, so no trailing Enter.
         assert_eq!(
             build_claude_ask_answer_keys(&questions, &selections),
-            vec![raw("2")]
+            vec![claude_prep(&questions, 0, None), raw("2")]
         );
     }
 
@@ -2790,7 +3098,12 @@ mod tests {
         // "Type something" is row options.len()+1 = 3; label + other joined.
         assert_eq!(
             build_claude_ask_answer_keys(&questions, &selections),
-            vec![raw("3"), text("A, also this"), raw("\r")]
+            vec![
+                claude_prep(&questions, 0, None),
+                raw("3"),
+                text("A, also this"),
+                raw("\r")
+            ]
         );
     }
 
@@ -2798,11 +3111,16 @@ mod tests {
     fn claude_multi_select_toggles_then_advances_then_submits() {
         let questions = vec![question("Pick many", true, &["A", "B", "C"])];
         let selections = vec![selection(&[0, 2], None)];
-        // Toggle 1 and 3, step to Submit tab, then the final confirmation
-        // (single multiSelect question ends on the Submit tab).
+        // The prep step ticks exactly 1 and 3, then Right to the Submit tab
+        // and the final confirmation (single multiSelect question ends on
+        // the Submit tab).
         assert_eq!(
             build_claude_ask_answer_keys(&questions, &selections),
-            vec![raw("1"), raw("3"), raw("\u{1b}[C"), raw("\r")]
+            vec![
+                claude_prep(&questions, 0, Some(&[0, 2])),
+                raw("\u{1b}[C"),
+                raw("\r")
+            ]
         );
     }
 
@@ -2820,32 +3138,44 @@ mod tests {
         // ends on the Submit tab → final Enter.
         assert_eq!(
             build_claude_ask_answer_keys(&questions, &selections),
-            vec![raw("1"), raw("\u{1b}[C"), raw("\r")]
+            vec![
+                claude_prep(&questions, 0, None),
+                raw("1"),
+                claude_prep(&questions, 1, None),
+                raw("\u{1b}[C"),
+                raw("\r")
+            ]
         );
     }
 
     #[test]
-    fn codex_digit_commits_and_notes_use_shortest_arrow_path() {
+    fn codex_digit_commits_and_notes_align_to_their_row() {
+        let align = |question: usize, row: Option<usize>| AskAnswerKeyGroup::AlignCodexQuestion {
+            question,
+            row,
+        };
         let questions = vec![question("Pick", false, &["A", "B", "C"])];
         assert_eq!(
             build_codex_ask_answer_keys(&questions, &[selection(&[2], None)]),
-            vec![raw("3")]
+            vec![align(0, None), raw("3")]
         );
-        // Note without selection targets the notes row (index 3 of 4 rows):
-        // previous_steps = 4-3 = 1 < next_steps = 3 → one Up, Tab, note, Enter.
+        // A note without an option goes on the notes row (index 3 of 4 rows).
         assert_eq!(
             build_codex_ask_answer_keys(&questions, &[selection(&[], Some("my note"))]),
-            vec![raw("\u{1b}[A"), raw("\t"), text("my note"), raw("\r")]
+            vec![align(0, Some(3)), raw("\t"), text("my note"), raw("\r")]
         );
-        // Note attached to row 1 (index 0): zero arrows (already highlighted).
         assert_eq!(
             build_codex_ask_answer_keys(&questions, &[selection(&[0], Some("why"))]),
-            vec![raw("\t"), text("why"), raw("\r")]
+            vec![align(0, Some(0)), raw("\t"), text("why"), raw("\r")]
         );
     }
 
     #[test]
     fn codex_unanswered_rows_are_skipped_and_confirmed() {
+        let align = |question: usize| AskAnswerKeyGroup::AlignCodexQuestion {
+            question,
+            row: None,
+        };
         let questions = vec![
             question("First", false, &["A", "B"]),
             question("Second", false, &["X", "Y"]),
@@ -2858,7 +3188,14 @@ mod tests {
         // remains → trailing Enter for the confirmation dialog.
         assert_eq!(
             build_codex_ask_answer_keys(&questions, &selections),
-            vec![raw("\u{7f}"), raw("\u{1b}[C"), raw("2"), raw("\r")]
+            vec![
+                align(0),
+                raw("\u{7f}"),
+                raw("\u{1b}[C"),
+                align(1),
+                raw("2"),
+                raw("\r")
+            ]
         );
         // Unanswered LAST question ends its row with Enter instead of Right.
         let tail_unanswered = vec![
@@ -2867,7 +3204,14 @@ mod tests {
         ];
         assert_eq!(
             build_codex_ask_answer_keys(&questions, &tail_unanswered),
-            vec![raw("1"), raw("\u{7f}"), raw("\r"), raw("\r")]
+            vec![
+                align(0),
+                raw("1"),
+                align(1),
+                raw("\u{7f}"),
+                raw("\r"),
+                raw("\r")
+            ]
         );
     }
 
@@ -3585,12 +3929,32 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
                         );
                     }
                     if selector_on_screen {
-                        crate::session_chat_send::build_ask_answer_steps(
-                            &crate::session_chat_send::build_claude_ask_answer_keys(
+                        // See CDXC:SessionChat in session_chat_question_liveness.rs.
+                        let Some(position) =
+                            crate::session_chat_question_liveness::claude_question_selector_position(
                                 &questions,
-                                &selections,
-                            ),
-                        )
+                                &screen_text,
+                            )
+                        else {
+                            return domain_error_response(
+                                endpoint_path,
+                                request_id,
+                                DomainStateError {
+                                    code: "invalidState",
+                                    message: "Claude's question is on screen, but where its highlight sits could not be read, so the answer was not sent. Answer it in the terminal."
+                                        .to_string(),
+                                },
+                            );
+                        };
+                        let mut groups =
+                            crate::session_chat_question_liveness::claude_question_selector_reset_keys(
+                                position,
+                            );
+                        groups.extend(crate::session_chat_send::build_claude_ask_answer_keys(
+                            &questions,
+                            &selections,
+                        ));
+                        crate::session_chat_send::build_ask_answer_steps(&groups)
                     } else if !crate::session_chat_send::has_ask_answer(&selections) {
                         Vec::new()
                     } else {
@@ -3751,6 +4115,31 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
             "session-chat-answer",
             steps,
         );
+    }
+    let denied_approval = kind == "approval"
+        && params
+            .get("approvalSend")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .is_empty();
+    if denied_approval {
+        if let Some(answered) = crate::agents::session_chat_prompt_setting(&target.session)
+            .as_deref()
+            .and_then(crate::session_chat::parse_stored_session_chat_prompt)
+            .filter(|prompt| {
+                matches!(
+                    prompt,
+                    crate::session_chat::SessionChatInteractivePrompt::Approval { .. }
+                )
+            })
+        {
+            crate::session_chat_interactive::retire_denied_session_chat_approval(
+                state,
+                &target.project_id,
+                &target.session_id,
+                &answered,
+            );
+        }
     }
     /*
     CDXC:SessionChat 2026-08-21:
@@ -4044,8 +4433,10 @@ pub(crate) fn handle_interrupt_session_chat_http(
     // steps) drop, then deliver ESC through the queue's new generation.
     crate::session_chat_send::cancel_session_chat_sends(&target.project_id, &target.session_id);
     let mut steps = Vec::new();
-    if session_chat_agent_for_session(&target.session).as_deref() == Some("codex") {
-        steps.push(SessionChatSendStep::GuardCodexInterrupt);
+    match session_chat_agent_for_session(&target.session).as_deref() {
+        Some("codex") => steps.push(SessionChatSendStep::GuardCodexInterrupt),
+        Some("claude") => steps.push(SessionChatSendStep::GuardClaudeInterrupt),
+        _ => {}
     }
     steps.push(SessionChatSendStep::Write(
         SESSION_CHAT_INTERRUPT.to_string(),

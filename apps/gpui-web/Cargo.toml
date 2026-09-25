@@ -17,6 +17,7 @@ rust-embed = { version = "8.7.2", features = ["debug-embed", "include-exclude"] 
 ghostex-gx-core = { path = "../../packages/gx-core" }
 ghostex-gx-protocol = { path = "../../packages/gx-protocol" }
 ghostex-gx-chat-core = { path = "../../packages/gx-chat-core" }
+ghostex-gx-chat-client = { path = "../../packages/gx-chat-client" }
 anyhow = "1"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }

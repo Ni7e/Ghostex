@@ -1,5 +1,5 @@
 //! The Close Project successor rule, asserted against a table derived by READING
-//! `packages/core-ui/sidebar-app/close-project-successor.ts` and the `post` that calls it in
+//! the deleted React sidebar's `close-project-successor.ts` and the `post` that calls it in
 //! the deleted sidebar page's `controller.ts`.
 //!
 //! **Why a table and not a parity harness.** The TypeScript half was the deleted sidebar page's `controller.ts`,

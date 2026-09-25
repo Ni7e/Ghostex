@@ -70,7 +70,7 @@ impl GhostexGpuiApp {
                     else {
                         return None;
                     };
-                    Some((runtime_session_id, url.clone()))
+                    Some((runtime_session_id, slot_id.session_id, url.clone()))
                 }));
                 if action_events.iter().any(|event| {
                     matches!(
@@ -87,12 +87,17 @@ impl GhostexGpuiApp {
                 );
             }
         }
-        for (runtime_session_id, url) in terminal_link_requests {
+        for (runtime_session_id, session_id, url) in terminal_link_requests {
             let working_directory = self
                 .command_terminal_runtime_osc_states
                 .get(&runtime_session_id)
                 .and_then(|state| state.pwd.clone());
-            self.open_gpui_engine_terminal_action_url(&url, working_directory.as_deref(), cx);
+            self.open_gpui_engine_terminal_action_url(
+                &url,
+                working_directory.as_deref(),
+                GpuiEngineTerminalEventTarget::Command(session_id),
+                cx,
+            );
         }
         if !self.command_terminal_runtime_osc_states.is_empty() {
             let live_runtime_session_ids = self
@@ -221,6 +226,9 @@ impl GhostexGpuiApp {
         if self.sidebar.is_some() {
             return true;
         }
+        if crate::app::native_service::NativeService::start_failed() {
+            return false;
+        }
         let sidebar_handler = self.sidebar_bridge_event_handler(cx);
         let host_handler = self.app_modal_host_bridge_event_handler(cx);
         match crate::app::native_service::NativeService::new(
@@ -243,15 +251,17 @@ impl GhostexGpuiApp {
                         "stack": error.lines().skip(1).take(12).collect::<Vec<_>>(),
                     }),
                 );
+                self.gx_store_runtime_start_failed(cx);
                 false
             }
         }
     }
 
     pub(crate) fn initialize_cef(&mut self, cx: &mut gpui::Context<Self>) {
-        if !self.ensure_native_service(cx) {
-            return;
-        }
+        // CEF pages do not need the QuickJS runtime; a runtime that failed to start is reported
+        // once by `ensure_native_service` and CEF starts anyway (CDXC:CefRuntime 2026-09-25 in
+        // native_service.rs).
+        self.ensure_native_service(cx);
 
         cef::initialize(cx).expect("failed to initialize CEF");
         if !cef::context_initialized() {

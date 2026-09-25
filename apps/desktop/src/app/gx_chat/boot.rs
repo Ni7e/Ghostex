@@ -120,7 +120,7 @@ pub(super) fn chat_settings() -> ChatSettings {
 /// shape is `packages/shared/session-chat-controller/client-id.ts`'s, `gx-` then two base-36 runs,
 /// because an id is compared and stored but never parsed. A refused write is counted and the
 /// in-memory id is used anyway, which is what the TypeScript's `catch` does for private mode.
-fn client_id(now_ms: i64, errors: &mut BootReads) -> String {
+pub(super) fn client_id(now_ms: i64, errors: &mut BootReads) -> String {
     let key = StorageKey {
         store: "chatClient".to_string(),
         suffix: String::new(),
@@ -131,7 +131,7 @@ fn client_id(now_ms: i64, errors: &mut BootReads) -> String {
     let created = format!(
         "gx-{}{}",
         base36(u64::from_be_bytes(
-            uuid::Uuid::new_v4().into_bytes()[..8]
+            super::platform::random_bytes()[..8]
                 .try_into()
                 .unwrap_or_default()
         )),
@@ -218,7 +218,7 @@ fn entry_with_version(stored: Option<&StoredDraftRecord>) -> Value {
 /// The core generates no ids on purpose (it reads no random source and must cross UniFFI), so the
 /// host mints them, in the same v4 shape `crypto.randomUUID()` produces inside QuickJS.
 pub(super) fn next_draft_version() -> Value {
-    json!({"draftId": uuid::Uuid::new_v4().to_string(), "revision": 1})
+    json!({"draftId": super::platform::uuid_v4(), "revision": 1})
 }
 
 /// `{ "<sessionKey>[#<scope>]": <value> }` for every stored record of this session.

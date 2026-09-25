@@ -10,6 +10,7 @@ pub(crate) struct WebsiteProvider {
     pub id: String,
     pub title: String,
     pub hidden_settings_key: String,
+    pub hidden_by_default: bool,
     pub workspace_kind: String,
     pub placeholder: String,
     pub description: String,
@@ -79,7 +80,7 @@ pub(crate) fn website_views() -> Vec<GpuiCustomView> {
     website_providers().iter().map(|provider| GpuiCustomView {
         id: ExtensionId::new(&provider.id).expect("built-in website ID"),
         title: provider.title.clone(),
-        enabled: settings.object().get(&provider.hidden_settings_key).and_then(Value::as_bool) != Some(true),
+        enabled: !settings.object().get(&provider.hidden_settings_key).and_then(Value::as_bool).unwrap_or(provider.hidden_by_default),
         url: String::new(),
         definition: json!({"id":provider.id, "name":provider.title, "availability":if provider.automatic() {"matching"} else {"all"}, "source":{"kind":"website"}}),
     }).collect()

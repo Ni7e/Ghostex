@@ -63,7 +63,7 @@ static LIGHT_CODE_THEME: LazyLock<Arc<HighlightTheme>> =
     LazyLock::new(|| Arc::new(CODE_THEMES.light.clone()));
 
 /// The syntax palette a fenced block is painted with, matching React's Shiki themes.
-pub(super) fn highlight_theme(light: bool) -> Arc<HighlightTheme> {
+pub(crate) fn highlight_theme(light: bool) -> Arc<HighlightTheme> {
     if light {
         LIGHT_CODE_THEME.clone()
     } else {
@@ -98,6 +98,11 @@ pub(super) fn text_style(p: &ChatAppearance) -> TextViewStyle {
     let mut table = StyleRefinement::default();
     table.overflow.x = Some(gpui::Overflow::Scroll);
     style.table = table;
+    // CDXC:SessionChat 2026-09-24 DECISION:
+    // "When I hover over a table, if it's too wide and it's going off-screen, show a small
+    // scrollbar at the very bottom below the table", matching the transcript's own bar: the same
+    // 5px thumb in the app's scrollbar colours, under the table rather than over its last row.
+    style.table_scrollbar = Some(px(super::scrollbar::THICKNESS * p.scale));
     // The React transcript draws a table as rules, not as a grid: no frame
     // around it, no rule between columns, a full-strength rule under the header
     // and a lighter one under every body row.

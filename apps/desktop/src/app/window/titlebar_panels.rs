@@ -174,6 +174,24 @@ impl GpuiTitlebarPopupWindow {
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
+        // CDXC:Titlebar 2026-09-23 WHY:
+        // Borderless Windows popups still need a native title so accessibility tools can identify their own window without activating the main window behind them.
+        #[cfg(target_os = "windows")]
+        window.set_window_title(match kind {
+            GpuiTitlebarPopupKind::AccountUsage(_) => "Ghostex Account Usage",
+            GpuiTitlebarPopupKind::Actions => "Ghostex Start",
+            GpuiTitlebarPopupKind::BrowserActions(_) => "Ghostex Browser Actions",
+            GpuiTitlebarPopupKind::ContextMenu => "Ghostex Menu",
+            GpuiTitlebarPopupKind::Extensions => "Ghostex Extensions",
+            GpuiTitlebarPopupKind::Git => "Ghostex Commit",
+            GpuiTitlebarPopupKind::Help => "Ghostex Help",
+            GpuiTitlebarPopupKind::More => "Ghostex More",
+            GpuiTitlebarPopupKind::Notifications => "Ghostex Notifications",
+            GpuiTitlebarPopupKind::OpenTargets => "Ghostex Open",
+            GpuiTitlebarPopupKind::Resources => "Ghostex Resources",
+            GpuiTitlebarPopupKind::RemoteSites => "Ghostex Remote Sites",
+            GpuiTitlebarPopupKind::Tips => "Ghostex Tips",
+        });
         let content_kind = match &content {
             GpuiTitlebarPopupContent::AccountUsage(_) => "accountUsage",
             GpuiTitlebarPopupContent::Menu(_) => "menu",
@@ -222,6 +240,22 @@ impl GpuiTitlebarPopupWindow {
                 _dismiss_subscription: dismiss_subscription,
             }
         })
+    }
+
+    pub(crate) fn replace_menu(
+        &mut self,
+        menu: Entity<PopupMenu>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        menu.focus_handle(cx).focus(window, cx);
+        self._dismiss_subscription = Some(cx.subscribe_in(
+            &menu,
+            window,
+            |this, _, _: &DismissEvent, window, cx| this.close_from_popup_window(window, cx),
+        ));
+        self.content = GpuiTitlebarPopupContent::Menu(menu);
+        cx.notify();
     }
 
     fn close_from_popup_window(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {

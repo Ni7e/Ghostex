@@ -205,13 +205,7 @@ pub(crate) fn validate_identity(
             .map(PathBuf::from)
             .unwrap_or_else(|| xswap_data_home.join("codex-swap"))
             .join("accounts.json"),
-        Provider::Claude => {
-            if cfg!(target_os = "linux") {
-                data_home.join("claude-swap/sequence.json")
-            } else {
-                home.join(".claude-swap-backup/sequence.json")
-            }
-        }
+        Provider::Claude => super::claude_resets::swap_root(home).join("sequence.json"),
     };
     let fail = || {
         DomainStateError::bad_request("The saved account changed or is unavailable. Refresh Accounts and reconnect it before resuming.")

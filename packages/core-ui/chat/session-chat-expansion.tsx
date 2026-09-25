@@ -3,6 +3,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { useSessionChatDisclosureState } from './session-chat-interaction-state';
 import { cn } from '@/packages/components/utils';
 import { Button } from '../../components/ui/button';
+import { SessionChatDisclosureBody } from './session-chat-disclosure-body';
 
 /** Center a transcript row after React has committed its expanded content. */
 export function centerSessionChatExpansion(target: HTMLElement | null): void {
@@ -84,7 +85,7 @@ export function SessionChatDisclosure({
         </span>
         <span>{label}</span>
       </Button>
-      {open ? (
+      <SessionChatDisclosureBody gap={false} gapBefore='0.625rem' open={open}>
         <SessionChatExpansion
           bodyClassName='ghostex-chat-completed-work-content'
           label={`Collapse ${label.toLowerCase()}`}
@@ -92,7 +93,7 @@ export function SessionChatDisclosure({
         >
           {children}
         </SessionChatExpansion>
-      ) : null}
+      </SessionChatDisclosureBody>
     </div>
   );
 }

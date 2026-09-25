@@ -19,6 +19,7 @@ function ModelMenuStory({
   otherAgents,
   open,
   fast,
+  accounts,
 }: {
   theme: 'light' | 'dark';
   tab?: ModelMenuTabId;
@@ -27,6 +28,7 @@ function ModelMenuStory({
   otherAgents: boolean;
   open: boolean;
   fast: boolean;
+  accounts: boolean;
 }) {
   const [state, setState] = useState<SessionChatOptionState>({
     model: { value: 'opus[1m]', source: 'detected' },
@@ -34,7 +36,7 @@ function ModelMenuStory({
     ...(fast ? { fastMode: { value: 'on', source: 'detected' as const } } : {}),
   });
   const [log, setLog] = useState(
-    'Click a model to save it as the default; right-click applies it to this session only. The context window and fast buttons toggle; reasoning opens a list.'
+    'Click a model to save it as the default; right-click applies it to this session only. Left and Right change the highlighted model’s reasoning; Enter uses it in this session and Shift+Enter saves the default.'
   );
   useEffect(() => {
     const previous = document.body.dataset.sessionChatTheme;
@@ -58,6 +60,14 @@ function ModelMenuStory({
     caps: { canPickModel: true, queuedControls: true, canSendKey: true },
     selectionError: error ? 'Claude Code does not list Fable 5.1 for this account.' : null,
     disabled: false,
+    ...(accounts
+      ? {
+          accounts: [
+            { id: 'work', label: 'work@example.com', current: true, ready: true },
+            { id: 'personal', label: 'me@example.com', current: false, ready: true },
+          ],
+        }
+      : {}),
   };
   const scope = (secondary: boolean) => (secondary ? 'this session only' : 'saved as default');
   return (
@@ -76,14 +86,18 @@ function ModelMenuStory({
             defaultOpen={open}
             initialFlyout={flyout}
             initialTab={tab}
-            onPickRow={(row, secondary) => {
+            onPickRow={(row, secondary, effort) => {
               if (row.provider !== 'claude') {
                 setLog(`Handoff opens with ${row.agentName} selected, starting on ${row.label}.`);
                 return;
               }
               const value = row.variants.find((variant) => variant.value === state.model?.value)?.value ?? row.value;
-              setState((current) => ({ ...current, model: { value, source: 'dispatched' } }));
-              setLog(`${row.label}: ${scope(secondary)}.`);
+              setState((current) => ({
+                ...current,
+                model: { value, source: 'dispatched' },
+                ...(effort ? { effort: { value: effort, source: 'dispatched' as const } } : {}),
+              }));
+              setLog(`${row.label}${effort ? ` · ${effort}` : ''}: ${scope(secondary)}.`);
             }}
             onPickTrait={(trait, choice, secondary) => {
               const id = trait.id === 'context' ? 'model' : trait.id;
@@ -115,7 +129,7 @@ export default {
   title: 'Chat/Model Menu',
   component: ModelMenuStory,
   parameters: { layout: 'fullscreen' },
-  args: { theme: 'dark', error: false, otherAgents: true, open: true, fast: false },
+  args: { theme: 'dark', error: false, otherAgents: true, open: true, fast: false, accounts: false },
   argTypes: { theme: { control: 'inline-radio', options: ['light', 'dark'] } },
 } satisfies Meta<typeof ModelMenuStory>;
 type Story = StoryObj<typeof ModelMenuStory>;
@@ -127,3 +141,4 @@ export const FastOn: Story = { args: { fast: true } };
 export const NotApplied: Story = { args: { error: true } };
 export const PillOnly: Story = { args: { open: false } };
 export const OwnAgentOnly: Story = { args: { otherAgents: false } };
+export const Accounts: Story = { args: { accounts: true } };

@@ -1,3 +1,4 @@
+use super::disclosure_motion::{FoldFrame, measured, motion_clip};
 use super::{appearance::ChatAppearance, state::NativeChatView};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -43,7 +44,66 @@ pub(super) fn status_card_press_header(
         .hover(move |style| style.bg(hover))
 }
 
+/// How a status card's body is moving, for [`NativeChatView::status_card_with_header_motion`].
+pub(super) struct CardBodyMotion<'a> {
+    /// The disclosure the body belongs to.
+    pub key: &'a str,
+    /// This frame while the body opens or closes; `None` at rest.
+    pub frame: Option<FoldFrame>,
+    /// True when the card keeps a shorter body while shut (a notice's collapsed choices): its
+    /// height is the floor the motion starts from and is measured while the card is settled shut.
+    pub shut_body: bool,
+    /// Whether the card is settled shut.
+    pub shut: bool,
+}
+
 impl NativeChatView {
+    /// A status card whose body opens and closes. While it moves, the body is clipped between
+    /// nothing (or the shut body's height) and its natural height; the panel's 8px lead-in and the
+    /// 4px the pressable header keeps below itself ride inside the clip, so a body eased to nothing
+    /// leaves the header exactly where a bodiless card puts it.
+    pub(super) fn status_card_with_header_motion(
+        &self,
+        motion: CardBodyMotion,
+        header: AnyElement,
+        body: Vec<AnyElement>,
+        actions: Vec<AnyElement>,
+        p: &ChatAppearance,
+    ) -> AnyElement {
+        let s = p.scale;
+        if body.is_empty() {
+            return self.status_card_with_header(header, body, actions, p);
+        }
+        let column = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0 * s))
+            .pt(px(8.0 * s))
+            .children(body)
+            .into_any_element();
+        let column = match motion.frame {
+            Some(frame) => {
+                let floor = if motion.shut_body {
+                    self.disclosure_floor(motion.key).get()
+                } else {
+                    0.0
+                };
+                motion_clip(
+                    self.disclosure_height(motion.key),
+                    frame,
+                    floor,
+                    4.0 * s,
+                    column,
+                )
+            }
+            None if motion.shut_body && motion.shut => {
+                measured(self.disclosure_floor(motion.key), column)
+            }
+            None => column,
+        };
+        self.status_card_panel(header, Some(column), actions, p)
+    }
+
     pub(crate) fn status_card(
         &self,
         title: String,
@@ -73,6 +133,27 @@ impl NativeChatView {
         &self,
         header: AnyElement,
         body: Vec<AnyElement>,
+        actions: Vec<AnyElement>,
+        p: &ChatAppearance,
+    ) -> AnyElement {
+        let s = p.scale;
+        let column = (!body.is_empty()).then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(12.0 * s))
+                .pt(px(8.0 * s))
+                .children(body)
+                .into_any_element()
+        });
+        self.status_card_panel(header, column, actions, p)
+    }
+
+    /// The card's shell around its header, its body column (already spaced) and its footer.
+    fn status_card_panel(
+        &self,
+        header: AnyElement,
+        body: Option<AnyElement>,
         actions: Vec<AnyElement>,
         p: &ChatAppearance,
     ) -> AnyElement {
@@ -110,16 +191,7 @@ impl NativeChatView {
                             .bg(panel_color)
                     })
                     .child(header)
-                    .when(!body.is_empty(), |panel| {
-                        panel.child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(12.0 * s))
-                                .pt(px(8.0 * s))
-                                .children(body),
-                        )
-                    }),
+                    .when_some(body, |panel, body| panel.child(body)),
             )
             .when(has_actions, |this| {
                 this.child(

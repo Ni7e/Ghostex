@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 use std::{collections::HashMap, fs, path::Path};
 
 /// CDXC:Drafts 2026-09-17 WHY: Native chat must retain browser-era draft ownership, recovery records and preferences without starting a hidden browser to read them. Import only the app's file origin, resolve deletion tombstones before decoding, and leave the source intact until the strict native transaction commits.
-pub(crate) fn import(storage: &mut Storage, profile: &Path) -> Result<()> {
+/// `Ok(true)` when this call imported, `Ok(false)` when an earlier start already had.
+pub(crate) fn import(storage: &mut Storage, profile: &Path) -> Result<bool> {
     let imported: Option<String> = storage
         .database
         .query_row(
@@ -17,7 +18,7 @@ pub(crate) fn import(storage: &mut Storage, profile: &Path) -> Result<()> {
         )
         .optional()?;
     if imported.is_some() {
-        return Ok(());
+        return Ok(false);
     }
     let local = profile.join("Local Storage/leveldb");
     let mut preferences = Vec::new();
@@ -118,10 +119,10 @@ pub(crate) fn import(storage: &mut Storage, profile: &Path) -> Result<()> {
         params!["browserImportV1", json!(true).to_string()],
     )?;
     transaction.commit()?;
-    Ok(())
+    Ok(true)
 }
 
-fn latest_records(path: &Path) -> Result<Vec<leveldb_core::Record>> {
+pub(crate) fn latest_records(path: &Path) -> Result<Vec<leveldb_core::Record>> {
     let mut latest: HashMap<Vec<u8>, leveldb_core::Record> = HashMap::new();
     for entry in fs::read_dir(path)? {
         let path = entry?.path();
@@ -169,7 +170,7 @@ fn prefix(key: &[u8]) -> Option<(usize, u64, usize)> {
         .fold(0, |v, (i, b)| v | ((*b as u64) << (i * 8)));
     Some((index_offset, database, index_len))
 }
-fn unwrap_values(records: &mut [leveldb_core::Record], blobs: &Path) -> Result<()> {
+pub(crate) fn unwrap_values(records: &mut [leveldb_core::Record], blobs: &Path) -> Result<()> {
     let externals: HashMap<Vec<u8>, Vec<u8>> = records
         .iter()
         .filter(|row| {
@@ -236,7 +237,7 @@ fn unwrap_values(records: &mut [leveldb_core::Record], blobs: &Path) -> Result<(
     }
     Ok(())
 }
-fn to_json(value: V8Value) -> Result<Value> {
+pub(crate) fn to_json(value: V8Value) -> Result<Value> {
     Ok(match value {
         V8Value::Undefined | V8Value::Null | V8Value::Hole => Value::Null,
         V8Value::Bool(value) | V8Value::BooleanObject(value) => json!(value),

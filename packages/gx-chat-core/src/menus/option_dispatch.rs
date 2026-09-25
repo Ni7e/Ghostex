@@ -77,15 +77,16 @@ pub fn queue_session_chat_option(
     } else {
         state.get("effort").map(|entry| entry.value.clone())
     };
-    let effort = effort_option
-        .as_ref()
-        .and_then(|option| {
-            option
-                .choice_list()
-                .iter()
-                .find(|entry| Some(entry.value.as_str()) == preferred.as_deref())
-                .map(|entry| entry.value.clone())
-        })
+    let offered = effort_option.as_ref().and_then(|option| {
+        option
+            .choice_list()
+            .iter()
+            .find(|entry| Some(entry.value.as_str()) == preferred.as_deref())
+            .map(|entry| entry.value.clone())
+    });
+    let keeps_agent_effort = descriptor.id == catalog.model.id && catalog.agent_keeps_effort();
+    let effort = offered
+        .or_else(|| keeps_agent_effort.then(String::new))
         .or_else(|| {
             effort_option
                 .as_ref()

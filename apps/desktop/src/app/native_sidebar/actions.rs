@@ -134,6 +134,8 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_accounts(&command, cx) {
             return;
         }
+        // Git, worktree and Handoff / Export menu items (gx_store/git/actions.rs).
+        if self.gx_store_run_sidebar_git(&command, cx) { return; }
         // A row on a REMOTE machine: its sleep, wake, close, fork, flags, snooze and Full Reload
         // are calls down that machine's tunnel, sent through the same function the old runtime's
         // bridge message reaches, and nothing local moves (gx_store/sidebar_remote.rs).
@@ -146,12 +148,21 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_action(&command, cx) {
             return;
         }
+        if self.gx_store_run_sidebar_more_menu(&command, cx) {
+            return;
+        }
         // Sleep and wake call the daemon from here, so the command must not also reach the old
         // runtime: it would make the same call a second time (gx_store/sidebar_lifecycle.rs).
         if self.gx_store_run_sidebar_lifecycle(&command, cx) {
             return;
         }
         if self.gx_store_run_sidebar_close(&command, cx) {
+            return;
+        }
+        if self.gx_store_run_close_after_done(&command, cx) {
+            return;
+        }
+        if self.gx_store_run_session_edit_command(&command, cx) {
             return;
         }
         if self.gx_store_run_sidebar_fork(&command, cx) {
@@ -248,8 +259,7 @@ impl GhostexGpuiApp {
         // A click on a row of a REMOTE machine, and its Split Right: the store acknowledges the
         // attention, performs the same `openRemoteSessionTerminal` the old runtime posted, and the
         // open's own tab selection moves the remote focus marks, so the command goes no further
-        // (gx_store/sidebar_remote_focus.rs). A click the store does not answer (the old list is
-        // drawn, or the machine has not streamed) is sent on and the old runtime performs it whole.
+        // (gx_store/sidebar_remote_focus.rs), for a machine this run has not streamed too.
         if let Some(plan) = self.gx_store_plan_remote_row_focus(&command) {
             self.gx_store_focus_remote_row(&command, &plan, cx);
             return;
@@ -259,6 +269,9 @@ impl GhostexGpuiApp {
         // straight to the runtime, so the five senders that post this command share ONE route with
         // no page in it (gx_store/sidebar_focus_route.rs).
         if self.gx_store_focus_local_row(&command, cx) {
+            return;
+        }
+        if self.gx_store_run_sidebar_create(&command, cx) {
             return;
         }
         if self.sidebar.is_none() {

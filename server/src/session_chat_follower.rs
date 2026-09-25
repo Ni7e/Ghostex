@@ -2262,14 +2262,22 @@ pub(crate) fn sync_session_chat_follower_for_session(
         &project_id,
         &session_id,
     );
-    // CDXC:AgentScreenDetection 2026-09-03 WHY: only Claude has a statusline payload
-    // to watch; a cheap stat per tick, no capture until it actually changes.
+    // CDXC:AgentScreenDetection 2026-09-03 WHY: only Claude and Cursor have a
+    // statusline payload to watch; a cheap stat per tick, no capture until it changes.
     let options_change_watch =
-        (crate::session_chat_options::session_chat_option_agent(terminal_agent.as_deref())
-            == Some(crate::session_chat_options::SessionChatOptionAgent::Claude))
-        .then(|| {
-            crate::session_chat_options::claude_statusline_change_watch(
+        match crate::session_chat_options::session_chat_option_agent(terminal_agent.as_deref()) {
+            Some(crate::session_chat_options::SessionChatOptionAgent::Claude) => {
+                Some(crate::agent_hooks::statusline::StatuslineAgent::Claude)
+            }
+            Some(crate::session_chat_options::SessionChatOptionAgent::Cursor) => {
+                Some(crate::agent_hooks::statusline::StatuslineAgent::Cursor)
+            }
+            _ => None,
+        }
+        .map(|agent| {
+            crate::session_chat_options::statusline_change_watch(
                 crate::session_chat_options::session_chat_hook_state_directory(&state.paths),
+                agent,
             )
         });
     let config = crate::session_chat::SessionChatFollowerConfig {

@@ -5,9 +5,6 @@ changed. See `core.ts` for how the runtime's methods are re-attached.
 */
 import { GPUI_SIDEBAR_COMMAND_SELECTOR_MESSAGE_KEYS } from './constants';
 import type { GpuiSidebarRuntime } from './core';
-import { activateGpuiProject } from './project-activation';
-import { createGpuiSidebarSettings } from './helpers/bootstrap';
-import { normalizeGpuiReplacementProjectFolderPick, normalizeGpuiWorkspaceFolderPick } from './helpers/folder-picker';
 import { isGpuiPresentationQuickDomainProject } from './helpers/presentation-projection';
 import { normalizeNonEmptyString } from './helpers/records';
 import {
@@ -17,12 +14,8 @@ import {
 } from './helpers/remote-presentation';
 import { gpuiProjectNameFromPath, normalizeGpuiProjectPath } from './helpers/worktrees';
 import type { GpuiSidebarRuntimeSnapshotKind } from './types-and-protocol';
-import { openAppModal, postAppModalHostMessage } from '@/packages/core-ui/app-modal-host-bridge';
-import { resolveEffectivePreferredAgentInterface } from '@/packages/shared/ghostex-settings';
-import {
-  createGxserverPresentationProjectGroupId,
-  parseGxserverPresentationProjectGroupId,
-} from '@/packages/shared/gxserver-presentation-sidebar-projection';
+import { openAppModal } from '@/packages/core-ui/app-modal-host-bridge';
+import { parseGxserverPresentationProjectGroupId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import type {
   GxserverProjectDomainState,
   GxserverRecentProjectDomainState,
@@ -66,16 +59,10 @@ export interface GpuiSidebarRuntimeProjectAndCommandMethods {
   ): Promise<void>;
   deleteGlobalSidebarCommand(commandId: string): Promise<void>;
   syncGlobalSidebarCommandOrder(requestId: string, commandIds: readonly string[]): Promise<void>;
-  pickWorkspaceFolder(originalMessage: SidebarToExtensionMessage): void;
-  handleGpuiWorkspaceFolderPicked(payload: unknown): Promise<void>;
   ensureLocalProjectPathAvailable(projectId: string): boolean;
   presentMissingProjectFolder(projectId: string): boolean;
-  relocateProjectFolder(projectId: string, path: string): Promise<void>;
-  removeProject(projectId: string): Promise<void>;
   restoreRecentProject(projectId: string): Promise<void>;
   removeRecentProject(projectId: string): Promise<void>;
-  closeProjectForGroup(groupId: string, successorSessionId?: string): Promise<void>;
-  removeProjectForGroup(groupId: string): Promise<void>;
   resolveProjectIdForGroup(groupId: string): string | undefined;
   activeDomainProject(): GxserverProjectDomainState | undefined;
   domainProjectById(projectId: string): GxserverProjectDomainState | undefined;
@@ -402,127 +389,6 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
     });
   },
 
-  pickWorkspaceFolder(this: GpuiSidebarRuntime, originalMessage: SidebarToExtensionMessage): void {
-    try {
-      postAppModalHostMessage({ type: 'pickWorkspaceFolder' }, 'GPUISidebarWorkspaceProjects:pickWorkspaceFolder');
-    } catch {
-      this.handleUnsupportedSidebarMessage(originalMessage);
-    }
-  },
-
-  async handleGpuiWorkspaceFolderPicked(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
-    const replacement = normalizeGpuiReplacementProjectFolderPick(payload);
-    if (replacement) {
-      await this.relocateProjectFolder(replacement.projectId, replacement.path);
-      return;
-    }
-    const pick = normalizeGpuiWorkspaceFolderPick(payload);
-    if (!pick) {
-      return;
-    }
-    if (!this.client) {
-      if (pick.requestId) {
-        postAppModalHostMessage(
-          {
-            error: 'gxserver is not connected.',
-            ok: false,
-            requestId: pick.requestId,
-            type: 'firstLaunchCreateProjectSessionResult',
-          },
-          'AppModals:firstLaunchCreateProjectSessionResult'
-        );
-      }
-      this.postSidebarActionToast('error', 'Add Project failed', {
-        description: 'gxserver is not connected.',
-      });
-      return;
-    }
-    try {
-      const response = await this.client.rpc<{ project?: GxserverProjectDomainState }>(
-        '/api/addProjectPath',
-        pick.name ? { name: pick.name, path: pick.path } : { path: pick.path }
-      );
-      const project = response.project;
-      if (!project) {
-        throw new Error('gxserver did not return the added project.');
-      }
-      this.upsertDomainProject(project);
-      if (!pick.firstLaunchAgentId) {
-        await activateGpuiProject(this, project.projectId);
-        return;
-      }
-      this.focusProjectId(project.projectId);
-      await this.refreshDomainPresentationSnapshotFromClient('patch').catch(() => {
-        this.publishHudPatch();
-      });
-      if (pick.firstLaunchAgentId) {
-        /*
-        CDXC:Onboarding 2026-08-24:
-        Onboarding Finish lands the user in a working workspace: the project it
-        just registered gets its first session immediately, using the default
-        agent chosen on the Get Started page ('terminal' means a plain shell).
-        */
-        const groupId = createGxserverPresentationProjectGroupId(project.projectId);
-        const isWindowsHost = typeof navigator !== 'undefined' && /Windows/iu.test(navigator.userAgent);
-        if (isWindowsHost && pick.requestId) {
-          const payload = JSON.stringify({
-            ...(pick.firstLaunchAgentId === 'terminal' ? {} : { agentId: pick.firstLaunchAgentId }),
-            ...(pick.firstLaunchAgentId === 'terminal'
-              ? { type: 'ghostex.gpui.sidebar.createProjectTerminal' }
-              : {
-                  preferredInterface: resolveEffectivePreferredAgentInterface(
-                    createGpuiSidebarSettings(this.runtimeSettings),
-                    pick.firstLaunchAgentId
-                  ),
-                  type: 'ghostex.gpui.sidebar.createProjectAgent',
-                }),
-            projectId: project.projectId,
-            requestId: pick.requestId,
-            version: 1,
-          });
-          const accepted =
-            pick.firstLaunchAgentId === 'terminal'
-              ? window.ghostexGpui?.postCreateProjectTerminal?.(payload)
-              : window.ghostexGpui?.postCreateProjectAgent?.(payload);
-          if (!accepted) {
-            throw new Error('The Windows terminal host did not accept the project session request.');
-          }
-        } else {
-          if (pick.firstLaunchAgentId === 'terminal') {
-            await this.createSession(groupId);
-          } else {
-            await this.createAgentSession(pick.firstLaunchAgentId, groupId);
-          }
-          if (pick.requestId) {
-            postAppModalHostMessage(
-              {
-                ok: true,
-                requestId: pick.requestId,
-                type: 'firstLaunchCreateProjectSessionResult',
-              },
-              'AppModals:firstLaunchCreateProjectSessionResult'
-            );
-          }
-        }
-      }
-    } catch (error) {
-      if (pick.requestId) {
-        postAppModalHostMessage(
-          {
-            error: error instanceof Error ? error.message : 'Ghostex could not add the selected folder.',
-            ok: false,
-            requestId: pick.requestId,
-            type: 'firstLaunchCreateProjectSessionResult',
-          },
-          'AppModals:firstLaunchCreateProjectSessionResult'
-        );
-      }
-      this.postSidebarActionToast('error', 'Add Project failed', {
-        description: 'Ghostex could not add the selected folder.',
-      });
-    }
-  },
-
   ensureLocalProjectPathAvailable(this: GpuiSidebarRuntime, projectId: string): boolean {
     const group = this.latestGroups.find(
       (candidate) =>
@@ -556,43 +422,6 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
       type: 'open',
     });
     return true;
-  },
-
-  async relocateProjectFolder(this: GpuiSidebarRuntime, projectId: string, path: string): Promise<void> {
-    if (!this.client) {
-      this.postSidebarActionToast('error', 'Could not update project folder', {
-        description: 'gxserver is not connected.',
-      });
-      return;
-    }
-    try {
-      const response = await this.client.rpc<{ project: GxserverProjectDomainState }>('/api/relocateProject', {
-        path,
-        projectId,
-      });
-      this.upsertDomainProject(response.project);
-      await this.refreshDomainPresentationSnapshotFromClient('patch');
-      postAppModalHostMessage({ type: 'close' }, 'GPUIMissingProjectFolder:resolved');
-      this.postSidebarActionToast('info', 'Project folder updated');
-    } catch (error) {
-      this.postSidebarActionToast('error', 'Could not update project folder', {
-        description: error instanceof Error ? error.message : 'Ghostex could not use the selected folder.',
-      });
-    }
-  },
-
-  async removeProject(this: GpuiSidebarRuntime, projectId: string): Promise<void> {
-    const remoteReference = parseGpuiRemotePresentationProjectId(projectId);
-    if (remoteReference) {
-      await this.removeRemoteProject(remoteReference);
-      return;
-    }
-    if (!this.client) {
-      return;
-    }
-    await this.client.rpc('/api/removeProject', {
-      projectId,
-    });
   },
 
   async restoreRecentProject(this: GpuiSidebarRuntime, projectId: string): Promise<void> {
@@ -641,75 +470,6 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
     this.domainProjects = this.domainProjects.filter((project) => project.projectId !== projectId);
     this.recentProjects = [...response.recentProjects];
     this.publishHudPatch();
-  },
-
-  async closeProjectForGroup(this: GpuiSidebarRuntime, groupId: string, successorSessionId?: string): Promise<void> {
-    /*
-    CDXC:Projects 2026-09-16 DECISION:
-    User: closing a project in a Space stays in that Space and selects a non-sleeping session from the next project in the list.
-    SidebarApp picks that session from the Space the user is in; it is focused before the park so the active project moves straight to it and never passes through the "no active project" state, which is what used to let the host land on a project outside the Space.
-    */
-    if (successorSessionId) {
-      await this.focusSession(successorSessionId, { sessionId: successorSessionId, type: 'focusSession' });
-    }
-    const remoteScope = this.resolveRemotePresentationProjectScope({ groupId });
-    if (parseGpuiRemotePresentationGroupId(groupId)) {
-      if (!remoteScope) {
-        this.postRemoteToast('warning', 'Remote project close unavailable', {
-          description: 'Reconnect the remote machine before closing the project.',
-        });
-        return;
-      }
-      await this.closeRemoteProjectForGroup(remoteScope, groupId);
-      return;
-    }
-    if (!this.client) {
-      return;
-    }
-    const projectId = this.resolveProjectIdForGroup(groupId);
-    if (!projectId) {
-      return;
-    }
-    /*
-    CDXC:Projects 2026-06-24-12:38:
-    GPUI reuses SidebarApp's macOS close/remove split. Close must call the gxserver park endpoint with the project id resolved from the live presentation group, then consume gxserver's authoritative parked row; never synthesize a Recent Project row or map Close to hard delete when resolution or the daemon mutation fails.
-    */
-    const response = await this.client.rpc<{
-      project: GxserverProjectDomainState;
-      recentProjects: GxserverRecentProjectDomainState[];
-    }>('/api/closeProjectToRecent', {
-      projectId,
-    });
-    this.upsertDomainProject(response.project);
-    this.recentProjects = [...response.recentProjects];
-    if (this.activeGroupId === groupId || this.activeProjectId === projectId) {
-      this.activeGroupId = undefined;
-      this.activeProjectId = undefined;
-    }
-    this.removeLocalPresentationProject(projectId);
-    if (this.presentation) {
-      this.publishPresentation('patch');
-      return;
-    }
-    this.publishHudPatch();
-  },
-
-  async removeProjectForGroup(this: GpuiSidebarRuntime, groupId: string): Promise<void> {
-    const remoteScope = this.resolveRemotePresentationProjectScope({ groupId });
-    if (parseGpuiRemotePresentationGroupId(groupId)) {
-      if (!remoteScope) {
-        this.postRemoteToast('warning', 'Remote project removal unavailable', {
-          description: 'Reconnect the remote machine before removing the project.',
-        });
-        return;
-      }
-      await this.removeRemoteProject(remoteScope);
-      return;
-    }
-    const projectId = parseGxserverPresentationProjectGroupId(groupId);
-    if (projectId) {
-      await this.removeProject(projectId);
-    }
   },
 
   resolveProjectIdForGroup(this: GpuiSidebarRuntime, groupId: string): string | undefined {

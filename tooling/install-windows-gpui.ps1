@@ -59,20 +59,25 @@ $InstalledExecutable = Join-Path $InstallDir "Ghostex.exe"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 <#
 CDXC:Build 2026-09-23 WHY:
-The server removes its HTTP endpoint before its workers finish shutting down. Wait for that installed process to exit before copying its executable; loss of the health response alone does not release Windows' image lock.
+The server removes its HTTP endpoint before its workers finish shutting down, and its mapped image can outlive process-path discovery. Retire a changed image outside the mirror, as with the persistent session provider, so installation does not depend on worker exit or race a reconnecting client. Keep an identical server executable out of the mirror.
 #>
+$RetiredNativeDir = Join-Path $InstallDir ".retired-native"
 $InstalledServer = Join-Path $InstallDir "resources/native/gxserver.exe"
-foreach ($ServerProcess in @(Get-Process gxserver -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $InstalledServer })) {
-    if (-not $ServerProcess.WaitForExit(30000)) {
-        throw "The previous gxserver process (pid $($ServerProcess.Id)) has not finished shutting down."
-    }
+$StagedServer = Join-Path $StagedAppPath "resources/native/gxserver.exe"
+$KeepInstalledServer = (Test-Path -LiteralPath $InstalledServer -PathType Leaf) -and
+    (Test-Path -LiteralPath $StagedServer -PathType Leaf) -and
+    ((Get-FileHash -LiteralPath $InstalledServer -Algorithm SHA256).Hash -eq
+        (Get-FileHash -LiteralPath $StagedServer -Algorithm SHA256).Hash)
+if (-not $KeepInstalledServer -and (Test-Path -LiteralPath $InstalledServer -PathType Leaf)) {
+    $RetiredServerDir = Join-Path $RetiredNativeDir ([Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $RetiredServerDir | Out-Null
+    Move-Item -LiteralPath $InstalledServer -Destination (Join-Path $RetiredServerDir "gxserver.exe")
 }
 $StagedHash = (Get-FileHash -LiteralPath $StagedExecutable -Algorithm SHA256).Hash
 <#
 CDXC:Build 2026-09-22 WHY:
 Persistent Windows sessions keep wmx.exe mapped after the app closes. Windows permits moving that image but cannot overwrite it; retain it outside the mirrored payload so installing a compatible provider preserves live sessions.
 #>
-$RetiredNativeDir = Join-Path $InstallDir ".retired-native"
 $StagedWmx = Join-Path $StagedAppPath "resources/native/wmx.exe"
 $InstalledWmx = Join-Path $InstallDir "resources/native/wmx.exe"
 if ((Test-Path -LiteralPath $StagedWmx -PathType Leaf) -and (Test-Path -LiteralPath $InstalledWmx -PathType Leaf)) {
@@ -84,7 +89,12 @@ if ((Test-Path -LiteralPath $StagedWmx -PathType Leaf) -and (Test-Path -LiteralP
         Move-Item -LiteralPath $InstalledWmx -Destination (Join-Path $RetiredVersionDir "wmx.exe")
     }
 }
-& robocopy.exe $StagedAppPath $InstallDir /MIR /COPY:DAT /DCOPY:DAT /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD $RetiredNativeDir
+# Exclude both trees when a staged app also contains retained runtime images.
+$MirrorExclusions = @('/XD', '.retired-native')
+if ($KeepInstalledServer) {
+    $MirrorExclusions += @('/XF', $StagedServer)
+}
+& robocopy.exe $StagedAppPath $InstallDir /MIR /COPY:DAT /DCOPY:DAT /R:2 /W:1 /NFL /NDL /NJH /NJS /NP @MirrorExclusions
 $RobocopyExitCode = $LASTEXITCODE
 if ($RobocopyExitCode -gt 7) {
     throw "Installing Ghostex into $InstallDir failed with robocopy exit code $RobocopyExitCode."
@@ -109,6 +119,11 @@ if ($InstalledHash -ne $StagedHash) {
     )
     $Detail = if ($Holders.Count -gt 0) { " Still holding it open: $($Holders -join ', ')." } else { "" }
     throw "$InstalledExecutable still has the previous build after installing (staged $StagedHash, installed $InstalledHash).$Detail"
+}
+if (Test-Path -LiteralPath $StagedServer -PathType Leaf) {
+    if ((Get-FileHash -LiteralPath $InstalledServer -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $StagedServer -Algorithm SHA256).Hash) {
+        throw "The installed gxserver does not match the rebuilt binary."
+    }
 }
 if (Test-Path -LiteralPath $StagedWmx -PathType Leaf) {
     if ((Get-FileHash -LiteralPath $InstalledWmx -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $StagedWmx -Algorithm SHA256).Hash) {

@@ -9,14 +9,21 @@ use gpui::Styled as _;
 use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
+use gpui_component::ElementExt as _;
 use gpui_component::h_flex;
 use gpui_component::tooltip::ManagedTooltipExt as _;
 use gpui_component::tooltip::ManagedTooltipPlacement;
+
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
 use crate::*;
+
+/// The panel toggles' width as last laid out, which is how much of the band's trailing edge they
+/// claim (`workarea_header_toggles_footprint`).
+static PANEL_TOGGLES_WIDTH: AtomicU32 = AtomicU32::new(0);
 
 pub(crate) fn header_panel_toggle_button(
     id: &'static str,
@@ -89,6 +96,38 @@ impl GhostexGpuiApp {
             )
             .child(self.render_workarea_header_command_terminal_toggle(cx))
             .child(self.render_workarea_header_view_panel_toggle(cx))
+            .on_prepaint(|bounds, _window, _cx| {
+                PANEL_TOGGLES_WIDTH.store(bounds.size.width.as_f32().to_bits(), Ordering::Relaxed);
+            })
+    }
+
+    /// How far the collapsed header's other controls end from the band's trailing edge beyond
+    /// where they end with the panel open: the toggles and the pinned gap before them.
+    fn workarea_header_toggles_footprint(&self) -> f32 {
+        f32::from_bits(PANEL_TOGGLES_WIDTH.load(Ordering::Relaxed)) + WORKAREA_HEADER_PINNED_GAP
+    }
+
+    /// CDXC:Titlebar 2026-09-24 DECISION:
+    /// User: Start/Open/Commit must not jump to the right side when the side panel collapses. While the view panel slides, the header's controls end as far in from the band's trailing edge as the larger of the panel on screen (with its divider) and the toggles' footprint, which is exactly where they end at rest at either end, so they glide between the two instead of jumping when the toggles change halves of the band. Opening, the toggles are already in the strip and the header row ends at the panel, so this is extra trailing padding for the header's controls.
+    pub(crate) fn workarea_header_opening_clearance(&self) -> f32 {
+        let frame = self.panel_motion.view_panel.frame();
+        if !frame.animating || !frame.opening || !self.workarea_header_hosts_view_tab_strip() {
+            return 0.0;
+        }
+        (self.workarea_header_toggles_footprint() - frame.extent - WORKSPACE_SPLIT_HANDLE_THICKNESS)
+            .max(0.0)
+    }
+
+    /// Closing, the header row already spans the band and ends in the toggles, so the rest of its
+    /// controls are held off them by what is still on screen of the panel
+    /// (`workarea_header_opening_clearance`).
+    pub(crate) fn workarea_header_closing_clearance(&self) -> f32 {
+        let frame = self.panel_motion.view_panel.frame();
+        if !frame.animating || frame.opening || self.workarea_header_hosts_view_tab_strip() {
+            return 0.0;
+        }
+        (frame.extent + WORKSPACE_SPLIT_HANDLE_THICKNESS - self.workarea_header_toggles_footprint())
+            .max(0.0)
     }
 
     pub(crate) fn render_sidebar_collapse_button(
@@ -133,14 +172,15 @@ impl GhostexGpuiApp {
     /// expanded view keeps its hidden sidebar and Expand fully simply stops reading as on; the
     /// Toggle sidebar button beside it owns the sidebar. User: the button never shows as active
     /// while the panel is shown, the way Toggle sidebar never does (supersedes the 2026-09-22 lit
-    /// state). Without an open view the panel is the whole workarea and there is nothing to fold
-    /// it behind, so the button is disabled the way Expand is, and says so.
+    /// state). With the side panel closed the Agents Panel is the whole workarea and there is
+    /// nothing to fold it behind, so the button is disabled the way Expand is, and says so; the
+    /// "Open a view" picker counts as open (see `view_panel_maximized`).
     pub(crate) fn render_workarea_header_agents_toggle(
         &self,
         icon_color: Option<gpui::Hsla>,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        let enabled = self.open_view_mode().is_some();
+        let enabled = self.view_panel_open();
         let tooltip = if enabled {
             titlebar_tooltip_label("Toggle Agents Panel", "expandViewPanel")
         } else {

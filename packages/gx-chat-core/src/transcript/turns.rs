@@ -255,6 +255,31 @@ pub fn completed_work_render_items(
     items
 }
 
+/// `stickySessionChatTranscriptWorking` in `packages/shared/session-chat-presentation/turns.ts`:
+/// a transcript that settled keeps treating the session as settled until its newest row changes,
+/// so a working blip alone never reopens a landed fold.
+///
+/// `settled_at` is the fold memory, the newest message id at the moment the transcript settled.
+/// Returns the working flag the projection uses and records the settle.
+pub fn sticky_transcript_working(
+    messages: &[ChatMessage],
+    working: bool,
+    settled_at: &mut Option<String>,
+) -> bool {
+    let effective = working && !sticky_fold_holds(messages, settled_at.as_deref());
+    *settled_at = if effective {
+        None
+    } else {
+        messages.last().map(|message| message.id.clone())
+    };
+    effective
+}
+
+/// Whether a recorded settle still stands: the newest row is the one the transcript settled on.
+pub fn sticky_fold_holds(messages: &[ChatMessage], settled_at: Option<&str>) -> bool {
+    settled_at.is_some() && messages.last().map(|message| message.id.as_str()) == settled_at
+}
+
 /// "Worked for 12s", the label on a finished turn's fold.
 pub fn worked_duration_label(started_at: Option<i64>, completed_at: Option<i64>) -> String {
     let (Some(started_at), Some(completed_at)) = (started_at, completed_at) else {

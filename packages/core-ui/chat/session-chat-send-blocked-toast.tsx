@@ -1,11 +1,13 @@
 /*
 CDXC:SessionChat 2026-09-03:
 User decision: the chat composer never blocks typing. When a message cannot be
-sent (input held by another device, a terminal picker waiting for an answer, a
-Claude mode switch in flight), the text stays fully editable, the Send button
-only LOOKS disabled, and pressing it raises a red toast that names the reason.
-Before this, the composer went read-only and users could not even fix or copy
-their draft while the block lasted.
+sent (input held by another device, a terminal picker waiting for an answer),
+the text stays fully editable, the Send button only LOOKS disabled, and pressing
+it raises a red toast that names the reason. Before this, the composer went
+read-only and users could not even fix or copy their draft while the block
+lasted. Since 2026-09-24 a block that clears on its own (a model or mode switch,
+an answer still being applied) holds the send instead of refusing it; see
+`sessionChatSendRefusedReason`.
 
 The toast has two renderers because the hosts differ: the desktop CEF page has
 the native app-toast host (`ghostexAppModalHost`), so the desktop shows its

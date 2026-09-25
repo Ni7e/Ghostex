@@ -1511,19 +1511,6 @@ pub(crate) fn titlebar_button_border_color() -> Hsla {
     .into()
 }
 
-/// CDXC:Titlebar 2026-09-23 DECISION:
-/// User: the four split buttons (Start, Open, Commit, and the view panel's expand pair) take a
-/// lighter #787779 outline and divider in dark mode, because the near-black outline vanishes in
-/// transparent mode. This is the interim look while a new split-button style is chosen.
-pub(crate) fn titlebar_split_button_border_color() -> Hsla {
-    rgb(if titlebar_uses_light_theme() {
-        0xd4d4d4
-    } else {
-        0x787779
-    })
-    .into()
-}
-
 pub(crate) fn titlebar_button_hover_color() -> Hsla {
     titlebar_overlay_base().opacity(0.08).into()
 }
@@ -1562,8 +1549,12 @@ pub(crate) fn titlebar_popup_menu_hover_color() -> Hsla {
         .into()
 }
 
+/// A menu's or tooltip's outline: a faint ink line, fainter still on the frosted menus of window
+/// glass, where it only has to catch the edge of the blur.
 pub(crate) fn titlebar_popup_menu_border_color() -> Hsla {
-    titlebar_overlay_base().opacity(0.12).into()
+    titlebar_overlay_base()
+        .opacity(if window_glass_active() { 0.10 } else { 0.12 })
+        .into()
 }
 
 pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
@@ -1580,9 +1571,18 @@ pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
     // CDXC:Theming 2026-09-23 DECISION: User: tooltips "dont fit the glass look". gpui-component's
     // tooltip paints `tokens.popover`, which kept the stock near-black, so it now takes the same
     // tinted menu colour as the app's menus.
-    theme.tokens.popover = titlebar_popup_menu_background().into();
+    // Under glass tooltips draw in the frosted tooltip window, which paints this token at the
+    // frosted alpha, so it takes the same lifted colour as the other frosted menus.
+    theme.tokens.popover = if window_glass_active() {
+        frosted_menu_fill(titlebar_popup_menu_background())
+            .opacity(1.0)
+            .into()
+    } else {
+        titlebar_popup_menu_background().into()
+    };
     theme.popover_foreground = titlebar_popup_menu_foreground();
     theme.border = titlebar_popup_menu_border_color();
+    gpui_component::tooltip::set_frosted_tooltip_alpha(WINDOW_GLASS_MENU_ALPHA);
     theme.radius = px(2.0);
     theme.scrollbar = gpui::transparent_black();
     theme.scrollbar_show = gpui_component::scroll::ScrollbarShow::Hover;
@@ -3304,25 +3304,6 @@ pub(crate) fn gpui_disabled_project_workarea_copy_noun(mode: TitlebarMode) -> &'
     }
 }
 
-/// CDXC:Titlebar 2026-09-09 SEE-ALSO:
-/// The user's view order from Settings, as mode slugs. `titlebar_mode_switcher_items` sorts the
-/// picker with it and the view panel seeds a new tab's position from it.
-/// packages/shared/ghostex-settings/titlebar-view-order.ts writes the same slugs.
-pub(crate) fn gpui_titlebar_view_order_slugs() -> Vec<String> {
-    shared_settings::shared_sidebar_settings_snapshot()
-        .object()
-        .get("titlebarViewOrder")
-        .and_then(serde_json::Value::as_array)
-        .map(|order| {
-            order
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 pub(crate) fn gpui_titlebar_mode_hidden_from_settings(mode: TitlebarMode) -> bool {
     let Some(settings_key) = titlebar_mode_view_tab_hidden_settings_key(mode) else {
         return false;
@@ -3331,11 +3312,9 @@ pub(crate) fn gpui_titlebar_mode_hidden_from_settings(mode: TitlebarMode) -> boo
         .object()
         .get(settings_key)
         .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
+        .unwrap_or_else(|| {
+            mode.website_provider()
+                .is_some_and(|provider| provider.hidden_by_default)
+        })
 }
 
-pub(crate) fn gpui_titlebar_git_action_script(message: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onTitlebarGitAction==='function'){{bridge.onTitlebarGitAction(payload);}}else{{const pending=Array.isArray(bridge.pendingTitlebarGitActions)?bridge.pendingTitlebarGitActions:[];pending.push(payload);bridge.pendingTitlebarGitActions=pending;}}}})(); undefined;"
-    )
-}

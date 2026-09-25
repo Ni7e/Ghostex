@@ -18,7 +18,7 @@ pub const GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-computer-use",
     "ghostex-cli",
     "ghostex-manage-beads",
-    "ghostex-agents-orchestration",
+    "ghostex-agents",
     "ghostex-auto-rename-session",
     "ghostex-move-codex-session",
     "ghostex-help",
@@ -996,6 +996,10 @@ The Fable 5.6 orchestration skill (shipped first as
 `ghostex-fable-5.6-orchestration`, then as `ghostex-fable-56-orchestration`)
 was replaced by the model-independent `$ghostex-agents-orchestration`, so its
 installed copies are retired the same way.
+
+CDXC:AgentSkills 2026-09-24 WHY:
+`ghostex-agents-orchestration` was renamed to `ghostex-agents`, so copies
+installed under the old name are retired the same way.
 */
 pub const RETIRED_GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-manage-automations",
@@ -1003,6 +1007,7 @@ pub const RETIRED_GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-find-prev-session",
     "ghostex-fable-5.6-orchestration",
     "ghostex-fable-56-orchestration",
+    "ghostex-agents-orchestration",
 ];
 
 /// sha256 of every SKILL.md / agents/openai.yaml revision the retired skills
@@ -1037,6 +1042,11 @@ const RETIRED_GHOSTEX_AGENT_SKILL_SHIPPED_SHA256: &[&str] = &[
     "7d1771b33c72b36692b4c97c82d5f78aca68acc55d3d30851380aa5c9e815ee7",
     "d0c65b88ef3379d9dc93421d4e68f362fdeeac1fe8945eafd5c92ab70a8e0e11",
     "1f220c6dd690323fcc8a82f7e612b2b2f25863954dbded973c108feb2f24cb8c",
+    // ghostex-agents-orchestration SKILL.md
+    "39ff8f58b8cf9031028f955e316a77564ae29f096b5975eba6b5ad549034b450",
+    "6fe9da4676cf8d237af8ffee361790e7e4577ae12689870ce45c80919e58f11c",
+    // ghostex-agents-orchestration agents/openai.yaml
+    "bbfd7e4f8794a1940c4434bdf42cab5b9beb06e972d007c570403f4155647179",
 ];
 
 fn file_matches_shipped_retired_skill_content(path: &Path) -> bool {

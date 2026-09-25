@@ -31,6 +31,7 @@ impl NativeChatView {
         let s = p.scale;
         let stale = strip["stale"] == true;
         let open = self.fleet_open(&strip, p);
+        let motion = self.disclosure_frame("agent-fleet", open, cx);
         let header = self.panel_header(
             super::panel_card::PanelHeader {
                 id: "chat-agent-fleet-header",
@@ -40,6 +41,7 @@ impl NativeChatView {
                 title: "Subagents",
                 meta: text(&strip, "countLabel"),
                 open,
+                has_body: open || motion.is_some(),
                 toggle_label: if open {
                     "Minimize subagents"
                 } else {
@@ -52,7 +54,7 @@ impl NativeChatView {
             cx,
         );
         let mut body = Vec::new();
-        if open {
+        if open || motion.is_some() {
             if stale {
                 body.push(
                     div()
@@ -84,7 +86,18 @@ impl NativeChatView {
                 .role(gpui::Role::Group)
                 .aria_label("Subagents")
                 .w_full()
-                .child(self.status_card_with_header(header, body, Vec::new(), p))
+                .child(self.status_card_with_header_motion(
+                    super::cards::CardBodyMotion {
+                        key: "agent-fleet",
+                        frame: motion,
+                        shut_body: false,
+                        shut: !open,
+                    },
+                    header,
+                    body,
+                    Vec::new(),
+                    p,
+                ))
                 .into_any_element(),
         )
     }

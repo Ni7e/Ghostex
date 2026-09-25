@@ -5,10 +5,16 @@ use serde_json::Value;
 pub(crate) enum GpuiSupportLog {
     SidebarRefresh,
     TerminalFocus,
+    SessionChat,
 }
 
 pub(crate) fn append(log: GpuiSupportLog, event: &str, details: Value) {
     log::debug!("{log:?} {event} {details}");
+}
+
+/// Scenario-gated on the desktop; the console has no scenarios, so the call is logged like `append`.
+pub(crate) fn append_for_scenario(log: GpuiSupportLog, _scenario_id: &str, event: &str, details: Value) {
+    append(log, event, details);
 }
 
 pub(crate) fn temporary_epoch_ms() -> u64 {
@@ -18,7 +24,7 @@ pub(crate) fn temporary_epoch_ms() -> u64 {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum GpuiDiagnosticScenario {
     SidebarRefresh,
-    ChatReplay,
+    SessionChat,
 }
 
 /// Scenario-gated disk logging has no disk to write to here, so no scenario is ever on.

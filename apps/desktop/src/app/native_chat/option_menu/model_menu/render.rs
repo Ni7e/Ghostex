@@ -1,7 +1,7 @@
 use super::super::window::ChatOptionMenuPanel;
 use super::style::{
-    BAR_HEIGHT, BUTTON_GAP, CARD_RADIUS, ERROR_HEIGHT, ITEM_RADIUS, LIST_HEIGHT, Palette, ROW_GAP,
-    TRAIT_ROW_HEIGHT, button_lines,
+    BAR_HEIGHT, BUTTON_GAP, CARD_RADIUS, ERROR_HEIGHT, HINTS_HEIGHT, ITEM_RADIUS, LIST_HEIGHT,
+    Palette, ROW_GAP, TRAIT_ROW_HEIGHT, button_lines,
 };
 use crate::app::native_chat::appearance::ChatAppearance;
 use gpui::prelude::FluentBuilder as _;
@@ -9,7 +9,6 @@ use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement as _, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, div, px, svg, uniform_list,
 };
-use gpui_component::input::Input;
 use serde_json::{Value, json};
 
 /// An agent's logo in its brand tone; a white mark turns dark on the light surface.
@@ -48,7 +47,14 @@ impl ChatOptionMenuPanel {
             let active = tab["active"] == true;
             let id = tab["id"].clone();
             let name = tab["name"].as_str().unwrap_or_default().to_owned();
-            let tooltip = name.clone();
+            // CDXC:SessionChat 2026-09-24 DECISION:
+            // User: show a handoff icon where switching to another agent means another agent CLI, but "don't show the icon for handover so much, just show it on the agent icons up top": another agent's tab carries a small badge and the model rows carry none. A draft switches agents without a handoff, so it shows none.
+            let handoff = tab["handoff"] == true;
+            let tooltip = if handoff {
+                format!("{name}: picking a model hands off to {name}")
+            } else {
+                name.clone()
+            };
             let hover = palette.ink(0.06);
             let icon = match tab["icon"].as_str() {
                 Some(icon) => agent_logo(icon, appearance).size(px(16.0 * scale)),
@@ -76,6 +82,26 @@ impl ChatOptionMenuPanel {
                         panel.model_menu_send(json!({"type":"modelMenuView","tab":id}), cx);
                     }))
                     .child(icon.opacity(if active { 1.0 } else { 0.72 }))
+                    .when(handoff, |tab| {
+                        tab.child(
+                            div()
+                                .absolute()
+                                .right(px(3.0 * scale))
+                                .bottom(px(3.0 * scale))
+                                .size(px(12.0 * scale))
+                                .rounded_full()
+                                .bg(palette.surface)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    svg()
+                                        .path("titlebar/switch-horizontal.svg")
+                                        .size(px(9.0 * scale))
+                                        .text_color(palette.muted),
+                                ),
+                        )
+                    })
                     // The 32px tab sits centred in the 40px bar, so 4px below it is the bar's own hairline.
                     .when(active, |tab| {
                         tab.child(
@@ -120,47 +146,22 @@ impl ChatOptionMenuPanel {
             .text_size(px(12.5 * scale))
             .font_weight(gpui::FontWeight::MEDIUM)
             .child(label.clone());
-        let caption = |text: String| {
-            div()
-                .min_w_0()
-                .truncate()
-                .text_size(px(11.0 * scale))
-                .text_color(palette.muted)
-                .child(text)
-        };
-        let body = if row["showAgent"] == true {
-            // Favorites mix agents, so each row names its own on a second line.
-            let line = div()
-                .flex()
-                .items_center()
-                .gap(px(6.0 * scale))
-                .min_w_0()
-                .child(
+        // Favorites mix agents, so each row leads with its agent's logo on the model's one line.
+        let body = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(8.0 * scale))
+            .when(row["showAgent"] == true, |body| {
+                body.child(
                     agent_logo(row["icon"].as_str().unwrap_or_default(), appearance)
-                        .size(px(11.0 * scale)),
+                        .size(px(14.0 * scale)),
                 )
-                .child(caption(
-                    row["agentName"].as_str().unwrap_or_default().to_owned(),
-                ));
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap(px(2.0 * scale))
-                .child(name)
-                .child(line)
-        } else {
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .items_center()
-                .gap(px(6.0 * scale))
-                .child(name)
-        };
-        // CDXC:SessionChat 2026-09-22 DECISION:
-        // User: a model's description is not written next to it in the picker; an eye that appears when the row is hovered shows it on hover instead.
+            })
+            .child(name);
+        // CDXC:SessionChat 2026-09-24 DECISION:
+        // User: a model's description is not written next to it in the picker; an info-circle icon that appears when the row is hovered shows it on hover instead (replaces the eye of 2026-09-22).
         const TOOLTIP_WIDTH: f32 = 220.0;
         let about = description.map(|description| {
             let about_hover = palette.ink(0.08);
@@ -192,7 +193,7 @@ impl ChatOptionMenuPanel {
                 })
                 .child(
                     svg()
-                        .path("titlebar/eye.svg")
+                        .path("titlebar/info-circle.svg")
                         .size(px(13.0 * scale))
                         .text_color(palette.muted),
                 )
@@ -226,11 +227,18 @@ impl ChatOptionMenuPanel {
                     cx.notify();
                 }
             }))
-            .on_click(cx.listener(move |panel, _, _, cx| panel.model_menu_pick(index, false, cx)))
+            // A click keeps its old meaning; it carries a level only when the keyboard or the Reasoning list moved one.
+            .on_click(cx.listener(move |panel, _, _, cx| {
+                let effort = panel.model_menu_browsed_effort(index, cx);
+                panel.model_menu_pick(index, false, effort, cx);
+            }))
             // Right-click applies the model to this session only, where the agent can.
             .on_mouse_down(
                 gpui::MouseButton::Right,
-                cx.listener(move |panel, _, _, cx| panel.model_menu_pick(index, true, cx)),
+                cx.listener(move |panel, _, _, cx| {
+                    let effort = panel.model_menu_browsed_effort(index, cx);
+                    panel.model_menu_pick(index, true, effort, cx);
+                }),
             )
             .child(body)
             .children(about)
@@ -287,15 +295,17 @@ impl ChatOptionMenuPanel {
     fn render_model_traits(
         &self,
         view: &Value,
+        traits: &[Value],
         active: usize,
+        shake: f32,
         appearance: &ChatAppearance,
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let scale = appearance.scale;
-        let traits = view["traits"]
-            .as_array()
-            .filter(|traits| !traits.is_empty())?;
+        if traits.is_empty() {
+            return None;
+        }
         let rows = view["rows"].as_array().map_or(0, Vec::len);
         let open = self
             .model_menu
@@ -325,8 +335,13 @@ impl ChatOptionMenuPanel {
                     Some("reasoning") => Some("titlebar/brain.svg"),
                     Some("context") => Some("titlebar/chart-bar.svg"),
                     Some("fast") => Some("titlebar/bolt.svg"),
+                    Some("account") => Some("titlebar/user.svg"),
                     _ => None,
                 };
+                let letter = setting["icon"]
+                    .as_str()
+                    .and_then(super::keys::button_letter);
+                let shaking = setting["id"] == "effort" && shake != 0.0;
                 // Fast mode reads as a switch: lit in the pill's marker tone when on, dimmed when off.
                 let fast = setting["icon"] == "fast";
                 let on = fast
@@ -348,14 +363,36 @@ impl ChatOptionMenuPanel {
                 } else {
                     format!("{label}: {value}")
                 };
+                let tooltip = match letter {
+                    Some(letter) => format!("{tooltip} ({letter})"),
+                    None => tooltip,
+                };
+                let tooltip = match setting["icon"].as_str() {
+                    Some("fast") => format!("{tooltip} (F)"),
+                    Some("context") => format!("{tooltip} (C)"),
+                    _ => tooltip,
+                };
+                // CDXC:SessionChat 2026-09-24 DECISION:
+                // User: the footer's values ("Default", "Medium") must not be cut short. Reasoning, Context Window and Fast keep their full width and grow into the spare room; only the Account button and labelled option buttons give way and truncate.
+                // SEE-ALSO: `.ghostex-chat-model-menu-tray-button` in packages/core-ui/chat/session-chat-model-menu.css.
+                let keeps_width = matches!(
+                    setting["icon"].as_str(),
+                    Some("reasoning" | "context" | "fast")
+                );
                 buttons = buttons.child(
                     div()
                         .id(("model-menu-setting", index))
                         .role(gpui::Role::MenuItem)
                         .aria_label(tooltip.clone())
                         .aria_expanded(open == Some(index))
-                        .flex_1()
-                        .min_w_0()
+                        .flex_auto()
+                        .map(|button| {
+                            if keeps_width {
+                                button.flex_shrink_0()
+                            } else {
+                                button.min_w_0()
+                            }
+                        })
                         .h(px(TRAIT_ROW_HEIGHT * scale))
                         .px(px(6.0 * scale))
                         .flex()
@@ -366,6 +403,7 @@ impl ChatOptionMenuPanel {
                         .text_size(px(12.0 * scale))
                         .opacity(if disabled { 0.42 } else { 1.0 })
                         .when(lit, |button| button.bg(palette.ink(0.11)))
+                        .when(shaking, |button| button.relative().left(px(shake * scale)))
                         .tooltip(move |window, cx| {
                             gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
                         })
@@ -389,12 +427,36 @@ impl ChatOptionMenuPanel {
                         )
                         .map(|button| match icon {
                             Some(path) => button.child(
-                                svg()
-                                    .path(path)
+                                div()
+                                    .relative()
                                     .flex_shrink_0()
-                                    .size(px(14.0 * scale))
-                                    .text_color(if on { palette.on } else { palette.muted })
-                                    .when(fast && !on, |icon| icon.opacity(0.6)),
+                                    .child(
+                                        svg()
+                                            .path(path)
+                                            .size(px(14.0 * scale))
+                                            .text_color(if on { palette.on } else { palette.muted })
+                                            .when(fast && !on, |icon| icon.opacity(0.6)),
+                                    )
+                                    // The hotkey floats off the icon's bottom-right corner as a letter in a filled circle.
+                                    .when_some(letter, |icon, letter| {
+                                        icon.child(
+                                            div()
+                                                .absolute()
+                                                .right(px(-5.0 * scale))
+                                                .bottom(px(-4.0 * scale))
+                                                .size(px(10.0 * scale))
+                                                .rounded_full()
+                                                .bg(palette.muted)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .text_size(px(7.0 * scale))
+                                                .line_height(px(10.0 * scale))
+                                                .font_weight(gpui::FontWeight::BOLD)
+                                                .text_color(palette.surface)
+                                                .child(letter),
+                                        )
+                                    }),
                             ),
                             None => button.child(
                                 div()
@@ -413,6 +475,7 @@ impl ChatOptionMenuPanel {
 
     pub(in crate::app::native_chat::option_menu) fn render_model_menu(
         &mut self,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let appearance = self.menu.read(cx).appearance.clone();
@@ -423,7 +486,13 @@ impl ChatOptionMenuPanel {
         };
         let view = state.view.clone();
         let active = state.active;
-        let input = state.input.clone();
+        let traits = state.display_traits(&self.menu.read(cx).model_efforts);
+        let shake = state
+            .shake_at
+            .map_or(0.0, |at| shake_offset(at.elapsed().as_secs_f32()));
+        if shake != 0.0 {
+            window.request_animation_frame();
+        }
         let scroll = state.scroll.clone();
         let count = state.rows().len();
         let list = if count == 0 {
@@ -471,6 +540,7 @@ impl ChatOptionMenuPanel {
         div()
             .id("chat-model-menu")
             .key_context(super::keys::KEY_CONTEXT)
+            .track_focus(&self.focus)
             .role(gpui::Role::Menu)
             .capture_action(cx.listener(Self::model_menu_key_action))
             .size_full()
@@ -485,37 +555,6 @@ impl ChatOptionMenuPanel {
             .text_color(palette.text)
             .text_size(px(13.0 * scale))
             .child(self.render_model_tabs(&view, &appearance, &palette, cx))
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .h(px(BAR_HEIGHT * scale))
-                    .px(px(10.0 * scale))
-                    .border_b_1()
-                    .border_color(palette.ink(0.08))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0 * scale))
-                    .child(
-                        svg()
-                            .path("titlebar/search.svg")
-                            .flex_shrink_0()
-                            .size(px(14.0 * scale))
-                            .text_color(palette.muted),
-                    )
-                    .child(
-                        div().flex_1().min_w_0().child(
-                            Input::new(&input)
-                                .appearance(false)
-                                .bordered(false)
-                                .focus_bordered(false)
-                                .w_full()
-                                .p_0()
-                                .text_size(px(13.0 * scale))
-                                .text_color(palette.text)
-                                .placeholder_color(palette.muted),
-                        ),
-                    ),
-            )
             .when_some(view["error"].as_str(), |card, error| {
                 // A choice the agent's own list could not offer is said here, where it was made.
                 card.child(
@@ -551,7 +590,68 @@ impl ChatOptionMenuPanel {
                     .opacity(if view["disabled"] == true { 0.5 } else { 1.0 })
                     .child(list),
             )
-            .children(self.render_model_traits(&view, active, &appearance, &palette, cx))
+            .children(self.render_model_traits(
+                &view,
+                &traits,
+                active,
+                shake,
+                &appearance,
+                &palette,
+                cx,
+            ))
+            .child(render_key_hints(&appearance, &palette))
             .into_any_element()
     }
+}
+
+/// CDXC:SessionChat 2026-09-24 SEE-ALSO: `MODEL_MENU_KEY_HINTS` in packages/shared/session-chat-presentation/model-menu.ts and `.ghostex-chat-model-menu-keys` in packages/core-ui/chat/session-chat-model-menu.css draw the same reminder.
+/// The compact key reminder along the card's bottom edge.
+fn render_key_hints(appearance: &ChatAppearance, palette: &Palette) -> AnyElement {
+    const HINTS: [(&str, &str); 5] = [
+        ("↑↓", "model"),
+        ("←→", "effort"),
+        ("⇥", "agent"),
+        ("⏎", "save"),
+        ("esc", "close"),
+    ];
+    let scale = appearance.scale;
+    div()
+        .flex_shrink_0()
+        .h(px(HINTS_HEIGHT * scale))
+        .px(px(10.0 * scale))
+        .border_t_1()
+        .border_color(palette.ink(0.08))
+        .flex()
+        .items_center()
+        .justify_between()
+        .text_size(px(10.5 * scale))
+        .text_color(palette.muted)
+        .children(HINTS.map(|(keys, label)| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(4.0 * scale))
+                .child(div().text_color(palette.text).child(keys))
+                .child(label)
+        }))
+        .into_any_element()
+}
+
+/// The Reasoning button's shake when Left or Right can go no further: 3px left, 3px right, back,
+/// over 220ms (`ghostex-chat-model-menu-shake` in session-chat-model-menu.css). Zero once it is over.
+fn shake_offset(seconds: f32) -> f32 {
+    const DURATION: f32 = 0.22;
+    if !(0.0..DURATION).contains(&seconds) {
+        return 0.0;
+    }
+    let t = seconds / DURATION;
+    let offset = if t < 0.3 {
+        -3.0 * t / 0.3
+    } else if t < 0.6 {
+        -3.0 + 6.0 * (t - 0.3) / 0.3
+    } else {
+        3.0 * (1.0 - t) / 0.4
+    };
+    // Zero is "not shaking", so the last frames settle at a hair off it instead.
+    if offset == 0.0 { 0.01 } else { offset }
 }

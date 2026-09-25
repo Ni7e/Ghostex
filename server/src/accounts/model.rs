@@ -154,6 +154,9 @@ pub(crate) struct DiscoveredAccount {
 pub(crate) struct ResetCredit {
     pub id: String,
     pub expires_at: Option<String>,
+    /// Why this reset may not work right now (paused, or only usable at a limit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 #[derive(Clone, Default)]
 pub(crate) struct Snapshot {

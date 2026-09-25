@@ -10,10 +10,6 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SidebarBridgeEventKind {
     ActiveProjectContext,
-    SourceWorkareaReadiness,
-    BrowserWorkareaReadiness,
-    ProjectWorkareaReadiness,
-    ManageFileWorkareaOperationRequest,
     NativeProjectPathAction,
     NativeAppShotPrompt,
     SidebarCommandAction,
@@ -24,7 +20,6 @@ pub(crate) enum SidebarBridgeEventKind {
     CreateProjectTerminal,
     WorkspaceTerminalFocus,
     WorkspaceTerminalRenameCommand,
-    WorkspaceTerminalEnter,
     WorkspaceTerminalLifecycleResult,
     SessionCompletionSound,
     SessionStatusIndicators,
@@ -34,8 +29,6 @@ pub(crate) enum SidebarBridgeEventKind {
     OpenBrowserUrl,
     BrowserTabFocus,
     ProjectBoardConversationResponse,
-    ResourcesSnapshotRequest,
-    NativeQuickAccessSnapshot,
     SidebarRuntimeFacts,
 }
 
@@ -51,12 +44,6 @@ impl SidebarBridgeEventKind {
         Some(match function_id {
             SidebarBridgeFunctionId::SidebarEditableFocus => return None,
             SidebarBridgeFunctionId::ActiveProjectContext => Self::ActiveProjectContext,
-            SidebarBridgeFunctionId::SourceWorkareaReadiness => Self::SourceWorkareaReadiness,
-            SidebarBridgeFunctionId::BrowserWorkareaReadiness => Self::BrowserWorkareaReadiness,
-            SidebarBridgeFunctionId::ProjectWorkareaReadiness => Self::ProjectWorkareaReadiness,
-            SidebarBridgeFunctionId::ManageFileWorkareaOperationRequest => {
-                Self::ManageFileWorkareaOperationRequest
-            }
             SidebarBridgeFunctionId::NativeProjectPathAction => Self::NativeProjectPathAction,
             SidebarBridgeFunctionId::NativeAppShotPrompt => Self::NativeAppShotPrompt,
             SidebarBridgeFunctionId::SidebarCommandAction => Self::SidebarCommandAction,
@@ -71,7 +58,6 @@ impl SidebarBridgeEventKind {
             SidebarBridgeFunctionId::WorkspaceTerminalRenameCommand => {
                 Self::WorkspaceTerminalRenameCommand
             }
-            SidebarBridgeFunctionId::WorkspaceTerminalEnter => Self::WorkspaceTerminalEnter,
             SidebarBridgeFunctionId::WorkspaceTerminalLifecycleResult => {
                 Self::WorkspaceTerminalLifecycleResult
             }
@@ -85,8 +71,6 @@ impl SidebarBridgeEventKind {
             SidebarBridgeFunctionId::ProjectBoardConversationResponse => {
                 Self::ProjectBoardConversationResponse
             }
-            SidebarBridgeFunctionId::ResourcesSnapshotRequest => Self::ResourcesSnapshotRequest,
-            SidebarBridgeFunctionId::NativeQuickAccessSnapshot => Self::NativeQuickAccessSnapshot,
             SidebarBridgeFunctionId::SidebarRuntimeFacts => Self::SidebarRuntimeFacts,
         })
     }
@@ -211,10 +195,6 @@ pub type BrowserPopupOpenHandler = StdRc<dyn Fn(String, BrowserPopupPlacement)>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SidebarBridgeEvent {
     ActiveProjectContext(String),
-    SourceWorkareaReadiness(String),
-    BrowserWorkareaReadiness(String),
-    ProjectWorkareaReadiness(String),
-    ManageFileWorkareaOperationRequest(String),
     NativeProjectPathAction(String),
     NativeAppShotPrompt(String),
     SidebarCommandAction(String),
@@ -225,7 +205,6 @@ pub enum SidebarBridgeEvent {
     CreateProjectTerminal(String),
     WorkspaceTerminalFocus(String),
     WorkspaceTerminalRenameCommand(String),
-    WorkspaceTerminalEnter(String),
     WorkspaceTerminalLifecycleResult(String),
     SessionCompletionSound(String),
     SessionStatusIndicators(String),
@@ -235,8 +214,6 @@ pub enum SidebarBridgeEvent {
     OpenBrowserUrl(String),
     BrowserTabFocus(String),
     ProjectBoardConversationResponse(String),
-    ResourcesSnapshotRequest(String),
-    NativeQuickAccessSnapshot(String),
     /// The runtime's one-way channel of the facts the Rust sidebar still takes from outside the
     /// store: the HUD, a project's git numbers, the two armed timers, and a reveal request.
     SidebarRuntimeFacts(String),
@@ -284,12 +261,6 @@ impl SidebarBridgeEventKind {
     pub(crate) fn with_payload(self, payload: String) -> SidebarBridgeEvent {
         match self {
             Self::ActiveProjectContext => SidebarBridgeEvent::ActiveProjectContext(payload),
-            Self::SourceWorkareaReadiness => SidebarBridgeEvent::SourceWorkareaReadiness(payload),
-            Self::BrowserWorkareaReadiness => SidebarBridgeEvent::BrowserWorkareaReadiness(payload),
-            Self::ProjectWorkareaReadiness => SidebarBridgeEvent::ProjectWorkareaReadiness(payload),
-            Self::ManageFileWorkareaOperationRequest => {
-                SidebarBridgeEvent::ManageFileWorkareaOperationRequest(payload)
-            }
             Self::NativeProjectPathAction => SidebarBridgeEvent::NativeProjectPathAction(payload),
             Self::NativeAppShotPrompt => SidebarBridgeEvent::NativeAppShotPrompt(payload),
             Self::SidebarCommandAction => SidebarBridgeEvent::SidebarCommandAction(payload),
@@ -304,7 +275,6 @@ impl SidebarBridgeEventKind {
             Self::WorkspaceTerminalRenameCommand => {
                 SidebarBridgeEvent::WorkspaceTerminalRenameCommand(payload)
             }
-            Self::WorkspaceTerminalEnter => SidebarBridgeEvent::WorkspaceTerminalEnter(payload),
             Self::WorkspaceTerminalLifecycleResult => {
                 SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(payload)
             }
@@ -317,10 +287,6 @@ impl SidebarBridgeEventKind {
             Self::BrowserTabFocus => SidebarBridgeEvent::BrowserTabFocus(payload),
             Self::ProjectBoardConversationResponse => {
                 SidebarBridgeEvent::ProjectBoardConversationResponse(payload)
-            }
-            Self::ResourcesSnapshotRequest => SidebarBridgeEvent::ResourcesSnapshotRequest(payload),
-            Self::NativeQuickAccessSnapshot => {
-                SidebarBridgeEvent::NativeQuickAccessSnapshot(payload)
             }
             Self::SidebarRuntimeFacts => SidebarBridgeEvent::SidebarRuntimeFacts(payload),
         }

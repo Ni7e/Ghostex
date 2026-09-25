@@ -320,6 +320,41 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
     title: 'Hide GitHub view',
     subtitle: 'Hide the automatic repository view from the view picker and tab menus.',
   },
+  sentryViewTabHidden: {
+    ...viewRows,
+    title: 'Hide Sentry view',
+    subtitle: 'Enable Sentry in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.',
+  },
+  figmaViewTabHidden: {
+    ...viewRows,
+    title: 'Hide Figma view',
+    subtitle: 'Enable Figma in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.',
+  },
+  vercelViewTabHidden: {
+    ...viewRows,
+    title: 'Hide Vercel view',
+    subtitle: 'Enable Vercel in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.',
+  },
+  supabaseViewTabHidden: {
+    ...viewRows,
+    title: 'Hide Supabase view',
+    subtitle: 'Enable Supabase in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.',
+  },
+  githubActionsViewTabHidden: {
+    ...viewRows,
+    title: 'Hide GitHub Actions view',
+    subtitle: 'Enable GitHub Actions in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.',
+  },
+  posthogViewTabHidden: {
+    ...viewRows,
+    title: 'Hide PostHog view',
+    subtitle: 'Enable PostHog in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.',
+  },
+  customWebsiteViewTabHidden: {
+    ...viewRows,
+    title: 'Hide Custom Website view',
+    subtitle: 'Enable Custom Website in Settings > Extensions, then choose its home URL when opening the view. Disabled by default.',
+  },
   storybookViewTabHidden: {
     ...viewRows,
     title: 'Hide Storybook view',

@@ -16,20 +16,30 @@ import {
 } from '@/packages/shared/session-chat-controller/option-dispatch';
 import { computeSessionChatOptions } from '@/packages/shared/session-chat-controller/session-options';
 import { SessionChatComposerOptionsMenu } from './session-chat-composer-options-menu';
-import { modelPickerProvider } from './session-chat-model-picker-request';
+import {
+  createModelPickerRequest,
+  modelPickerProvider,
+} from '@/packages/shared/session-chat-presentation/model-picker-request';
+import { modelSelectionUnchanged } from '@/packages/shared/session-chat-controller/model-selection';
+import { currentAgentModelCatalog } from '@/packages/shared/agent-model-catalog-state';
 import {
   modelPickScope,
   modelPickerSupportsSessionScope,
 } from '@/packages/shared/session-chat-presentation/model-picker';
-import { modelMenuPick, type ModelMenuContext } from '@/packages/shared/session-chat-controller/model-menu';
+import { modelMenuTraitPicksModel } from '@/packages/shared/session-chat-presentation/model-menu';
+import {
+  modelMenuAccounts,
+  modelMenuPick,
+  type ModelMenuContext,
+} from '@/packages/shared/session-chat-controller/model-menu';
+import { useAccountText } from '../accounts/account-text';
 import { SessionChatModelMenu, type SessionChatModelMenuExtraRow } from './session-chat-model-menu';
-import { QUICK_MODEL_PICKER_ENABLED } from './session-chat-model-picker-platform';
 import {
   contextDetailsAgentFor,
   resolveContextDetailStatus,
   type ContextDetailStatus,
 } from './session-chat-context-details-agents';
-import type { AccountIconColor } from '@/packages/shared/agent-accounts';
+import type { AccountIconColor, AgentAccountsState } from '@/packages/shared/agent-accounts';
 import type { SessionChatPendingModelSelection } from '@/packages/shared/session-chat';
 // Composer footer session-option pills (upstream chat spec §1.2-§1.4 port).
 // Ghost controls showing the current values only: Model and Effort are menu
@@ -46,7 +56,7 @@ import type { SessionChatPendingModelSelection } from '@/packages/shared/session
 // the one control here that changes the session itself rather than typing at
 // its TUI. The submenu sits above the model section.
 
-import { SessionChatModelPickerLauncher, type ModelPickerActions } from './session-chat-model-picker-launcher';
+import { SessionChatModelSelectionOutbox, type ModelSelectionActions } from './session-chat-model-selection-outbox';
 import { IconBoltFilled, IconChevronDown, IconMap } from '@tabler/icons-react';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { postAppModalHostMessage } from '../app-modal-host-bridge';
@@ -199,6 +209,10 @@ export function useSessionChatSessionOptions({
 
 export interface SessionChatSessionOptionPillsProps {
   accountIndicator?: string;
+  /** The session agent's accounts, for the model pop-up's Account button; absent where accounts are not managed. */
+  accounts?: AgentAccountsState;
+  /** Switches this session to another signed-in account. */
+  onSwitchAccount?: (accountId: string) => void;
   controller: SessionChatSessionOptionsController;
   /** Terminal-only metadata that does not belong in persisted option state. */
   detectedOptions?: SessionChatDetectedOptions | null;
@@ -463,6 +477,8 @@ function PlanModeIcon() {
 
 export function SessionChatSessionOptionPills({
   accountIndicator,
+  accounts,
+  onSwitchAccount,
   canSend,
   canSendKey,
   contextDetailsSession,
@@ -486,8 +502,9 @@ export function SessionChatSessionOptionPills({
   screenProbed,
 }: SessionChatSessionOptionPillsProps) {
   const hotkeys = useSidebarStore((store) => store.hud.settings?.hotkeys);
+  const accountText = useAccountText();
   const modelPickerShortcut = formatSidebarHotkeyLabel(normalizeghostexHotkeySettings(hotkeys).openModelPicker ?? '');
-  const modelPickerActions = useRef<ModelPickerActions | null>(null);
+  const modelPickerActions = useRef<ModelSelectionActions | null>(null);
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const dispatchingRef = useRef<object | null>(null);
   const contextDetailsAgent = contextDetailsAgentFor(controller.catalog?.modelIcon) ?? 'claude';
@@ -891,8 +908,7 @@ export function SessionChatSessionOptionPills({
   /** CDXC:Tooltips 2026-09-16 DECISION:
    * User: model and effort tooltips show their quick-picker hotkey, and the terminal status line moves to the context circle's tooltip.
    */
-  const pickerShortcutSuffix =
-    QUICK_MODEL_PICKER_ENABLED && quickPicker && modelPickerShortcut ? ` (${modelPickerShortcut})` : '';
+  const pickerShortcutSuffix = quickPicker && modelPickerShortcut ? ` (${modelPickerShortcut})` : '';
   const modelTooltip = `Model${pickerShortcutSuffix}`;
   const menuSections = optionMenuSections(menuOptions);
   /**
@@ -1102,6 +1118,7 @@ export function SessionChatSessionOptionPills({
    * SEE-ALSO: packages/shared/session-chat-controller/native-host.ts (`modelMenuPick`, `modelMenuTrait`) applies the same picks for the GPUI chat.
    */
   if (pickerProvider) {
+    const isDraft = draftAgents !== undefined && draftAgents.length > 0;
     const menuContext: ModelMenuContext = {
       provider: pickerProvider,
       modelId: catalog.model.id,
@@ -1112,8 +1129,9 @@ export function SessionChatSessionOptionPills({
       caps: { canPickModel, queuedControls, canSendKey },
       selectionError,
       disabled: !canPickModel,
+      ...(onSwitchAccount ? { accounts: modelMenuAccounts(accounts, accountText) } : {}),
+      draft: isDraft,
     };
-    const isDraft = draftAgents !== undefined && draftAgents.length > 0;
     const draftAgentFor = (provider: string) => agentRows?.find((row) => modelPickerProvider(row.icon) === provider);
     // Where the agent tells the two scopes apart, picking the running value again still moves it between them.
     const unchanged = (descriptor: SessionChatOptionDescriptor, value: string) =>
@@ -1161,7 +1179,7 @@ export function SessionChatSessionOptionPills({
         <SessionChatComposerOptionsMenu>
           {contextMeterUsage || hasContextDetails ? contextMeter(true) : null}
         </SessionChatComposerOptionsMenu>
-        <SessionChatModelPickerLauncher
+        <SessionChatModelSelectionOutbox
           key={controller.sessionKey}
           actionsRef={modelPickerActions}
           controller={controller}
@@ -1175,9 +1193,22 @@ export function SessionChatSessionOptionPills({
           }
           context={menuContext}
           extraRows={extraRows}
-          onPickRow={(row, secondary) => {
-            const pick = modelMenuPick(row, menuContext);
+          onPickRow={(row, secondary, effort) => {
+            const pick = modelMenuPick(row, menuContext, effort);
             if (pick.kind === 'select') {
+              // A pick that carries a reasoning level queues model and level together, as Option+P always did.
+              if (pick.effort !== undefined) {
+                const actions = modelPickerActions.current;
+                const scope = modelPickScope(pickerProvider, secondary);
+                const selection = { model: pick.value, effort: pick.effort };
+                const current = { model: state[catalog.model.id]?.value, effort: state.effort?.value };
+                const request =
+                  createModelPickerRequest(currentAgentModelCatalog(), pickerProvider, current.model, current.effort) ??
+                  null;
+                if (actions && !modelSelectionUnchanged(selection, actions.desired(), current, request, scope))
+                  actions.select(selection, undefined, scope);
+                return;
+              }
               if (!unchanged(catalog.model, pick.value)) dispatch(catalog.model, pick.value, secondary);
               return;
             }
@@ -1193,8 +1224,13 @@ export function SessionChatSessionOptionPills({
             onHandoffToModel?.(pick);
           }}
           onPickTrait={(trait, choice, secondary) => {
-            const descriptor =
-              trait.id === 'context' ? catalog.model : visibleOptions.find((entry) => entry.id === trait.id);
+            if (trait.id === 'account') {
+              if (!choice.selected) onSwitchAccount?.(choice.value);
+              return;
+            }
+            const descriptor = modelMenuTraitPicksModel(trait.id)
+              ? catalog.model
+              : visibleOptions.find((entry) => entry.id === trait.id);
             if (!descriptor || unchanged(descriptor, choice.value)) return;
             dispatch(
               choice.exitPlan ? { ...descriptor, dispatch: { kind: 'key', key: 'shift-tab', marker: '' } } : descriptor,
@@ -1246,7 +1282,7 @@ export function SessionChatSessionOptionPills({
   return (
     <>
       <SessionChatComposerOptionsMenu>{overflowMenu}</SessionChatComposerOptionsMenu>
-      <SessionChatModelPickerLauncher
+      <SessionChatModelSelectionOutbox
         key={controller.sessionKey}
         actionsRef={modelPickerActions}
         controller={controller}
@@ -1267,11 +1303,6 @@ export function SessionChatSessionOptionPills({
         />
         <DropdownMenuContent align='end' className='ghostex-session-chat-popup w-64 rounded-xl [--radius:0.625rem]'>
           {agentsSection}
-          {QUICK_MODEL_PICKER_ENABLED && quickPicker && (
-            <DropdownMenuItem closeOnClick className='rounded-md' onClick={() => modelPickerActions.current?.open()}>
-              Quick picker <span className='ml-auto text-xs text-muted-foreground'>{modelPickerShortcut}</span>
-            </DropdownMenuItem>
-          )}
           {/* Base UI's GroupLabel throws outside a Menu.Group context. */}
           <DropdownMenuGroup>
             <DropdownMenuLabel>{catalog.model.label}</DropdownMenuLabel>

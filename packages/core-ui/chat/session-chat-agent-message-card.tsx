@@ -6,6 +6,7 @@ Collapsed it shows only the first two lines of the message text; expanding shows
 
 import { useLayoutEffect, useRef, useState } from 'react';
 import { IconMessage } from '@tabler/icons-react';
+import { useSessionChatHeightTransition } from './session-chat-height-transition';
 import { cn } from '@/packages/components/utils';
 import {
   SessionChatStatusCard,
@@ -19,7 +20,11 @@ import { SessionChatSubagentLink } from './session-chat-subagent-link';
  * How gxserver writes a decoded inter-agent message: the sender path on the
  * first line, a blank line, then the readable payload (session_chat_decode_codex.rs).
  */
-import { parseSessionChatAgentMessage, agentDisplayName, type SessionChatAgentMessage } from '@/packages/shared/session-chat-presentation/agent-message';
+import {
+  parseSessionChatAgentMessage,
+  agentDisplayName,
+  type SessionChatAgentMessage,
+} from '@/packages/shared/session-chat-presentation/agent-message';
 export { parseSessionChatAgentMessage, type SessionChatAgentMessage };
 
 /** CDXC:SessionChat 2026-09-14 DECISION: User: received subagent messages use the same font size as the rest of the agent messages, including the header, collapsed preview, and expanded body. */
@@ -27,6 +32,8 @@ export function SessionChatAgentMessageCard({ body, sender }: SessionChatAgentMe
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const previewRef = useRef<HTMLParagraphElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useSessionChatHeightTransition(bodyRef, expanded);
   const name = agentDisplayName(sender);
 
   // The chevron only appears when the clamp actually hides text.
@@ -67,15 +74,17 @@ export function SessionChatAgentMessageCard({ body, sender }: SessionChatAgentMe
         ) : undefined
       }
     >
-      {expanded ? (
-        <div className='ghostex-chat-agent-message min-w-0'>
-          <SessionChatMarkdown markdown={body} />
-        </div>
-      ) : (
-        <p className={cn('line-clamp-2 whitespace-pre-wrap break-words text-foreground/90')} ref={previewRef}>
-          {body}
-        </p>
-      )}
+      <div className='min-w-0' ref={bodyRef}>
+        {expanded ? (
+          <div className='ghostex-chat-agent-message min-w-0'>
+            <SessionChatMarkdown markdown={body} />
+          </div>
+        ) : (
+          <p className={cn('line-clamp-2 whitespace-pre-wrap break-words text-foreground/90')} ref={previewRef}>
+            {body}
+          </p>
+        )}
+      </div>
     </SessionChatStatusCard>
   );
 }

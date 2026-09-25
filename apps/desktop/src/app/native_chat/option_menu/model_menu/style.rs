@@ -27,6 +27,8 @@ pub(super) fn button_lines(buttons: usize) -> (usize, usize) {
     )
 }
 pub(super) const ERROR_HEIGHT: f32 = 58.0;
+/// The key reminder along the card's bottom edge.
+pub(super) const HINTS_HEIGHT: f32 = 26.0;
 
 /// The picker's tones, from the same two surfaces the chat's other menus use.
 pub(super) struct Palette {

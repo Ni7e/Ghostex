@@ -12,7 +12,6 @@
 import type { GxserverReadSessionChatResult, SessionChatMessage } from '../session-chat';
 import { subagentModelLabel } from '../session-chat-presentation/agent-fleet';
 import type { SessionChatSubagentTarget } from '../session-chat-presentation/subagent';
-import { SESSION_CHAT_SETTLE_HOLD_MS } from '../session-chat-presentation/working-hold';
 import { NativeChatPresentation } from './native-presentation';
 
 export type NativeSubagentRead = (params: {
@@ -47,9 +46,8 @@ export class NativeSubagentViewer {
   private loadingEarlier = false;
   private presentation = this.projector();
   private items: unknown[] = [];
-  /** The settle hold React's `useSessionChatWorkingHold` applies to the viewer's list. */
+  /** Whether the open child's lifecycle says it is working; the presentation keeps a settled fold sticky. */
   private working = false;
-  private holdTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly read: () => NativeSubagentRead | undefined,
@@ -150,8 +148,6 @@ export class NativeSubagentViewer {
       this.active.cancelled = true;
       clearTimeout(this.active.timer);
     }
-    clearTimeout(this.holdTimer);
-    this.holdTimer = undefined;
     this.error = null;
     this.loadingEarlier = false;
     this.working = false;
@@ -173,23 +169,6 @@ export class NativeSubagentViewer {
     this.presentation.setAgentPath(name.startsWith('/') ? name : '/root');
     // A subagent transcript is always read in normal mode, with verbose and summarized off.
     this.items = this.presentation.update(page.messages, this.working, false, NO_DEFERRED_WORK, 0).items;
-  }
-
-  /** Going working is applied at once; settling waits out the hold, exactly as the React hook does. */
-  private settle(live: boolean): void {
-    if (live) {
-      clearTimeout(this.holdTimer);
-      this.holdTimer = undefined;
-      this.working = true;
-      return;
-    }
-    if (!this.working || this.holdTimer !== undefined) return;
-    this.holdTimer = setTimeout(() => {
-      this.holdTimer = undefined;
-      this.working = false;
-      this.project();
-      this.changed();
-    }, SESSION_CHAT_SETTLE_HOLD_MS);
   }
 
   private async request(earlier: boolean): Promise<void> {
@@ -246,7 +225,7 @@ export class NativeSubagentViewer {
         };
       }
       this.error = null;
-      this.settle(active.page.lifecycle?.state === 'working');
+      this.working = active.page.lifecycle?.state === 'working';
       this.project();
     } catch (error) {
       if (!active.cancelled) this.error = error instanceof Error ? error.message : String(error);

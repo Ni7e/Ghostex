@@ -7,10 +7,11 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Action | Default | Windows/Linux | What it does | Id |
 | --- | --- | --- | --- | --- |
 | Scroll Chat to Bottom | `ctrl+shift+down` | `cmd+shift+down` | Scroll chat to the bottom, including while typing in the composer. | `scrollChatToBottom` |
-| Create Session | `cmd+t` |  | Create a terminal session. | `createSession` |
+| New Agent Session | `cmd+t` |  | Start your last-used agent in the active project, in your default interface. | `createAgentSession` |
+| New Terminal | `cmd+shift+t` |  | Create a terminal session. | `createSession` |
 | Open Quick Access: Commands | `cmd+shift+p` |  | Open Ghostex Quick Access on Commands. | `openCommandPalette` |
 | Open Quick Access: Recent Sessions | `cmd+p` |  | Open Ghostex Quick Access on Recent Sessions. | `openSessionSearchPalette` |
-| New Thread in Active Project | `cmd+shift+t` |  | Pick an agent, Browser, or Terminal to start in the active project. | `openNewThreadPalette` |
+| New Thread in Active Project | `cmd+alt+t` |  | Pick an agent, Browser, or Terminal to start in the active project. | `openNewThreadPalette` |
 | Open Commands Panel | `f12` |  | Open the project command terminal panel. When the pane is already focused, hide it; press again to show it. | `openCommandsPanel` |
 | Open Settings | `cmd+,` |  | Open app settings. | `openSettings` |
 | Open Extensions | unassigned |  | Open the Extensions page in Settings to manage built-in features and installed extensions. | `openExtensions` |
@@ -42,7 +43,7 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Merge All Tabs | `ctrl+shift+m` | `cmd+alt+m` | Merge the focused group's panes into one tabbed pane. | `mergeAllTabs` |
 | Delayed Actions | `ctrl+shift+s` | `cmd+alt+s` | Open delayed actions for the focused terminal session. | `delayedSend` |
 | Close After Done | unassigned |  | Toggle Close After Done for the focused terminal session. | `closeAfterDone` |
-| Model & Effort Picker | `alt+p` |  | Choose the chat model and effort with arrow keys, then Enter to save. | `openModelPicker` |
+| Model & Effort Picker | `alt+p` |  | Open the model picker: arrows choose a model and its reasoning, Enter uses it here, Shift+Enter saves it as the default. | `openModelPicker` |
 | Prompt Editor | `ctrl+g` | `cmd+shift+g` | Open the prompt editor for the focused terminal. | `promptEditor` |
 | Attach File or Folder | `cmd+alt+p` |  | Attach a file or folder to the focused terminal. | `attachFileOrFolder` |
 | Session Note | `cmd+alt+n` |  | Open the note attached to the focused agent conversation. | `sessionNote` |

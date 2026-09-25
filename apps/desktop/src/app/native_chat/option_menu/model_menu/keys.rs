@@ -1,25 +1,26 @@
 use super::super::window::ChatOptionMenuPanel;
-use gpui::{Context, Focusable as _, ScrollStrategy, Window};
+use gpui::{Context, ScrollStrategy, Window};
+use serde_json::json;
 
 #[derive(Clone, Debug, PartialEq, gpui::Action)]
 #[action(namespace = ghostex_gpui, no_json)]
 pub(super) struct ModelMenuKey {
     key: String,
 }
-struct ModelMenuKeysRegistered;
+/// The model picker hotkey last bound to close the pop-up, so a changed binding is bound again.
+struct ModelMenuKeysRegistered(Option<String>);
 impl gpui::Global for ModelMenuKeysRegistered {}
 
 pub(super) const KEY_CONTEXT: &str = "ChatModelMenu";
 
-/// The search field keeps focus the whole visit, and gpui resolves the field's own bindings
-/// (arrows, Enter, Escape) before any key listener, so the picker claims its keys as an action in
-/// the field's context, the way the composer does (keyboard.rs). Keys it does not use fall through
-/// to the field.
+/// The card holds focus the whole visit and claims its keys as an action in its own context, the
+/// way the composer does (keyboard.rs).
 pub(super) fn register(cx: &mut gpui::App) {
-    if cx.has_global::<ModelMenuKeysRegistered>() {
+    bind_toggle_chord(cx);
+    if cx.has_global::<KeysBound>() {
         return;
     }
-    cx.set_global(ModelMenuKeysRegistered);
+    cx.set_global(KeysBound);
     let keys = [
         "up",
         "down",
@@ -31,16 +32,63 @@ pub(super) fn register(cx: &mut gpui::App) {
         "shift-enter",
         "escape",
         "tab",
+        "shift-tab",
     ]
     .into_iter()
     .map(str::to_owned)
-    .chain((1..=9).map(|slot| format!("secondary-{slot}")));
-    // The card itself holds focus after a side list closes or the window is re-activated, so the same keys are bound there too.
-    cx.bind_keys(keys.flat_map(|key| {
-        ["ChatModelMenu > Input", "ChatModelMenu"].map(|context| {
-            gpui::KeyBinding::new(&key, ModelMenuKey { key: key.clone() }, Some(context))
-        })
+    .chain((1..=9).map(|slot| format!("secondary-{slot}")))
+    .chain(
+        BUTTON_LETTERS
+            .iter()
+            .map(|(_, letter)| letter.to_lowercase()),
+    );
+    cx.bind_keys(keys.map(|key| {
+        gpui::KeyBinding::new(&key, ModelMenuKey { key: key.clone() }, Some(KEY_CONTEXT))
     }));
+}
+
+/// CDXC:SessionChat 2026-09-24 DECISION:
+/// User: each footer button's hotkey is "just the letter in a filled circle floating to the bottom right of the icon": R Reasoning, C Context, F Fast mode, A Account ("i want a as hotkey for accounts"). The picker has no search field ("just remove the search it's useless"), so the plain letter is the key; it works like a click, and pressing it again closes a side list it opened.
+const BUTTON_LETTERS: [(&str, &str); 4] = [
+    ("reasoning", "R"),
+    ("context", "C"),
+    ("fast", "F"),
+    ("account", "A"),
+];
+
+/// The letter the footer button with this icon answers to.
+pub(super) fn button_letter(icon: &str) -> Option<&'static str> {
+    BUTTON_LETTERS
+        .iter()
+        .find(|(kind, _)| *kind == icon)
+        .map(|(_, letter)| *letter)
+}
+
+struct KeysBound;
+impl gpui::Global for KeysBound {}
+
+/// CDXC:SessionChat 2026-09-24 DECISION:
+/// User: Option+P opens the model pop-up and pressing it again closes it without saving ("I don't want to have two interfaces for picking the model"). The pop-up holds key status in its own window, so the picker hotkey is bound inside it as a close key; a changed binding is bound again the next time the pop-up opens.
+fn bind_toggle_chord(cx: &mut gpui::App) {
+    let chord = crate::app::hotkeys::gpui_configured_hotkey_key("openModelPicker")
+        .and_then(|key| crate::app::hotkeys::gpui_keystroke_from_shared_hotkey(&key));
+    if cx
+        .try_global::<ModelMenuKeysRegistered>()
+        .is_some_and(|bound| bound.0 == chord)
+    {
+        return;
+    }
+    cx.set_global(ModelMenuKeysRegistered(chord.clone()));
+    let Some(chord) = chord else {
+        return;
+    };
+    cx.bind_keys([gpui::KeyBinding::new(
+        &chord,
+        ModelMenuKey {
+            key: "toggle".into(),
+        },
+        Some(KEY_CONTEXT),
+    )]);
 }
 
 impl ChatOptionMenuPanel {
@@ -50,13 +98,6 @@ impl ChatOptionMenuPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Whatever held focus, the next typed letter belongs to the search field.
-        if let Some(state) = self.model_menu.as_ref() {
-            let input = state.input.clone();
-            if !input.read(cx).focus_handle(cx).is_focused(window) {
-                input.update(cx, |input, cx| input.focus(window, cx));
-            }
-        }
         if self.model_menu_key(&action.key, window, cx) {
             cx.stop_propagation();
             window.prevent_default();
@@ -64,7 +105,11 @@ impl ChatOptionMenuPanel {
         }
     }
 
-    /// True when the picker used the key; anything else belongs to the search field.
+    /// True when the picker used the key.
+    ///
+    /// CDXC:SessionChat 2026-09-24 DECISION:
+    /// User: the model pop-up is the one model picker and is driven from the keyboard (docs/2026-09-24/model-popup-keyboard/): Up and Down move through the models and then the footer buttons and stop at the top and bottom instead of wrapping round ("make it not loop to the top when I press down while I'm at the bottom", 2026-09-24, superseding the wrap); Left and Right move the highlighted model's reasoning a level (a shake at either end or on a model without levels) and move along the footer; Enter uses the highlighted model and level in this session and Shift+Enter saves them as the agent's default, and either one closes the pop-up (2026-09-24); Cmd+1 to Cmd+9 only highlight that row and never apply it ("I should press enter to apply the model change", 2026-09-24, superseding Cmd+number picking); the footer buttons answer to their letters (see `BUTTON_LETTERS`); Tab and Shift+Tab switch agent tabs; Escape or the picker hotkey close without saving. The mouse keeps its old meaning: a click saves the default, a right-click this session only.
+    /// SEE-ALSO: packages/core-ui/chat/session-chat-model-menu.tsx (`onKeyDown`) answers the same keys for React.
     fn model_menu_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(state) = self.model_menu.as_mut() else {
             return false;
@@ -72,20 +117,45 @@ impl ChatOptionMenuPanel {
         let rows = state.rows().len();
         let count = rows + state.traits().len();
         match key {
-            "escape" | "tab" => self.menu.update(cx, |menu, cx| menu.close(None, cx)),
+            "escape" | "toggle" => self.menu.update(cx, |menu, cx| menu.close(None, cx)),
+            "tab" | "shift-tab" => {
+                let tabs = state.view["tabs"].as_array().cloned().unwrap_or_default();
+                if tabs.is_empty() {
+                    return true;
+                }
+                let current = tabs
+                    .iter()
+                    .position(|tab| tab["active"] == true)
+                    .unwrap_or(0);
+                let next = if key == "tab" {
+                    (current + 1) % tabs.len()
+                } else {
+                    (current + tabs.len() - 1) % tabs.len()
+                };
+                let tab = tabs[next]["id"].clone();
+                self.model_menu_send(json!({"type":"modelMenuView","tab":tab}), cx);
+            }
             "up" | "ctrl-p" | "down" | "ctrl-n" if count > 0 => {
                 let up = key == "up" || key == "ctrl-p";
-                // The footer is one stop on the way round: Left and Right move along its buttons.
+                // The footer is one stop below the last model (Left and Right move along its
+                // buttons); the first model and the footer are the ends.
                 state.active = if state.active >= rows {
-                    if up && rows > 0 { rows - 1 } else { 0 }
+                    if up && rows > 0 {
+                        rows - 1
+                    } else {
+                        state.active
+                    }
                 } else if up {
-                    (state.active + count - 1) % count
-                } else if state.active + 1 < rows {
+                    state.active.saturating_sub(1)
+                } else if state.active + 1 < rows || count > rows {
                     state.active + 1
                 } else {
-                    rows % count
+                    state.active
                 };
                 if state.active < rows {
+                    state.last_row = state.rows()[state.active]["key"]
+                        .as_str()
+                        .map(str::to_owned);
                     state
                         .scroll
                         .scroll_to_item(state.active, ScrollStrategy::Nearest);
@@ -94,7 +164,9 @@ impl ChatOptionMenuPanel {
             "enter" | "shift-enter" => {
                 let active = state.active;
                 if active < rows {
-                    self.model_menu_pick(active, key == "shift-enter", cx);
+                    if self.model_menu_pick_with_effort(active, key == "enter", cx) {
+                        self.menu.update(cx, |menu, cx| menu.close(None, cx));
+                    }
                 } else {
                     self.activate_model_button(active - rows, key == "shift-enter", window, cx);
                 }
@@ -109,23 +181,46 @@ impl ChatOptionMenuPanel {
                         (index + 1) % buttons
                     };
             }
-            "left" | "right" => return false,
-            _ => {
-                let Some(slot) = key
-                    .strip_prefix("secondary-")
-                    .and_then(|slot| slot.parse::<usize>().ok())
-                else {
+            "left" | "right" => {
+                let row = state.rows()[state.active].clone();
+                let efforts = &self.menu.read(cx).model_efforts;
+                let current = state.effort_for(&row, efforts);
+                match super::state::step_effort(&row, &current, key == "right") {
+                    Some(next) => {
+                        let key = row["key"].as_str().unwrap_or_default().to_owned();
+                        self.menu.update(cx, |menu, _| {
+                            menu.model_efforts.insert(key, next);
+                        });
+                    }
+                    None => state.shake_at = Some(std::time::Instant::now()),
+                }
+            }
+            _ if key.len() == 1 => {
+                let letter = key.to_uppercase();
+                let Some(index) = state.traits().iter().position(|setting| {
+                    setting["icon"]
+                        .as_str()
+                        .and_then(button_letter)
+                        .is_some_and(|button| button == letter)
+                }) else {
                     return false;
                 };
-                let Some(index) = state
+                state.active = rows + index;
+                self.activate_model_button(index, false, window, cx);
+            }
+            _ => {
+                let Some(Ok(slot)) = key.strip_prefix("secondary-").map(str::parse::<u64>) else {
+                    return false;
+                };
+                if let Some(index) = state
                     .rows()
                     .iter()
-                    .position(|row| row["shortcut"].as_u64() == Some(slot as u64))
-                else {
-                    return true;
-                };
-                state.active = index;
-                self.model_menu_pick(index, false, cx);
+                    .position(|row| row["shortcut"].as_u64() == Some(slot))
+                {
+                    state.active = index;
+                    state.last_row = state.rows()[index]["key"].as_str().map(str::to_owned);
+                    state.scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                }
             }
         }
         true

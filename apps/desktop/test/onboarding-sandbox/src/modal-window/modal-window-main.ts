@@ -9,9 +9,7 @@
  *     `{type:"ready"}` through
  *     `window.webkit.messageHandlers.ghostexAppModalHost.postMessage` —
  *     `packages/core-ui/app-modal-host-bridge.ts` THROWS when that handler is missing.
- * Same ordering contract as `apps/web/src/main.tsx` +
- * `apps/web/src/app/app-modal-host-shim.ts`, only the transport differs:
- * here outbound messages are forwarded to the sandbox parent page.
+ * Here outbound messages are forwarded to the sandbox parent page.
  */
 
 const SANDBOX_MARKER = '__onboardingSandbox';

@@ -211,7 +211,10 @@ finally submitted). Whitespace folding is the narrowest normalization that
 makes them agree.
 */
 fn queued_prompt_key(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    strip_claude_pasted_content_envelopes(text)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// CDXC:SessionChat 2026-09-08 DECISION:
@@ -320,7 +323,7 @@ fn decode_claude_queued_prompt(
     if record.get("operation").and_then(Value::as_str) != Some("enqueue") {
         return None;
     }
-    let content = extract_string(record.get("content"))?;
+    let content = strip_claude_pasted_content_envelopes(&extract_string(record.get("content"))?);
     if content.trim().is_empty() {
         return None;
     }
@@ -533,7 +536,7 @@ fn leading_tag_name(normalized: &str) -> Option<&str> {
     }
 }
 
-fn is_known_harness_injected_user_turn_text(text: &str) -> bool {
+pub(crate) fn is_known_harness_injected_user_turn_text(text: &str) -> bool {
     let normalized = text.trim().to_lowercase();
     if normalized.is_empty() {
         return false;

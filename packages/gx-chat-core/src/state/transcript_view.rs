@@ -101,6 +101,10 @@ pub struct TranscriptViewState {
     pub pending_verbose_override: Option<Option<bool>>,
     /// The five inputs the last projection was built from, so an unchanged turn rebuilds nothing.
     pub projection_inputs: Option<ProjectionInputs>,
+    /// The fold memory, `NativeChatPresentation.foldMemory`: the newest message id when the
+    /// transcript last settled, which keeps a landed fold folded through a working blip
+    /// ([`crate::transcript::turns::sticky_transcript_working`]).
+    pub fold_settled_at: Option<String>,
     /// The projection was rebuilt and the publish that ships it has not run yet.
     pub projection_rebuilt: bool,
     /// Bumped by `ChatCore::republish` when it publishes a rebuilt projection, which is what the
@@ -168,6 +172,7 @@ impl Default for TranscriptViewState {
             pending_summary_mode: None,
             pending_verbose_override: None,
             projection_inputs: None,
+            fold_settled_at: None,
             projection_rebuilt: false,
             projection_revision: 0,
         }

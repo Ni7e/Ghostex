@@ -3,7 +3,11 @@ import { sessionChatAppendDraftText } from '@/packages/shared/session-chat-prese
 import { SESSION_CHAT_FILE_SUGGESTION_HEADING, composerSuggestions, completeComposerMention, composerNativeCommand, sessionChatSuggestionRowRadius } from '@/packages/shared/session-chat-presentation/composer-suggestions';
 import { SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS, DESKTOP_SESSION_CHAT_PLACEHOLDER } from '@/packages/shared/session-chat-controller/composer-policy';
 import { deliverChatSubmission, editQueuedChatPrompt, restoreUndeliveredChatText } from '@/packages/shared/session-chat-controller/submission';
-import { nextFileReferenceIndex, insertChatReference } from '@/packages/shared/session-chat-presentation/references';
+import {
+  nextFileReferenceIndex,
+  insertChatReference,
+  nativePathReference,
+} from '@/packages/shared/session-chat-presentation/references';
 import { classifyDraftHandoff } from '@/packages/shared/session-chat-controller/draft-handoff';
 import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { flushClientStorage } from '@/packages/client-storage';
@@ -289,6 +293,12 @@ export interface SessionChatComposerProps {
    * purpose: nothing may make the text box read-only.
    */
   sendBlockedReason?: string | null;
+  /**
+   * A block that clears on its own (a model or mode switch, an answer still being applied) is in
+   * effect. Sending is not refused: the message is echoed at once and delivered when this turns
+   * false (see `sessionChatSendRefusedReason`).
+   */
+  sendHeld?: boolean;
   isWorking: boolean;
   /** Session activity may differ from the transcript's held working state. */
   workingStatus?: SessionChatWorkingStripProps;
@@ -333,7 +343,12 @@ export interface SessionChatComposerProps {
   onRequestFiles?: () => void;
   /** True while the host is listing files for the "@" picker. */
   filesLoading?: boolean;
-  onSend: (text: string, draftVersion?: SessionChatDraftVersion) => void | Promise<void>;
+  /** `hold` is awaited after the echo is drawn and before the message leaves. */
+  onSend: (
+    text: string,
+    draftVersion?: SessionChatDraftVersion,
+    hold?: () => Promise<void>
+  ) => void | Promise<void>;
   /**
    * Reads the session's terminal screen for the `composerNotReady` refusal
    * notice (see session-chat-composer-not-ready.tsx) and, polled, for the
@@ -412,7 +427,7 @@ export interface SessionChatComposerProps {
    * instead of the browser file input; image paths insert "[Image #N](path)"
    * and everything else "[File #N](path)".
    */
-  onPickPaths?: () => Promise<string[]>;
+  onPickPaths?: (selection?: 'files' | 'folders') => Promise<string[]>;
   /**
    * Absolute paths of the OS drag currently over this page, captured by the
    * host shell at drag-enter (Chromium never exposes `File.path` to a page).
@@ -590,6 +605,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       scrollCollapseEnabled = false,
       onScrollCollapsedChange,
       sendBlockedReason = null,
+      sendHeld = false,
       sendOnEnter = true,
       sessionKey,
       sessionNoteActive = false,
@@ -712,8 +728,32 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const pendingSavedPromptRef = useRef('');
     const sendInFlightRef = useRef(false);
     const sendAttemptRef = useRef<{ cancelled: boolean } | null>(null);
+    const sendHeldRef = useRef(sendHeld);
+    sendHeldRef.current = sendHeld;
+    /** Sends waiting for `sendHeld` to clear; each answers whether it is done waiting. */
+    const heldSendsRef = useRef(new Set<(unmounted: boolean) => boolean>());
+    const releaseHeldSends = (unmounted = false): void => {
+      for (const settle of [...heldSendsRef.current]) if (settle(unmounted)) heldSendsRef.current.delete(settle);
+    };
+    useEffect(() => releaseHeldSends(), [sendHeld]);
+    useEffect(() => () => releaseHeldSends(true), []);
+    /** Resolves once sending may proceed, or rejects when Escape cancelled it or the composer went away. */
+    const holdUntilSendable = (attempt: { cancelled: boolean }): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const settle = (unmounted: boolean): boolean => {
+          if (attempt.cancelled || unmounted) {
+            reject(new GxserverRpcError('sendCancelled', 'The session chat send was cancelled.', '/api/sendSessionChatMessage'));
+            return true;
+          }
+          if (sendHeldRef.current) return false;
+          resolve();
+          return true;
+        };
+        if (!settle(false)) heldSendsRef.current.add(settle);
+      });
     const onInterrupt = (): void => {
       if (sendAttemptRef.current) sendAttemptRef.current.cancelled = true;
+      releaseHeldSends();
       interruptAgent();
     };
     /** Newest draft stamp already applied or dismissed here (never re-offered). */
@@ -1348,6 +1388,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         send: onSend,
         queue: compactQueue?.queuePrompt,
         cancelled: () => attempt.cancelled,
+        hold: () => holdUntilSendable(attempt),
         phase: (phase) => {
           sendPhase = phase;
           if (phase === 'deliverMessage') traceDraft('deliveryBegin', { sent: sessionChatDraftFingerprint(text) });
@@ -1391,6 +1432,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
             // Do not overwrite a next draft typed while the send was in flight.
             // Put the failed message first so retrying still preserves send order.
             restoreComposerText(text);
+            // Keep the refusal after restoring the draft; native-host's preserveError actions mirror this ordering.
             /*
           CDXC:SessionChat 2026-09-04: the user's own Escape cancelled this
           send before its Enter (`sendCancelled`). Nothing failed and the
@@ -1484,6 +1526,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
             text: stored, version: submittedDraft.version, mode: 'queue',
             push: draftSync?.canSync ? draftSync.push : undefined,
             send: onSend, queue: controller.queuePrompt,
+            hold: () => holdUntilSendable({ cancelled: false }),
           });
           try {
             recordSentSessionChatMessage(text, sessionKey);
@@ -1841,7 +1884,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const insertFileReference = (path: string): void => {
       const api = getInputApi();
       const current = api?.getValue() ?? draft;
-      insertReference(`[File #${nextFileReferenceIndex(current)}](${path})`);
+      insertReference(nativePathReference(path, current));
     };
 
     const appendFileReferences = (paths: readonly string[]): void => {
@@ -1850,8 +1893,9 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       }
       const api = getInputApi();
       const current = api?.getValue() ?? draftRef.current;
-      const firstIndex = nextFileReferenceIndex(current);
-      const references = paths.map((path, index) => `[File #${firstIndex + index}](${path})`).join('\n');
+      const references = paths
+        .reduce<string[]>((lines, path) => [...lines, nativePathReference(path, `${current}\n${lines.join('\n')}`)], [])
+        .join('\n');
       const separator = current === '' || current.endsWith('\n\n') ? '' : current.endsWith('\n') ? '\n' : '\n\n';
       const next = `${current}${separator}${references}`;
       updateDraft(next, next.length);
@@ -2008,11 +2052,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
      * (folders included), no byte upload, inserted through the shared
      * native-path reference logic.
      */
-    const attachFromNativePicker = (): void => {
+    const attachFromNativePicker = (selection?: 'files' | 'folders'): void => {
       pendingComposerOperationsRef.current += 1;
       void (async () => {
         try {
-          await insertNativePathReferences((await onPickPaths?.()) ?? []);
+          await insertNativePathReferences((await onPickPaths?.(selection)) ?? []);
         } catch (error) {
           console.error('[session-chat] attach picker failed', error);
         } finally {
@@ -2930,12 +2974,17 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                       ? {
                           onAttach: () => {
                             if (onPickPaths) {
-                              attachFromNativePicker();
+                              attachFromNativePicker(
+                                typeof navigator !== 'undefined' && /Linux/i.test(navigator.platform) ? 'files' : undefined
+                              );
                             } else {
                               fileInputRef.current?.click();
                             }
                           },
                         }
+                      : {})}
+                    {...(onPickPaths && typeof navigator !== 'undefined' && /Linux/i.test(navigator.platform)
+                      ? { onAttachFolders: () => attachFromNativePicker('folders') }
                       : {})}
                   />
                   {showStopButton ? (

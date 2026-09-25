@@ -6,7 +6,6 @@ import type { DarkThemePreset, LightThemePreset } from './titlebar-color';
 import {
   type AppShotsHotkey,
   type AutoSleepIdleMinutes,
-  type ChatBrain,
   type ChatFileOpenView,
   type CommandsPanelSide,
   type DefaultEditorCommand,
@@ -156,6 +155,7 @@ export const WINDOW_GLASS_SOURCE_OPTIONS: ReadonlyArray<{
   { label: 'Desktop and windows', value: 'desktopAndWindows' },
   { label: 'Wallpaper only', value: 'wallpaper' },
   { label: 'Custom image', value: 'customImage' },
+  { label: 'Video', value: 'video' },
 ];
 
 export const WINDOW_GLASS_IMAGE_PLACEMENT_OPTIONS: ReadonlyArray<{
@@ -315,14 +315,6 @@ export const GHOSTTY_SCROLLBAR_OPTIONS: ReadonlyArray<{
 }> = [
   { label: 'System', value: 'system' },
   { label: 'Never', value: 'never' },
-];
-
-export const CHAT_BRAIN_OPTIONS: ReadonlyArray<{
-  label: string;
-  value: ChatBrain;
-}> = [
-  { label: 'QuickJS (shipped)', value: 'quickjs' },
-  { label: 'Rust (in development)', value: 'rust' },
 ];
 
 export const PROMPT_EDITOR_BACKEND_OPTIONS: ReadonlyArray<{

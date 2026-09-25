@@ -55,7 +55,20 @@ pub struct DeliveredDraft {
 
 /// A row is one line. Show the first line that has any content: a prompt that opens with a blank
 /// line, a heading, or a fenced block would otherwise render an empty row and look broken.
+/// A message from another agent names its sender and shows the body instead of its header line.
+/// SEE-ALSO: packages/shared/session-chat-controller/queue.ts `sessionChatQueueRowPreview`.
 pub fn queue_row_preview(text: &str) -> String {
+    if let Some(message) = crate::transcript::agent_message::parse_inter_agent_message(text) {
+        return format!(
+            "From {}: {}",
+            message.agent_name,
+            first_content_line(&message.body)
+        );
+    }
+    first_content_line(text)
+}
+
+fn first_content_line(text: &str) -> String {
     for line in text.split('\n') {
         let trimmed = line.trim();
         if !trimmed.is_empty() {

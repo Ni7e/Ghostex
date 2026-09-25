@@ -9,8 +9,8 @@ use gpui::{AnyElement, Context, IntoElement, ParentElement as _, Styled as _, Wi
 
 use crate::GhostexGpuiApp;
 
-/// CDXC:Workarea 2026-09-23 DECISION:
-/// User: "add animations for collapsing and expanding the right/left/bottom sidebars and panels", with reveal and hide "always consistently" the same, then: the Agents Panel animates too, the right side panel is "anchored to the right most side of the window", the bottom command pane's terminal must not show "squeezed then expanding" (it stays hidden and fades in near the end of the opening), and "do same thing for side panel please": the view panel's frame also slides open empty and its view (a native view, the view picker, a sleeping card) fades in near the end, while a web page, which cannot fade with GPUI, fades in right after the slide settles. The system "reduce animations" setting is respected, and there are settings for "none slow normal fast". Every panel's width or height tweens on CSS `ease-out` (`cubic-bezier(0, 0, 0.58, 1)`) over the Panel animations duration (Slow 320ms, Normal 200ms, Fast 120ms), opening and closing alike, and a toggle made mid-flight reverses from the size on screen. Off, or macOS Reduce Motion, snaps. After "when we're animating open/close for the sidebar it's flickering because we're hiding then showing the cef right? because if i just move the cef's drag handle there's no issue", a web page the slide only pushes resizes live like a divider drag and is never hidden; only the view panel's own slide hides its page.
+/// CDXC:Workarea 2026-09-24 DECISION:
+/// User: "add animations for collapsing and expanding the right/left/bottom sidebars and panels", with reveal and hide "always consistently" the same, then: the Agents Panel animates too, the right side panel is "anchored to the right most side of the window", the bottom command pane's terminal must not show "squeezed then expanding" (it stays hidden and fades in near the end of the opening), and "do same thing for side panel please": the view panel's frame also slides open empty and its view (a native view, the view picker, a sleeping card) fades in near the end, while a web page, which cannot fade with GPUI, fades in right after the slide settles. Then, of the view picker's cards: "i want them to fade in / out when expanding/collapsing this and no jumpiness please", so the picker also stays in a closing panel and fades out over the first half of the slide, and opening content fades in over the last half (it was the last 30%). The system "reduce animations" setting is respected, and there are settings for "none slow normal fast". Every panel's width or height tweens on CSS `ease-out` (`cubic-bezier(0, 0, 0.58, 1)`) over the Panel animations duration (Slow 320ms, Normal 200ms, Fast 120ms), opening and closing alike, and a toggle made mid-flight reverses from the size on screen. Off, or macOS Reduce Motion, snaps. After "when we're animating open/close for the sidebar it's flickering because we're hiding then showing the cef right? because if i just move the cef's drag handle there's no issue", a web page the slide only pushes resizes live like a divider drag and is never hidden; only the view panel's own slide hides its page.
 ///
 /// CDXC:Workarea 2026-09-23 WHY:
 /// The panel's content keeps the larger of its two sizes for the whole tween and the animating frame clips it, so the panel slides rather than reflowing. Terminals whose bounds move during the tween hold their grid until it settles (`set_grid_resize_held`), and a terminal inside the opening panel (whose bounds never move) resizes once on its second frame. Web pages follow the divider drag instead: a page the slide only pushes (the sidebar, the Agents Panel or the command pane moving beside the view panel) is moved and resized live every frame, because hiding it for the slide and fading it back made the page blink, and dragging the divider already resizes Chromium every frame without trouble, which disproved the per-frame cost worry. Only while the view panel itself slides is its page, which would poke outside the panel's clip, made transparent until the slide settles (`CefBrowser::set_motion_hidden`), because GPUI cannot clip an AppKit child view.
@@ -39,8 +39,14 @@ pub(crate) fn panel_motion_duration() -> Duration {
 /// CSS `ease-out`.
 const PANEL_MOTION_EASING: [f32; 4] = [0.0, 0.0, 0.58, 1.0];
 
-/// The share of an opening tween, at its end, over which the panel's content fades in.
-const PANEL_CONTENT_FADE_SHARE: f32 = 0.3;
+/// `progress` (0 to 1) on the panels' curve, for another surface that slides like them.
+pub(crate) fn panel_motion_eased(progress: f32) -> f32 {
+    bezier(progress.clamp(0.0, 1.0), PANEL_MOTION_EASING)
+}
+
+/// The share of a tween over which the panel's content fades: in at the end of an opening, out at
+/// the start of a closing.
+const PANEL_CONTENT_FADE_SHARE: f32 = 0.5;
 
 /// How long a web page takes to fade back in once a slide has settled: the same span the panel's
 /// GPUI content fades over at the end of an opening, run after it because the page cannot show
@@ -115,14 +121,23 @@ impl PanelFrame {
         }
     }
 
-    /// The opacity of an opening panel's content: hidden for most of the slide and faded in over
-    /// its last 30%, so it is never seen being revealed at a size it is about to leave.
+    /// The opacity of an opening panel's content: hidden for the first half of the slide and faded
+    /// in over the rest, so it is never seen being revealed at a size it is about to leave.
     pub(crate) fn opening_content_opacity(self) -> f32 {
         if !self.animating || !self.opening {
             return 1.0;
         }
         ((self.progress - (1.0 - PANEL_CONTENT_FADE_SHARE)) / PANEL_CONTENT_FADE_SHARE)
             .clamp(0.0, 1.0)
+    }
+
+    /// The opacity of a closing panel's content that is still drawn (the view picker): faded out
+    /// over the first half of the slide, so the frame finishes shutting empty.
+    pub(crate) fn closing_content_opacity(self) -> f32 {
+        if !self.animating || self.opening {
+            return 1.0;
+        }
+        (1.0 - self.progress / PANEL_CONTENT_FADE_SHARE).clamp(0.0, 1.0)
     }
 }
 
@@ -235,6 +250,10 @@ pub(crate) struct PanelMotions {
     /// The project on screen the last frame. The view panel and the command pane belong to the
     /// project, so switching projects shows the new one's panels as they are rather than sliding.
     project_id: Option<String>,
+    /// Whether the view panel showed the picker the last frame it was open. The picker is GPUI's
+    /// own drawing, so a closing slide keeps it in the frame to fade it out; a view's native page
+    /// is gone with the view.
+    pub(crate) view_panel_showed_picker: bool,
     was_animating: bool,
 }
 
@@ -264,6 +283,9 @@ impl GhostexGpuiApp {
             self.panel_motion.view_panel.reset();
         } else {
             let open = self.view_panel_open();
+            if open {
+                self.panel_motion.view_panel_showed_picker = self.view_picker_open();
+            }
             let extent = if open {
                 self.view_panel_open_width(window)
             } else {
@@ -274,8 +296,9 @@ impl GhostexGpuiApp {
                 .sample(open, extent, 0.0, reduce_motion, now);
         }
 
-        // The Agents Panel folds only beside an open view; without one it is the whole workarea.
-        if self.open_view_mode().is_some() {
+        // The Agents Panel folds only beside an open panel (a view or the picker); without one it is
+        // the whole workarea.
+        if self.view_panel_open() {
             let open = !self.view_panel_maximized();
             let extent = self.workarea_header_row_width_at_rest(window);
             self.panel_motion

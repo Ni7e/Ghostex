@@ -24,7 +24,7 @@ bunx prettier --write "apps/desktop/{sidebar,views,test,scripts}/**/*.{ts,tsx,mj
   "server/**/*.mjs" "tooling/**/*.{mjs,ts}" "*.{json,md,ts}" ".github/**/*.yml"
 ```
 
-Never format `.dependencies/**`, `node_modules/**`, `apps/web/**` or `apps/mobile/app/**` (the submodules), generated files (`*.generated.*`, `dist/`, `build/`, `target/`, `apps/desktop/runtime/`), or `bun.lock` as part of a parent-repo pass. Format files intentionally changed inside a submodule within its own commit. After a repo-wide pass, run the typecheck/test gates before pushing, and review `git status` so you only commit formatting deltas plus your own work; if the pass touched a file with foreign uncommitted hunks, leave that file out of your commit.
+Never format `.dependencies/**`, `node_modules/**`, `apps/mobile/app/**` (the submodule), generated files (`*.generated.*`, `dist/`, `build/`, `target/`, `apps/desktop/runtime/`), or `bun.lock` as part of a parent-repo pass. Format files intentionally changed inside a submodule within its own commit. After a repo-wide pass, run the typecheck/test gates before pushing, and review `git status` so you only commit formatting deltas plus your own work; if the pass touched a file with foreign uncommitted hunks, leave that file out of your commit.
 
 **File-size upkeep pass (same quiet-worktree window only).** A repo-wide split wave finished on 2026-08-24: every app-owned source file is under ~2,000 lines except a handful of deliberate keeps, and the big Rust god-files (`render.rs`, `terminal_sync.rs`, `presentation.rs`, `os_cli.rs`, `remote_conn.rs`, the `helpers/*` monoliths, `gxserver-runtime/git.ts`, …) are per-concern module directories. Do not regress:
 

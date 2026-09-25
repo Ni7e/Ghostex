@@ -29,6 +29,7 @@
 import { resetBrowserStorage, writeStorageItem } from './browser-shim';
 import { FrozenProjectDocServerSync } from './project-docs-server-sync-typescript';
 import { GpuiSidebarRuntime } from '@/apps/desktop/sidebar/gxserver-runtime/core';
+import { frozenWorkspaceGroupEditMethods } from './workspace-groups-edits-frozen';
 import { reorderNativeSidebar } from '@/tooling/gx-core/sidebar-page-frozen/reorder';
 import { runNativeProjectDrop } from '@/tooling/gx-core/sidebar-page-frozen/project-drag';
 import { runNativeMembershipAction } from '@/tooling/gx-core/sidebar-page-frozen/membership';
@@ -50,7 +51,7 @@ type Recorders = {
 
 /** The shipped projection, as the runtime builds it for the sidebar store. */
 function buildGroups(snapshot: Json, document: Json): Json[] {
-  const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+  const runtime = Object.assign(Object.create(GpuiSidebarRuntime.prototype), frozenWorkspaceGroupEditMethods) as Json;
   runtime.workspaceGroups = parseGpuiWorkspaceSessionGroupsState(document);
   runtime.domainProjects = [];
   runtime.recentProjects = [];
@@ -64,7 +65,6 @@ function buildGroups(snapshot: Json, document: Json): Json[] {
   runtime.presentation = snapshot;
   runtime.remotePresentations = new Map();
   runtime.projectDiffStatsByProjectId = new Map();
-  runtime.refreshCloseAfterDoneTimers = () => {};
   runtime.getCloseAfterDoneProjection = () => undefined;
   runtime.getDelayedSendProjection = () => undefined;
   runtime.createRemoteSidebarGroups = () => [];
@@ -200,7 +200,7 @@ function installBridges(recorders: Recorders): void {
 
 /** One posted `syncGroupOrder`, through the shipped runtime arm that answers it. */
 async function runGroupOrder(snapshot: Json, document: Json, groupIds: string[]): Promise<Json> {
-  const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+  const runtime = Object.assign(Object.create(GpuiSidebarRuntime.prototype), frozenWorkspaceGroupEditMethods) as Json;
   runtime.workspaceGroups = parseGpuiWorkspaceSessionGroupsState(document);
   runtime.domainProjects = [];
   runtime.recentProjects = [];

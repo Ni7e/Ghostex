@@ -1965,8 +1965,6 @@ impl GhostexGpuiApp {
         shell_session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.source_code_server_runtime
-            .cancel_remote_prompt_editor_request_for_shell_session(shell_session_id);
         /*
         CDXC:FocusRouting 2026-06-26-06:57:
         Removing a GPUI shell tab must also drop only the process-local gxserver/session mapping for that shell id. Close provider cleanup and acknowledged Sleep transitions remain sidebar-owned through the lifecycle bridge; this cleanup prevents stale GPUI mappings from selecting a deleted tab without fabricating daemon success, deleting gxserver rows, logging ids, or touching persisted private data.
@@ -1979,8 +1977,10 @@ impl GhostexGpuiApp {
             });
         self.remove_agents_chat_surface_for_session(shell_session_id, cx);
         if let Some(remote_key) = scoped_remote_key.as_ref() {
+            self.source_code_server_runtime
+                .cancel_remote_prompt_editor_request_for_remote_session(remote_key);
             self.remote_attach_sessions.remove(remote_key);
-            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             self.remote_attach_askpass_scripts.remove(remote_key);
         }
         let removed_keys = self

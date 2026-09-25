@@ -92,6 +92,7 @@ import {
   SessionChatStatusCardLead,
 } from './session-chat-status-card';
 import { SessionChatTerminalDialogCard } from './session-chat-terminal-dialog';
+import { SessionChatDisclosureBody } from './session-chat-disclosure-body';
 
 const SEND_FAILED_NOTICE = "Couldn't deliver those keys. Switch to Terminal View to act there.";
 const READ_ONLY_HINT = 'Input is held by another device.';
@@ -504,6 +505,7 @@ export function SessionChatTerminalNoticeCard({
       role='status'
       severity={notice.severity}
       title={notice.title}
+      bodyTransitionKey={collapsed}
       {...(answerable
         ? {
             headerExpanded: expanded,
@@ -572,7 +574,7 @@ export function SessionChatTerminalNoticeCard({
               />
             </Button>
           </div>
-          {tailOpen ? (
+          <SessionChatDisclosureBody gap={false} open={tailOpen}>
             <div className='ghostex-chat-notice-tail mt-2 min-w-0 rounded-lg border border-border/65 bg-background/70 p-3'>
               <pre
                 className='max-h-40 min-w-0 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]'
@@ -581,7 +583,7 @@ export function SessionChatTerminalNoticeCard({
                 {notice.screenTail}
               </pre>
             </div>
-          ) : null}
+          </SessionChatDisclosureBody>
         </div>
       ) : null}
       {sendFailed ? <p className='text-[11px] leading-snug text-destructive/80'>{SEND_FAILED_NOTICE}</p> : null}

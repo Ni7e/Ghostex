@@ -510,9 +510,13 @@ fn active_conversation<'a>(
     chain
 }
 
+/// CDXC:SessionChat 2026-09-24 WHY:
+/// A prompt Claude handed back to its input box after an Escape stays in the transcript as the leaf until the next prompt skips it, but Claude has already dropped it from the conversation its /rewind list shows. Counting it put the cursor one prompt too far up (the confirmation step then refused a fork's rewind), so `returned_row` excludes the same row the chat readers hide.
+/// SEE-ALSO: session_chat_returned_prompt.rs (`session_chat_returned_prompt_row`).
 fn resolve_rewind_target(
     path: &Path,
     message_id: &str,
+    returned_row: Option<&str>,
 ) -> std::result::Result<ClaudeRewindTarget, DomainStateError> {
     let file_len = std::fs::metadata(path)
         .map_err(|error| {
@@ -530,7 +534,7 @@ fn resolve_rewind_target(
     let chain = active_conversation(&rows, leaf.as_deref());
     let prompts: Vec<&ClaudeTranscriptRow> = chain
         .into_iter()
-        .filter(|row| row.prompt_text.is_some())
+        .filter(|row| row.prompt_text.is_some() && returned_row != Some(row.lineage.id.as_str()))
         .collect();
     let position = prompts
         .iter()
@@ -703,6 +707,17 @@ impl RewindDriver<'_> {
         capture_session_terminal_text(self.zmx_name).await
     }
 
+    /// CDXC:SessionChat 2026-09-25 WHY:
+    /// After a turn Claude Code paints a suggested next prompt in its input box in faint text. The plain capture cannot tell it from typed text, so every rewind after a finished turn was refused as "the terminal composer holds unsent text". The styled capture can: the styled read calls faint text empty, and typing (or the rewind command) replaces it.
+    async fn styled_composer_is_empty(&self) -> bool {
+        crate::session_chat_send::capture_session_terminal_text_vt(self.zmx_name)
+            .await
+            .and_then(|screen| {
+                crate::session_chat_composer::session_chat_composer_input("claude", &screen)
+            })
+            .is_some_and(|input| input.is_empty())
+    }
+
     /// Polls the screen until `accept` answers `Some`, the step deadline
     /// passes, or the session's send generation is superseded.
     async fn wait_for<T>(
@@ -745,6 +760,11 @@ impl RewindDriver<'_> {
         let settle = Duration::from_millis(REWIND_MOVE_SETTLE_MS);
         let deadline = Duration::from_millis(REWIND_STEP_TIMEOUT_MS);
         let mut stayed: Option<T> = None;
+        /*
+        CDXC:SessionChat 2026-09-24 WHY:
+        A capture can land while Claude is still writing a frame, so the first read that differs from `previous` may show the dialog shifted with the highlight not yet repainted. Trusting it verified the wrong row after two Up presses 14 ms apart. A move counts only once two consecutive captures agree on it.
+        */
+        let mut moved: Option<T> = None;
         loop {
             if (self.cancelled)() {
                 return Err(agent_busy(
@@ -757,12 +777,17 @@ impl RewindDriver<'_> {
                     rewind_stage_region(&lines, subtitle).and_then(|region| read(region))
                 {
                     if value != *previous {
-                        return Ok((value, true));
+                        if moved.as_ref() == Some(&value) {
+                            return Ok((value, true));
+                        }
+                        moved = Some(value);
+                    } else {
+                        moved = None;
+                        stayed = Some(value);
                     }
-                    stayed = Some(value);
                 }
             }
-            if stayed.is_some() && started.elapsed() >= settle {
+            if moved.is_none() && stayed.is_some() && started.elapsed() >= settle {
                 return Ok((
                     stayed.expect("the settle branch only runs with a value"),
                     false,
@@ -850,7 +875,13 @@ impl RewindDriver<'_> {
 
     async fn drive(&self, plan: &RewindPlan) -> std::result::Result<(), DomainStateError> {
         if let Some((path, target)) = &plan.claude_target {
-            if resolve_rewind_target(path, &target.message_id)? != *target {
+            let returned_row =
+                crate::session_chat_returned_prompt::session_chat_returned_prompt_row(
+                    self.project_id,
+                    self.session_id,
+                );
+            if resolve_rewind_target(path, &target.message_id, returned_row.as_deref())? != *target
+            {
                 return Err(agent_busy(
                     "The conversation changed while the rewind was queued. Try again.",
                 ));
@@ -881,7 +912,7 @@ impl RewindDriver<'_> {
                 ),
                 _ => error,
             })?;
-        if !draft.is_empty() {
+        if !draft.is_empty() && !self.styled_composer_is_empty().await {
             if !is_restored_draft(self.project_id, self.session_id, &draft) {
                 return Err(agent_busy(
                     "The terminal composer holds unsent text, so the rewind was not started. Send it or clear it in the terminal first."
@@ -1197,7 +1228,12 @@ async fn rewind_session_chat(
         ));
     }
     let transcript_path = claude_transcript_path(&target.session)?;
-    let rewind_target = resolve_rewind_target(&transcript_path, &message_id)?;
+    let returned_row = crate::session_chat_returned_prompt::session_chat_returned_prompt_row(
+        &target.project_id,
+        &target.session_id,
+    );
+    let rewind_target =
+        resolve_rewind_target(&transcript_path, &message_id, returned_row.as_deref())?;
 
     let Some(_guard) = RewindInFlightGuard::claim(&target.project_id, &target.session_id) else {
         return Err(agent_busy(

@@ -89,6 +89,15 @@ impl GhostexGpuiApp {
         cx.notify();
     }
 
+    /// A tab that just opened goes last. The drawn order is stored first, so every tab already on
+    /// screen, including browser tabs the stored order had not seen yet, keeps its place ahead of it.
+    pub(crate) fn append_view_strip_tab(&mut self, key: ViewStripTabKey) {
+        let mut order = self.view_strip_keys_with_undrawn();
+        order.retain(|existing| *existing != key);
+        order.push(key);
+        self.view_strip_layout.order = order;
+    }
+
     /// The drawn keys, followed by the stored keys that are not drawn right now (a view this
     /// project cannot show at the moment, a page that has not loaded) so they keep a place to come
     /// back to. Keys whose tab is gone for good are dropped here.

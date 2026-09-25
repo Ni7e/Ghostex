@@ -51,6 +51,8 @@ impl GhostexGpuiApp {
         let window_size = size(px(width), px(initial_height));
         let options = WindowOptions {
             kind: crate::app::window::popup_frame::child_window_kind(),
+            #[cfg(target_os = "linux")]
+            x11_parent: self.main_window_handle,
             window_bounds: Some(WindowBounds::Windowed(gpui::Bounds::centered_at(
                 self.main_window_bounds.center(),
                 window_size,
@@ -71,9 +73,11 @@ impl GhostexGpuiApp {
         };
         let view_slot: Rc<RefCell<Option<AnyEntity>>> = Rc::new(RefCell::new(None));
         let view_out = view_slot.clone();
+        let window_border = self.gpui_native_modal_palette().window_border();
         let window = cx
             .open_window(options, move |window, cx| {
-                window.set_window_title(if cfg!(target_os = "windows") {
+                crate::app::window::popup_frame::frame_app_modal_window(window, window_border);
+                window.set_window_title(if cfg!(any(target_os = "windows", target_os = "linux")) {
                     kind.window_title()
                 } else {
                     ""

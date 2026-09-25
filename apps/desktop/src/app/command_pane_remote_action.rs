@@ -70,7 +70,7 @@ impl GhostexGpuiApp {
         session stays visible in that machine's Running Sessions, which is
         where a disconnected remote's leftovers belong.
         */
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         self.command_remote_attach_askpass_scripts
             .remove(&session_id);
         let Some(reference) = self.command_remote_action_sessions.remove(&session_id) else {
@@ -182,6 +182,10 @@ impl GhostexGpuiApp {
         }
         let group_id = selection.group_id;
         let session_id = selection.session_id;
+        let action_scope = self.gpui_action_scope_for_command(&command_id);
+        if let Some(session) = self.command_pane.session_mut(session_id) {
+            session.action_scope = action_scope;
+        }
         self.reveal_command_group_dock(group_id, cx);
         let slot_id = CommandTerminalBodyMountSlotId {
             group_id,
@@ -445,25 +449,9 @@ impl GhostexGpuiApp {
             group_id,
             session_id: slot_id.session_id,
         };
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        let env_vars = plan
-            .askpass
-            .as_ref()
-            .map(|askpass| {
-                vec![
-                    (
-                        "DISPLAY".to_string(),
-                        std::env::var("DISPLAY").unwrap_or_else(|_| "localhost:0".to_string()),
-                    ),
-                    (
-                        "SSH_ASKPASS".to_string(),
-                        gpui_path_string(askpass.script.as_path()),
-                    ),
-                    ("SSH_ASKPASS_REQUIRE".to_string(), "force".to_string()),
-                ]
-            })
-            .unwrap_or_default();
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+        let env_vars = gpui_remote_ssh_terminal_environment(plan.askpass.as_ref());
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
         let env_vars = Vec::new();
         let payload = CommandTerminalExplicitLaunchPayload {
             working_directory: None,
@@ -482,7 +470,7 @@ impl GhostexGpuiApp {
             return false;
         }
         self.remember_remote_command_action_session_for_command_tab(slot_id.session_id, reference);
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         if let Some(askpass) = plan.askpass {
             self.command_remote_attach_askpass_scripts
                 .insert(slot_id.session_id, askpass);
@@ -519,14 +507,14 @@ impl GhostexGpuiApp {
         let key = GpuiRemoteAttachSessionKey::from(&reference);
         self.remote_attach_sessions
             .insert(key.clone(), shell_session_id);
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         if let Some(askpass) = self
             .command_remote_attach_askpass_scripts
             .remove(&source_session_id)
         {
             self.remote_attach_askpass_scripts.insert(key, askpass);
         }
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
         let _ = source_session_id;
         self.agents_sessions_pending_surface_transfer
             .insert(shell_session_id);

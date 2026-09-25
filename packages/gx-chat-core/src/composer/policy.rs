@@ -15,6 +15,11 @@ pub const STOP_BUTTON_COOLDOWN_MS: u64 = 2_000;
 pub const DESKTOP_COMPOSER_PLACEHOLDER: &str =
     "Press Enter to send a message and Tab to Queue.\nUse @ to mention a file and $ for using skills.";
 
+/// What a touch composer (the phone, `StartConfig::touch_composer`) says when nothing is blocking
+/// it: React's `MOBILE_SESSION_CHAT_PLACEHOLDER` in `session-chat-composer.tsx`.
+pub const TOUCH_COMPOSER_PLACEHOLDER: &str =
+    "Tap \u{2191} to send or hold it to queue; use @ for files and $ for skills.";
+
 /// The title of the toast a blocked Send raises.
 pub const SEND_BLOCKED_TITLE: &str = "Message not sent";
 
@@ -52,6 +57,27 @@ pub fn send_blocked_reason(state: &SendGate) -> Option<&'static str> {
     }
     if state.session_option_switching {
         return Some("Claude is still switching mode. Try again in a moment.");
+    }
+    None
+}
+
+/// Why a send is refused outright, or `None` when it may go (at once or once the gate clears).
+///
+/// CDXC:SessionChat 2026-09-24 SEE-ALSO:
+/// Port of `sessionChatSendRefusedReason` in `composer-policy.ts`, which holds the user's decision
+/// that a block which clears on its own (an answer still being applied, a mode or model switch, an
+/// account switch) holds the send instead of refusing it. Only these blocks need the user.
+pub fn send_refused_reason(state: &SendGate) -> Option<&'static str> {
+    if !state.can_send {
+        return Some("Input is held by another device.");
+    }
+    if state.conversation_locked {
+        return Some(
+            "This conversation is open elsewhere. Use Continue here or close it in the other app and retry.",
+        );
+    }
+    if state.terminal_choice_pending && state.notice_card_visible {
+        return Some("Answer the question above first.");
     }
     None
 }

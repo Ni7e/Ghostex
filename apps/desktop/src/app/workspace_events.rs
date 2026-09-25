@@ -85,6 +85,15 @@ impl GhostexGpuiApp {
                     }
                     return;
                 }
+                // Native Docs' browser area: a link in an HTML file opens that file in Docs.
+                if let Ok(request) = serde_json::from_str::<serde_json::Value>(&payload)
+                    && manage_request_string(&request, "action").as_deref() == Some("openDocsFile")
+                {
+                    if let Some(path) = manage_request_string(&request, "path") {
+                        self.native_docs_open_external(path, cx);
+                    }
+                    return;
+                }
                 // Annotation feedback never touches the file system: the target
                 // session and the delivery are app state, so both requests are
                 // answered here instead of through the git-backed file bridge.
@@ -113,81 +122,14 @@ impl GhostexGpuiApp {
                     }
                     return;
                 }
-                /*
-                CDXC:Docs 2026-07-11:
-                This arm previously ran synchronously inside the bridge event
-                handler, but manage_files_bridge_result shells out to `git`
-                (rev-parse/check-ignore/cat-file, up to six calls, no timeout)
-                and reads files/directories — all on the main thread. A stuck
-                git (index.lock, network filesystem, slow hook) beach-balled
-                the app. Run it on the background executor like the Beads and
-                automation-board arms, then dispatch the response from the
-                follow-up update.
-                */
-                let snapshot = self.latest_sidebar_project_snapshot.clone();
-                let additional_docs_folders_text = gpui_manage_additional_docs_folders_text(
-                    &self.sidebar_runtime_settings_snapshot,
-                );
-                let global_docs_directory_text =
-                    gpui_global_docs_directory_text(&self.sidebar_runtime_settings_snapshot);
-                let remote_context = snapshot
-                    .as_ref()
-                    .and_then(|snapshot| snapshot.active_project_id.as_ref())
-                    .and_then(|project_id| {
-                        gpui_remote_project_reference_from_project_id(project_id.0.as_str())
-                    })
-                    .map(|reference| {
-                        let target = self.gpui_remote_gxserver_request_target(
-                            reference.remote_machine_id.as_str(),
-                        );
-                        (reference, target)
-                    });
-                let background = cx.background_executor().clone();
-                cx.spawn(async move |this, cx| {
-                    let outcome = background
-                        .spawn(async move {
-                            match remote_context {
-                                Some((reference, target)) => {
-                                    run_remote_manage_files_bridge_request_for_project_snapshot(
-                                        &payload,
-                                        snapshot.as_ref(),
-                                        &additional_docs_folders_text,
-                                        &reference,
-                                        target.as_ref(),
-                                    )
-                                }
-                                None => run_manage_files_bridge_request_for_project_snapshot(
-                                    &payload,
-                                    snapshot.as_ref(),
-                                    &additional_docs_folders_text,
-                                    &global_docs_directory_text,
-                                ),
-                            }
-                        })
-                        .await;
-                    let _ = this.update(cx, |this, cx| {
-                        let ManageFilesBridgeOutcome {
-                            action,
-                            request_id,
-                            mut response,
-                            side_effect,
-                        } = outcome;
-                        if let Some(side_effect) = side_effect
-                            && let Err(error) =
-                                this.perform_manage_files_bridge_side_effect(side_effect, cx)
-                        {
-                            response =
-                                manage_files_bridge_error_response(&action, &request_id, &error);
-                        }
-                        this.dispatch_project_workarea_json_event(
-                            slot_key,
-                            "ghostex-manage-files-response",
-                            &response.to_string(),
-                            cx,
-                        );
-                    });
-                })
-                .detach();
+                self.run_docs_files_request(payload, cx, move |this, response, cx| {
+                    this.dispatch_project_workarea_json_event(
+                        slot_key,
+                        "ghostex-manage-files-response",
+                        &response.to_string(),
+                        cx,
+                    );
+                });
             }
             (
                 ProjectWorkareaCefSurfaceSlotKey::Kanban
@@ -471,20 +413,8 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::WorkspaceTerminalRenameCommand(payload) => {
                 self.receive_sidebar_workspace_terminal_rename_command_payload(&payload, cx);
             }
-            cef::SidebarBridgeEvent::WorkspaceTerminalEnter(payload) => {
-                self.receive_sidebar_workspace_terminal_enter_payload(&payload, cx);
-            }
             cef::SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(payload) => {
                 self.receive_sidebar_workspace_terminal_lifecycle_result_payload(&payload, cx);
-            }
-            cef::SidebarBridgeEvent::SourceWorkareaReadiness(_)
-            | cef::SidebarBridgeEvent::BrowserWorkareaReadiness(_)
-            | cef::SidebarBridgeEvent::ProjectWorkareaReadiness(_)
-            | cef::SidebarBridgeEvent::ManageFileWorkareaOperationRequest(_) => {
-                /*
-                CDXC:Workarea 2026-06-29-00:02:
-                Legacy sidebar readiness/proof messages stay accepted as compatibility no-ops. Source, Kanban, Automate, and Manage mounting now follows only the current runtime URL gate plus owned CEF surface map, and first-party Kanban/Automate/Manage CEF requests still flow through the separate project-workarea bridge.
-                */
             }
             cef::SidebarBridgeEvent::NativeProjectPathAction(payload) => {
                 self.receive_sidebar_native_project_path_action_payload(&payload, cx);
@@ -492,14 +422,8 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::NativeAppShotPrompt(payload) => {
                 self.receive_sidebar_native_app_shot_prompt_payload(&payload, cx);
             }
-            cef::SidebarBridgeEvent::NativeQuickAccessSnapshot(payload) => {
-                self.receive_native_quick_access_update(&payload, cx);
-            }
             cef::SidebarBridgeEvent::SidebarRuntimeFacts(payload) => {
                 self.receive_sidebar_runtime_facts(&payload, cx);
-            }
-            cef::SidebarBridgeEvent::ResourcesSnapshotRequest(payload) => {
-                self.receive_sidebar_resources_snapshot_request_payload(&payload, cx);
             }
             cef::SidebarBridgeEvent::SidebarCommandAction(payload) => {
                 self.receive_sidebar_command_action_payload(&payload, window, cx);
@@ -523,7 +447,7 @@ impl GhostexGpuiApp {
                 self.receive_sidebar_global_actions_payload(&payload, cx);
             }
             cef::SidebarBridgeEvent::TitlebarGitMenuState(payload) => {
-                self.receive_sidebar_titlebar_git_menu_state_payload(&payload, cx);
+                self.receive_sidebar_titlebar_git_menu_state_payload(&payload, window, cx);
             }
             cef::SidebarBridgeEvent::OpenBrowserUrl(payload) => {
                 self.receive_sidebar_open_browser_url_payload(&payload, window, cx);
@@ -539,7 +463,7 @@ impl GhostexGpuiApp {
                 // while "Open links in embedded browser" is on, else the
                 // system browser (CDXC:SessionChat 2026-09-09 in
                 // cef/shell/request_handling.rs).
-                self.open_session_chat_link(&url, false, false, window, cx);
+                self.open_session_chat_link(&url, None, false, false, window, cx);
             }
         }
     }
@@ -739,6 +663,27 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        let remote_machine_id = match message.project_id.as_deref() {
+            Some(project_id) => gpui_remote_project_reference_from_project_id(project_id)
+                .map(|reference| reference.remote_machine_id),
+            None if !message.from_quick_header => self.browser_project_remote_machine_id(),
+            None => None,
+        };
+        self.open_browser_url_from_renderer_command_with_machine(
+            message,
+            remote_machine_id,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn open_browser_url_from_renderer_command_with_machine(
+        &mut self,
+        message: GpuiSidebarOpenBrowserUrlMessage,
+        remote_machine_id: Option<String>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
         /*
         macOS `openNativeBrowserPaneFromCli` parity for `ghostex browser open` /
         `openBrowser(Pane)` renderer commands: reuse an exact or same-origin tab
@@ -779,10 +724,11 @@ impl GhostexGpuiApp {
         let Some(url) = normalize_address(&message.url) else {
             return;
         };
-        if let Some((pane_id, tab_id)) = self
-            .browser_tabs
-            .find_renderer_open_reuse_tab(&url, message.reuse)
-        {
+        if let Some((pane_id, tab_id)) = self.browser_tabs.find_renderer_open_reuse_tab(
+            &url,
+            message.reuse,
+            remote_machine_id.as_deref(),
+        ) {
             self.browser_tabs.select_tab_in_pane(pane_id, tab_id);
             self.change_active_mode_with_pane_state(TitlebarMode::Browser, cx);
             self.focus_shell_target(
@@ -802,6 +748,14 @@ impl GhostexGpuiApp {
         let Some(created_tab_id) = created_tab_id else {
             return;
         };
+        if let Some(tab) = self
+            .browser_tabs
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.id == created_tab_id)
+        {
+            tab.remote_machine_id = remote_machine_id;
+        }
         self.reveal_new_browser_tab(created_tab_id);
         self.change_active_mode_with_pane_state(TitlebarMode::Browser, cx);
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
@@ -818,6 +772,7 @@ impl GhostexGpuiApp {
     pub(crate) fn receive_sidebar_titlebar_git_menu_state_payload(
         &mut self,
         payload: &str,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(state) = gpui_titlebar_git_menu_state_from_payload(payload) else {
@@ -827,6 +782,7 @@ impl GhostexGpuiApp {
             return;
         }
         self.titlebar_git_menu_state = Some(state);
+        self.refresh_open_git_popup(window, cx);
         cx.notify();
     }
 
@@ -1187,13 +1143,18 @@ impl GhostexGpuiApp {
         {
             self.pull_workspace_session_into_focused_pane(pane_id, shell_session_id);
         }
+        let created_here = self.gx_store_is_created_attach(&key);
         self.spawn_local_workspace_attach_plan(
             key,
             attach_intent,
             requested_pane_id,
             force_requested_pane_placement,
             message.placement,
-            GpuiLocalWorkspaceAttachOrigin::SidebarFocus,
+            match message.placement_target_session_id {
+                Some(_) => GpuiLocalWorkspaceAttachOrigin::Fork,
+                None if created_here => GpuiLocalWorkspaceAttachOrigin::Fork,
+                None => GpuiLocalWorkspaceAttachOrigin::SidebarFocus,
+            },
             cx,
         );
     }
@@ -1400,6 +1361,7 @@ impl GhostexGpuiApp {
         }
 
         let attach_started_at = Instant::now();
+        let focused_at_request = self.gx_store_focused_session();
         let open_chat_early = placement == GpuiWorkspaceTerminalFocusPlacement::Tab
             && self
                 .pending_agents_chat_launch_intents
@@ -1480,6 +1442,24 @@ impl GhostexGpuiApp {
                             return;
                         }
                     }
+                    GpuiLocalWorkspaceAttachOrigin::Fork => {
+                        // A newer focus request, a project switch, or a selection the store took
+                        // since the fork was requested wins over it. The runtime's focus copy is
+                        // not consulted: it still names the source session until it is told.
+                        let focused = this.gx_store_focused_session();
+                        if this.local_workspace_latest_focus_key.as_ref() != Some(&key)
+                            || this.agents_workspace_project_id.as_deref()
+                                != Some(key.project_id.as_str())
+                            || (focused != focused_at_request
+                                && focused.as_ref().is_none_or(|focused| {
+                                    !focused.machine.is_local()
+                                        || focused.project_id != key.project_id
+                                        || focused.session_id != key.session_id
+                                }))
+                        {
+                            return;
+                        }
+                    }
                     GpuiLocalWorkspaceAttachOrigin::SurfacedRestore => {
                         let Some(shell_session_id) =
                             this.local_workspace_session_mappings.get(&key).copied()
@@ -1523,6 +1503,7 @@ impl GhostexGpuiApp {
                                 .focused_session_id
                                 .as_deref()
                                 != Some(key.session_id.as_str())
+                                && !this.gx_store_is_created_attach(&key)
                         {
                             return;
                         }
@@ -1556,6 +1537,7 @@ impl GhostexGpuiApp {
                             );
                         }
                         GpuiLocalWorkspaceAttachOrigin::SidebarFocus
+                        | GpuiLocalWorkspaceAttachOrigin::Fork
                         | GpuiLocalWorkspaceAttachOrigin::WakeRecovery => {
                             // A Split Right request whose tab already exists was
                             // moved into its right-hand leaf when the focus arrived;

@@ -565,6 +565,14 @@ export function ManageApp() {
       ) {
         openDocuments.stashDraft(previousPath, draftContentRef.current, lastSavedContentRef.current);
       }
+      /*
+       * CDXC:Docs 2026-09-24 WHY:
+       * Re-reading the selected file (a chat link to the file Docs already shows, or the restored active file) must take its unsaved draft now, before the resets below clear the content. Read after the await, the refs hold the cleared '' and the file opened as an empty draft: a blank white HTML page until Reload.
+       */
+      const sameFileDraft =
+        !discardDraft && previousPath === path && draftContentRef.current !== lastSavedContentRef.current
+          ? { draft: draftContentRef.current, savedContent: lastSavedContentRef.current }
+          : undefined;
       openDocuments.openDocument(path);
       if (isManageReviewDocumentPath(previousPath)) {
         setReviewDocument(undefined);
@@ -598,7 +606,7 @@ export function ManageApp() {
         const pendingDraft = discardDraft
           ? undefined
           : previousPath === path
-            ? { draft: draftContentRef.current, savedContent: lastSavedContentRef.current }
+            ? sameFileDraft
             : openDocuments.takeDraft(path);
         const nextContent =
           pendingDraft && openedFile?.kind === 'text' && pendingDraft.draft !== savedContentOnDisk

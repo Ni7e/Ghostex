@@ -94,6 +94,28 @@ impl GhostexGpuiApp {
             cx.notify();
             return;
         }
+        // A session aimed at another section of its project moves there (section_move.rs); a
+        // section heading takes nothing else.
+        if source.kind == "session" && matches!(target_kind, "section" | "session") {
+            if let Some(command) = self.native_sidebar_section_move_command(
+                &source.id,
+                target_kind,
+                target_id,
+                group_id,
+            ) {
+                if self.native_sidebar.drop_command.as_ref() != Some(&command) {
+                    self.native_sidebar.drop_command = Some(command);
+                    cx.notify();
+                }
+                return;
+            }
+        }
+        if target_kind == "section" {
+            if self.native_sidebar.drop_command.take().is_some() {
+                cx.notify();
+            }
+            return;
+        }
         if source.kind == "session" && matches!(target_kind, "session" | "group" | "session-group")
         {
             let Some(snapshot) = self.native_sidebar.snapshot.as_ref() else {
@@ -195,7 +217,11 @@ impl GhostexGpuiApp {
 
     pub(crate) fn finish_native_sidebar_drop(&mut self, cx: &mut Context<Self>) {
         if let Some(command) = self.native_sidebar.drop_command.take() {
-            self.dispatch_native_sidebar_ui(command, cx);
+            if command["type"] == "moveSessionToSection" {
+                self.move_native_sidebar_session_to_section(&command, cx);
+            } else {
+                self.dispatch_native_sidebar_ui(command, cx);
+            }
         }
         // A row drag that crossed an Agents pane hid the pane surfaces for its drop zones; a drop
         // back in the sidebar is the release the window root never sees.

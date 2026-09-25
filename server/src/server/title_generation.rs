@@ -38,6 +38,11 @@ pub(crate) fn schedule_agent_title_metadata_check(
                 &session_id,
             );
         }
+        if let Ok(Some(session)) = repository.get_session(&project_id, &session_id) {
+            if let Some(target) = fork_initial_rename_retry_target(&session) {
+                schedule_fork_initial_rename(state.clone(), target);
+            }
+        }
     });
 }
 
@@ -139,6 +144,51 @@ pub(crate) struct ForkInitialRenameTarget {
     title: String,
 }
 
+type ForkRenameKey = (String, String, String);
+static FORK_RENAMES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashSet<ForkRenameKey>>,
+> = std::sync::OnceLock::new();
+
+struct ForkRenameGuard(ForkRenameKey);
+
+impl Drop for ForkRenameGuard {
+    fn drop(&mut self) {
+        if let Some(mut jobs) = FORK_RENAMES.get().and_then(|jobs| jobs.lock().ok()) {
+            jobs.remove(&self.0);
+        }
+    }
+}
+
+pub(crate) fn fork_initial_rename_is_current(session: &Value, expected_title: &str) -> bool {
+    read_session_text(session, "lifecycleState").as_deref() == Some("running")
+        && matches!(
+            read_runtime_text(session, "gxserverForkInitialRenameStatus").as_deref(),
+            Some("pending" | "failed")
+        )
+        && crate::agents::provisional_fork_title(session).as_deref() == Some(expected_title)
+        && read_runtime_text(session, "gxserverFirstPromptAutoTitleStatus").is_none()
+        && read_runtime_text(session, "pendingAgentTitleRequestTitle")
+            .is_none_or(|title| title == expected_title)
+        && read_runtime_text(session, "pendingAgentTitleRequestTitleSource")
+            .is_none_or(|source| source == "placeholder")
+}
+
+/// CDXC:SessionFork 2026-09-24 WHY:
+/// Codex startup questions can outlast the initial rename attempt. Its inherited parent name is deliberately not adopted, so a permanently failed attempt also hides the completed fork from closed history. The server-owned metadata sweep retries the owned provisional rename before its index-revision gate because clearing a startup question need not change that index or trigger client polling; confirmation still comes from the agent's metadata.
+pub(super) fn fork_initial_rename_retry_target(session: &Value) -> Option<ForkInitialRenameTarget> {
+    let agent_name = crate::agents::session_agent_family_id(&Value::Null, session)?;
+    if agent_name != "codex" {
+        return None;
+    }
+    let target = ForkInitialRenameTarget {
+        agent_name,
+        project_id: read_session_text(session, "projectId")?,
+        session_id: read_session_text(session, "sessionId")?,
+        title: crate::agents::provisional_fork_title(session)?,
+    };
+    fork_initial_rename_is_current(session, &target.title).then_some(target)
+}
+
 /// CDXC:SessionFork 2026-09-15 DECISION:
 /// User: Fork must persist `Fork: <original name>` through the agent's own rename command.
 /// This supersedes the Codex exception that left its provider thread unnamed for first-turn auto-titling.
@@ -170,6 +220,19 @@ pub(crate) fn fork_initial_rename_target(
 /// Use the chat sender's composer and paste verification, and await its completion inside this background task before reporting the rename applied.
 /// Codex can finish this rename before exposing its rollout through a hook or open handle. Record the same pending rename as the manual flow so its exact post-request session-index confirmation also supplies the fork identity and inherited chat history before the first prompt.
 pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialRenameTarget) {
+    let key = (
+        state.metadata.server_id.clone(),
+        target.project_id.clone(),
+        target.session_id.clone(),
+    );
+    let Ok(mut jobs) = FORK_RENAMES.get_or_init(Default::default).lock() else {
+        return;
+    };
+    if !jobs.insert(key.clone()) {
+        return;
+    }
+    drop(jobs);
+    let guard = ForkRenameGuard(key);
     /*
     CDXC:SessionFork 2026-07-11:
     Fork provider startup already owns the resumed CLI process. Wait for its
@@ -184,6 +247,7 @@ pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialR
     slash command lands as literal text in whatever screen IS up.
     */
     tokio::spawn(async move {
+        let _guard = guard;
         let readiness = crate::session_chat_composer::wait_for_session_chat_composer_by_ids(
             &state.paths,
             state.metadata.server_id.as_str(),
@@ -196,7 +260,7 @@ pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialR
             },
         )
         .await;
-        let session = {
+        let mut session = {
             let Ok(db) = open_gxserver_database(&state.paths) else {
                 return;
             };
@@ -207,26 +271,62 @@ pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialR
             };
             session
         };
-        if read_runtime_text(&session, "gxserverForkInitialRenameStatus").as_deref()
-            != Some("pending")
-            || read_runtime_text(&session, "gxserverFirstPromptAutoTitleStatus").is_some()
-            || read_runtime_text(&session, "pendingAgentTitleRequestTitle")
-                .is_some_and(|title| title != target.title)
-        {
+        if !fork_initial_rename_is_current(&session, &target.title) {
             return;
         }
         let command = agent_session_title_command(Some(&target.agent_name), &target.title);
+        let mut resume_staged_command = false;
+        if target.agent_name == "codex" {
+            let Some(zmx_name) = read_session_text(&session, "zmxName") else {
+                return;
+            };
+            let input = crate::session_chat_send::capture_session_terminal_text_vt(&zmx_name)
+                .await
+                .and_then(|screen| {
+                    crate::session_chat_composer::session_chat_composer_input("codex", &screen)
+                });
+            let Some(input) = input else {
+                return;
+            };
+            resume_staged_command = !input.is_empty()
+                && input.text == command
+                && read_runtime_text(&session, "pendingAgentTitleRequestTitle").as_deref()
+                    == Some(target.title.as_str())
+                && read_runtime_text(&session, "pendingAgentTitleRequestStatus").as_deref()
+                    == Some("pending")
+                && read_runtime_text(&session, "pendingAgentTitleRequestRequestedAt").is_some();
+            if !input.is_empty() && !resume_staged_command {
+                return;
+            }
+        }
         let completion = if matches!(
             readiness,
             crate::session_chat_composer::SessionChatComposerWait::Ready
                 | crate::session_chat_composer::SessionChatComposerWait::Unknown
         ) {
-            if target.agent_name == "codex" {
+            if target.agent_name == "codex" && !resume_staged_command {
                 let Ok(db) = open_gxserver_database(&state.paths) else {
                     return;
                 };
+                let Ok(transaction) = rusqlite::Transaction::new_unchecked(
+                    &db,
+                    rusqlite::TransactionBehavior::Immediate,
+                ) else {
+                    return;
+                };
                 let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
-                if crate::agents::request_session_rename(
+                let Ok(Some(current)) =
+                    repository.get_session(&target.project_id, &target.session_id)
+                else {
+                    return;
+                };
+                if !fork_initial_rename_is_current(&current, &target.title)
+                    || read_runtime_text(&current, "firstUserMessage")
+                        != read_runtime_text(&session, "firstUserMessage")
+                {
+                    return;
+                }
+                let Ok(result) = crate::agents::request_session_rename(
                     &repository,
                     &crate::agents::LifecycleParams {
                         project_id: target.project_id.clone(),
@@ -236,9 +336,18 @@ pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialR
                         .as_object()
                         .expect("rename parameters"),
                     &state.paths.home_dir,
-                )
-                .is_err()
-                {
+                ) else {
+                    return;
+                };
+                if transaction.commit().is_err() {
+                    return;
+                }
+                let Some(current) = result.get("session").cloned() else {
+                    return;
+                };
+                session = current;
+                if !fork_initial_rename_is_current(&session, &target.title) {
+                    schedule_delta_for_ids(&state, &target.project_id, &target.session_id);
                     return;
                 }
             }
@@ -248,17 +357,47 @@ pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialR
                 &target.session_id,
                 &command,
             );
+            let mut steps = crate::session_chat_send::build_session_chat_message_steps(
+                Some(&target.agent_name),
+                &command,
+                &[],
+                false,
+            );
+            if target.agent_name == "codex" {
+                let guard = |expected_composer| {
+                    crate::session_chat_send::SessionChatSendStep::GuardForkRename {
+                        agent: target.agent_name.clone(),
+                        title: target.title.clone(),
+                        state_db_file: state.paths.state_db_file.clone(),
+                        server_id: state.metadata.server_id.clone(),
+                        first_user_message: read_runtime_text(&session, "firstUserMessage"),
+                        rename_requested_at: read_runtime_text(
+                            &session,
+                            "pendingAgentTitleRequestRequestedAt",
+                        ),
+                        expected_composer,
+                    }
+                };
+                if resume_staged_command {
+                    let paste = crate::session_chat_send::build_session_chat_paste_bytes(&command);
+                    steps.retain(|step| !matches!(step, crate::session_chat_send::SessionChatSendStep::Write(payload) if payload == &paste));
+                }
+                for step in &mut steps {
+                    if matches!(
+                        step,
+                        crate::session_chat_send::SessionChatSendStep::ClearComposer { .. }
+                    ) {
+                        *step = guard(resume_staged_command.then(|| command.clone()));
+                    }
+                }
+                steps.insert(steps.len() - 1, guard(Some(command.clone())));
+            }
             crate::session_chat_send::enqueue_session_write_sequence_with_completion(
                 &session,
                 &target.project_id,
                 &target.session_id,
                 "fork-title-command",
-                crate::session_chat_send::build_session_chat_message_steps(
-                    Some(&target.agent_name),
-                    &command,
-                    &[],
-                    false,
-                ),
+                steps,
                 None,
             )
             .ok()
@@ -284,9 +423,7 @@ pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialR
         else {
             return;
         };
-        if read_runtime_text(&latest_session, "gxserverForkInitialRenameStatus").as_deref()
-            != Some("pending")
-        {
+        if !fork_initial_rename_is_current(&latest_session, &target.title) {
             return;
         }
         let mut runtime_settings = latest_session
@@ -557,7 +694,7 @@ pub(crate) fn handle_claim_session_chat_launch_draft_http(
                     code: "internalError",
                     message: format!("SQLite gxserver state error: {error}"),
                 },
-            )
+            );
         }
     };
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());

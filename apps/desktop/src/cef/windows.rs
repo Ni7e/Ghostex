@@ -24,10 +24,12 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GA_ROOT, GetAncestor, HWND_MESSAGE, HWND_TOP,
-    IsChild, IsWindow, KillTimer, PostMessageW, RegisterClassW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetTimer, SetWindowPos, ShowWindow,
-    USER_DEFAULT_SCREEN_DPI, WM_APP, WM_TIMER, WNDCLASSW,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GA_ROOT, GWL_EXSTYLE, GetAncestor,
+    GetWindowLongPtrW, HWND_MESSAGE, HWND_TOP, IsChild, IsWindow, KillTimer, LWA_ALPHA,
+    PostMessageW, RegisterClassW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, USER_DEFAULT_SCREEN_DPI, WM_APP, WM_TIMER, WNDCLASSW, WS_EX_LAYERED,
+    WS_EX_NOREDIRECTIONBITMAP,
 };
 
 const PUMP_WINDOW_CLASS_NAME: &str = "GhostexGpuiCefMessagePump";
@@ -246,6 +248,7 @@ pub(super) fn set_native_view_frame(
     the authoritative per-window value on Windows and gpui derives its own
     scale from the same source.
     */
+    ensure_child_composited_by_dwm(hwnd);
     let scale = unsafe { GetDpiForWindow(hwnd) } as f64 / USER_DEFAULT_SCREEN_DPI as f64;
     let scale = if scale > 0.0 { scale } else { 1.0 };
     unsafe {
@@ -258,6 +261,27 @@ pub(super) fn set_native_view_frame(
             ((height * scale).round().max(0.0)) as i32,
             SWP_NOZORDER | SWP_NOACTIVATE,
         );
+    }
+}
+
+/// CDXC:Theming 2026-09-25 WHY:
+/// A main window opened with window glass presents through DirectComposition (`WS_EX_NOREDIRECTIONBITMAP`), which has no redirection surface for ordinary child HWNDs to draw into, so windowed CEF pages would stay black (the 2026-07-25 PlatformSupport note in main.rs). Since Windows 8 a child window may be layered, and a layered child gets a redirection surface of its own that DWM composites above its parent, so each CEF child is made layered and fully opaque when its root window has no redirection surface. Opaque main windows keep plain children.
+fn ensure_child_composited_by_dwm(hwnd: HWND) {
+    unsafe {
+        let root = GetAncestor(hwnd, GA_ROOT);
+        if root.is_null() {
+            return;
+        }
+        let root_style = GetWindowLongPtrW(root, GWL_EXSTYLE) as u32;
+        if root_style & WS_EX_NOREDIRECTIONBITMAP == 0 {
+            return;
+        }
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        if style & WS_EX_LAYERED != 0 {
+            return;
+        }
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, (style | WS_EX_LAYERED) as isize);
+        SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
     }
 }
 

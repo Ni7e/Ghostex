@@ -33,6 +33,8 @@ impl GhostexGpuiApp {
         refresh_gpui_visual_settings(&shared_settings::shared_sidebar_settings_snapshot());
         apply_gpui_component_theme(cx);
         let parent = cef_parent_native_view(window)?;
+        let main_window_handle =
+            cfg!(target_os = "linux").then(|| gpui::Window::window_handle(window));
         let project_name = titlebar_project_label_from_latest_sidebar_snapshot(None);
         let shared_settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let sidebar_runtime_settings_snapshot =
@@ -151,7 +153,7 @@ impl GhostexGpuiApp {
                 command_pane_project_id: shell_layout_state.command_pane_project_id,
                 parked_command_panes_by_project: shell_layout_state.parked_command_panes_by_project,
                 command_pane_project_epoch: 0,
-                main_window_handle: None,
+                main_window_handle,
                 project_editor_shell: shell_layout_state.project_editor_shell,
                 project_editor_auto_sleep_epochs: ProjectEditorAutoSleepEpochs::default(),
                 project_editor_auto_sleep_policy,
@@ -163,7 +165,6 @@ impl GhostexGpuiApp {
                 browser_tabs_project_epoch: 0,
                 browser_tabs_runtime_key: 0,
                 sidebar_browser_tabs_snapshot: String::new(),
-                sidebar_displayed_sessions_snapshot: String::new(),
                 pending_export_transcript_reveal_path: None,
                 latest_sidebar_project_snapshot: None,
                 navigation_history_state: navigation_history::GpuiNavigationHistoryState::default(),
@@ -239,7 +240,7 @@ impl GhostexGpuiApp {
                 view_pane_layouts: shell_layout_state.view_pane_layouts,
                 sidebar_visibility_memory,
                 remote_attach_sessions: shell_layout_state.remote_attach_sessions,
-                #[cfg(any(target_os = "macos", target_os = "linux"))]
+                #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
                 remote_attach_askpass_scripts: HashMap::new(),
                 project_workarea_runtime_cef_surfaces: HashMap::new(),
                 sidebar_runtime_settings_snapshot,
@@ -269,15 +270,13 @@ impl GhostexGpuiApp {
                 session_chat_diagnostics: Default::default(),
                 agents_chat_prewarm_scheduled: false,
                 native_chat_visible_sessions: HashSet::new(),
-                session_chat_subscribe_requests: HashMap::new(),
                 session_chat_paused_generations: HashSet::new(),
                 native_chat_pool_pass_scheduled: false,
                 agent_launch_placeholders: Default::default(),
+                untouched_agent_chats: Vec::new(),
                 agents_chat_reconcile_scheduled: false,
                 native_chat_views: HashMap::new(),
                 session_chat_broker_endpoints: HashMap::new(),
-                session_chat_broker_epoch: None,
-                session_chat_shared_snapshots: Vec::new(),
                 session_chat_presentations: Vec::new(),
                 account_switch_progress: HashMap::new(),
                 session_chat_composer_ready_sessions: HashSet::new(),
@@ -296,7 +295,8 @@ impl GhostexGpuiApp {
                 sidebar_command_pane_sessions_snapshot: String::new(),
                 sidebar_agents_delayed_sends_snapshot: String::new(),
                 sidebar_timer_presentations_replayed_after_ready: false,
-                sidebar_primary_agent_launcher_id: None,
+                sidebar_primary_agent_launcher_id:
+                    crate::app::gx_store::read_primary_agent_launcher_id(),
                 native_app_modal: None,
                 native_automate: None,
                 new_thread_picker_window: None,
@@ -313,7 +313,7 @@ impl GhostexGpuiApp {
                 command_gxserver_session_mappings: restored_command_gxserver_session_mappings,
                 command_gxserver_attach_pending: HashSet::new(),
                 command_remote_action_sessions: restored_command_remote_action_sessions,
-                #[cfg(any(target_os = "macos", target_os = "linux"))]
+                #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
                 command_remote_attach_askpass_scripts: HashMap::new(),
                 pending_command_gxserver_cleanup,
                 command_gxserver_cleanup_in_flight: HashSet::new(),
@@ -503,10 +503,12 @@ impl GhostexGpuiApp {
                 agent_hook_status_request_in_flight: false,
                 sidebar: None,
                 native_sidebar: Default::default(),
+                native_docs: Default::default(),
                 native_kanban: Default::default(),
                 floating_reveal: Default::default(),
                 panel_motion: Default::default(),
                 gx_store: Default::default(),
+                quick_access: Default::default(),
                 browser_surfaces: HashMap::new(),
                 browser_address_inputs: HashMap::new(),
                 browser_address_input_subscriptions: HashMap::new(),

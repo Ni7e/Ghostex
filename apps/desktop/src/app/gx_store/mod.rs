@@ -52,25 +52,41 @@
 //! the menu-host re-read ride;
 //! `diagnostics.rs` writes the log lines.
 
+mod activation_focus;
 mod added_project;
+mod attention;
 mod burst;
 mod client_document;
+mod client_storage_init;
 mod collection_menu;
+mod create;
+mod custom_tags_sync;
 mod diagnostics;
 mod diagnostics_open;
 mod diagnostics_project_docs;
 mod diagnostics_remote_last_seen;
 mod diagnostics_runtime_facts;
 mod effects;
+pub(crate) mod git;
 mod host;
+mod hud;
 mod layout_persist;
+mod primary_launcher;
+mod local_delayed_sends;
 mod local_focus;
+mod notifications;
 mod project_docs;
+mod quick_access_data;
 mod records_storage;
 mod remote_clients;
 mod remote_last_seen;
+mod remote_last_seen_prune;
 mod remote_project_docs;
+mod renderer_commands;
+mod rpc;
+mod rpc_types;
 mod runtime_facts;
+mod runtime_trace;
 mod session_walk;
 mod shadow_diff;
 mod sidebar_accounts;
@@ -87,6 +103,7 @@ mod sidebar_list;
 mod sidebar_list_inputs;
 mod sidebar_menus;
 mod sidebar_modals;
+mod sidebar_more_menu;
 mod sidebar_open;
 mod sidebar_ready;
 mod sidebar_reload;
@@ -108,6 +125,7 @@ mod sidebar_ui_storage;
 mod space_editor;
 mod space_sleep;
 mod space_switch;
+pub(crate) mod terminal_lifecycle;
 mod workspace_groups;
 
 /// The client-storage doors, for the other Rust hosts in this app that own catalogued stores of
@@ -117,7 +135,20 @@ mod workspace_groups;
 pub(crate) use records_storage::{
     RecordRead, RecordStore, read_record_raw, remove_record, scan_record_raw, write_record,
 };
-pub(crate) use sidebar_ui_storage::{with_read_connection, with_write_connection};
+pub(crate) use sidebar_ui_storage::{
+    read_preference_value, with_read_connection, with_write_connection, write_client_document_value,
+};
 
+pub(crate) use client_storage_init::initialize_client_storage_at_start;
 pub(crate) use host::GxStoreHost;
+#[allow(unused_imports)] // the first callers arrive with the runtime port's family commits
+pub(crate) use activation_focus::{menu_bar_session_focus_id, palette_session_focus_id};
+pub(crate) use primary_launcher::read_primary_agent_launcher_id;
+pub(crate) use rpc::{gx_rpc, gx_rpc_with_timeout};
+#[allow(unused_imports)]
+pub(crate) use rpc_types::GxRpcError;
+pub(crate) use runtime_trace::{
+    runtime_trace_enabled, trace_runtime_entry, trace_runtime_handler, trace_runtime_post,
+    trace_runtime_rpc,
+};
 pub(crate) use workspace_groups::note_native_host_message_dropped;

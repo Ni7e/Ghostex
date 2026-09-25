@@ -106,31 +106,9 @@ a persistent flag would also block the next hover from opening a tooltip.
 #[cfg(target_os = "macos")]
 pub(crate) const GPUI_SIDEBAR_DISMISS_TOOLTIPS_SCRIPT: &str = "(function(){const bridge=window.ghostexGpui;if(bridge&&typeof bridge.dismissSidebarTooltips==='function'){bridge.dismissSidebarTooltips();}})(); undefined;";
 
-/*
-CDXC:Spaces 2026-08-29:
-A finger scroll gesture began inside the sidebar's native frame. The page's
-Space-swipe handler resets its gesture lock on this — DOM wheel events carry no
-momentum phase, so only AppKit can mark where one physical swipe ends and the
-next begins.
-*/
-#[cfg(target_os = "macos")]
-pub(crate) const GPUI_SIDEBAR_SCROLL_GESTURE_BEGAN_SCRIPT: &str = "(function(){const bridge=window.ghostexGpui;if(bridge&&typeof bridge.onNativeScrollGestureBegan==='function'){bridge.onNativeScrollGestureBegan();}})(); undefined;";
-
 pub(crate) fn gpui_sidebar_command_pane_sessions_script(sessions: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};bridge.commandPaneSessions={sessions};if(typeof bridge.onCommandPaneSessionsChanged==='function'){{bridge.onCommandPaneSessionsChanged(bridge.commandPaneSessions);}}}})(); undefined;"
-    )
-}
-
-pub(crate) fn gpui_sidebar_agents_delayed_sends_script(sessions: &serde_json::Value) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};bridge.workspaceSessionDelayedSends={sessions};if(typeof bridge.onWorkspaceSessionDelayedSendsChanged==='function'){{bridge.onWorkspaceSessionDelayedSendsChanged(bridge.workspaceSessionDelayedSends);}}}})(); undefined;"
-    )
-}
-
-pub(crate) fn gpui_sidebar_displayed_sessions_script(session_ids_json: &str) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};bridge.displayedWorkspaceSessionIds={session_ids_json};if(typeof bridge.onDisplayedWorkspaceSessionIdsChanged==='function'){{bridge.onDisplayedWorkspaceSessionIdsChanged(bridge.displayedWorkspaceSessionIds);}}}})(); undefined;"
     )
 }
 

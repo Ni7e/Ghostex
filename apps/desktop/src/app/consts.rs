@@ -236,17 +236,6 @@ pub(crate) const TITLEBAR_CONTROL_HEIGHT: f32 = 27.0;
 pub(crate) const TITLEBAR_PROJECT_CONTEXT_DISABLED_REASON: &str =
     "Switch to a project to access this view";
 
-/*
-CDXC:Titlebar 2026-08-20:
-Source (Code) has no working remote runtime yet: code-server is launched on this
-machine against a local path, so a machine-scoped remote project would open the
-wrong tree. Disable the tab for remote projects through the same availability
-contract the Quick/projectless reasons use, so the tab click, the compact mode
-menu, hotkeys, and restored-mode coercion all refuse it in one place.
-*/
-pub(crate) const TITLEBAR_REMOTE_SOURCE_DISABLED_REASON: &str =
-    "Code is currently disabled for remote projects";
-
 /// Fixed square width kept only for the Linux caption-control gap; every other header button sizes
 /// to its icon now.
 #[cfg(target_os = "linux")]
@@ -332,11 +321,6 @@ pub(crate) const GPUI_TITLEBAR_GIT_MENU_BRANCH_MAX_CHARS: usize = 200;
 
 pub(crate) const GPUI_TITLEBAR_GIT_MENU_MAX_ROWS: usize = 16;
 
-pub(crate) const GPUI_SIDEBAR_TITLEBAR_GIT_ACTION_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_TITLEBAR_GIT_ACTION_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.titlebarGitAction";
-
 pub(crate) const GPUI_TITLEBAR_GIT_ACTION_REFRESH_SELECTOR: &str = "refresh";
 
 pub(crate) const GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION: u64 = 1;
@@ -376,11 +360,6 @@ pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE: &s
 
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_TITLE_MAX_CHARS: usize = 120;
 
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceTerminalEnter";
-
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_VERSION: u64 = 1;
 
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_TYPE: &str =
@@ -394,40 +373,8 @@ pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE: 
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_ID_MAX: u64 =
     9_007_199_254_740_991;
 
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceTerminalBell";
-
-#[cfg(target_os = "windows")]
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_VERSION: u64 = 1;
-
-#[cfg(target_os = "windows")]
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceTerminalTitleChanged";
-
 #[cfg(target_os = "windows")]
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_MAX_CHARS: usize = 512;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceTerminalEscapePressed";
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceFirstPromptTitleGenerationCancel";
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge";
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.workspaceTerminalRuntimeAction";
 
 pub(crate) const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_VERSION: u64 = 1;
 
@@ -509,40 +456,15 @@ Actions past the cap stay runnable from Settings and Ghostex Quick Access.
 */
 pub(crate) const GPUI_TAB_STRIP_MAX_GLOBAL_ACTIONS: usize = 8;
 
-pub(crate) const GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.statusPetActivation";
-
 pub(crate) const GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_VERSION: u64 = 1;
 
 pub(crate) const GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.menuBarProjectActivation";
 
-pub(crate) const GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.menuBarSessionActivation";
-
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION: u64 = 1;
 
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTabSessionSelected";
-
-pub(crate) const GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.commandPaletteSessionFocus";
-
-pub(crate) const GPUI_SIDEBAR_STASHED_PROMPT_SESSION_JUMP_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_STASHED_PROMPT_SESSION_JUMP_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.stashedPromptSessionJump";
-
-pub(crate) const GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.commandPaletteRunSidebarCommand";
 
 pub(crate) const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION: u64 = 1;
 
@@ -766,7 +688,7 @@ pub(crate) const FIND_BAR_CLOSE_BUTTON_WIDTH: f32 = 41.0;
 pub(crate) const BROWSER_TOOLBAR_HEIGHT: f32 = 35.0;
 
 /// CDXC:Browser 2026-09-21 DECISION:
-/// User: the address bar's buttons match the look of the view tab strip's buttons above them and line up with them. They use the strip's panel-toggle metrics (`TITLEBAR_CONTROL_HEIGHT` tall, `TITLEBAR_BUTTON_HORIZONTAL_PADDING` either side of an 18px icon, `TITLEBAR_BUTTON_RADIUS` corners, a 2px gap), start at the strip's 6px leading inset and end at `WORKAREA_HEADER_EDGE_PADDING`. The Docs header mirrors the same numbers in `apps/desktop/views/manage/styles.ts`.
+/// User: the address bar's buttons match the look of the view tab strip's buttons above them and line up with them. They use the strip's panel-toggle metrics (`TITLEBAR_CONTROL_HEIGHT` tall, `TITLEBAR_BUTTON_HORIZONTAL_PADDING` either side of an 18px icon, `TITLEBAR_BUTTON_RADIUS` corners, a 2px gap), start at the strip's 6px leading inset and end where the strip's panel toggles end (`WORKAREA_HEADER_EDGE_PADDING` plus `WORKAREA_HEADER_PINNED_GAP`, 2026-09-24). The Docs header mirrors the same numbers in `apps/desktop/views/manage/styles.ts`.
 pub(crate) const BROWSER_TOOLBAR_BUTTON_ICON_SIZE: f32 = TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE;
 
 pub(crate) const BROWSER_TOOLBAR_BUTTON_WIDTH: f32 =
@@ -1093,10 +1015,9 @@ pub(crate) const TITLEBAR_MORE_TOOLTIP: &str = "More";
 
 pub(crate) const TITLEBAR_GIT_TOOLTIP: &str = "Git actions";
 
-pub(crate) const TITLEBAR_ACTIONS_TOOLTIP: &str = "Quick Actions. Right click for more options";
+pub(crate) const TITLEBAR_ACTIONS_TOOLTIP: &str = "Quick Actions";
 
-pub(crate) const TITLEBAR_OPEN_TARGETS_TOOLTIP: &str =
-    "Open in an app. Right click for more options";
+pub(crate) const TITLEBAR_OPEN_TARGETS_TOOLTIP: &str = "Open in an app";
 
 pub(crate) const TITLEBAR_UPDATE_AVAILABLE_TOOLTIP: &str =
     "Update Ghostex! All your sessions will continue running.";

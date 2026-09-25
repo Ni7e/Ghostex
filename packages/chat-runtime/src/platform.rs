@@ -7,15 +7,6 @@ fn random_uuid() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-pub(crate) fn install_crypto(ctx: &rquickjs::Ctx<'_>) -> rquickjs::Result<()> {
-    let crypto = rquickjs::Object::new(ctx.clone())?;
-    crypto.set(
-        "randomUUID",
-        rquickjs::Function::new(ctx.clone(), random_uuid)?,
-    )?;
-    ctx.globals().set("crypto", crypto)
-}
-
 pub(crate) fn call(storage: &mut Storage, request: Value) -> Result<Value> {
     let operation = request["operation"]
         .as_str()

@@ -384,49 +384,6 @@ pub(crate) fn gpui_sidebar_workspace_terminal_rename_command_from_value(
     })
 }
 
-pub(crate) fn gpui_sidebar_workspace_terminal_enter_from_json(
-    text: &str,
-) -> Result<GpuiSidebarWorkspaceTerminalEnterMessage, GpuiGxserverPresentationFocusStateContractError>
-{
-    let value = serde_json::from_str::<serde_json::Value>(text)
-        .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
-    gpui_sidebar_workspace_terminal_enter_from_value(&value)
-}
-
-pub(crate) fn gpui_sidebar_workspace_terminal_enter_from_value(
-    value: &serde_json::Value,
-) -> Result<GpuiSidebarWorkspaceTerminalEnterMessage, GpuiGxserverPresentationFocusStateContractError>
-{
-    let object = gpui_gxserver_focus_contract_object(value)?;
-    reject_unexpected_gxserver_focus_contract_keys(
-        object,
-        &["version", "type", "projectId", "sessionId"],
-    )?;
-
-    let version = object
-        .get("version")
-        .and_then(serde_json::Value::as_u64)
-        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion)?;
-    if version != GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_VERSION {
-        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion);
-    }
-
-    let message_type = object
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType)?;
-    if message_type != GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_TYPE {
-        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType);
-    }
-
-    let project_id = gxserver_workspace_focus_project_id_field(object, "projectId")?;
-    let session_id = gxserver_workspace_focus_session_id_field(object, "sessionId")?;
-    Ok(GpuiSidebarWorkspaceTerminalEnterMessage {
-        project_id,
-        session_id,
-    })
-}
-
 /// The sound to play, and the sidebar session that finished.
 ///
 /// CDXC:Sessions 2026-09-21 WHY:

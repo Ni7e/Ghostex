@@ -3,6 +3,7 @@ pub(crate) mod claude_retention;
 pub(crate) mod codex_status_line;
 pub(crate) mod codex_trust;
 pub mod config;
+pub(crate) mod cursor_statusline;
 pub mod event_mapping;
 mod hook_store;
 pub mod install;
@@ -23,5 +24,6 @@ pub use api::{
     uninstall_agent_hooks,
 };
 pub use notify_runtime::run_notify_hook;
+pub(crate) use resolution::read_claude_hook_surface_records;
 pub(crate) use resolution::read_codex_hook_session_identities;
 pub use statusline::run_statusline_hook;

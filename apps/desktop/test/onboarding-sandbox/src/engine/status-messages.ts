@@ -153,7 +153,7 @@ export function createGhostexCliStatusMessage(
     agentsOrchestrationSkillInstalled: skills.agentsOrchestration,
     ...(skills.agentsOrchestration
       ? {
-          agentsOrchestrationSkillPath: '~/agents/skills/ghostex-agents-orchestration/SKILL.md',
+          agentsOrchestrationSkillPath: '~/agents/skills/ghostex-agents/SKILL.md',
         }
       : {}),
     manageBeadsSkillInstalled: skills.manageBeads,

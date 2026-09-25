@@ -133,7 +133,7 @@ impl GhostexGpuiApp {
     }
 
     /// CDXC:Sidebar 2026-09-19 DECISION:
-    /// User: clicking a sleeping session, or one not opened recently, must react on the pane at once and show that session, with a skeleton until its chat transcript is ready, instead of waiting for the wake and attach while the current session stays on screen; people flip between sessions quickly.
+    /// User: clicking a sleeping session, or one not opened recently, must react on the pane at once and show that session, with its chat fading in once its transcript is ready (no skeleton since 2026-09-24), instead of waiting for the wake and attach while the current session stays on screen; people flip between sessions quickly.
     /// The session's tab is selected now, or created now as a mounting placeholder mapped to the session, so the pane switches in the click's frame. The runtime's wake and attach then fill that same tab: the attach completion reuses a mapped tab in place. A session whose agent prefers Chat and that already has a transcript gets its chat surface immediately, so the chat runtime boots while the daemon is still waking the session.
     fn stage_native_sidebar_session_tab(
         &mut self,
@@ -209,6 +209,8 @@ impl GhostexGpuiApp {
         let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id) else {
             return false;
         };
+        // An already mapped tab (a sleeping one) opens in Chat the same way.
+        self.adopt_preferred_chat_view_on_selection(shell_session_id, cx);
         // A kept view selects in the background; otherwise the session comes to the focused pane
         // like any other selection (session_pane_placement.rs).
         let pane_id = if keep_view {

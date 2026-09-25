@@ -44,7 +44,7 @@ pub(super) static METRICS: LazyLock<ComposerAnimationMetrics> = LazyLock::new(||
 });
 
 /// CSS `cubic-bezier(x1, y1, x2, y2)` at `t`: solve x(u) = t, then read y(u).
-fn eased(easing: &[f32; 4], t: f32) -> f32 {
+pub(super) fn eased(easing: &[f32; 4], t: f32) -> f32 {
     let curve = |a: f32, b: f32, u: f32| {
         let v = 1.0 - u;
         3.0 * a * v * v * u + 3.0 * b * v * u * u + u * u * u

@@ -103,12 +103,10 @@ fn upload_directory(
     let mut directory = request.clone();
     directory["directory"] = true.into();
     directory["base64Data"] = "".into();
-    directory["relativePath"] = path
-        .strip_prefix(root)
-        .map_err(|error| error.to_string())?
-        .to_string_lossy()
-        .replace('\\', "/")
-        .into();
+    let relative_path = path.strip_prefix(root).map_err(|error| error.to_string())?;
+    if !relative_path.as_os_str().is_empty() {
+        directory["relativePath"] = relative_path.to_string_lossy().replace('\\', "/").into();
+    }
     let saved = save(remote, "/api/saveSessionChatAttachment", &directory)?;
     for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;

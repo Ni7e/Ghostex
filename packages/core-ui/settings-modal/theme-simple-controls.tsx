@@ -166,9 +166,30 @@ export function ThemeCardGrid<Preset extends string>({
   );
 }
 
-/** Window glass is drawn only by the macOS app, so surfaces that can hide the switch elsewhere ask here. */
+/**
+ * Window glass is drawn by the macOS and Windows apps, so surfaces that can hide the switch elsewhere ask here.
+ *
+ * CDXC:Theming 2026-09-25 DECISION:
+ * User: "let's enable transparency on windows please also if possible. like it works on mac exactly." The glass
+ * controls show on macOS and Windows. Glass shows (Wallpaper only, Custom image) stays macOS-only because only the
+ * macOS window backend can draw a picture behind the glass, and on Windows turning glass on takes effect at the next
+ * launch (see `note_main_window_background` in apps/desktop/src/app/helpers/window_glass.rs).
+ */
 export function windowGlassAvailable(): boolean {
+  const platform = detectghostexHotkeyPlatform();
+  return platform === 'mac' || platform === 'windows';
+}
+
+/** Whether the glass can show the wallpaper or a chosen picture instead of what is behind the window (macOS). */
+export function windowGlassPicturesAvailable(): boolean {
   return detectghostexHotkeyPlatform() === 'mac';
+}
+
+/** A sentence for glass controls on Windows, where turning glass on waits for the next launch. */
+export function windowGlassRestartNote(): string {
+  return detectghostexHotkeyPlatform() === 'windows'
+    ? ' On Windows, turning it on takes effect the next time Ghostex starts.'
+    : '';
 }
 
 /**

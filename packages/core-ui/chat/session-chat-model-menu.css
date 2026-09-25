@@ -73,6 +73,25 @@
   content: '';
 }
 
+/*
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: show a handoff icon where switching to another agent means another agent CLI, but only "on the agent icons up top": another agent's tab carries a small badge and the model rows carry none. A draft switches agents without a handoff, so it shows none.
+ * SEE-ALSO: apps/desktop/src/app/native_chat/option_menu/model_menu/render.rs draws the same marks for GPUI; `handoff` comes from modelMenuProjection in packages/shared/session-chat-controller/model-menu.ts.
+ */
+.ghostex-chat-model-menu-tab-handoff {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--popover);
+  color: var(--menu-muted);
+}
+
 .ghostex-chat-model-menu-logo {
   display: inline-block;
   width: var(--logo-size);
@@ -131,10 +150,6 @@
   cursor: pointer;
 }
 
-.ghostex-chat-model-menu-row[data-two-line] {
-  padding-block: 6px;
-}
-
 .ghostex-chat-model-menu-row[data-active] {
   background: var(--menu-cursor);
 }
@@ -155,15 +170,8 @@
   display: flex;
   min-width: 0;
   flex: 1;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ghostex-chat-model-menu-row-line {
-  display: flex;
-  min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .ghostex-chat-model-menu-row-label {
@@ -176,15 +184,9 @@
   white-space: nowrap;
 }
 
-.ghostex-chat-model-menu-row-agent {
-  color: var(--menu-muted);
-  font-size: 0.6875rem;
-  white-space: nowrap;
-}
-
 /*
- * CDXC:SessionChat 2026-09-22 DECISION:
- * User: a model's description is not written next to it in the picker; an eye that appears when the row is hovered shows it on hover instead.
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: a model's description is not written next to it in the picker; an info-circle icon that appears when the row is hovered shows it on hover instead (replaces the eye of 2026-09-22).
  */
 .ghostex-chat-model-menu-row-about {
   display: inline-flex;
@@ -272,11 +274,14 @@
   border-top: 1px solid var(--menu-hairline);
 }
 
+/*
+ * CDXC:SessionChat 2026-09-24 SEE-ALSO: the footer layout in apps/desktop/src/app/native_chat/option_menu/model_menu/render.rs (`keeps_width`), which records the user's decision that values like "Default" and "Medium" are never cut short: Reasoning, Context Window and Fast keep their full width, and only the Account button and labelled option buttons truncate.
+ */
 .ghostex-chat-model-menu-tray-button {
   display: flex;
   height: 30px;
   min-width: 0;
-  flex: 1 1 0;
+  flex: 1 1 auto;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -285,6 +290,10 @@
   color: color-mix(in srgb, var(--foreground) 90%, transparent);
   cursor: pointer;
   font-size: 0.75rem;
+}
+
+.ghostex-chat-model-menu-tray-button:is([data-icon='reasoning'], [data-icon='context'], [data-icon='fast']) {
+  flex-shrink: 0;
 }
 
 .ghostex-chat-model-menu-tray-button[data-active] {
@@ -377,6 +386,13 @@
   left: auto;
 }
 
+/* A phone-width card leaves no room on either side, so the list sits over the model rows above the buttons. */
+.ghostex-chat-model-menu-flyout[data-side='above'] {
+  bottom: calc(100% + 4px);
+  left: 4px;
+  max-width: calc(100% - 8px);
+}
+
 .ghostex-chat-model-menu-flyout-heading {
   padding: 6px 8px 4px;
   color: var(--menu-muted);
@@ -398,4 +414,48 @@
   color: var(--menu-muted);
   font-size: 0.625rem;
   font-weight: 600;
+}
+
+/* A compact reminder of the keys the pop-up answers to. SEE-ALSO: MODEL_MENU_KEY_HINTS in session-chat-presentation/model-menu.ts. */
+.ghostex-chat-model-menu-keys {
+  display: flex;
+  flex: none;
+  gap: 10px;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-top: 1px solid var(--menu-hairline);
+  color: var(--menu-muted);
+  font-size: 0.65625rem;
+  white-space: nowrap;
+}
+
+.ghostex-chat-model-menu-keys kbd {
+  margin-right: 4px;
+  color: var(--foreground);
+  font-family: inherit;
+}
+
+/* Left or Right past the first or last reasoning level, or on a model without levels. */
+.ghostex-chat-model-menu-tray-button[data-shake] {
+  animation: ghostex-chat-model-menu-shake 0.22s ease-out;
+}
+
+@keyframes ghostex-chat-model-menu-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  30% {
+    transform: translateX(-3px);
+  }
+  60% {
+    transform: translateX(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghostex-chat-model-menu-tray-button[data-shake] {
+    animation: none;
+  }
 }

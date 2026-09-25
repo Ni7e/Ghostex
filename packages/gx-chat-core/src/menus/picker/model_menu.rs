@@ -134,6 +134,19 @@ pub struct ModelMenuRow {
     pub shortcut: Option<usize>,
     /// Favorites mix agents, so those rows name theirs on a second line.
     pub show_agent: bool,
+    /// The reasoning levels this row's model offers, which Left and Right step through; empty for
+    /// a model without levels. Filled by [`crate::menus::picker::projection::model_menu_projection`].
+    pub efforts: Vec<ModelMenuEffort>,
+    /// The level a keyboard pick of this row starts on; empty when `efforts` is.
+    pub effort: String,
+}
+
+/// `ModelMenuEffort`: one reasoning level a row offers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelMenuEffort {
+    pub value: String,
+    pub label: String,
 }
 
 /// One tab of the picker.
@@ -146,6 +159,10 @@ pub struct ModelMenuTab {
     pub icon: Option<String>,
     pub name: String,
     pub active: bool,
+    /// Another agent's tab in a started session: its models hand the conversation off to that
+    /// agent's CLI. Set by [`crate::menus::picker::projection::model_menu_projection`].
+    #[serde(default)]
+    pub handoff: bool,
 }
 
 /// `modelMenuFavoriteKey`.
@@ -243,6 +260,7 @@ pub fn model_menu_tabs(entries: &ModelMenuEntries, tab: ModelMenuTabId) -> Vec<M
         icon: None,
         name: "Favorites".to_string(),
         active: tab == ModelMenuTabId::Favorites,
+        handoff: false,
     }];
     for provider in MODEL_MENU_PROVIDERS {
         let rows = entries_of(entries, provider.as_str());
@@ -254,6 +272,7 @@ pub fn model_menu_tabs(entries: &ModelMenuEntries, tab: ModelMenuTabId) -> Vec<M
             icon: Some(first.icon.clone()),
             name: first.agent_name.clone(),
             active: tab == ModelMenuTabId::Provider(provider),
+            handoff: false,
         });
     }
     tabs
@@ -367,6 +386,8 @@ pub fn model_menu_rows(
             }),
             shortcut: (index < MODEL_MENU_SHORTCUT_ROWS).then_some(index + 1),
             show_agent: favorites_tab,
+            efforts: Vec::new(),
+            effort: String::new(),
             entry: (*entry).clone(),
         })
         .collect()

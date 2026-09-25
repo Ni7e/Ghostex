@@ -20,6 +20,5 @@ else
   mode=debug
   cargo build --target wasm32-unknown-unknown
 fi
-(cd ../.. && bun tooling/build-chat-runtime.mjs apps/gpui-web/www/public/chat-runtime.js)
 wasm-bindgen "target/wasm32-unknown-unknown/$mode/ghostex_gpui_web.wasm" \
   --out-dir www/src/wasm --target web --no-typescript

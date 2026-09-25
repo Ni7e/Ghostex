@@ -216,7 +216,9 @@ fn model_picker_rows(screen: &str) -> Option<Vec<PickerRow>> {
 
 fn effort_picker_rows(screen: &str, model: &str) -> Option<Vec<PickerRow>> {
     let expected = format!("{CODEX_EFFORT_PICKER_TITLE_PREFIX}{model}");
-    picker_rows_under(&screen_lines(screen), |line| line == expected)
+    picker_rows_under(&screen_lines(screen), |line| {
+        line.eq_ignore_ascii_case(&expected)
+    })
 }
 
 fn advanced_effort_picker_rows(screen: &str) -> Option<Vec<PickerRow>> {
@@ -250,12 +252,20 @@ fn claude_model_picker_open(screen: &str) -> bool {
 /// Whether a row's text is the model or effort label `wanted`: the label is
 /// the whole text, or the text continues with a space (` (current)`, ` (default)`,
 /// or the row's description).
+///
+/// CDXC:AgentScreenDetection 2026-09-24 WHY:
+/// Codex 0.156 lists display names (`GPT-6-Sol`) in its model picker and effort title while the
+/// catalog, the footer reader and the "Model changed to" line use ids (`gpt-6-sol`), so the label
+/// is compared without case. An exact match failed every Codex model change from chat.
+/// SEE-ALSO: server/src/session_chat_options.rs codex_model_value.
 fn row_names(row: &PickerRow, wanted: &str) -> bool {
-    row.text == wanted
-        || row
-            .text
-            .strip_prefix(wanted)
-            .is_some_and(|rest| rest.starts_with(' '))
+    row.text
+        .get(..wanted.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(wanted))
+        && row.text[wanted.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| next == ' ')
 }
 
 /// The label Codex paints for a catalog effort id.
@@ -1141,10 +1151,10 @@ impl PickerDriver<'_> {
                 .map(|row| row.text.split(' ').next().unwrap_or_default().to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            return Err(dialog_mismatch(
-                "model",
-                &format!("the picker lists {listed}, not {}.", plan.model),
-            ));
+            return Err(unsupported_selection(format!(
+                "Codex's model picker lists {listed}, not {}.",
+                plan.model
+            )));
         };
         self.write(&row_key(model_row, "model")?).await?;
 
@@ -1174,10 +1184,10 @@ impl PickerDriver<'_> {
                 .map(|row| row.text.clone())
                 .collect::<Vec<_>>()
                 .join(", ");
-            return Err(dialog_mismatch(
-                "effort",
-                &format!("{} offers {listed}, not {effort_label}.", plan.model),
-            ));
+            return Err(unsupported_selection(format!(
+                "Codex's {} offers {listed}, not {effort_label}.",
+                plan.model
+            )));
         }
 
         self.wait_for("confirm", |screen| {

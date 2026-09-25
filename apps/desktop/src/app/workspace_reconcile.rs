@@ -708,6 +708,7 @@ impl GhostexGpuiApp {
         self.project_name = titlebar_project_label_from_latest_sidebar_snapshot(
             self.latest_sidebar_project_snapshot.as_ref(),
         );
+        self.gx_store_git_active_project_changed(cx);
         self.restore_gpui_titlebar_project_selections();
         self.refresh_titlebar_actions_in_background(cx);
         self.swap_agents_workspace_for_active_project(cx);
@@ -718,6 +719,7 @@ impl GhostexGpuiApp {
         self.coerce_active_mode_to_available_project_context(cx);
         self.land_quick_automations_active_project_on_automate_mode(window, cx);
         self.land_pending_source_file_open_on_source_mode(window, cx);
+        self.gx_store_land_pending_browser_open(window, cx);
         self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
         self.broadcast_extension_context_changes(cx);
         cx.notify();
@@ -989,18 +991,16 @@ impl GhostexGpuiApp {
                         parked_at: Some(Instant::now()),
                     },
                 );
-                if let Some(replaced) = self
-                    .parked_agents_chat_runtimes_by_project
-                    .insert(old_project_id, parked_chat_runtime)
-                {
-                    self.release_parked_session_chat_runtime_subscriptions(&replaced, cx);
-                }
+                // A replaced parking's views drop here, which detaches them from the chat host.
+                drop(
+                    self.parked_agents_chat_runtimes_by_project
+                        .insert(old_project_id, parked_chat_runtime),
+                );
             }
             // No owning project id means there is nothing to park these pages
             // under and nothing that could ever restore them, so they are
             // destroyed here exactly as the pre-parking teardown did.
             None => {
-                self.release_parked_session_chat_runtime_subscriptions(&parked_chat_runtime, cx);
                 drop(parked_chat_runtime);
             }
         }
@@ -1241,7 +1241,7 @@ impl GhostexGpuiApp {
         */
         self.command_remote_action_sessions =
             command_remote_action_sessions_from_command_model(&self.command_pane);
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         self.command_remote_attach_askpass_scripts.clear();
         self.command_gxserver_attach_pending.clear();
         self.command_terminal_launch_payload_source
@@ -1890,24 +1890,32 @@ impl GhostexGpuiApp {
         }
     }
 
+    /// CDXC:Browser 2026-09-24 DECISION:
+    /// User: Cmd+N with the side panel closed must not open two tabs. A project whose Browser holds
+    /// only the empty "New Tab" placeholder gets that placeholder loaded as its new tab instead of
+    /// a second tab beside it; the placeholder used to survive next to the new page with no way
+    /// to close it.
     pub(crate) fn add_browser_tab(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
         if !self.titlebar_mode_available(TitlebarMode::Browser) {
             return;
         }
-        let default_url = browser_shell_default_url(
-            self.latest_sidebar_project_snapshot
-                .as_ref()
-                .and_then(|snapshot| snapshot.browser_home_url.as_deref()),
-        );
-        let created_tab_id = self.browser_tabs.add_loaded_popup_tab(
-            default_url.clone(),
-            self.browser_profiles.active_profile_id(),
-            cef::BrowserPopupPlacement::Selected,
-        );
-        if let Some(created_tab_id) = created_tab_id {
-            self.reveal_new_browser_tab(created_tab_id);
+        if !self.seed_current_project_browser_tab_if_empty() {
+            let default_url = browser_shell_default_url(
+                self.latest_sidebar_project_snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.browser_home_url.as_deref()),
+            );
+            let created_tab_id = self.browser_tabs.add_loaded_popup_tab(
+                default_url.clone(),
+                self.browser_profiles.active_profile_id(),
+                cef::BrowserPopupPlacement::Selected,
+            );
+            if let Some(created_tab_id) = created_tab_id {
+                self.assign_new_browser_tab_project_machine(created_tab_id);
+                self.reveal_new_browser_tab(created_tab_id);
+            }
+            self.browser_url = default_url;
         }
-        self.browser_url = default_url;
         let pane_id = self.browser_tabs.focused_pane;
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
         self.focus_shell_target(ShellFocusTarget::BrowserPane(pane_id), cx);
@@ -1978,6 +1986,7 @@ impl GhostexGpuiApp {
             self.browser_profiles.active_profile_id(),
             default_url.clone(),
         ) {
+            self.assign_new_browser_tab_project_machine(created_tab_id);
             self.reveal_new_browser_tab(created_tab_id);
             self.browser_url = default_url;
             self.change_active_mode_with_pane_state(TitlebarMode::Browser, cx);
@@ -2109,7 +2118,7 @@ impl GhostexGpuiApp {
         if !self.titlebar_mode_available(TitlebarMode::Browser) {
             return;
         }
-        let popup_tab_id = self.browser_tabs.add_loaded_popup_tab(
+        let popup_tab_id = self.browser_tabs.open_loaded_popup_tab(
             requested_url,
             self.browser_profiles.active_profile_id(),
             placement,
@@ -2267,6 +2276,8 @@ impl GhostexGpuiApp {
         if self.browser_tabs.tabs.len() != 1 || active_tab.state != BrowserTabState::AddressOnly {
             return false;
         }
+        let tab_id = active_tab.id;
+        self.assign_new_browser_tab_project_machine(tab_id);
 
         /*
         CDXC:Browser 2026-07-14:

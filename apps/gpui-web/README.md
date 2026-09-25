@@ -1,17 +1,17 @@
 # Ghostex GPUI in the browser (experiment)
 
-The desktop app's native GPUI UI, compiled to wasm32 and drawn into a `<canvas>` by `gpui_web` (WebGPU, WebGL2 fallback) from the Zed fork in `.dependencies/zed`. It talks to gxserver directly from the page, the same way the React web app does.
+The desktop app's native GPUI UI, compiled to wasm32 and drawn into a `<canvas>` by `gpui_web` (WebGPU, WebGL2 fallback) from the Zed fork in `.dependencies/zed`. It talks to gxserver directly from the page. It is the only web app: the React one (`apps/web`) was deleted on 2026-09-24, and `ghostex web` serves this build.
 
 Status on 2026-09-22: the sidebar, the chat view and the terminal are the desktop's own source files running in Chrome against live gxserver data.
 
 | Surface | What runs | Reused from the desktop |
 | --- | --- | --- |
 | Sidebar | Rows, sections, headers, icons, hover actions, tooltips, collapse (saved to localStorage in the desktop's format), row focus, the row context menu | `app/native_sidebar/*` (all but `actions.rs`), `gx_store/sidebar_snapshot.rs`, `gx-core` for the list, menus, UI state and action plans |
-| Chat | Transcript, markdown, tool rows, composer with typing, image paste (thumbnail and `Image #n` reference), model pill and model picker, More actions menu, the composer's Terminal View button, tooltips, scrollbar, paging of older turns | All 87 files of `app/native_chat/` except five (`binding`, `runtime_worker`, `rpc`, `focus`, `replay_recording`), the TypeScript controller bundle (`native-host.ts`) and the desktop's chat broker (`sidebar/session-chat-runtime/broker.ts`), both unchanged |
+| Chat | Transcript, markdown, tool rows, sending and streaming, question cards, composer with typing, drafts that survive a reload, image paste (thumbnail and `Image #n` reference), model pill and model picker, More actions menu, the composer's Terminal View button, tooltips, scrollbar, paging of older turns, switching chats | All of `app/native_chat/` except four (`binding`, `rpc`, `focus`, `launch`), and the desktop's Rust chat host `app/gx_chat/` on `gx-chat-core` and `packages/gx-chat-client` (all but three files: see below). No TypeScript runs in the chat. |
 | Terminal | Output, colours, Nerd Font glyphs, cursor, keyboard input through Ghostty's key encoder, resize, and an action bar with the desktop's Chat View button | `terminal_element.rs`, `ghostty_vt.rs`, `terminal_wheel.rs`, `terminal_scrollbar_reveal.rs`, the state half of `terminal_model.rs`, and libghostty-vt itself as a static wasm32 archive |
 | Shell | Work area header with breadcrumb and sidebar toggle; chat and terminal switch through their own buttons, as on the desktop. Start, Open, Commit, the more menu and the panel toggles are drawn disabled. Code, Browser, Kanban, Automate and Docs tabs are not drawn | The desktop's constants, palette and icons; the header itself is written here |
 
-Not run against live sessions, on purpose: sending a chat message, Sleep and Wake. They are wired (the send path is the desktop's own; Sleep and Wake go through the core's planner) but would have started or stopped real agents.
+Not run against live sessions, on purpose: Sleep and Wake. They are wired (through the core's planner) but would stop or start real agents. Chat sending, model picks and question answers were run against throwaway sessions on 2026-09-25.
 
 ## Run it
 
@@ -20,14 +20,16 @@ Not run against live sessions, on purpose: sending a chat message, Sleep and Wak
 cargo install wasm-bindgen-cli --version 0.2.125 --locked   # must match the wasm-bindgen in Cargo.lock
 # needs Zig 0.16 (the repo's Zig) for the first build, and bun
 
-# gxserver must be running, and `ghostex web` must be serving on 127.0.0.1:4173 (it hands the page the daemon URL and token)
-cd apps/gpui-web
-./build-wasm.sh --release                                  # ~2 min cold; the debug build works but is 100 MB and slow
-../../node_modules/.bin/vite --config www/vite.config.js   # http://localhost:4174
+# gxserver must be running. From the repository root:
+bun run start:web        # builds the wasm (release, ~2 min cold) and the page into www/dist, then serves it with `ghostex web` on http://127.0.0.1:4173
+
+# for iterating, keep `ghostex web --no-open` running (the page's bootstrap hands it the daemon URL and token), then:
+bun run web:dev          # rebuilds the wasm and starts Vite on http://localhost:4174, which proxies the bootstrap to :4173
 ```
 
+`./build-wasm.sh` without `--release` gives a debug build that works but is 100 MB and slow.
+
 - `http://localhost:4174/?session=<projectId>:<sessionId>&surface=terminal` opens a session directly (ids as in its zmx name, `S90-<projectId>-<sessionId>`).
-- `?chatDebug` logs every chat runtime output to the console.
 - `node shot.mjs out.png --wait 5000 --click 150,240 --type "text" --key Enter --key Control+a --pasteimage <base64 png> --eval "js" --rightclick 150,300 --move x,y --pause ms --url ...` drives the page in headless Chrome over the DevTools protocol, prints the page console and saves a screenshot. It waits in real time; Chrome's `--virtual-time-budget` never delivers the gxserver WebSocket frames.
 
 ## How it is put together
@@ -39,8 +41,8 @@ cd apps/gpui-web
 | `src/lib.rs` prelude | The desktop crate root doubles as a prelude (`use crate::*`), so the same names are re-exported here. |
 | `src/app/web_app.rs` | This build's `GhostexGpuiApp`: the fields and methods the shared code reads, with the browser's answer behind each. |
 | `src/app/gx_store/` | The web store host: `fetch` + one `WebSocket` in place of `packages/gx-client`, and the `gx-core` `Core`, `SidebarViewModel`, `SidebarUiStore`, `SidebarMenus` and action planners. |
-| `src/app/native_chat/runtime_worker.rs` | The chat controller bundle in a hidden same-origin iframe per chat, behind the API of the desktop's QuickJS worker thread. An iframe because the bundle replaces `setTimeout` with virtual timers, which would break the page. It drains in a macrotask, after the page's microtasks, which is what the desktop's "run every pending job, then drain" means in a browser. |
-| `src/app/chat_host.rs` | Runs the desktop's `broker.ts` in the page and relays between it and the chat views, with the payload the desktop's `session_chat_runtime.rs` builds. |
+| `src/app/gx_chat/` | The desktop's chat host, symlinked file by file, with three browser twins: `worker.rs` runs the host on the page's thread (one `setTimeout` for the core's timers, and each view woken in a later macrotask so a view and the host never call each other in one task), `storage_backend.rs` reads and writes the page's `packages/client-storage` (hydrated by `www/src/main.js` before the app starts and exposed as `globalThis.ghostexChatStorage`), and `platform.rs` is the page's clock and `crypto`. The chat socket is `packages/gx-chat-client`'s browser `WebSocket`, the token in its query string. |
+| `src/app/chat_host.rs` | What the app does for a chat view: its presentation cache and the host actions a shell performs. |
 | `src/terminal_model.rs` | The desktop model with its PTY half replaced by gxserver's `/api/terminal` WebSocket. |
 | `src/cef.rs`, `ghostty_kit.rs`, `support_logs.rs`, `shared_settings.rs`, `app/helpers/web.rs`, ... | Same-named stand-ins for native modules the shared files mention. |
 | `component-assets/` | A stand-in `gpui-component-assets` that embeds the icon folder. Upstream's crate becomes an HTTP icon downloader on wasm, which changes its type and fails the first paint of every icon. |
@@ -74,7 +76,8 @@ All are no-ops for native builds; `cargo check --bins` of the desktop crate pass
 
 - **The toolchain is not the hard part.** The pinned 1.95.0 compiler works; `RUSTC_BOOTSTRAP=1` is only needed because `gpui_platform` pulls `gpui_web` with its default `multithreaded` feature. Single-threaded, no COOP/COEP headers, no nightly.
 - **libghostty-vt links statically into a Rust wasm module.** `zig build -Demit-lib-vt -Dtarget=wasm32-freestanding` gives a 1.2 MB archive, and `ghostty_vt.rs` compiles against it unchanged. No second wasm module and no JavaScript glue.
-- **The chat's TypeScript is already host-neutral.** The controller bundle needs nothing but `crypto.randomUUID`, and the broker was written for a browser page. Both run here byte for byte.
+- **The chat host is host-neutral too.** Only its runner, its storage door and its clock differ between the desktop and the page; the rules, the effects, the retention and the socket's routing are the same files.
+- **An idle page stops answering after 30 to 40 seconds in headless Chrome** (2026-09-25): `shot.mjs` screenshots hang with no chat open and with the chat host and client storage switched off, so it is not the chat. Keep a headless run under half a minute until it is found.
 - **`gx-core` pays off.** The list, the menus, the sidebar's own state, its storage formats and the daemon call plans are host-neutral.
 - **What does not port is the migration scaffolding.** Most of `apps/desktop/src/app/gx_store/` keeps the old QuickJS runtime in step. Including the whole folder gives 916 errors; it should stay out.
 - **Debug assertions are off in this crate's dev profile**: gpui's `shape_line` asserts on newlines the shared chat code passes it, and a panic in wasm takes the page down.
@@ -88,7 +91,7 @@ All are no-ops for native builds; `cargo check --bins` of the desktop crate pass
 - The header breadcrumb is empty for a session whose row the sidebar is not drawing (a compact list, a deep link).
 - Colour emoji draw as a missing glyph; SVGs with `color(display-p3 ...)` fills fall back to black in resvg.
 - The terminal has no context menu, and Cmd+C / Cmd+V go through gpui_web's clipboard, which cannot read outside a paste event.
-- A terminal attached here is a visible zmx client with its own grid, like the React web app's, so a desktop pane showing the same session reflows while both are open.
+- A terminal attached here is a visible zmx client with its own grid, so a desktop pane showing the same session reflows while both are open.
 - Sidebar commands not handled yet log `sidebar command not handled on web yet` (close, fork, pin, tags, snooze, drag and drop, rename, project actions). `gx-core` already plans most of them.
 - Settings are empty (`shared_settings::install` is never called), so the chat uses its defaults for theme, zoom and width.
 

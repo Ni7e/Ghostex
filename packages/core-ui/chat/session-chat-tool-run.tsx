@@ -8,7 +8,8 @@ import {
   IconTool,
   IconWorldSearch,
 } from '@tabler/icons-react';
-import { useContext, useRef, type ReactNode } from 'react';
+import { useContext, useRef, useState, type ReactNode } from 'react';
+import { SessionChatDisclosureBody } from './session-chat-disclosure-body';
 import { useSessionChatDisclosureState } from './session-chat-interaction-state';
 import { SessionChatSimpleModeContext } from './session-chat-simple-mode';
 import type { SessionChatToolCallBlock, SessionChatToolResultBlock } from '../../shared/session-chat';
@@ -153,7 +154,7 @@ function ToolLine({
         </button>
         {subagent ? <SessionChatSubagentLink {...subagent} /> : null}
       </div>
-      {hasDetail && open ? (
+      <SessionChatDisclosureBody gap={false} open={hasDetail && open}>
         <SessionChatExpansion
           className='ghostex-chat-work-detail'
           label={`Collapse ${name}`}
@@ -167,7 +168,7 @@ function ToolLine({
             <ToolBody error={result.isError} label={call ? 'Result' : undefined} text={result.output} />
           ) : null}
         </SessionChatExpansion>
-      ) : null}
+      </SessionChatDisclosureBody>
     </div>
   );
 }
@@ -181,6 +182,12 @@ export function SessionChatToolRun({
   const pairs = pairSessionChatToolBlocks(blocks);
   const simpleMode = useContext(SessionChatSimpleModeContext);
   const [expanded, setExpanded] = useSessionChatDisclosureState('tool-run', showAllRows || expandSignal);
+  // The rail stays around the rows while the fold's earlier rows ease shut, and leaves with them.
+  const [closing, setClosing] = useState(false);
+  const collapse = (): void => {
+    setClosing(true);
+    setExpanded(false);
+  };
 
   const exchanges = pairs.map((pair) => (questionPairsAsRows ? null : answeredSessionChatQuestionExchange(pair)));
   const renderItem = (index: number) => {
@@ -205,7 +212,7 @@ export function SessionChatToolRun({
     <button
       aria-expanded={expanded}
       className='ghostex-chat-tool-run-toggle'
-      onClick={() => setExpanded((current) => !current)}
+      onClick={() => (expanded ? collapse() : setExpanded(true))}
       type='button'
     >
       <span className='ghostex-chat-work-icon'>
@@ -217,6 +224,42 @@ export function SessionChatToolRun({
 
   const allRows = pairs.map((_, index) => renderItem(index));
   const collapsedRows = pairs.map((_, index) => (collapsedVisible[index] ? renderItem(index) : null));
+  /*
+   * The rows in order, with each run of folded-away rows inside a body that eases open and shut,
+   * so opening the fold grows the earlier rows into place above the ones already showing and
+   * closing it folds them back, instead of the whole run swapping. The rows the fold keeps stay
+   * where they are; GPUI's tool_run.rs plays the same motion.
+   */
+  const foldedRows: ReactNode[] = [];
+  let chunk: ReactNode[] = [];
+  let chunkStart = 0;
+  const flush = (): void => {
+    if (chunk.length === 0) return;
+    foldedRows.push(
+      <SessionChatDisclosureBody
+        gap={false}
+        key={`fold:${chunkStart}`}
+        onSettled={(settledOpen) => {
+          if (!settledOpen) setClosing(false);
+        }}
+        open={expanded}
+        {...(chunkStart === 0 ? { gapAfter: '0.125rem' } : { gapBefore: '0.125rem' })}
+      >
+        <div className='ghostex-chat-tool-run-expanded'>{chunk}</div>
+      </SessionChatDisclosureBody>
+    );
+    chunk = [];
+  };
+  pairs.forEach((_, index) => {
+    if (collapsedVisible[index]) {
+      flush();
+      foldedRows.push(renderItem(index));
+    } else {
+      if (chunk.length === 0) chunkStart = index;
+      chunk.push(renderItem(index));
+    }
+  });
+  flush();
 
   /** CDXC:SessionChat 2026-09-13 DECISION:
    * User: Simple mode hides the command previews even when no message or reasoning precedes the tools; show only the tool-call count until expanded.
@@ -243,7 +286,7 @@ export function SessionChatToolRun({
               </span>
               <span>{label}</span>
             </button>
-            {expanded ? (
+            <SessionChatDisclosureBody gap={false} gapBefore='0.125rem' open={expanded}>
               <SessionChatExpansion
                 bodyClassName='ghostex-chat-tool-run-expanded'
                 label='Collapse tool calls'
@@ -251,7 +294,7 @@ export function SessionChatToolRun({
               >
                 {work.map(({ index }) => renderItem(index))}
               </SessionChatExpansion>
-            ) : null}
+            </SessionChatDisclosureBody>
           </>
         ) : null}
         {pairs.map((_, index) => (exchanges[index] !== null ? renderItem(index) : null))}
@@ -263,13 +306,13 @@ export function SessionChatToolRun({
     <div className='ghostex-chat-tool-run'>
       {hiddenCount === 0 || showAllRows ? (
         allRows
-      ) : expanded ? (
+      ) : expanded || closing ? (
         <SessionChatExpansion
           bodyClassName='ghostex-chat-tool-run-expanded'
           label='Show fewer tool calls'
-          onCollapse={() => setExpanded(false)}
+          onCollapse={collapse}
         >
-          {allRows}
+          {foldedRows}
           {toggle}
         </SessionChatExpansion>
       ) : (

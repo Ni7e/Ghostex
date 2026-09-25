@@ -358,8 +358,8 @@ fn install_writes_notify_hook_without_payload_content() {
         .get("installedPaths")
         .and_then(Value::as_array)
         .expect("installed paths");
-    // The shared notify hook and the shared Claude statusline script.
-    assert_eq!(installed.len(), 2);
+    // The shared notify hook and the Claude and Cursor statusline scripts.
+    assert_eq!(installed.len(), 3);
     let hook_text = fs::read_to_string(installed[0].as_str().expect("path")).expect("hook");
     assert!(hook_text.contains(NOTIFY_HOOK_MARKER));
     assert!(!hook_text.contains("firstUserMessage"));

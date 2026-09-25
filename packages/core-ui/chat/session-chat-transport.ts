@@ -1,7 +1,7 @@
-import type { SessionChatDraft } from '@/packages/shared/session-chat-queue';
-import type { SessionChatDraftVersion } from '@/packages/shared/session-chat-queue';
-import type { AccountsTransport } from '@/packages/shared/agent-accounts';
-import type { SessionChatPresentationStore } from './session-chat-presentation-cache';
+import type { SessionChatDraft } from "@/packages/shared/session-chat-queue";
+import type { SessionChatDraftVersion } from "@/packages/shared/session-chat-queue";
+import type { AccountsTransport } from "@/packages/shared/agent-accounts";
+import type { SessionChatPresentationStore } from "./session-chat-presentation-cache";
 // Session Chat transport contract.
 // Hosts (ghostex-web, gpui CEF, mobile web views) inject an implementation so
 // the shared chat components never talk to gxserver directly. The transport is
@@ -13,7 +13,7 @@ import type {
   GxserverRewindSessionChatResult,
   GxserverSelectSessionChatModelResult,
   GxserverSessionForkBranchesResult,
-} from '../../shared/gxserver-protocol';
+} from "../../shared/gxserver-protocol";
 import type {
   GxserverAnswerSessionChatPromptParams,
   GxserverQueueSessionChatPromptResult,
@@ -28,11 +28,11 @@ import type {
   GxserverSessionChatQueueResult,
   GxserverSessionChatRemoveQueuedPromptResult,
   SessionChatSendKey,
-} from '../../shared/session-chat';
+} from "../../shared/session-chat";
 
 export interface SessionChatTransport {
   readHistory?(
-    params: import('../../shared/session-chat').SessionChatHistoryReadParams
+    params: import("../../shared/session-chat").SessionChatHistoryReadParams,
   ): Promise<GxserverReadSessionChatResult>;
   accounts?: AccountsTransport;
   /** Per-session bottom-bar state retained by hosts that release inactive chat pages. */
@@ -43,7 +43,10 @@ export interface SessionChatTransport {
   seed?(params: { limit?: number }): Promise<GxserverReadSessionChatResult>;
   /** Refresh a retained subscription without discarding the host's cached transcript. */
   reconnect?(): void;
-  read(params: { limit?: number; beforeOffset?: number }): Promise<GxserverReadSessionChatResult>;
+  read(params: {
+    limit?: number;
+    beforeOffset?: number;
+  }): Promise<GxserverReadSessionChatResult>;
   readSubagent?(params: {
     subagent: string;
     limit?: number;
@@ -74,7 +77,9 @@ export interface SessionChatTransport {
   offering a control whose call would 404. The daemon re-snapshots the chat
   stream itself, so nothing here prunes rows.
   */
-  rewindSessionChat?(params: { messageId: string }): Promise<GxserverRewindSessionChatResult>;
+  rewindSessionChat?(params: {
+    messageId: string;
+  }): Promise<GxserverRewindSessionChatResult>;
   /**
    * Drives Codex's own `/model` picker to `model` + `effort`
    * (`/api/selectSessionChatModel`). Optional on the same gate as everything
@@ -82,10 +87,10 @@ export interface SessionChatTransport {
    * pill keeps its terminal handoff row instead of offering rows it cannot apply.
    */
   selectSessionChatModel?(params: {
-    options?: import('@/packages/shared/session-chat').SessionChatSelectionOptions;
+    options?: import("@/packages/shared/session-chat").SessionChatSelectionOptions;
     model: string;
     effort: string;
-    scope?: import('@/packages/shared/session-chat').SessionChatModelSelectionScope;
+    scope?: import("@/packages/shared/session-chat").SessionChatModelSelectionScope;
     defer?: boolean;
   }): Promise<GxserverSelectSessionChatModelResult>;
   /** Returns an unsubscribe function. Events must already be filtered to this session. */
@@ -102,7 +107,7 @@ export interface SessionChatTransport {
   send(
     text: string,
     imagePaths?: string[],
-    draftVersion?: SessionChatDraftVersion
+    draftVersion?: SessionChatDraftVersion,
   ): Promise<void | { queuedPromptId?: string }>;
   /**
    * Injects a raw keystroke sequence (no text, no Enter) for controls owned by
@@ -116,7 +121,10 @@ export interface SessionChatTransport {
    * without an upload path (e.g. the mobile WebView) omit this, which
    * disables the composer's image paste.
    */
-  saveImage?(params: { base64Data: string; suggestedName?: string }): Promise<GxserverSaveSessionChatImageResult>;
+  saveImage?(params: {
+    base64Data: string;
+    suggestedName?: string;
+  }): Promise<GxserverSaveSessionChatImageResult>;
   /**
    * Saves any attached file's bytes into Ghostex storage on the session's machine
    * and returns the absolute path for the "[File #N](path)" reference. Hosts
@@ -137,13 +145,15 @@ export interface SessionChatTransport {
    * log thumbnails and image links open through it). Hosts without it fall
    * back to non-clickable chips.
    */
-  loadImage?(params: { path: string }): Promise<GxserverReadSessionChatImageResult>;
+  loadImage?(params: {
+    path: string;
+  }): Promise<GxserverReadSessionChatImageResult>;
   /**
    * Opens the host's native file/folder picker and resolves with absolute
    * paths on the session's machine (gpui). Hosts without one omit it and the
    * attach button uses a browser file input + upload instead.
    */
-  pickAttachmentPaths?(): Promise<string[]>;
+  pickAttachmentPaths?(selection?: "files" | "folders"): Promise<string[]>;
   /**
    * Absolute paths of the OS drag currently over this surface, captured by
    * the host shell at drag-enter (gpui — Chromium never exposes `File.path`
@@ -156,11 +166,17 @@ export interface SessionChatTransport {
    * has no download handler to write through). Hosts without one omit it and
    * the image viewer's "Save image" uses a browser download instead.
    */
-  saveImageAs?(params: { base64Data: string; suggestedName: string }): Promise<void>;
+  saveImageAs?(params: {
+    base64Data: string;
+    suggestedName: string;
+  }): Promise<void>;
   /** Lists existing project Markdown paths used to choose a non-colliding save name. */
   listMessageMarkdownPaths?(): Promise<readonly string[]>;
   /** Saves a final assistant response inside the session project's Docs tree. */
-  saveMessageMarkdown?(params: { content: string; path: string }): Promise<{ path: string }>;
+  saveMessageMarkdown?(params: {
+    content: string;
+    path: string;
+  }): Promise<{ path: string }>;
   /*
   CDXC:SessionChat 2026-08-26:
   The evidence behind a `composerNotReady` send refusal: the daemon's composer
@@ -181,8 +197,17 @@ export interface SessionChatTransport {
   daemon refuses the call once the draft has been promoted, and that rejection
   is surfaced, never swallowed.
   */
-  switchDraftAgent?(params: { agentId: string; agentModel?: string; agentEffort?: string }): Promise<void>;
-  answerPrompt(params: Omit<GxserverAnswerSessionChatPromptParams, 'projectId' | 'sessionId'>): Promise<void>;
+  switchDraftAgent?(params: {
+    agentId: string;
+    agentModel?: string;
+    agentEffort?: string;
+  }): Promise<void>;
+  answerPrompt(
+    params: Omit<
+      GxserverAnswerSessionChatPromptParams,
+      "projectId" | "sessionId"
+    >,
+  ): Promise<void>;
   interrupt(): Promise<void>;
   /*
   Ghostex prompt queue + synced composer draft (plan 016). Every method here is
@@ -216,19 +241,25 @@ export interface SessionChatTransport {
    * Deletes a row and returns it, so Edit can pull the removed text into the
    * composer in the same round trip. Hosts without it hide Delete and Edit.
    */
-  removeQueuedPrompt?(params: { promptId: string }): Promise<GxserverSessionChatRemoveQueuedPromptResult>;
+  removeQueuedPrompt?(params: {
+    promptId: string;
+  }): Promise<GxserverSessionChatRemoveQueuedPromptResult>;
   /**
    * Commits a drag-to-reorder with the full id list, head first. Hosts without
    * it render the rows without drag handles instead of animating a reorder
    * that the server would never persist.
    */
-  reorderQueue?(params: { promptIds: string[] }): Promise<GxserverSessionChatQueueResult>;
+  reorderQueue?(params: {
+    promptIds: string[];
+  }): Promise<GxserverSessionChatQueueResult>;
   /**
    * "Send now": delivers one row immediately regardless of agent state, exactly
    * like pressing Enter. Hosts without it hide the per-row Send now control;
    * the row still drains on its own at the next idle window.
    */
-  sendQueuedPrompt?(params: { promptId: string }): Promise<GxserverSendSessionChatQueuedPromptResult>;
+  sendQueuedPrompt?(params: {
+    promptId: string;
+  }): Promise<GxserverSendSessionChatQueuedPromptResult>;
   /**
    * Pushes the unsent composer text to gxserver so other devices see it.
    * Called on blur / session switch / unmount / backgrounding, never per

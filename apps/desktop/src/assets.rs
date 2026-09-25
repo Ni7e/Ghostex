@@ -2,7 +2,6 @@ use anyhow::anyhow;
 use gpui::{AssetSource, Result, SharedString};
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
-use std::{collections::BTreeMap, sync::LazyLock};
 
 #[path = "assets/chat_message_actions.rs"]
 mod chat_message_actions;
@@ -11,17 +10,11 @@ mod chat_references;
 #[path = "assets/chat_working.rs"]
 pub(crate) mod chat_working;
 
-static MODEL_PICKER_ARTWORK: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
-    serde_json::from_str(include_str!(
-        "../../../packages/shared/session-chat-presentation/model-picker-artwork.json"
-    ))
-    .expect("shared model picker artwork must contain SVG strings")
-});
-
 #[derive(RustEmbed)]
 #[folder = "assets"]
 #[include = "titlebar/**/*.svg"]
 #[include = "modals/**/*.svg"]
+#[include = "docs/**/*.svg"]
 struct GhostexEmbeddedAssets;
 
 #[derive(RustEmbed)]
@@ -51,13 +44,8 @@ impl AssetSource for GhostexAssets {
                 .map(|svg| Some(Cow::Owned(svg.into_bytes())))
                 .ok_or_else(|| anyhow!("unknown working strip asset {key:?}"));
         }
-        if let Some(key) = path.strip_prefix("model-picker/") {
-            return MODEL_PICKER_ARTWORK
-                .get(key)
-                .map(|svg| Some(Cow::Borrowed(svg.as_bytes())))
-                .ok_or_else(|| anyhow!("could not find shared model picker artwork {key:?}"));
-        }
-        if path.starts_with("titlebar/") || path.starts_with("modals/") {
+        if path.starts_with("titlebar/") || path.starts_with("modals/") || path.starts_with("docs/")
+        {
             return GhostexEmbeddedAssets::get(path)
                 .map(|asset| Some(asset.data))
                 .ok_or_else(|| anyhow!("could not find embedded Ghostex asset at path {path:?}"));

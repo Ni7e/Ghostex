@@ -216,7 +216,7 @@ fn is_table_delimiter_row(line: &str) -> bool {
 }
 
 /// React's `sessionChatTableToCsv`: the cells as they read, quoted only when they have to be.
-fn table_csv(source: &str) -> String {
+pub(super) fn table_csv(source: &str) -> String {
     source
         .lines()
         .filter(|line| line.contains('|') && !is_table_delimiter_row(line))
@@ -239,7 +239,7 @@ fn table_csv(source: &str) -> String {
 }
 
 /// One button in the table's toolbar.
-fn table_action(
+pub(super) fn table_action(
     id: &'static str,
     icon: &'static str,
     p: &ChatAppearance,
@@ -271,17 +271,55 @@ fn table_action(
         .into_any_element()
 }
 
+/// A copy button in the table's toolbar, named for the format it copies.
+///
+/// CDXC:SessionChat 2026-09-24 DECISION:
+/// The two copy buttons "both just copy but one as csv and one as md, which isn't clear from the icons, maybe write md and csv next to the icons": both show the copy icon with the format written beside it.
+pub(super) fn table_copy_action(
+    id: &'static str,
+    format: &'static str,
+    p: &ChatAppearance,
+    click: impl Fn(&mut gpui::App) + 'static,
+) -> AnyElement {
+    let s = p.scale;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(3.0 * s))
+        .h(px(22.0 * s))
+        .px(px(5.0 * s))
+        .rounded(px(6.0 * s))
+        .chat_cursor_pointer()
+        .hover(|style| style.bg(p.border.opacity(0.7)))
+        .child(
+            svg()
+                .path("titlebar/copy.svg")
+                .size(px(14.0 * s))
+                .text_color(p.muted)
+                .flex_shrink_0(),
+        )
+        .child(
+            div()
+                .text_size(px(11.0 * s))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(p.muted)
+                .child(format),
+        )
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            click(cx)
+        })
+        .into_any_element()
+}
+
 /// The right-aligned toolbar under a table: what a reader can do with it.
 ///
 /// It keeps its row of space and fades in with the pointer, because a two-by-two
-/// table of short cells is the common case and deserves no chrome at all. The
-/// same four things React offers (session-chat-markdown.tsx): open it in the
-/// table modal, fit its columns to the pane or let them keep their width and
-/// scroll, and copy it as Markdown or as CSV.
+/// table of short cells is the common case and deserves no chrome at all. It
+/// opens the table in the larger preview, and copies it as Markdown or as CSV.
 fn table_actions(
-    key: String,
     source: String,
-    fitted: bool,
     chat: &gpui::WeakEntity<NativeChatView>,
     p: &ChatAppearance,
 ) -> AnyElement {
@@ -289,7 +327,6 @@ fn table_actions(
     let markdown = source.clone();
     let csv = source.clone();
     let open_chat = chat.clone();
-    let fit_chat = chat.clone();
     div()
         .flex()
         .justify_end()
@@ -303,48 +340,21 @@ fn table_actions(
             p,
             move |cx| {
                 let source = source.clone();
-                let _ = open_chat.update(cx, |_, cx| {
-                    cx.emit(super::state::NativeChatEvent::Host(
-                        json!({"type":"open","modal":"markdownTable","source":source}),
-                    ));
-                });
+                let _ = open_chat.update(cx, |chat, cx| chat.open_table_preview(source, cx));
             },
         ))
-        .child(table_action(
-            "fit-table",
-            if fitted {
-                "titlebar/arrows-diagonal-expand.svg"
-            } else {
-                "titlebar/arrows-diagonal-minimize.svg"
-            },
-            p,
-            move |cx| {
-                let key = key.clone();
-                let _ = fit_chat.update(cx, |chat, cx| chat.set_table_fit(key, !fitted, cx));
-            },
-        ))
-        .child(table_action(
-            "copy-table",
-            "titlebar/copy.svg",
-            p,
-            move |cx| {
-                crate::app::helpers::gpui_copy_to_clipboard(
-                    ClipboardItem::new_string(markdown.clone()),
-                    cx,
-                );
-            },
-        ))
-        .child(table_action(
-            "copy-table-csv",
-            "titlebar/layout-columns.svg",
-            p,
-            move |cx| {
-                crate::app::helpers::gpui_copy_to_clipboard(
-                    ClipboardItem::new_string(table_csv(&csv)),
-                    cx,
-                );
-            },
-        ))
+        .child(table_copy_action("copy-table", "MD", p, move |cx| {
+            crate::app::helpers::gpui_copy_to_clipboard(
+                ClipboardItem::new_string(markdown.clone()),
+                cx,
+            );
+        }))
+        .child(table_copy_action("copy-table-csv", "CSV", p, move |cx| {
+            crate::app::helpers::gpui_copy_to_clipboard(
+                ClipboardItem::new_string(table_csv(&csv)),
+                cx,
+            );
+        }))
         .into_any_element()
 }
 
@@ -366,26 +376,6 @@ impl NativeChatView {
         cx.notify();
     }
 
-    /// The reader asked one table to fit the pane instead of keeping its column widths.
-    ///
-    /// React's collapsed table caps its cells and ellipsizes them; the native table has the same
-    /// two readings, as the column algorithm that wraps to the pane's width and the one that keeps
-    /// content widths and scrolls sideways.
-    pub(super) fn set_table_fit(
-        &mut self,
-        key: String,
-        fitted: bool,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if fitted {
-            self.table_collapsed.insert(key);
-        } else {
-            self.table_collapsed.remove(&key);
-        }
-        self.list.remeasure();
-        cx.notify();
-    }
-
     fn text_view(
         &self,
         id: String,
@@ -401,11 +391,18 @@ impl NativeChatView {
         let mut style = super::markdown_style::text_style(p);
         style.is_dark = !p.light;
         style.highlight_theme = Some(super::markdown_style::highlight_theme(p.light));
-        // A table the reader asked to fit the pane proportions its columns to
-        // the width it has instead of keeping them and scrolling sideways.
-        if self.table_collapsed.contains(&id) {
-            style.table.overflow.x = None;
+        // React's `--chat-table-cell-max`, min(24rem, 60cqw): one long cell cannot claim the
+        // whole row, and a narrow pane lowers the cap so a wide table usually just fits.
+        let pane_width = f32::from(self.bounds.get().size.width);
+        let mut cell_max = 384.0 * p.scale;
+        if pane_width > 0.0 {
+            cell_max = cell_max.min(pane_width * 0.6);
         }
+        style.table_cell_max_width = Some(px(cell_max));
+        // CDXC:SessionChat 2026-09-25 DECISION: collapsed cells cut their text off, so the user
+        // took the option away: every table wraps its cells inside the capped columns, and a table
+        // wider than the pane scrolls sideways. Supersedes the 2026-09-24 collapse toggle.
+        style.table_wrap_cells = true;
         let references = super::markdown_links::presentations(references, p);
         let header_id = id.clone();
         let wrap_id = id.clone();
@@ -479,13 +476,7 @@ impl NativeChatView {
                     .min_w_0()
                     .gap(px(2.0 * s))
                     .child(self.text_view(key.clone(), source.clone(), references, p, cx))
-                    .child(table_actions(
-                        key.clone(),
-                        source.clone(),
-                        self.table_collapsed.contains(&key),
-                        &cx.weak_entity(),
-                        p,
-                    ))
+                    .child(table_actions(source.clone(), &cx.weak_entity(), p))
                     .into_any_element()
             }
             // The air around an inline picture is the picture's own margin, exactly as React's

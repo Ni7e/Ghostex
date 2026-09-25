@@ -52,6 +52,7 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) {
         self.invoke(json!({"type":"searchOpen"}), cx);
+        self.search_pending_open = Some(true);
         self.ensure_search_input(window, cx);
         if let Some(input) = self.search_input.clone() {
             let end = input.read(cx).value().len();
@@ -94,7 +95,17 @@ impl NativeChatView {
         true
     }
 
+    /// Whether the find bar is shown.
+    ///
+    /// CDXC:SessionChat 2026-09-24 WHY:
+    /// `searchOpen` and `searchClose` reach the shared runtime asynchronously, so for a frame or more the snapshot still reports the old state. Rendering from the snapshot alone dropped the field Cmd+F had just focused (and briefly revived it after Escape), which sent the next keystrokes to the composer. The pane's own request wins until the snapshot catches up.
+    pub(super) fn search_open(&self) -> bool {
+        self.search_pending_open
+            .unwrap_or(self.snapshot["transcriptSearch"]["open"] == true)
+    }
+
     fn close_search(&mut self, cx: &mut Context<Self>) {
+        self.search_pending_open = Some(false);
         self.search_input = None;
         self.search_subscription = None;
         self.search_scrolled_revision = -1;
@@ -159,7 +170,11 @@ impl NativeChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.snapshot["transcriptSearch"]["open"] != true {
+        let snapshot_open = self.snapshot["transcriptSearch"]["open"] == true;
+        if self.search_pending_open == Some(snapshot_open) {
+            self.search_pending_open = None;
+        }
+        if !self.search_open() {
             if self.search_input.is_some() {
                 self.search_input = None;
                 self.search_subscription = None;

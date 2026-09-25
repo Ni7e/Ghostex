@@ -1372,8 +1372,6 @@ impl GhostexGpuiApp {
             let window_configuration_matches = handle
                 .update(cx, |host, _modal_window, _cx| {
                     host.current_modal.uses_react_modal_host() == modal.uses_react_modal_host()
-                        && (host.current_modal == GpuiAppModalKind::ModelPicker)
-                            == (modal == GpuiAppModalKind::ModelPicker)
                         && host.current_modal.has_titlebar() == modal.has_titlebar()
                         && host.current_modal.is_resizable() == modal.is_resizable()
                         && (modal.uses_react_modal_host() || host.current_modal == modal)
@@ -1404,7 +1402,9 @@ impl GhostexGpuiApp {
                     );
                     modal_window.resize(window_size);
                     modal_window.set_window_title(
-                        if cfg!(target_os = "windows") || modal.has_titlebar() {
+                        if cfg!(any(target_os = "windows", target_os = "linux"))
+                            || modal.has_titlebar()
+                        {
                             &window_title
                         } else {
                             ""
@@ -1427,14 +1427,7 @@ impl GhostexGpuiApp {
         }
 
         let mut extension_bridge_surface = None;
-        let url = if modal == GpuiAppModalKind::ModelPicker {
-            let Ok(url) =
-                gpui_cef_html_entry_url("GHOSTEX_GPUI_MODEL_PICKER_URL", "model-picker.html")
-            else {
-                return;
-            };
-            url
-        } else if modal.uses_react_modal_host() {
+        let url = if modal.uses_react_modal_host() {
             let Some(url) = app_modal_host_url().ok() else {
                 if let Some(window) = source_window {
                     window.push_notification(
@@ -1477,6 +1470,8 @@ impl GhostexGpuiApp {
         ));
         let options = WindowOptions {
             kind: crate::app::window::popup_frame::child_window_kind(),
+            #[cfg(target_os = "linux")]
+            x11_parent: self.main_window_handle,
             window_bounds: Some(window_bounds),
             app_id: gpui_platform_window_app_id(),
             focus: true,
@@ -1525,14 +1520,21 @@ impl GhostexGpuiApp {
             .and_then(serde_json::Value::as_array)
             .is_some_and(|projects| !projects.is_empty());
         let main_window_native_view = self.parent_ns_view;
+        let window_border = self.gpui_native_modal_palette().window_border();
         self.app_modal_window = cx
             .open_window(options, |modal_window, cx| {
                 if !modal.has_titlebar() {
-                    modal_window.set_window_title(if cfg!(target_os = "windows") {
-                        &window_title
-                    } else {
-                        ""
-                    });
+                    crate::app::window::popup_frame::frame_app_modal_window(
+                        modal_window,
+                        window_border,
+                    );
+                    modal_window.set_window_title(
+                        if cfg!(any(target_os = "windows", target_os = "linux")) {
+                            &window_title
+                        } else {
+                            ""
+                        },
+                    );
                 }
                 modal_window.activate_window();
                 /*
@@ -1940,6 +1942,7 @@ impl GhostexGpuiApp {
         &self,
         mut message: serde_json::Value,
     ) -> serde_json::Value {
+        message = self.with_remote_project_action_rows(message);
         /*
         CDXC:CommandPane 2026-06-25-10:50:
         App-modal sidebar hydrates must carry the same command-session indicators as the live GPUI sidebar HUD. Reuse the sanitized command-pane summary and gxserver command rows; never compute from command text, paths, status-file paths, terminal output, logs, or persisted shell-state JSON.
@@ -2155,7 +2158,8 @@ impl GhostexGpuiApp {
         let Some(handle) = self.app_modal_window.clone() else {
             return;
         };
-        let sidebar_state_message = self.with_project_view_scope_options(sidebar_state_message);
+        let sidebar_state_message =
+            self.with_gpui_command_pane_sidebar_indicators(sidebar_state_message);
         let update_result = handle.update(cx, |host, modal_window, cx| {
             host.refresh_sidebar_state_message(sidebar_state_message.clone(), cx);
             modal_window.refresh();
@@ -2176,18 +2180,17 @@ impl GhostexGpuiApp {
         */
         let Some(handle) = self.app_modal_window.clone() else {
             /*
-            CDXC:AppModal 2026-09-20 WHY:
-            Quick Access is a native GPUI window now, and its controller lives in the sidebar
-            runtime rather than in a modal-host page. Its answers (recent projects, saved prompts,
-            previous sessions, transcript sizes) reach it through the sidebar host-message bridge,
-            which re-emits them on the runtime's own message source.
+            CDXC:AppModal 2026-09-25 WHY:
+            Quick Access is a native GPUI window with no modal-host page; its model is gx-core's
+            (apps/desktop/src/app/quick_access/host.rs). Its answers (recent projects, saved
+            prompts, previous sessions, transcript sizes) go straight to that model.
             */
             if self
                 .native_app_modal_kind()
                 .and_then(crate::app::window::quick_access::QuickAccessTabId::from_modal_kind)
                 .is_some()
             {
-                self.dispatch_gpui_sidebar_host_message(payload, cx);
+                self.quick_access_receive(payload, cx);
             }
             return;
         };

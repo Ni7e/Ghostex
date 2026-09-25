@@ -944,8 +944,11 @@ export function SettingsModal({
     chooseAppIconFile,
     chooseTerminalBackgroundImageFile,
     chooseWindowGlassImageFile,
+    chooseWindowGlassVideoFile,
     nativeFilePickerAvailable,
     selectAppIcon,
+    windowGlassVideoError,
+    windowGlassVideos,
   } = useAppIconSettings({
     appIconPickerUnavailable,
     appIconState,
@@ -1241,7 +1244,7 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.sidebar, 'showProjectIcons') ? (
                               <ToggleField
                                 checked={draft.showProjectIcons}
-                                description='Show project artwork or a folder or worktree icon beside project names.'
+                                description='Show project artwork or a square with the project’s first letter beside project names.'
                                 label='Show project icons'
                                 {...getSettingModificationProps('showProjectIcons')}
                                 onChange={(checked) => updateDraft('showProjectIcons', checked)}
@@ -2140,8 +2143,8 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.terminal, 'showQuickModelPickerInTerminal') ? (
                               <ToggleField
                                 checked={draft.showQuickModelPickerInTerminal}
-                                label='Show quick model & effort picker for Claude and Codex in terminal view'
-                                description='Use the model picker shortcut in terminal view. Turn off to let the terminal handle that shortcut.'
+                                label='Model picker in terminal view'
+                                description='Show a model button in the terminal bar and open the model picker with its shortcut. Turn off to let the terminal handle that shortcut.'
                                 {...getSettingModificationProps('showQuickModelPickerInTerminal')}
                                 onChange={(checked) => updateDraft('showQuickModelPickerInTerminal', checked)}
                               />
@@ -2732,6 +2735,9 @@ export function SettingsModal({
                       appIconState={appIconState}
                       chooseAppIconFile={chooseAppIconFile}
                       chooseWindowGlassImageFile={chooseWindowGlassImageFile}
+                      chooseWindowGlassVideoFile={chooseWindowGlassVideoFile}
+                      windowGlassVideoError={windowGlassVideoError}
+                      windowGlassVideos={windowGlassVideos}
                       draft={draft}
                       getSettingModificationProps={getSettingModificationProps}
                       nativeFilePickerAvailable={nativeFilePickerAvailable}
@@ -2942,6 +2948,7 @@ export function SettingsModal({
                         'expandCollapsedProjectsOnJump'
                       )}
                       hotkeys={draft.hotkeys}
+                      preferredAgentInterface={draft.preferredAgentInterface}
                       sectionRefs={hotkeySectionRefs}
                       sectionSearches={hotkeySectionSearches}
                       showLessForExpandedProjectJumps={draft.showLessForExpandedProjectJumps}

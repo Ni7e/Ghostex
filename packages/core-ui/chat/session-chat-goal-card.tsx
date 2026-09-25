@@ -7,6 +7,7 @@ Since 2026-09-16 the shape is the shared status card and the card leads with a t
 
 import { useLayoutEffect, useRef, useState } from 'react';
 import { IconTarget } from '@tabler/icons-react';
+import { useSessionChatHeightTransition } from './session-chat-height-transition';
 import { cn } from '@/packages/components/utils';
 import {
   SessionChatStatusCard,
@@ -35,6 +36,7 @@ export function SessionChatGoalCard({ objective, status, usage }: SessionChatGoa
   const [overflows, setOverflows] = useState(false);
   const objectiveRef = useRef<HTMLParagraphElement>(null);
   const text = objective.trim();
+  useSessionChatHeightTransition(objectiveRef, expanded);
 
   // The chevron only appears when the clamp actually hides text.
   useLayoutEffect(() => {

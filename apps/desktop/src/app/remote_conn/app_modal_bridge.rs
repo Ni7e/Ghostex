@@ -142,6 +142,12 @@ impl GhostexGpuiApp {
             "pickWindowGlassImageFile" => {
                 self.handle_gpui_pick_window_glass_image_message(&message, cx);
             }
+            "listWindowGlassVideos" => {
+                self.handle_gpui_list_window_glass_videos_message(cx);
+            }
+            "pickWindowGlassVideoFile" => {
+                self.handle_gpui_pick_window_glass_video_message(&message, cx);
+            }
             "pickFirstLaunchProjectFolder" => {
                 self.handle_gpui_pick_first_launch_project_folder_message(cx);
             }
@@ -166,11 +172,6 @@ impl GhostexGpuiApp {
             "probeRemoteGxserverInstall" => {
                 if let Some(command) = message.as_object() {
                     self.handle_gpui_probe_remote_gxserver_install_message(command, cx);
-                }
-            }
-            "remoteGxserverSubscribePresentation" => {
-                if let Some(command) = message.as_object() {
-                    self.handle_gpui_remote_gxserver_subscribe_presentation_message(command, cx);
                 }
             }
             "browseRemoteProjectDirectories" => {
@@ -238,85 +239,6 @@ impl GhostexGpuiApp {
             }
             "sidebarCommand" => {
                 self.handle_gpui_app_modal_sidebar_command(message, window, cx);
-            }
-            "projectWorktreesResult" => {
-                // The sidebar runtime answers the Worktree modal's existing
-                // worktree/branch list request through the app-modal host, the
-                // same route macOS uses. Forward only the shared result fields
-                // into the open modal window.
-                let Some(request_id) = message
-                    .get("requestId")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|request_id| !request_id.trim().is_empty())
-                else {
-                    return;
-                };
-                let mut result = serde_json::json!({
-                    "ok": message.get("ok").and_then(serde_json::Value::as_bool) == Some(true),
-                    "requestId": request_id,
-                    "type": "projectWorktreesResult",
-                });
-                if let Some(error) = message.get("error").and_then(serde_json::Value::as_str) {
-                    result["error"] = serde_json::json!(error);
-                }
-                if let Some(branches) = message.get("branches").filter(|value| value.is_array()) {
-                    result["branches"] = branches.clone();
-                }
-                if let Some(worktrees) = message.get("worktrees").filter(|value| value.is_array()) {
-                    result["worktrees"] = worktrees.clone();
-                }
-                self.dispatch_open_gpui_app_modal_message(result, cx);
-            }
-            "exportSessionTranscriptResult" => {
-                /*
-                CDXC:TranscriptExport 2026-08-24:
-                The sidebar runtime's answer to the Export Transcript dialog's
-                `runExportSessionTranscript` request. Forward only the shared
-                result fields into the open modal window, and capture the
-                exported path for Reveal in Finder here — the same Rust-held
-                state the dialog's old done-stage open message used to seed —
-                so Reveal never trusts a path posted back by the modal page.
-                */
-                let Some(request_id) = message
-                    .get("requestId")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|request_id| {
-                        !request_id.trim().is_empty() && request_id.chars().count() <= 128
-                    })
-                else {
-                    return;
-                };
-                let ok = message.get("ok").and_then(serde_json::Value::as_bool) == Some(true);
-                let can_reveal = message
-                    .get("canReveal")
-                    .and_then(serde_json::Value::as_bool)
-                    == Some(true);
-                let path = message
-                    .get("path")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|path| !path.trim().is_empty());
-                self.pending_export_transcript_reveal_path = (ok && can_reveal)
-                    .then(|| path.map(str::to_string))
-                    .flatten();
-                let mut result = serde_json::json!({
-                    "canReveal": can_reveal,
-                    "ok": ok,
-                    "requestId": request_id,
-                    "type": "exportSessionTranscriptResult",
-                });
-                if let Some(path) = path {
-                    result["path"] = serde_json::json!(path);
-                }
-                if let Some(agent_id) = message.get("agentId").and_then(serde_json::Value::as_str) {
-                    result["agentId"] = serde_json::json!(agent_id);
-                }
-                if let Some(error) = message.get("error").and_then(serde_json::Value::as_str) {
-                    result["error"] = serde_json::json!(error);
-                }
-                if self.receive_gpui_export_transcript_result(&result, cx) {
-                    return;
-                }
-                self.dispatch_open_gpui_app_modal_message(result, cx);
             }
             "firstLaunchCreateProjectSessionResult" => {
                 let Some(command) = message.as_object() else {
@@ -433,11 +355,6 @@ impl GhostexGpuiApp {
             return;
         };
 
-        if message_type == "sessionChatRuntimeBroker" {
-            self.receive_session_chat_runtime_broker(&message, cx);
-            return;
-        }
-
         match message_type {
             "sidebarDiagnosticLog" => {
                 let Some(scenario_id) = message
@@ -466,9 +383,6 @@ impl GhostexGpuiApp {
             }
             navigation_history::NAVIGATION_HISTORY_STATE_MESSAGE_TYPE => {
                 self.receive_navigation_history_state_message(&message, cx);
-            }
-            notification_feed::NOTIFICATION_FEED_STATE_MESSAGE_TYPE => {
-                self.receive_notification_feed_state_message(&message, cx);
             }
             "runProcess" => {
                 self.receive_gpui_titlebar_native_host_run_process(message, cx);
@@ -508,16 +422,8 @@ impl GhostexGpuiApp {
                 let state = state.clone();
                 self.gx_store_receive_workspace_groups_hand_off(&state, cx);
             }
-            "primaryAgentLauncherChanged" => {
-                self.sidebar_primary_agent_launcher_id = message["agentId"]
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|agent_id| !agent_id.is_empty() && agent_id.len() <= 128)
-                    .map(str::to_string);
-            }
             // The sidebar's own Load Sessions row reaches the same three steps without this
             // bridge since M5 (gx_store/sidebar_open.rs), so they are one function.
-            "startGxserverFromTitlebar" => self.start_local_gxserver_from_sidebar(cx),
             "accountSwitchProgress" => {
                 let (Some(project_id), Some(session_id)) =
                     (message["projectId"].as_str(), message["sessionId"].as_str())

@@ -35,9 +35,9 @@ fn source_code_server_spawn_host_runtime(
         target.endpoint,
         SourceCodeServerRuntimeEndpoint::Remote { .. }
     ) {
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         return source_code_server_spawn_remote_runtime(target, startup_deadline);
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
         return Err("Remote Source runtime is unavailable from this SSH host.".to_string());
     }
     if source_code_server_health_check() {
@@ -132,6 +132,12 @@ pub(crate) fn source_code_server_spawn_runtime(
     settings: &SourceCodeServerRuntimeSettings,
     startup_deadline: Instant,
 ) -> Result<SourceCodeServerRuntimeStartOutput, String> {
+    if matches!(
+        target.endpoint,
+        SourceCodeServerRuntimeEndpoint::Remote { .. }
+    ) {
+        return source_code_server_spawn_remote_runtime(target, startup_deadline);
+    }
     if windows_terminal_backend::current_preference()
         == windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell
     {

@@ -10,14 +10,6 @@ use crate::extras::activity::compute_activity_at;
 use crate::extras::working_words::pick_working_word;
 use crate::state::{ChatContext, ChatState, WorkingWordState};
 
-/// How long a session must stay continuously non-working before a transcript settles (folds its
-/// newest turn into "Worked for Xs").
-///
-/// The live status flaps around turn boundaries and each false blip would flash the fold in and
-/// out, so the rule lives here and both transcripts read it: React through
-/// `use-session-chat-working-hold.ts`, the native chat through the subagent viewer.
-pub const SETTLE_HOLD_MS: f64 = 8_000.0;
-
 /// Re-draws the stint word the way `useState(pick)` plus `useEffect(..., [working])` does.
 ///
 /// The initializer's draw is made once and then immediately replaced whenever the first

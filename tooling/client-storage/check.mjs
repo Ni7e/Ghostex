@@ -14,7 +14,6 @@ const roots = [
   'apps/desktop/src',
   'apps/desktop/native',
   'apps/mobile/views',
-  'apps/web/src',
   'apps/editor/web',
 ];
 const excluded = new Set([

@@ -31,7 +31,12 @@ pub(crate) fn project_session_sections(
         .iter()
         .map(|session| section_of(&session.row, enable_parking, now_ms))
         .collect();
-    let is_collapsed = |index: usize| collapse.get(section_by_session[index]);
+    // A group whose only section is Sessions draws no heading for it, so nothing could expand it
+    // again: its stored collapse is ignored until another section shows up.
+    let lone_sessions = section_by_session
+        .iter()
+        .all(|section| *section == SectionId::Sessions);
+    let is_collapsed = |index: usize| !lone_sessions && collapse.get(section_by_session[index]);
     let countable: Vec<usize> = (0..sessions.len())
         .filter(|index| !is_collapsed(*index))
         .collect();
@@ -58,7 +63,7 @@ pub(crate) fn project_session_sections(
             let row = |index: &usize| -> &Arc<SessionRow> { &sessions[*index].row };
             Some(SectionView {
                 id,
-                collapsed: collapse.get(id),
+                collapsed: !lone_sessions && collapse.get(id),
                 count: members.len(),
                 contains_active_session: is_active_group
                     && members.iter().any(|index| sessions[*index].is_focused),
@@ -71,6 +76,10 @@ pub(crate) fn project_session_sections(
                     .filter(|index| {
                         row(index).activity == "attention" && row(index).pending_question_count == 0
                     })
+                    .count(),
+                background_work_count: members
+                    .iter()
+                    .filter(|index| row(index).shows_background_work())
                     .count(),
                 question_count: members
                     .iter()

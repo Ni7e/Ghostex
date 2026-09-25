@@ -28,9 +28,9 @@ impl NativeChatView {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.snapshot["contextEditor"].is_null() {
+        if self.pane_hidden || self.snapshot["contextEditor"].is_null() {
             if let Some(handle) = self.context_editor_window.handle.take() {
-                let main = self.main_window;
+                let main = self.main_window.filter(|_| !self.pane_hidden);
                 let chat = cx.weak_entity();
                 cx.defer(move |cx| {
                     let _ = handle.update(cx, |_, window, _| window.remove_window());
@@ -65,6 +65,8 @@ impl NativeChatView {
                 (bounds,crate::app::window::popup_frame::display_at(bounds.center(),cx).or_else(||window.display(cx).map(|display|display.id())))
             }).and_then(|(bounds,display_id)| cx.open_window(WindowOptions {
                 kind: crate::app::window::popup_frame::child_window_kind(),
+                #[cfg(target_os = "linux")]
+                x11_parent: Some(main),
                 window_bounds:Some(WindowBounds::Windowed(bounds)),display_id,
                 app_id:crate::gpui_platform_window_app_id(),icon:crate::gpui_platform_window_icon(),
                 focus:true,show:true,is_resizable:false,is_minimizable:false,is_movable:false,titlebar:None,

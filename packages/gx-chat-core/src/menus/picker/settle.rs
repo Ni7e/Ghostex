@@ -16,7 +16,9 @@ use crate::menus::context::preferences::{context_preferences_key, parse_preferen
 use crate::menus::context::status::ContextDetailsAgent;
 use crate::menus::picker::favorites::{parse_model_favorites, MODEL_FAVORITES_STORE};
 use crate::menus::picker::fork_branches::ForkBranch;
-use crate::menus::picker::model_picker::ModelPickerSelection;
+use crate::menus::picker::model_picker::{
+    ModelPickerRequest, ModelPickerSelection, ModelSelectionScope,
+};
 use crate::menus::picker::selection::{model_selection_unchanged, MODEL_OUTBOX_RETRY_MS};
 use crate::state::{ChatContext, ChatState};
 use crate::wire::{ChatRpcMethod, RpcOutcome};
@@ -218,6 +220,24 @@ fn settle_picker_timers(state: &mut ChatState, context: &ChatContext) -> Vec<Eff
     if session_key != outcome.session_key {
         return Vec::new();
     }
+    queue_model_selection(
+        state,
+        selection,
+        Some(&outcome.request),
+        outcome.scope,
+        context.random_id(0),
+    )
+}
+
+/// Puts a model and effort choice into the durable outbox, unless it would change nothing. Shared
+/// by the quick picker's close and the model menu's keyboard pick.
+pub(crate) fn queue_model_selection(
+    state: &mut ChatState,
+    selection: ModelPickerSelection,
+    request: Option<&ModelPickerRequest>,
+    scope: ModelSelectionScope,
+    id: String,
+) -> Vec<Effect> {
     let current_model = state
         .pickers
         .model_menu_context
@@ -233,8 +253,8 @@ fn settle_picker_timers(state: &mut ChatState, context: &ChatContext) -> Vec<Eff
         state.pickers.desired_selection(),
         current_model.as_deref(),
         current_effort.as_deref(),
-        Some(&outcome.request),
-        Some(outcome.scope),
+        request,
+        Some(scope),
     ) {
         return Vec::new();
     }
@@ -246,12 +266,10 @@ fn settle_picker_timers(state: &mut ChatState, context: &ChatContext) -> Vec<Eff
     // This was an `Effect::HostAction { action: "selectModel" }` no host performed, so a pick made
     // in the model picker reached neither the outbox nor gxserver. Found by the desktop host agent
     // on 2026-09-22.
-    let intent = state.pickers.model_selection.persist(
-        selection,
-        None,
-        Some(outcome.scope),
-        context.random_id(0),
-    );
+    let intent = state
+        .pickers
+        .model_selection
+        .persist(selection, None, Some(scope), id);
     remember_outbox(state, Some(&intent));
     vec![Effect::WriteStorage {
         key: crate::menus::picker::selection::scoped_model_outbox_key(state),
@@ -389,7 +407,17 @@ fn settle_desired_receipt(state: &mut ChatState, context: &ChatContext) {
         }
         None => {
             if let Some((_, receipt)) = state.pickers.model_selection.dispatch_receipt.take() {
-                state.menus.options.complete(receipt, context.now_millis());
+                // CDXC:SessionChat 2026-09-25 WHY:
+                // A selection gxserver marks `failed` (a model the CLI does not list for this
+                // account) never reached the agent, and the terminal's status line does not
+                // change, so completing the receipt left the pill on the refused model for good.
+                // Rolling back returns it to what the agent last showed; the menu carries the
+                // reason as its "Not applied" row.
+                if state.pickers.model_selection.selection_error.is_some() {
+                    state.menus.options.rollback(receipt);
+                } else {
+                    state.menus.options.complete(receipt, context.now_millis());
+                }
             }
         }
         _ => {}

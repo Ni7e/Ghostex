@@ -38,6 +38,7 @@ impl ServiceWorker {
         config: Value,
         database: PathBuf,
         wake: impl Fn() + Send + Sync + 'static,
+        trace: Arc<AtomicBool>,
     ) -> Result<Self> {
         let (commands, command_rx) = mpsc::channel::<String>();
         let (message_tx, messages) = mpsc::channel();
@@ -52,15 +53,16 @@ impl ServiceWorker {
             .name("ghostex-native-service".into())
             .spawn(move || {
                 let output = delivery.clone();
-                let mut runtime = match ServiceRuntime::new(&config, &database, move |message| {
-                    output.send(Ok(message))
-                }) {
-                    Ok(runtime) => runtime,
-                    Err(error) => {
-                        let _ = ready_tx.send(Err(error.to_string()));
-                        return;
-                    }
-                };
+                let mut runtime =
+                    match ServiceRuntime::new(&config, &database, trace, move |message| {
+                        output.send(Ok(message))
+                    }) {
+                        Ok(runtime) => runtime,
+                        Err(error) => {
+                            let _ = ready_tx.send(Err(error.to_string()));
+                            return;
+                        }
+                    };
                 if ready_tx.send(Ok(())).is_err() {
                     return;
                 }

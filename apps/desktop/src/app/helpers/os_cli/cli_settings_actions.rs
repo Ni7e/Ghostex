@@ -50,7 +50,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallBrowserUseSkill => "Ghostex Browser Use installed",
             Self::InstallComputerUseSkill => "Ghostex Computer Use installed",
             Self::InstallCliSkill => "Ghostex CLI skill installed",
-            Self::InstallAgentsOrchestrationSkill => "Ghostex Agents Orchestration installed",
+            Self::InstallAgentsOrchestrationSkill => "Ghostex Agents installed",
             Self::InstallManageBeadsSkill => "Ghostex Manage Beads installed",
             Self::InstallGenerateTitleSkill => "Ghostex Auto Rename Session installed",
             Self::InstallMoveCodexSessionSkill => "Ghostex Move Codex Session installed",
@@ -71,7 +71,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallBrowserUseSkill => "Ghostex Browser Use install failed",
             Self::InstallComputerUseSkill => "Ghostex Computer Use install failed",
             Self::InstallCliSkill => "Ghostex CLI skill install failed",
-            Self::InstallAgentsOrchestrationSkill => "Ghostex Agents Orchestration install failed",
+            Self::InstallAgentsOrchestrationSkill => "Ghostex Agents install failed",
             Self::InstallManageBeadsSkill => "Ghostex Manage Beads install failed",
             Self::InstallGenerateTitleSkill => "Ghostex Auto Rename Session install failed",
             Self::InstallMoveCodexSessionSkill => "Ghostex Move Codex Session install failed",
@@ -159,7 +159,7 @@ pub(crate) fn gpui_run_ghostex_cli_settings_action(
             gpui_install_bundled_ghostex_skill_action(
                 action,
                 &["agents-orchestration", "install-skill"],
-                "Ghostex Agents Orchestration",
+                "Ghostex Agents",
             )
         }
         GpuiGhostexCliSettingsAction::InstallManageBeadsSkill => {

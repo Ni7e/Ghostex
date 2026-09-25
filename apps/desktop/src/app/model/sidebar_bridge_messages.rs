@@ -137,10 +137,6 @@ pub(crate) fn gpui_sidebar_bridge_event_must_follow_pending_project_switch(
             | cef::SidebarBridgeEvent::PetOverlayState(_)
             | cef::SidebarBridgeEvent::TitlebarGitMenuState(_)
             | cef::SidebarBridgeEvent::ProjectBoardConversationResponse(_)
-            | cef::SidebarBridgeEvent::SourceWorkareaReadiness(_)
-            | cef::SidebarBridgeEvent::BrowserWorkareaReadiness(_)
-            | cef::SidebarBridgeEvent::ProjectWorkareaReadiness(_)
-            | cef::SidebarBridgeEvent::ManageFileWorkareaOperationRequest(_)
             | cef::SidebarBridgeEvent::RefusedPageNavigation(_)
     )
 }
@@ -198,12 +194,6 @@ pub(crate) enum GpuiWorkspaceRenameCommandDelivery {
     Delivered,
     SurfaceNotMounted,
     TargetInvalid,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct GpuiSidebarWorkspaceTerminalEnterMessage {
-    pub(crate) project_id: String,
-    pub(crate) session_id: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

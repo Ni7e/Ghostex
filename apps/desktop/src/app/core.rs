@@ -140,7 +140,6 @@ pub struct GhostexGpuiApp {
     otherwise decides visibility from its own click history, which cannot see a
     parked terminal behind a chat surface and is wiped on a daemon reconnect.
     */
-    pub(crate) sidebar_displayed_sessions_snapshot: String,
     /*
     CDXC:TranscriptExport 2026-08-20:
     The path of the markdown file the open Export Transcript result dialog is
@@ -347,7 +346,7 @@ pub struct GhostexGpuiApp {
     // CDXC:Workarea 2026-09-12: app-wide Agents and Wide pane layouts. See GpuiViewPaneLayouts.
     pub(crate) view_pane_layouts: GpuiViewPaneLayouts,
     pub(crate) sidebar_visibility_memory: GpuiSidebarVisibilityMemory,
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     pub(crate) remote_attach_askpass_scripts:
         HashMap<GpuiRemoteAttachSessionKey, GpuiRemoteAskpassScript>,
     /*
@@ -468,21 +467,19 @@ pub struct GhostexGpuiApp {
     pub(crate) agents_chat_prewarm_scheduled: bool,
     /// Sessions whose chat is in a visible pane, as of the last chat surface reconcile.
     pub(crate) native_chat_visible_sessions: HashSet<TerminalSessionId>,
-    /// Each runtime's own broker subscribe request, replayed when a paused view is shown again.
-    pub(crate) session_chat_subscribe_requests: HashMap<u64, serde_json::Value>,
-    /// Runtime generations whose broker subscription is paused because their view is hidden.
+    /// Runtime generations whose document is paused because their view is hidden.
     pub(crate) session_chat_paused_generations: HashSet<u64>,
     pub(crate) native_chat_pool_pass_scheduled: bool,
     /// Tabs opened by project-header agent launches that are still waiting for their created session.
     pub(crate) agent_launch_placeholders:
         std::collections::VecDeque<super::sidebar_agent_launch_placeholder::AgentLaunchPlaceholder>,
+    /// Launcher-opened chats still empty; closed once the user leaves them (new_agent_session.rs).
+    pub(crate) untouched_agent_chats: Vec<super::new_agent_session::UntouchedAgentChat>,
     pub(crate) agents_chat_reconcile_scheduled: bool,
     pub(crate) native_chat_views:
         HashMap<TerminalSessionId, Entity<super::native_chat::state::NativeChatView>>,
+    /// The gxserver endpoint each machine's chat socket was last given.
     pub(crate) session_chat_broker_endpoints: HashMap<String, (String, String)>,
-    pub(crate) session_chat_broker_epoch: Option<String>,
-    pub(crate) session_chat_shared_snapshots:
-        Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
     pub(crate) session_chat_presentations:
         Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
     pub(crate) account_switch_progress:
@@ -613,7 +610,7 @@ pub struct GhostexGpuiApp {
     the temp script and stops its password server, so it must outlive the
     terminal and no longer.
     */
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     pub(crate) command_remote_attach_askpass_scripts:
         HashMap<CommandSessionId, GpuiRemoteAskpassScript>,
     pub(crate) pending_command_gxserver_cleanup: HashSet<GpuiLocalWorkspaceSessionKey>,
@@ -974,10 +971,13 @@ pub struct GhostexGpuiApp {
     pub(crate) sidebar: Option<Entity<crate::app::native_service::NativeService>>,
     pub(crate) native_sidebar: crate::app::native_sidebar::state::NativeSidebarState,
     /// The native Kanban board's state; see app/native_kanban/.
+    /// The native Docs view's state; see app/native_docs/.
+    pub(crate) native_docs: crate::app::native_docs::state::NativeDocsState,
     pub(crate) native_kanban: crate::app::native_kanban::state::NativeKanbanState,
     pub(crate) floating_reveal: crate::app::floating_reveal::model::FloatingRevealState,
     pub(crate) panel_motion: crate::app::panel_motion::PanelMotions,
     pub(crate) gx_store: crate::app::gx_store::GxStoreHost,
+    pub(crate) quick_access: crate::app::quick_access::host::QuickAccessHost,
     pub(crate) browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
     pub(crate) browser_address_inputs: HashMap<BrowserPaneId, Entity<InputState>>,
     pub(crate) browser_address_input_subscriptions: HashMap<BrowserPaneId, gpui::Subscription>,

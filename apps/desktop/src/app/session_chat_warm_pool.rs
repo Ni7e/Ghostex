@@ -40,7 +40,7 @@ impl GhostexGpuiApp {
 
     /// CDXC:SessionChat 2026-09-19 WHY:
     /// Every native chat view kept its own runtime alive and subscribed for as long as its session existed: the ones the user opened, the prewarmed ones, and every view of every project switched away from. Thirty of them were live at once, and with eighteen sessions streaming the service thread spent most of its time relaying frames nobody was looking at, which is what made the app burn CPU.
-    /// A view that is not in a visible pane has its broker subscription paused (`pause_session_chat_runtime`); the runtime stays booted and gets a fresh snapshot the moment the view is shown again, so switching stays fast. Beyond a small app-wide total the least recently painted hidden views are pooled out entirely, never one holding unsent text or an unfinished request; a session whose view was pooled out is recreated by the ordinary reconcile when it is shown.
+    /// A view that is not in a visible pane has its document paused (`pause_session_chat_runtime`): its chat stays retained and followed in the Rust chat host, and the view gets everything it missed in one drain the moment it is shown again, so switching stays fast. Beyond a small app-wide total the least recently painted hidden views are pooled out entirely, never one holding unsent text or an unfinished request; a session whose view was pooled out is recreated by the ordinary reconcile when it is shown.
     fn native_chat_pool_pass(&mut self, cx: &mut gpui::Context<Self>) {
         let visible = self.native_chat_visible_sessions.clone();
         let mut hidden: Vec<(
@@ -113,7 +113,7 @@ impl GhostexGpuiApp {
             }
             match project_id {
                 None => self.evict_native_chat_view(session_id, cx),
-                Some(project_id) => self.evict_parked_native_chat_view(&project_id, session_id, cx),
+                Some(project_id) => self.evict_parked_native_chat_view(&project_id, session_id),
             }
             excess -= 1;
         }
@@ -129,35 +129,26 @@ impl GhostexGpuiApp {
         (view.last_render, evictable)
     }
 
-    /// Stops the broker from relaying frames to a hidden view's runtime; the stored subscribe request replays on resume.
+    /// Stops a hidden view's document: the chat stays retained and followed, and the view is sent
+    /// only the requests it must perform until it is shown again.
     pub(crate) fn pause_session_chat_runtime(
         &mut self,
         generation: u64,
         cx: &mut gpui::Context<Self>,
     ) {
-        if self.session_chat_paused_generations.contains(&generation)
-            || !self
-                .session_chat_subscribe_requests
-                .contains_key(&generation)
-        {
+        if self.session_chat_paused_generations.contains(&generation) {
             return;
         }
-        let Some(epoch) = self.session_chat_broker_epoch.clone() else {
-            return;
-        };
-        let Some(sidebar) = self.sidebar.clone() else {
+        let Some(view) = self.native_chat_for_generation(generation) else {
             return;
         };
         self.session_chat_paused_generations.insert(generation);
-        let payload = serde_json::json!({"epoch": epoch, "generation": generation.to_string(), "method": "unsubscribe"});
-        sidebar.update(cx, |sidebar, _| {
-            sidebar.execute_app_owned_script(&format!(
-                "window.ghostexGpui?.onSessionChatRuntimeRequest?.({payload}); undefined;"
-            ));
-        });
+        if let Some(runtime) = &view.read(cx).runtime {
+            runtime.set_paused(true);
+        }
     }
 
-    /// Replays the runtime's own subscribe request, which makes the shared transport deliver its current snapshot at once.
+    /// Restarts a paused view's document, which drains everything it missed in one frame.
     pub(crate) fn resume_session_chat_runtime(
         &mut self,
         generation: u64,
@@ -166,21 +157,11 @@ impl GhostexGpuiApp {
         if !self.session_chat_paused_generations.remove(&generation) {
             return;
         }
-        let Some(payload) = self
-            .session_chat_subscribe_requests
-            .get(&generation)
-            .cloned()
-        else {
-            return;
-        };
-        let Some(sidebar) = self.sidebar.clone() else {
-            return;
-        };
-        sidebar.update(cx, |sidebar, _| {
-            sidebar.execute_app_owned_script(&format!(
-                "window.ghostexGpui?.onSessionChatRuntimeRequest?.({payload}); undefined;"
-            ));
-        });
+        if let Some(view) = self.native_chat_for_generation(generation)
+            && let Some(runtime) = &view.read(cx).runtime
+        {
+            runtime.set_paused(false);
+        }
     }
 
     /// Resumes every runtime whose view is in a visible pane; called after the reconcile computes that set and when a view paints.
@@ -199,19 +180,50 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// Takes down the preview and picker windows of views whose pane just stopped being shown.
+    /// Takes down the child windows of every view whose pane is not on screen, which is also what
+    /// keeps a warmed-up view that was never shown from opening one.
     pub(crate) fn dismiss_native_chat_windows_leaving_view(
         &mut self,
         visible: &HashSet<TerminalSessionId>,
         cx: &mut gpui::Context<Self>,
     ) {
         let hidden = self
-            .native_chat_visible_sessions
-            .difference(visible)
-            .filter_map(|session_id| self.native_chat_views.get(session_id).cloned())
+            .native_chat_views
+            .iter()
+            .filter(|(session_id, _)| !visible.contains(*session_id))
+            .map(|(_, view)| view.clone())
             .collect::<Vec<_>>();
         for view in hidden {
             view.update(cx, |view, cx| view.dismiss_windows_for_hidden_pane(cx));
+        }
+    }
+
+    /// Reopens the modals of views whose pane is on screen again, on its current frame. Views that
+    /// never lost their pane answer this with nothing to do.
+    pub(crate) fn restore_native_chat_windows_entering_view(
+        &mut self,
+        visible: &HashSet<TerminalSessionId>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let shown = visible
+            .iter()
+            .filter_map(|session_id| self.native_chat_views.get(session_id).cloned())
+            .collect::<Vec<_>>();
+        for view in shown {
+            view.update(cx, |view, cx| view.restore_windows_for_shown_pane(cx));
+        }
+    }
+
+    /// A painted pane is on screen by definition: resume its runtime and give it back the modals it
+    /// was holding, even if no reconcile ran since it was selected.
+    pub(crate) fn note_native_chat_pane_painted(
+        &mut self,
+        session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.resume_native_chat_runtime_for_session(session_id, cx);
+        if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
+            view.update(cx, |view, cx| view.restore_windows_for_shown_pane(cx));
         }
     }
 
@@ -238,16 +250,15 @@ impl GhostexGpuiApp {
         session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.native_chat_views.remove(&session_id);
+        if let Some(view) = self.native_chat_views.remove(&session_id) {
+            view.update(cx, |view, cx| view.dismiss_windows_for_hidden_pane(cx));
+        }
         self.session_chat_composer_ready_sessions
             .remove(&session_id);
         self.session_chat_composer_empty_reports.remove(&session_id);
         if let Some(state) = self.agents_chat_page_states.remove(&session_id) {
             self.session_chat_paused_generations
                 .remove(&state.generation);
-            self.session_chat_subscribe_requests
-                .remove(&state.generation);
-            self.release_session_chat_runtime_subscription(state.generation, cx);
         }
         self.record_session_chat_lifecycle(session_id, "sessionChat.nativePageRemoved", "warmPool");
     }
@@ -256,7 +267,6 @@ impl GhostexGpuiApp {
         &mut self,
         project_id: &str,
         session_id: TerminalSessionId,
-        cx: &mut gpui::Context<Self>,
     ) {
         let Some(parked) = self
             .parked_agents_chat_runtimes_by_project
@@ -271,9 +281,6 @@ impl GhostexGpuiApp {
         if let Some(state) = state {
             self.session_chat_paused_generations
                 .remove(&state.generation);
-            self.session_chat_subscribe_requests
-                .remove(&state.generation);
-            self.release_session_chat_runtime_subscription(state.generation, cx);
         }
     }
 
@@ -285,27 +292,5 @@ impl GhostexGpuiApp {
                 .values()
                 .map(|parked| parked.native_views.len())
                 .sum::<usize>()
-    }
-
-    /// A broker event delivered as its JSON text goes straight to the runtime thread, which parses it there; a React page gets the parsed value as before.
-    pub(crate) fn dispatch_session_chat_generation_event_raw(
-        &mut self,
-        generation: u64,
-        raw: String,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if let Some(view) = self.native_chat_for_generation(generation) {
-            view.update(cx, |view, _| view.receive_broker_raw(raw));
-            return;
-        }
-        if let Ok(message) = serde_json::from_str::<serde_json::Value>(&raw) {
-            self.dispatch_session_chat_generation_response(
-                generation,
-                "onSessionChatRuntimeMessage",
-                &message,
-                false,
-                cx,
-            );
-        }
     }
 }

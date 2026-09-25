@@ -36,6 +36,9 @@ impl GhostexGpuiApp {
     /// CDXC:Titlebar 2026-09-23 DECISION:
     /// User: on Windows, close, minimize and maximize must always stay at the very top right of the app, even when the sidebar or another column is shown.
     /// The rightmost band region owns the caption controls as fixed-width siblings, preserving the column divider alignment and the space available to each region's other controls.
+    ///
+    /// CDXC:Titlebar 2026-09-23 WHY:
+    /// Linux client decorations use this same band ownership; putting its window controls among project actions left them above the sessions column when Code or Browser opened to the right.
     pub(crate) fn render_workarea_header(
         &self,
         window: &mut Window,
@@ -51,12 +54,17 @@ impl GhostexGpuiApp {
         } else {
             WORKAREA_HEADER_HEIGHT
         };
-        #[cfg(target_os = "windows")]
-        let mut window_controls = Some(
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        let mut window_controls = (cfg!(target_os = "windows")
+            || matches!(
+                window.window_decorations(),
+                gpui::Decorations::Client { .. }
+            ))
+        .then(|| {
             self.render_titlebar_window_controls(window, cx)
-                .into_any_element(),
-        );
-        #[cfg(not(target_os = "windows"))]
+                .into_any_element()
+        });
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         let mut window_controls: Option<gpui::AnyElement> = None;
         h_flex()
             .absolute()
@@ -111,9 +119,16 @@ impl GhostexGpuiApp {
                     },
                 )
                 .child({
+                    // Alone in its sliding clip it grows by 1, or it would fill only its share
+                    // of the clip (render/workarea_split.rs).
+                    let strip_grow = if self.panel_motion.view_panel.frame().animating {
+                        1.0
+                    } else {
+                        1.0 - split_ratio
+                    };
                     let strip = div()
                         .flex()
-                        .flex_grow(1.0 - split_ratio)
+                        .flex_grow(strip_grow)
                         .flex_shrink(1.0)
                         .flex_basis(relative(0.0))
                         .h(px(WORKAREA_VIEW_TAB_STRIP_HEIGHT))
@@ -201,10 +216,11 @@ impl GhostexGpuiApp {
     /// header drops its labels from this width rather than from the window's, because with a view
     /// open the labels have only the sessions column to fit in.
     pub(crate) fn workarea_header_row_width(&self, window: &Window) -> f32 {
-        self.workarea_header_row_width_with_reserve(
+        (self.workarea_header_row_width_with_reserve(
             window,
             self.workarea_header_trailing_dock_reserve(window),
-        )
+        ) - self.workarea_header_closing_clearance())
+        .max(0.0)
     }
 
     /// The header row's width with every panel at its settled size.
@@ -221,8 +237,14 @@ impl GhostexGpuiApp {
                 - reserve)
                 .max(0.0);
         if !self.workarea_header_hosts_view_tab_strip() {
-            #[cfg(target_os = "windows")]
-            if reserve == 0.0 {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            if reserve == 0.0
+                && (cfg!(target_os = "windows")
+                    || matches!(
+                        window.window_decorations(),
+                        gpui::Decorations::Client { .. }
+                    ))
+            {
                 return (band_width - 3.0 * TITLEBAR_WINDOW_BUTTON_WIDTH).max(0.0);
             }
             return band_width;

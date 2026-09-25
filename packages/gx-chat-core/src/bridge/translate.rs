@@ -811,6 +811,28 @@ fn known_shape(method: &ChatRpcMethod) -> bool {
     )
 }
 
+/// The broker's `contextPreferences` push, one event per agent record it carries.
+///
+/// CDXC:SessionChat 2026-09-25 WHY:
+/// `broker.ts` posts every agent's record at once (`preferences: {claude, codex, cursor}`, no
+/// `provider`), which the TypeScript brain adopts whole. Passing that map through as one provider's
+/// record made the core read it as Claude's, find no `starred` key in it, and clear every starred
+/// row: the status line under the chat box showed its skeleton on a starting chat and vanished once
+/// the agent answered. The push re-fires on every window focus, so it hit open chats too.
+pub fn context_preferences_events(preferences: &Value) -> Vec<Event> {
+    crate::menus::context::ContextDetailsAgent::ALL
+        .iter()
+        .filter_map(|agent| {
+            preferences
+                .get(agent.as_str())
+                .map(|record| Event::ContextPreferencesChanged {
+                    provider: agent.as_str().to_string(),
+                    preferences: record.clone(),
+                })
+        })
+        .collect()
+}
+
 /// The five `brokerMessage` kinds that carry state, fanned out into the events they carry.
 ///
 /// The other two the TypeScript accepts are QuickJS transport and have no core meaning: `chunk`
@@ -830,14 +852,9 @@ fn broker_events(message: &Value) -> Vec<Event> {
             .and_then(|value| serde_json::from_value::<ChatSettings>(value.clone()).ok())
             .map(|settings| vec![Event::SettingsChanged(Box::new(settings))])
             .unwrap_or_default(),
-        Some("contextPreferences") => vec![Event::ContextPreferencesChanged {
-            provider: message
-                .get("provider")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            preferences: message.get("preferences").cloned().unwrap_or(Value::Null),
-        }],
+        Some("contextPreferences") => {
+            context_preferences_events(message.get("preferences").unwrap_or(&Value::Null))
+        }
         Some("catalog") => vec![Event::ModelCatalogChanged {
             catalog: message.get("catalog").cloned().unwrap_or(Value::Null),
         }],

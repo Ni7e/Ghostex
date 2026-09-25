@@ -23,6 +23,8 @@ pub mod rpc;
 pub mod saved_prompts;
 pub mod selector;
 mod session_chat_model;
+mod session_chat_rpc;
+mod session_chat_transcript;
 mod session_parking;
 pub mod sessions;
 pub mod settings;
@@ -96,6 +98,7 @@ const HELP_GATE_EXCLUDED: &[&str] = &[
     "resources",
     "quick-actions",
     "saved-prompts",
+    "session-chat-rpc",
     "server",
     "settings",
     "tailcat",
@@ -140,7 +143,7 @@ fn dispatch(argv: &[String]) -> CliResult<i32> {
     if !HELP_GATE_EXCLUDED.contains(&command_name)
         && args.iter().any(|arg| arg == "-h" || arg == "--help")
     {
-        println!("{}", usage::usage());
+        println!("{}", usage::command_usage(command_name));
         return Ok(0);
     }
     run_command(command_name, &args)?;
@@ -269,6 +272,7 @@ fn is_known_command(name: &str) -> bool {
         "interrupt-session-chat",
         "handoff-session-chat-draft",
         "read-session-chat-queue",
+        "session-chat-rpc",
         "queue-session-chat-prompt",
         "update-session-chat-queued-prompt",
         "remove-session-chat-queued-prompt",
@@ -624,6 +628,9 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             fail_on_not_ok,
             args,
         ),
+        "read-session-chat" if session_chat_transcript::wants_transcript_reader(args) => {
+            session_chat_transcript::read_session_chat_transcript(args)
+        }
         "read-session-chat" => {
             run_bridge_action("readSessionChat", Parser::SessionChatRead, plain, args)
         }
@@ -694,6 +701,7 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         handed out, never by a list position, so a phone acting on a row minutes
         later still lands on the prompt it displayed.
         */
+        "session-chat-rpc" => session_chat_rpc::session_chat_rpc_command(args),
         "read-session-chat-queue" => {
             run_bridge_action("readSessionChatQueue", Parser::SessionSelector, plain, args)
         }

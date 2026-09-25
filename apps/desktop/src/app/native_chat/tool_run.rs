@@ -6,6 +6,7 @@
 //! React transcript reads; this file only lays them out.
 
 use super::disclosure_body::{DisclosureRail, disclosure_body};
+use super::disclosure_motion::motion_clip_trailing;
 use super::{
     appearance::ChatAppearance, fonts::CHAT_MONO, state::NativeChatView, transcript::text,
 };
@@ -62,6 +63,7 @@ impl NativeChatView {
             let key = format!("tools:{id}");
             // React's run disclosure opens on demand and is never opened by verbose mode.
             let expanded = self.expanded.contains(&key);
+            let motion = self.disclosure_frame(&key, expanded, cx);
             let mut rows = vec![self.disclosure(
                 key.clone(),
                 text(message, "simpleToolLabel"),
@@ -70,17 +72,18 @@ impl NativeChatView {
                 p,
                 cx,
             )];
-            if expanded {
+            if expanded || motion.is_some() {
                 let body = self.tool_row_list(&id, &tools, &visible, p, cx);
-                rows.push(disclosure_body(
+                let body = disclosure_body(
                     p,
                     DisclosureRail::Marker,
                     ROW_GAP,
-                    key,
+                    key.clone(),
                     "Collapse tool calls",
                     body,
                     cx,
-                ));
+                );
+                rows.push(self.disclosure_body_motion(&key, motion, ROW_GAP * p.scale, body));
             }
             return rows;
         }
@@ -99,6 +102,41 @@ impl NativeChatView {
                 "collapsedLabel"
             },
         );
+        // While the group opens or closes, the rows it hides ease in above the ones it always
+        // shows, on the rail the open group has; the rail itself is the one part that appears whole.
+        if let Some(frame) = self.disclosure_frame(&run_key, run_expanded, cx) {
+            let (kept, hidden): (Vec<usize>, Vec<usize>) = visible
+                .iter()
+                .copied()
+                .partition(|index| fold["visible"][*index] == true);
+            let mut body: Vec<AnyElement> = Vec::new();
+            let hidden_rows = self.tool_row_list(&id, &tools, &hidden, p, cx);
+            if !hidden_rows.is_empty() {
+                body.push(motion_clip_trailing(
+                    self.disclosure_height(&run_key),
+                    frame,
+                    ROW_GAP * p.scale,
+                    div()
+                        .flex()
+                        .flex_col()
+                        .min_w_0()
+                        .gap(px(ROW_GAP * p.scale))
+                        .children(hidden_rows)
+                        .into_any_element(),
+                ));
+            }
+            body.extend(self.tool_row_list(&id, &tools, &kept, p, cx));
+            body.push(self.tool_fold_toggle(run_key.clone(), label, run_expanded, p, cx));
+            return vec![disclosure_body(
+                p,
+                DisclosureRail::Marker,
+                ROW_GAP,
+                run_key,
+                "Show fewer tool calls",
+                body,
+                cx,
+            )];
+        }
         if run_expanded {
             let mut body = self.tool_row_list(&id, &tools, &visible, p, cx);
             body.push(self.tool_fold_toggle(run_key.clone(), label, true, p, cx));
@@ -193,6 +231,7 @@ impl NativeChatView {
         let key = format!("tool:{message_id}:{index}");
         let expanded = self.expanded.contains(&key);
         let has_detail = tool["hasDetail"] == true;
+        let motion = self.disclosure_frame(&key, expanded && has_detail, cx);
         let failed = tool["failed"] == true;
         let name = text(tool, "name");
         let preview = text(tool, "preview");
@@ -301,7 +340,7 @@ impl NativeChatView {
                 })
                 .into_any_element()
         });
-        if expanded && has_detail {
+        if (expanded || motion.is_some()) && has_detail {
             let detail = self.row_detail(&key, "tool", message_id, index as u64);
             let input = text(&detail, "input");
             let output = text(&detail, "output");
@@ -323,15 +362,16 @@ impl NativeChatView {
                 detail.push(self.tool_body(format!("output:{key}"), label, output, failed, p));
             }
             if !detail.is_empty() {
-                row = row.child(disclosure_body(
+                let body = disclosure_body(
                     p,
                     DisclosureRail::ToolDetail,
                     8.0,
-                    key,
+                    key.clone(),
                     format!("Collapse {}", tool["name"].as_str().unwrap_or_default()),
                     detail,
                     cx,
-                ));
+                );
+                row = row.child(self.disclosure_body_motion(&key, motion, 4.0 * s, body));
             }
         }
         row.into_any_element()

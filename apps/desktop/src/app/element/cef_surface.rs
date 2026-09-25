@@ -551,6 +551,8 @@ impl Element for CefElement {
 
         self.browser.set_visible(true);
         place_browser_view(&self.browser, bounds, window);
+        // CDXC:Tooltips 2026-09-24 SEE-ALSO: the tooltip positioners in gpui (`window.rs`) and gpui-component (`tooltip.rs`) lay tooltips out around the regions recorded here, because the page's native view draws over anything GPUI paints inside its frame.
+        window.occlude_native_region(bounds);
         #[cfg(target_os = "macos")]
         if self.surface_id != APP_MODAL_HOST_ID
             && let Some(native_view) = self.browser.native_view()

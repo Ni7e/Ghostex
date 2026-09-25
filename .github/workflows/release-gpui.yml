@@ -276,15 +276,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
-      # The root typecheck covers packages/core-ui, whose modal-gallery stories
-      # render the web app's Find and Machines surfaces. apps/web became its own
-      # submodule, so the skipped checkout leaves those modules unresolvable.
-      # release:test also reads zmx's build.zig.zon for the Zig pin assertion.
+      # release:test reads zmx's build.zig.zon for the Zig pin assertion.
       - name: Restore release-test prerequisites
         run: |
           git submodule update --init --depth 1 .dependencies/code-server
           git submodule update --init --depth 1 .dependencies/zmx
-          git submodule update --init --depth 1 apps/web
       - name: Install and typecheck
         run: |
           bun install --frozen-lockfile

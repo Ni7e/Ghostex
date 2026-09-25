@@ -139,9 +139,9 @@ impl GhostexGpuiApp {
                 }),
         );
         // CDXC:Titlebar 2026-09-20 DECISION:
-        // User: the view order mixes built-in, extension, and custom views, and it is what a newly opened view's tab position is seeded from. Option+1..9 follows the tabs in the view panel (screen 07), falling through to this order for a number past the last tab.
-        // This supersedes the 2026-09-09 wording that the numbers followed the titlebar's displayed list, which no longer exists.
-        // SEE-ALSO: packages/shared/ghostex-settings/titlebar-view-order.ts uses the same mode slugs for Settings, and app/view_panel.rs seeds a tab's position from it.
+        // User: the view order mixes built-in, extension, and custom views. Option+1..9 follows the tabs in the view panel (screen 07), falling through to this order for a number past the last tab.
+        // This supersedes the 2026-09-09 wording that the numbers followed the titlebar's displayed list, which no longer exists. Since 2026-09-24 a newly opened tab goes at the end of the tabs bar instead of taking its place from this order (app/view_panel.rs).
+        // SEE-ALSO: packages/shared/ghostex-settings/titlebar-view-order.ts uses the same mode slugs for Settings.
         let snapshot = shared_settings::shared_sidebar_settings_snapshot();
         if let Some(order) = snapshot
             .object()

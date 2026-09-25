@@ -700,6 +700,8 @@ pub(crate) fn ingest_terminal_title_event_with_home(
     })
 }
 
+/// CDXC:SessionFork 2026-09-25 WHY:
+/// A resumed fork's CLI puts the parent's name in its terminal title seconds after launch, often before its composer is ready. Taking it replaced the provisional `Fork:` name, which cancels the initial rename, and a Claude fork writes its own transcript only when that rename (or the first prompt) lands, so every chat client showed the fork empty while its terminal showed the history. Only the inherited name is refused; any other title is the fork's own and still applies.
 pub(crate) fn terminal_title_skip_reason(
     session: &Value,
     params: &Map<String, Value>,
@@ -750,6 +752,13 @@ pub(crate) fn terminal_title_skip_reason(
             }
             .to_string(),
         );
+    }
+    if provisional_fork_title(session)
+        .as_deref()
+        .and_then(|title| title.strip_prefix("Fork: "))
+        .is_some_and(|inherited| titles_match(inherited, visible_title))
+    {
+        return Some("fork-provisional-title-preserved".to_string());
     }
     None
 }

@@ -192,30 +192,6 @@ pub enum SharedSettingsAutoSleepTarget {
     ProjectEditor,
 }
 
-/// Which chat brain a chat view creates.
-///
-/// CDXC:SessionChat 2026-09-22 WHY:
-/// Temporary. The chat's rules exist twice while the brain moves from the TypeScript bundle running
-/// in QuickJS (`packages/shared/session-chat-controller/`) to the Rust core
-/// (`packages/gx-chat-core/`, hosted by `src/app/gx_chat/`). `QuickJs` is the shipped brain and the
-/// default; `Rust` runs the new host instead and creates no QuickJS chat runtime. Both this enum
-/// and the `chatBrain` setting behind it are deleted with the TypeScript brain.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SharedChatBrain {
-    #[default]
-    QuickJs,
-    Rust,
-}
-
-impl SharedChatBrain {
-    pub fn from_settings_value(value: Option<&str>) -> Self {
-        match value {
-            Some("rust") => Self::Rust,
-            _ => Self::QuickJs,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SharedSidebarVisibilityMemory {
     Shared,
@@ -606,11 +582,6 @@ impl SharedSidebarSettingsSnapshot {
 
     pub fn debugging_mode(&self) -> bool {
         strict_bool_field(&self.object, "debuggingMode") == Some(true)
-    }
-
-    /// Which brain a chat view's runtime is created with. See [`SharedChatBrain`].
-    pub fn chat_brain(&self) -> SharedChatBrain {
-        SharedChatBrain::from_settings_value(self.object.get("chatBrain").and_then(Value::as_str))
     }
 
     /*

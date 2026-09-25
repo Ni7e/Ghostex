@@ -93,6 +93,11 @@ pub(crate) struct GxStoreHost {
     /// Shared with the client thread, which quotes it as `lastRevision` when it subscribes.
     held_revision: Arc<AtomicI64>,
     pub(super) counters: GxStoreCounters,
+    /// The remote machines' start-up connect and reconnect ladder (remote_conn/reconnect_ladder.rs).
+    pub(crate) remote_reconnect: crate::app::remote_conn::reconnect_ladder::RemoteReconnectLadder,
+    /// CLI renderer commands the local client handed over in the last pump, performed right after
+    /// it (renderer_commands/).
+    pending_renderer_commands: Vec<ghostex_gx_core::protocol::RendererCommand>,
     connecting_since: Option<Instant>,
     pub(super) shadow: ShadowDiff,
     pub(crate) sidebar_ui: SidebarUiHost,
@@ -153,10 +158,24 @@ pub(crate) struct GxStoreHost {
     pub(super) runtime_route: super::sidebar_runtime_route::SidebarRuntimeRouteCounters,
     /// The runtime's one-way facts channel, beside the publish it is compared with.
     pub(crate) runtime_facts: super::runtime_facts::SidebarRuntimeFacts,
+    /// Git, worktrees and transcript export (family F5, gx_store/git/).
+    pub(crate) git: super::git::GitHost,
+    /// The effects the app performs rather than the store (`effects.rs`).
+    pub(super) app_effects: super::effects::AppEffectQueue,
+    /// The sidebar HUD's sources (hud/).
+    pub(super) hud: super::hud::HudHost,
     /// The collection a project move just created, which the renderer opens its Rename on. Held
     /// here rather than carried from the old projection's publish, because the create is the
     /// store's now and the publish would not know about it.
     pub(super) pending_collection_rename: Option<(String, u64)>,
+    pub(crate) shown_sessions: super::terminal_lifecycle::shown_sessions::ShownSessionsHost,
+    #[cfg(target_os = "windows")]
+    pub(crate) terminal_title_settle:
+        super::terminal_lifecycle::terminal_events::TerminalTitleSettle,
+    /// F4's creates and opens: counters and the browser open waiting for its project switch.
+    pub(crate) create: super::create::CreateHost,
+    /// The custom session tag catalog's debounced push to this computer's gxserver.
+    pub(crate) custom_tags: super::custom_tags_sync::CustomTagsSyncHost,
 }
 
 impl GxStoreHost {
@@ -189,6 +208,9 @@ impl GxStoreHost {
                 ClientOutput::Diagnostic(diagnostic) => {
                     self.counters.client_diagnostics += 1;
                     self.diagnostics.client_diagnostic(&diagnostic);
+                }
+                ClientOutput::RendererCommand(command) => {
+                    self.pending_renderer_commands.push(command);
                 }
             }
         }
@@ -357,11 +379,13 @@ impl GhostexGpuiApp {
         // The sidebar's own once-a-second tick, which the armed-timer labels and the menu-host
         // re-read ride (sidebar_clock.rs). Started once, and not tied to having a transport.
         self.gx_store_start_sidebar_clock(cx);
+        self.gx_store_start_app_effects(cx);
         // The sidebar's own state is read once, and again later if that read failed.
         self.gx_store_restore_sidebar_ui(cx);
         // A machine may already have connected before the store came up, and the machine tabs are
         // built here whether or not one has.
         self.gx_store_sync_remote_clients(true, cx);
+        self.remote_reconnect_on_launch(cx);
         if self.gx_store.transport == next {
             return;
         }
@@ -389,6 +413,8 @@ impl GhostexGpuiApp {
                 client_id: GX_STORE_CLIENT_ID.to_string(),
                 held_revision: host.held_revision.clone(),
                 forward_chat_frames: false,
+                // This socket is the app's one renderer-command target (renderer_commands/).
+                renderer_commands: true,
             },
             move || {
                 let _ = wake.unbounded_send(());
@@ -464,6 +490,10 @@ impl GhostexGpuiApp {
     /// Returns `true` when the client's thread is gone.
     fn gx_store_pump(&mut self, cx: &mut gpui::Context<Self>) -> bool {
         let outcome = self.gx_store.pump();
+        let renderer_commands = std::mem::take(&mut self.gx_store.pending_renderer_commands);
+        if !renderer_commands.is_empty() {
+            self.gx_store_take_renderer_commands(renderer_commands, cx);
+        }
         // NOT `workspace_groups_changed` alone. This host seeds the core's side state with the
         // stored document itself, so on an ordinary launch the reducer compares the daemon's copy
         // against what this host just put there, agrees, and reports no change: the guard was then

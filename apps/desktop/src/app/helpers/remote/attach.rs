@@ -75,15 +75,14 @@ pub(crate) fn gpui_prepare_remote_attach_terminal_plan(
         "/api/attachSessionMetadata"
     };
     let attach_rpc_started = Instant::now();
-    let result = gpui_remote_gxserver_rpc_result(
-        target,
-        path,
-        &serde_json::json!({
-            "projectId": reference.project_id.as_str(),
-            "sessionId": reference.session_id.as_str(),
-        }),
-        Duration::from_secs(15),
-    )?;
+    let mut params = serde_json::json!({
+        "projectId": reference.project_id.as_str(),
+        "sessionId": reference.session_id.as_str(),
+    });
+    if target.capabilities.code_server_prompt_editor {
+        params["promptEditor"] = serde_json::json!("code-server");
+    }
+    let result = gpui_remote_gxserver_rpc_result(target, path, &params, Duration::from_secs(15))?;
     support_logs::append_temporary(
         support_logs::GpuiSupportLog::TerminalFocus,
         "TEMP.remoteNewTerminal.attachRpcCompleted",
@@ -145,7 +144,7 @@ pub(crate) fn gpui_remote_attach_terminal_plan_from_result(
         config.ssh_host.as_str(),
         config.ssh_port,
     );
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     let askpass = if interactive_attach {
         gpui_remote_ssh_askpass_script(config)?
     } else {
@@ -153,7 +152,7 @@ pub(crate) fn gpui_remote_attach_terminal_plan_from_result(
     };
     Ok(GpuiRemoteAttachTerminalPlan {
         agent_icon,
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         askpass,
         clipboard_command,
         terminal_command,
@@ -379,6 +378,9 @@ pub(crate) fn gpui_remote_ssh_shell_command(
         }
     };
     arguments.push(command);
+    #[cfg(windows)]
+    return Ok(gpui_windows_remote_ssh_terminal_command(&arguments[1..]));
+    #[cfg(not(windows))]
     Ok(arguments
         .iter()
         .map(|argument| gpui_remote_shell_command_arg(argument))

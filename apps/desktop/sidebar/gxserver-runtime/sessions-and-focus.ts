@@ -35,7 +35,7 @@ import {
 } from './helpers/remote-presentation';
 import { shouldApplyGpuiLocalWorkspaceTransition } from './helpers/terminal-lifecycle';
 import type { GpuiWorkspaceTerminalFocusPlacement } from './types-and-protocol';
-import { closeAppModal, openAppModal, postAppModalHostMessage } from '@/packages/core-ui/app-modal-host-bridge';
+import { postAppModalHostMessage } from '@/packages/core-ui/app-modal-host-bridge';
 import {
   resolveEffectivePreferredAgentInterface,
   type PreferredAgentInterface,
@@ -52,13 +52,10 @@ import type {
   GxserverForkSessionResult,
   GxserverProjectId,
   GxserverSessionId,
-  GxserverSessionRenameRequestResult,
   GxserverSessionTransitionResult,
 } from '@/packages/shared/gxserver-protocol';
 import type { SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
 import type { SidebarSessionTag } from '@/packages/shared/session-tags';
-import { getDefaultSidebarAgentByIcon, getDefaultSidebarAgentById } from '@/packages/shared/sidebar-agents';
-import { isSessionTitleGenerationAgent } from '@/packages/shared/ghostex-settings/session-title-generation';
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -109,12 +106,8 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
   ): void;
   transitionSession(sessionId: string, action: 'close' | 'sleep'): Promise<void>;
   copySessionDetails(message: Extract<SidebarToExtensionMessage, { type: 'copySessionDetails' }>): void;
-  noteSidebarContextMenuOpened(): void;
-  noteSidebarContextMenuClosed(): void;
-  syncSidebarContextMenuFocusGrant(): void;
   fullReloadSession(sessionId: string): Promise<void>;
   splitSessionRight(sessionId: string): Promise<void>;
-  switchSessionAgent(sessionId: string, agentId: string): Promise<void>;
   fullReloadProjectZmxSessions(groupId: string): Promise<void>;
   fullReloadWorkspaceGroup(groupId: string): Promise<void>;
   resolveLocalProjectListTransitionFocusTarget(projectId: string, removedSessionId: string): string | undefined;
@@ -122,15 +115,12 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
   isRunningLocalPresentationSession(projectId: string, sessionId: string): boolean;
   isSleepingLocalPresentationSession(projectId: string, sessionId: string): boolean;
   forkSession(sessionId: string): Promise<void>;
-  renameSession(message: Extract<SidebarToExtensionMessage, { type: 'renameSession' }>): Promise<void>;
   updateSessionFlags(
     sessionId: string,
     flags: { isFavorite?: boolean; isParked?: boolean; isPinned?: boolean; sessionTag?: SidebarSessionTag | null }
   ): Promise<void>;
   setSessionParked(sessionId: string, parked: boolean): Promise<void>;
   snoozeSession(sessionId: string, snoozedUntil: string): Promise<void>;
-  openSessionNoteEditor(sessionId: string): void;
-  saveSessionNote(sessionId: string, note: string): Promise<void>;
   runSessionLifecycleCommand(
     sessionId: string,
     path: Extract<
@@ -607,36 +597,6 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     }
   },
 
-  /*
-  CDXC:ContextMenus 2026-09-11 WHY:
-  The sidebar is mouse-focus passive, so an open context menu must ask for native focus explicitly or a click back into the terminal never blurs the page and the menu stays open.
-  The portal reports opened/closed per menu instance; this counts them and forwards one held/released signal through the fixed editableFocus bridge, where the CEF helper merges it with editable focus.
-  The release is deferred to a microtask on purpose: when one menu closes and another opens in the same React commit (right-click a different row, Rename from a menu), the count dips to zero and back within one task, and an eager release-then-regrant reaches the page as a window blur that dismisses the new menu.
-  SEE-ALSO: packages/core-ui/sidebar-context-menu-portal.tsx, apps/desktop/src/bin/ghostex_gpui_cef_helper.rs.
-  */
-  noteSidebarContextMenuOpened(this: GpuiSidebarRuntime): void {
-    this.openSidebarContextMenuCount += 1;
-    this.syncSidebarContextMenuFocusGrant();
-  },
-
-  noteSidebarContextMenuClosed(this: GpuiSidebarRuntime): void {
-    this.openSidebarContextMenuCount = Math.max(0, this.openSidebarContextMenuCount - 1);
-    queueMicrotask(() => this.syncSidebarContextMenuFocusGrant());
-  },
-
-  syncSidebarContextMenuFocusGrant(this: GpuiSidebarRuntime): void {
-    const held = this.openSidebarContextMenuCount > 0;
-    if (held === this.sidebarContextMenuFocusHeld) {
-      return;
-    }
-    const bridge = window.ghostexGpui?.postSidebarEditableFocus;
-    if (!bridge) {
-      return;
-    }
-    this.sidebarContextMenuFocusHeld = held;
-    bridge(held ? 'focused' : 'blurred');
-  },
-
   async fullReloadSession(this: GpuiSidebarRuntime, sessionId: string): Promise<void> {
     /*
     CDXC:CefRuntime 2026-07-12:
@@ -696,43 +656,6 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     }
     this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId, { placement: 'splitRight' });
     this.publishPresentation('patch');
-  },
-
-  async switchSessionAgent(this: GpuiSidebarRuntime, sessionId: string, agentId: string): Promise<void> {
-    /*
-    CDXC:AgentProviders 2026-09-03:
-    Resume the same conversation under another same-family agent configuration
-    (another account). The owning daemon rewrites the row's launch identity;
-    the provider cycle that follows is Full Reload itself, so the wake resumes
-    through the ordinary restore path with the new agent's command. A refused
-    switch (incompatible agent, draft, old daemon) leaves the row untouched, so
-    nothing is reloaded and the daemon's own sentence is what the user sees.
-    */
-    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
-    const reference = parseGxserverPresentationProjectSessionId(sessionId);
-    try {
-      if (remoteSession) {
-        await this.requestRemoteGxserver(remoteSession.machineId, '/api/switchSessionAgent', {
-          agentId,
-          projectId: remoteSession.projectId,
-          sessionId: remoteSession.sessionId,
-        });
-      } else if (reference && this.client) {
-        await this.client.rpc('/api/switchSessionAgent', {
-          agentId,
-          projectId: reference.projectId,
-          sessionId: reference.sessionId,
-        });
-      } else {
-        return;
-      }
-    } catch (error) {
-      this.postRemoteToast('error', 'Could not switch account', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-      return;
-    }
-    await this.fullReloadSession(sessionId);
   },
 
   async fullReloadProjectZmxSessions(this: GpuiSidebarRuntime, groupId: string): Promise<void> {
@@ -979,115 +902,6 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     }
   },
 
-  async renameSession(
-    this: GpuiSidebarRuntime,
-    message: Extract<SidebarToExtensionMessage, { type: 'renameSession' }>
-  ): Promise<void> {
-    const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
-    if (remoteSession) {
-      /*
-      CDXC:SessionTitles 2026-07-29:
-      Empty-title Generate Name is a local-transcript flow; a remote machine's
-      transcripts are not readable here, and a blank direct rename would erase
-      the remote title.
-      */
-      if (!message.title.trim()) {
-        return;
-      }
-      /*
-      CDXC:RemoteMachines 2026-08-12:
-      Remote agent sessions must use the same pending-metadata rename contract
-      as local sessions. The remote gxserver owns that session's zmx provider,
-      so ask it to submit the provider-specific slash command itself instead of
-      only updating sidebar metadata or trying to use GPUI's local Ghostty
-      surface bridge.
-      */
-      this.postRemoteGxserverSidebarRequest(remoteSession.machineId, '/api/requestSessionRename', {
-        ...(message.agentId ? { agentName: message.agentId } : {}),
-        projectId: remoteSession.projectId,
-        reason: 'gpui-sidebar',
-        sessionId: remoteSession.sessionId,
-        submitAgentRenameCommand: true,
-        title: message.title,
-        titleSource: 'user',
-      });
-      return;
-    }
-    const reference = parseGxserverPresentationProjectSessionId(message.sessionId);
-    if (!reference || !this.client) {
-      return;
-    }
-    if (message.shouldGenerateTitle) {
-      /*
-      CDXC:Sessions 2026-07-29:
-      Generate Name reuses the first-message auto-title UX end to end:
-      gxserver marks the session generating (the card shows the same
-      "Generating title…" chrome), summarizes the pasted text with the chosen
-      generation agent, stages the agent rename command through zmx with the
-      same delayed real Enter, and applies the generated title. The long
-      pasted text must never reach `/api/requestSessionRename` as a literal
-      title.
-      */
-      const generationAgent = this.resolveSidebarAgent(message.agentId ?? '');
-      const generationCommand = generationAgent?.command?.trim();
-      /**
-       * CDXC:SessionTitles 2026-09-15 WHY:
-       * The picker returns a launcher configuration id, but title generation needs its CLI family. Passing a custom Claude id previously selected Codex flags and ran `claude --yolo exec ...`, which exits immediately.
-       * Keep the selected configuration's command so its account and arguments survive the family resolution.
-       */
-      const generationFamily =
-        getDefaultSidebarAgentById(generationAgent?.agentId)?.agentId ??
-        getDefaultSidebarAgentByIcon(generationAgent?.icon)?.agentId;
-      try {
-        if (message.agentId && (!generationCommand || !isSessionTitleGenerationAgent(generationFamily))) {
-          throw new Error('Choose a configured agent that supports name generation.');
-        }
-        await this.client.rpc('/api/generateSessionTitle', {
-          ...(generationFamily ? { agentId: generationFamily } : {}),
-          ...(generationCommand ? { command: generationCommand } : {}),
-          projectId: reference.projectId,
-          sessionId: reference.sessionId,
-          text: message.title,
-        });
-      } catch (error) {
-        this.postSidebarActionToast('error', 'Could not generate session name', {
-          description: error instanceof Error ? error.message : String(error),
-        });
-      }
-      return;
-    }
-    /**
-     * CDXC:SessionTitles 2026-09-15 WHY:
-     * Chat view can have no mounted terminal to receive the native rename bridge, so local renames must use gxserver's queued command submission just like remote sessions.
-     * This replaces the client-side terminal staging path and keeps the current view open while the agent confirms its title through normal metadata sync.
-     */
-    try {
-      const result = await this.client.rpc<GxserverSessionRenameRequestResult>('/api/requestSessionRename', {
-        agentName: message.agentId,
-        projectId: reference.projectId,
-        reason: 'gpui-sidebar',
-        sessionId: reference.sessionId,
-        submitAgentRenameCommand: true,
-        title: message.title,
-        titleSource: 'user',
-      });
-      /*
-      CDXC:Sessions 2026-08-18:
-      Session cards render `displayTitle`, so patching only `title` moved the
-      row's alias without changing the text on the card. Apply gxserver's own
-      title projection instead, the same fields presentation publishes, so the
-      card, its tooltip, and the alias stay one consistent title. Agent sessions
-      keep the previous title here until the Agent CLI confirms the rename; the
-      confirmed title lands through the normal presentation delta.
-      */
-      this.patchPresentationSession(reference.projectId, reference.sessionId, result.projection);
-    } catch (error) {
-      this.postSidebarActionToast('error', 'Could not rename session', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    }
-  },
-
   async updateSessionFlags(
     this: GpuiSidebarRuntime,
     sessionId: string,
@@ -1172,78 +986,6 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
   remote resolve from their own machine's presentation for the same reason
   `saveSessionNote` writes to its own machine's daemon.
   */
-  openSessionNoteEditor(this: GpuiSidebarRuntime, sessionId: string): void {
-    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
-    const presentation = remoteSession ? this.remotePresentations.get(remoteSession.machineId) : this.presentation;
-    const reference = remoteSession ?? parseGxserverPresentationProjectSessionId(sessionId);
-    if (!reference || !presentation) {
-      return;
-    }
-    const session = presentation.sessions.find(
-      (candidate) => candidate.projectId === reference.projectId && candidate.sessionId === reference.sessionId
-    );
-    if (!session) {
-      return;
-    }
-    const sessionTitle =
-      normalizeNonEmptyString(session.primaryTitle) ??
-      normalizeNonEmptyString(session.title) ??
-      normalizeNonEmptyString(session.terminalTitle);
-    // Same modal-host contract as the row's own entry: the note editor replaces
-    // whatever modal is open instead of stacking behind it.
-    closeAppModal('SettingsDismissal:terminalActionBarNote');
-    openAppModal({
-      initialNote: session.sessionNote ?? '',
-      modal: 'sessionNote',
-      sessionId,
-      ...(sessionTitle ? { sessionTitle } : {}),
-      type: 'open',
-    });
-  },
-
-  /*
-  CDXC:SessionNotes 2026-08-24:
-  Save (or, with an empty note, clear) this session's free-text note.
-
-  - The note is filed against the session's PROVIDER conversation id, which only
-    the daemon can resolve, so the client sends the ghostex session reference and
-    nothing else. That is also why a note survives closing the row: resuming the
-    same conversation lands on the same note.
-  - No optimistic patch. gxserver schedules a presentation delta after a
-    successful save, and that delta is what puts the note on the row; guessing
-    here would paint a note the daemon may have refused (a session that never
-    captured a conversation id has nothing to file against).
-  - A remote row routes to ITS machine's daemon, exactly like every other
-    session mutation. A daemon that predates session notes rejects the call, so
-    the failure is surfaced as a toast instead of a silently lost note.
-  */
-  async saveSessionNote(this: GpuiSidebarRuntime, sessionId: string, note: string): Promise<void> {
-    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
-    try {
-      if (remoteSession) {
-        await this.requestRemoteGxserver(remoteSession.machineId, '/api/saveSessionAgentNote', {
-          note,
-          projectId: remoteSession.projectId,
-          sessionId: remoteSession.sessionId,
-        });
-        return;
-      }
-      const reference = parseGxserverPresentationProjectSessionId(sessionId);
-      if (!reference || !this.client) {
-        return;
-      }
-      await this.client.rpc('/api/saveSessionAgentNote', {
-        note,
-        projectId: reference.projectId,
-        sessionId: reference.sessionId,
-      });
-    } catch {
-      this.postSidebarActionToast('warning', 'Could not save the session note', {
-        description: 'gxserver refused the note. This session may not have an agent conversation yet.',
-      });
-    }
-  },
-
   /*
   CDXC:StateSync 2026-07-29:
   One code path for settle/unsettle/snooze/unsnooze, local and remote.

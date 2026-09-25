@@ -21,7 +21,8 @@
 //! carried and nothing is hidden, on both sides.
 //!
 //! SEE-ALSO: the deleted sidebar page's `controller.ts` (the `machineAction` arm),
-//! apps/desktop/sidebar/gxserver-runtime/app-shot-and-misc.ts (`saveSidebarSettingsPatch`),
+//! apps/desktop/sidebar/gxserver-runtime/app-shot-and-misc.ts (`saveSidebarSettingsPatch`, deleted
+//! 2026-09-25 once nothing called it),
 //! apps/desktop/src/app/remote_conn/settings_and_install_probe.rs,
 //! apps/desktop/src/app/gx_store/sidebar_state_actions.rs, tooling/gx-core/state-action-parity.ts.
 

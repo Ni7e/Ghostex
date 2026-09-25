@@ -1,6 +1,6 @@
 /*!
-The empty transcript region: the new-session welcome, the loading hold (drawn by
-transcript_skeleton.rs), and the plain empty-state copy.
+The empty transcript region: the new-session welcome and the plain empty-state copy. The
+loading hold that comes before either is transcript_reveal.rs.
 
 CDXC:SessionChat 2026-09-18 WHY:
 GPUI chat used to print `emptyState.title` / `.detail` for every transcript with
@@ -67,16 +67,6 @@ impl NativeChatView {
         p: &ChatAppearance,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        /*
-        The loading hold. A chat whose host has not published its first snapshot yet is still
-        reading its transcript too, so it draws the skeleton instead of a blank region.
-        */
-        let stage = state["loadingStage"]
-            .as_str()
-            .or_else(|| (state["status"].is_null() && self.error.is_none()).then_some("indicator"));
-        if let Some(stage) = stage {
-            return self.render_transcript_skeleton(stage, p, cx);
-        }
         let s = p.scale;
         // `.ghostex-chat-new-session`: `padding: 1.5rem 1.5rem var(--ghostex-chat-composer-overlay)`.
         // The band below already reserves its own height, so the welcome has no bottom padding of

@@ -18,13 +18,26 @@ all keeps the generic tool row (the caller decides that via
 
 import { IconCheck, IconChevronRight } from '@tabler/icons-react';
 import { useSessionChatDisclosureState } from './session-chat-interaction-state';
+import { SessionChatDisclosureBody } from './session-chat-disclosure-body';
 import type { SessionChatQuestion } from '../../shared/session-chat';
 import { cn } from '@/packages/components/utils';
 import { SessionChatChoiceRows } from './session-chat-choice-rows';
 import type { SessionChatToolPair } from './session-chat-tool-fold';
 
-import { answeredSessionChatQuestionExchange, parseSessionChatQuestionsInput, isSessionChatQuestionToolName, type SessionChatQuestionExchange, type SessionChatQuestionExchangeAnswer } from '@/packages/shared/session-chat-presentation/questions';
-export { answeredSessionChatQuestionExchange, parseSessionChatQuestionsInput, isSessionChatQuestionToolName, type SessionChatQuestionExchange, type SessionChatQuestionExchangeAnswer };
+import {
+  answeredSessionChatQuestionExchange,
+  parseSessionChatQuestionsInput,
+  isSessionChatQuestionToolName,
+  type SessionChatQuestionExchange,
+  type SessionChatQuestionExchangeAnswer,
+} from '@/packages/shared/session-chat-presentation/questions';
+export {
+  answeredSessionChatQuestionExchange,
+  parseSessionChatQuestionsInput,
+  isSessionChatQuestionToolName,
+  type SessionChatQuestionExchange,
+  type SessionChatQuestionExchangeAnswer,
+};
 
 function MicroLabel({ text }: { text: string }) {
   return <span className='text-[11px] font-semibold tracking-widest text-muted-foreground uppercase'>{text}</span>;
@@ -135,7 +148,7 @@ function QuestionSection({
             />
             {showOptions ? 'Hide options' : `Show all ${question.options.length} options`}
           </button>
-          {showOptions ? (
+          <SessionChatDisclosureBody gap={false} open={showOptions}>
             <div className='mt-2'>
               <SessionChatChoiceRows
                 onSelect={() => {}}
@@ -144,7 +157,7 @@ function QuestionSection({
                 selected={selectedIndices}
               />
             </div>
-          ) : null}
+          </SessionChatDisclosureBody>
         </div>
       ) : null}
     </div>

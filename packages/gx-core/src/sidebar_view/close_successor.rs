@@ -13,8 +13,8 @@
 //! after the closing project and then before it nearest first, and only the first AWAKE row of a
 //! candidate counts. With none, nothing is named and the host keeps its ordinary behaviour.
 //!
-//! SEE-ALSO: packages/core-ui/sidebar-app/close-project-successor.ts,
-//! the deleted sidebar page's `controller.ts` (`post`),
+//! SEE-ALSO: the deleted React sidebar's `close-project-successor.ts` and the deleted sidebar
+//! page's `controller.ts` (`post`),
 //! apps/desktop/src/app/gx_store/sidebar_close_project.rs.
 
 use crate::focus::ActiveGroup;

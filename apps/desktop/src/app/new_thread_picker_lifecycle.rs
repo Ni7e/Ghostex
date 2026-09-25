@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 /// The picker's window root inside the app: it answers the New Thread hotkey
-/// (a second Cmd+Shift+T closes the picker) around the kit-only picker view,
+/// (a second press closes the picker) around the kit-only picker view,
 /// which cannot name the app's action types itself.
 pub(crate) struct GpuiNewThreadPickerShell {
     picker: Entity<GpuiNewThreadPickerWindow>,
@@ -69,7 +69,7 @@ fn new_thread_picker_agent_from_hud(value: &Value) -> Option<NewThreadPickerAgen
 
 /// The sidebar HUD agent buttons in dropdown order, with the last-used agent
 /// moved to the front so it is the preselected row.
-fn order_new_thread_picker_agents(
+pub(crate) fn order_new_thread_picker_agents(
     hud_agents: &[Value],
     primary_agent_id: Option<&str>,
 ) -> Vec<NewThreadPickerAgent> {
@@ -121,7 +121,7 @@ fn usage_window_label(window: &Value) -> Option<String> {
     }
 }
 
-/// Port of `AccountLauncherUsage` in packages/core-ui/accounts/agent-launcher-menu.tsx:
+/// Port of `AccountLauncherUsage` in the deleted React sidebar's packages/core-ui/accounts/agent-launcher-menu.tsx (git history):
 /// Claude shows its two tightest limits out of weekly, five-hour, and Fable, Codex the weekly window and available resets.
 fn account_usage_line(account: &Value) -> Option<String> {
     let windows = account["usage"]
@@ -179,7 +179,7 @@ fn new_thread_picker_accounts(state: &Value) -> Vec<NewThreadPickerAccount> {
 }
 
 impl GhostexGpuiApp {
-    /// Cmd+Shift+T toggles the picker: a second press while it is open closes it.
+    /// The New Thread hotkey toggles the picker: a second press while it is open closes it.
     pub(crate) fn toggle_gpui_new_thread_picker(&mut self, cx: &mut gpui::Context<Self>) {
         if self.new_thread_picker_visible {
             self.close_gpui_new_thread_picker(cx);
@@ -259,6 +259,8 @@ impl GhostexGpuiApp {
         );
         let options = WindowOptions {
             kind: crate::app::window::popup_frame::child_window_kind(),
+            #[cfg(target_os = "linux")]
+            x11_parent: self.main_window_handle,
             window_bounds: Some(WindowBounds::Windowed(gpui::Bounds::centered_at(
                 self.main_window_bounds.center(),
                 window_size,
@@ -302,6 +304,9 @@ impl GhostexGpuiApp {
                 let picker = cx.new(|cx| {
                     let mut picker = GpuiNewThreadPickerWindow::new(config, host, window, cx);
                     picker.glass = window_glass_active();
+                    picker.frosted_fill = picker
+                        .glass
+                        .then(|| crate::app::helpers::frosted_menu_fill(picker.surface_color()));
                     picker
                 });
                 *picker_out.borrow_mut() = Some(picker.clone());
@@ -389,20 +394,8 @@ impl GhostexGpuiApp {
                 agent_id,
                 account_id,
             } => {
-                let mut message = json!({
-                    "agentId": agent_id,
-                    "type": "runSidebarAgent",
-                });
-                if let Some(account_id) = account_id {
-                    message["accountId"] = json!(account_id);
-                }
-                self.sidebar_primary_agent_launcher_id = Some(agent_id);
                 self.release_gpui_new_thread_picker_window(cx);
-                if self.sidebar.is_some() {
-                    self.stage_agent_launch_placeholder(&message, cx);
-                    self.focus_staged_chat_after_picker(cx);
-                }
-                self.dispatch_gpui_sidebar_host_message(message, cx);
+                self.launch_agent_in_active_project(agent_id, account_id, cx);
             }
             NewThreadPickerCommand::OpenBrowser => {
                 self.dispatch_gpui_sidebar_host_message(

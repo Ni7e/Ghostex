@@ -213,7 +213,7 @@ export type SidebarGhostexCliStatusMessage = {
   manageBeadsSkillPath?: string;
   /**
    * CDXC:AgentSkills 2026-09-19 WHY:
-   * `$ghostex-agents-orchestration` (which replaced the Fable 5.6 orchestration skill in the same slot) shipped after existing hosts, so its
+   * `$ghostex-agents` (first shipped as `$ghostex-agents-orchestration`, which replaced the Fable 5.6 orchestration skill in the same slot) shipped after existing hosts, so its
    * status fields stay optional and consumers must treat a missing value as
    * not installed instead of requiring every host build to send it.
    */
@@ -2448,7 +2448,7 @@ export type SidebarToExtensionMessage =
       /**
        * CDXC:Projects 2026-09-16 DECISION:
        * User: closing a project in a Space stays in that Space and selects a non-sleeping session from the next project in the list.
-       * SidebarApp resolves that session from the rows the user sees (see sidebar-app/close-project-successor.ts) and the host focuses it BEFORE parking the project, so the active project never falls back to one outside the Space.
+       * The sidebar resolves that session from the rows the user sees (packages/gx-core/src/sidebar_view/close_successor.rs) and the host focuses it BEFORE parking the project, so the active project never falls back to one outside the Space.
        */
       successorSessionId?: string;
     }
@@ -3299,6 +3299,15 @@ export type SidebarToExtensionMessage =
   | {
       appearance: 'dark' | 'light';
       type: 'pickWindowGlassImageFile';
+    }
+  /** Settings -> Window glass -> Video: the downloaded aerial wallpapers, answered as windowGlassVideosListed. */
+  | {
+      type: 'listWindowGlassVideos';
+    }
+  /** Settings -> Window glass -> Video: "Choose a file…", answered as windowGlassVideoFilePicked with a path or an error. */
+  | {
+      appearance: 'dark' | 'light';
+      type: 'pickWindowGlassVideoFile';
     }
   /**
    * CDXC:Onboarding 2026-08-24:

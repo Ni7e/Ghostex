@@ -51,6 +51,8 @@ import {
   lightThemeCards,
   windowGlassForTransparency,
   windowGlassAvailable,
+  windowGlassPicturesAvailable,
+  windowGlassRestartNote,
   themeContrastChoiceIndex,
   themeContrastPatch,
   transparencyStrengthFromSettings,
@@ -97,6 +99,7 @@ export function ThemeSettingsTab({
   appIconState,
   chooseAppIconFile,
   chooseWindowGlassImageFile,
+  chooseWindowGlassVideoFile,
   draft,
   getSettingModificationProps,
   nativeFilePickerAvailable,
@@ -110,12 +113,15 @@ export function ThemeSettingsTab({
   updateDraft,
   updateDraftDebounced,
   updateDraftMany,
+  windowGlassVideoError,
+  windowGlassVideos,
 }: {
   appIconError?: string;
   appIconSectionRef: RefObject<HTMLDivElement | null>;
   appIconState?: SidebarAppIconStateMessage;
   chooseAppIconFile: () => void;
   chooseWindowGlassImageFile: (appearance: 'dark' | 'light') => void;
+  chooseWindowGlassVideoFile: (appearance: 'dark' | 'light') => void;
   draft: ghostexSettings;
   getSettingModificationProps: <Key extends keyof ghostexSettings>(key: Key) => Required<SettingModificationProps>;
   nativeFilePickerAvailable: boolean;
@@ -132,6 +138,10 @@ export function ThemeSettingsTab({
   updateDraftDebounced: UpdateDraft;
   /** Saves several settings in one change, for the friendly controls that drive the deeper ones. */
   updateDraftMany: (patch: Partial<ghostexSettings>) => void;
+  /** Why the last picked glass video file was refused, for its appearance's row. */
+  windowGlassVideoError?: { appearance: 'dark' | 'light'; message: string };
+  /** The aerial wallpapers macOS has downloaded, offered as glass videos. */
+  windowGlassVideos: readonly { name: string; value: string }[];
 }) {
   const appearanceId = useId();
   const darkThemeId = useId();
@@ -284,7 +294,7 @@ export function ThemeSettingsTab({
             {windowGlassAvailable() && visible('windowGlass') ? (
               <ToggleField
                 checked={glassOn}
-                description='Let your desktop show softly through the window in dark mode. Always glass is under Advanced.'
+                description={`Let your desktop show softly through the window in dark mode. Always glass is under Advanced.${windowGlassRestartNote()}`}
                 label='Enable Transparency'
                 {...getSettingModificationProps('windowGlass')}
                 advanced={false}
@@ -517,7 +527,7 @@ export function ThemeSettingsTab({
               <SettingsSection title='Glass'>
                 {visible('windowGlass') ? (
                   <SelectField
-                    description='When the blurred desktop shows through the window. Glass in dark mode is what the Enable Transparency switch turns on.'
+                    description={`When the blurred desktop shows through the window. Glass in dark mode is what the Enable Transparency switch turns on.${windowGlassRestartNote()}`}
                     label='Window glass'
                     {...getSettingModificationProps('windowGlass')}
                     onChange={(value) => updateDraft('windowGlass', value as WindowGlassMode)}
@@ -525,10 +535,10 @@ export function ThemeSettingsTab({
                     value={draft.windowGlass}
                   />
                 ) : null}
-                {glassOn && visible('windowGlassSource') ? (
+                {glassOn && windowGlassPicturesAvailable() && visible('windowGlassSource') ? (
                   <SelectField
                     dependent
-                    description='Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose.'
+                    description='Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose, and Video plays a video behind it.'
                     label='Glass shows'
                     {...getSettingModificationProps('windowGlassSource')}
                     onChange={(value) => updateDraft('windowGlassSource', value as WindowGlassSource)}
@@ -537,7 +547,10 @@ export function ThemeSettingsTab({
                   />
                 ) : null}
                 {glassOn &&
-                (draft.windowGlassSource === 'wallpaper' || draft.windowGlassSource === 'customImage') &&
+                windowGlassPicturesAvailable() &&
+                (draft.windowGlassSource === 'wallpaper' ||
+                  draft.windowGlassSource === 'customImage' ||
+                  draft.windowGlassSource === 'video') &&
                 visible('windowGlassImagePlacement') ? (
                   <SelectField
                     dependent
@@ -549,7 +562,10 @@ export function ThemeSettingsTab({
                     value={draft.windowGlassImagePlacement}
                   />
                 ) : null}
-                {glassOn && draft.windowGlassSource === 'customImage' && visible('windowGlassImageDark') ? (
+                {glassOn &&
+                windowGlassPicturesAvailable() &&
+                draft.windowGlassSource === 'customImage' &&
+                visible('windowGlassImageDark') ? (
                   <TextField
                     browseLabel='Choose image'
                     dependent
@@ -566,7 +582,10 @@ export function ThemeSettingsTab({
                     value={draft.windowGlassImageDark}
                   />
                 ) : null}
-                {glassOn && draft.windowGlassSource === 'customImage' && visible('windowGlassImageLight') ? (
+                {glassOn &&
+                windowGlassPicturesAvailable() &&
+                draft.windowGlassSource === 'customImage' &&
+                visible('windowGlassImageLight') ? (
                   <TextField
                     browseLabel='Choose image'
                     dependent
@@ -581,6 +600,50 @@ export function ThemeSettingsTab({
                     onChange={(value) => updateDraft('windowGlassImageLight', value.trim())}
                     placeholder='/Users/you/Pictures/light.jpg'
                     value={draft.windowGlassImageLight}
+                  />
+                ) : null}
+                {glassOn && windowGlassPicturesAvailable() && draft.windowGlassSource === 'video'
+                  ? (['dark', 'light'] as const).map((appearance) => {
+                      const key = appearance === 'dark' ? 'windowGlassVideoDark' : 'windowGlassVideoLight';
+                      if (!visible(key)) {
+                        return null;
+                      }
+                      const value = draft[key];
+                      const options = glassVideoOptions(value, windowGlassVideos, nativeFilePickerAvailable);
+                      const error =
+                        windowGlassVideoError?.appearance === appearance ? windowGlassVideoError.message : '';
+                      return (
+                        <SelectField
+                          dependent
+                          description={error || glassVideoDescription(value, windowGlassVideos, appearance)}
+                          key={key}
+                          label={appearance === 'dark' ? 'Glass video for dark mode' : 'Glass video for light mode'}
+                          {...getSettingModificationProps(key)}
+                          onChange={(next) => {
+                            if (next === CHOOSE_VIDEO_FILE) {
+                              chooseWindowGlassVideoFile(appearance);
+                              return;
+                            }
+                            updateDraft(key, next === NO_VIDEO ? '' : next);
+                          }}
+                          options={options}
+                          triggerWidth='16rem'
+                          value={value || NO_VIDEO}
+                        />
+                      );
+                    })
+                  : null}
+                {glassOn &&
+                windowGlassPicturesAvailable() &&
+                draft.windowGlassSource === 'video' &&
+                visible('windowGlassVideoOnlyOnPower') ? (
+                  <ToggleField
+                    checked={draft.windowGlassVideoOnlyOnPower}
+                    dependent
+                    description='Pause the video while your computer runs on battery. It always pauses while Ghostex is in the background or hidden.'
+                    label='Play glass video only when plugged in'
+                    {...getSettingModificationProps('windowGlassVideoOnlyOnPower')}
+                    onChange={(checked) => updateDraft('windowGlassVideoOnlyOnPower', checked)}
                   />
                 ) : null}
                 {glassOn && visible('windowGlassSidebarOpacityDark') ? (
@@ -691,4 +754,47 @@ function RelatedSettingLink({ label, onOpen }: { label: string; onOpen: () => vo
       </Button>
     </SettingRow>
   );
+}
+
+const NO_VIDEO = '__none__';
+const CHOOSE_VIDEO_FILE = '__choose__';
+
+/** The video dropdown: none, the downloaded aerials, the chosen file, and Choose a file…. */
+function glassVideoOptions(
+  value: string,
+  aerials: readonly { name: string; value: string }[],
+  canChooseFile: boolean
+): { label: string; value: string }[] {
+  const options = [
+    { label: 'None', value: NO_VIDEO },
+    ...aerials.map((aerial) => ({ label: aerial.name, value: aerial.value })),
+  ];
+  if (value && !aerials.some((aerial) => aerial.value === value)) {
+    options.push({
+      label: value.startsWith('aerial:') ? 'Aerial (not downloaded)' : (value.split('/').pop() ?? value),
+      value,
+    });
+  }
+  if (canChooseFile) {
+    options.push({ label: 'Choose a file…', value: CHOOSE_VIDEO_FILE });
+  }
+  return options;
+}
+
+function glassVideoDescription(
+  value: string,
+  aerials: readonly { name: string; value: string }[],
+  appearance: 'dark' | 'light'
+): string {
+  if (!value) {
+    return aerials.length > 0
+      ? `No video chosen, so ${appearance} mode shows the live blur. Pick a downloaded aerial or choose a file.`
+      : `No video chosen, so ${appearance} mode shows the live blur. Choose a .mov or .mp4 file, or download an aerial wallpaper in System Settings.`;
+  }
+  if (value.startsWith('aerial:') && !aerials.some((aerial) => aerial.value === value)) {
+    return `Your computer no longer has this aerial downloaded, so ${appearance} mode shows the live blur. Pick it in System Settings > Wallpaper to download it again.`;
+  }
+  return value.startsWith('aerial:')
+    ? `Plays this aerial wallpaper, blurred, behind the glass in ${appearance} mode.`
+    : `Plays ${value} behind the glass in ${appearance} mode.`;
 }

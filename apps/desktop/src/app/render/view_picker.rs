@@ -47,22 +47,30 @@ impl ViewPickerGroup {
     }
 }
 
-/// One line under a view's name in the picker. Built-ins say what the view is for in the product's
-/// own words; an installed extension's line comes from its manifest instead (see
-/// `render_view_picker_card`), and a custom view has none.
+/// What a card says under a view's name: the line it shows, and the whole text its hover shows
+/// when that line is only part of it. Built-ins say what the view is for in the product's own
+/// words; a website view shows the first sentence of its catalog description; a custom view says
+/// which address it opens. An installed extension's line comes from its manifest instead (see
+/// `render_view_picker_card`).
 ///
-/// CDXC:Workarea 2026-09-23 DECISION:
-/// User: the line under each card stays one row by shortening the sentence, not with an ellipsis. Linear, Jira, and GitHub keep their longer sentences in Settings.
-fn view_picker_description(mode: TitlebarMode) -> &'static str {
+/// CDXC:Workarea 2026-09-24 DECISION:
+/// User: no card shows more than one line of description; hover shows the full text. Built-ins keep sentences short enough to fit, Linear, Jira, and GitHub keep their shortened sentences, and custom views read "Opens ticktick.com/tasks/..." without the `http(s)://` or `www.` prefix. Supersedes the 2026-09-23 rule that lines never end in an ellipsis.
+fn view_picker_description(mode: TitlebarMode) -> (gpui::SharedString, Option<gpui::SharedString>) {
     if let Some(provider) = mode.website_provider() {
-        return match provider.id.as_str() {
+        let line = match provider.id.as_str() {
             "linear" => "Your team's issues and projects.",
             "jira" => "The team board beside your work.",
             "github" => "Opens from the project's origin.",
-            _ => provider.description.as_str(),
+            _ => provider
+                .description
+                .split_inclusive(". ")
+                .next()
+                .unwrap_or_default()
+                .trim(),
         };
+        return (line.into(), Some(provider.description.clone().into()));
     }
-    match mode {
+    let line = match mode {
         mode if mode.is_storybook() => "Annotate your project’s components.",
         TitlebarMode::Source => "Edit and search project files.",
         TitlebarMode::Browser => "Open a local app or any website.",
@@ -70,8 +78,25 @@ fn view_picker_description(mode: TitlebarMode) -> &'static str {
         TitlebarMode::Automate => "Run repeatable project routines.",
         TitlebarMode::Terminal => "Shell commands beside your agents..",
         TitlebarMode::Manage => "Notes, plans and reference files.",
-        TitlebarMode::Extension(_) | TitlebarMode::Agents => "",
-    }
+        TitlebarMode::Extension(id) => {
+            let Some(view) = gpui_custom_view(id).filter(|view| !view.url.is_empty()) else {
+                return ("".into(), None);
+            };
+            let url = view.url.as_str();
+            let url = url
+                .strip_prefix("https://")
+                .or_else(|| url.strip_prefix("http://"))
+                .unwrap_or(url);
+            let url = url
+                .strip_prefix("www.")
+                .unwrap_or(url)
+                .trim_end_matches('/');
+            let text = gpui::SharedString::from(format!("Opens {url}"));
+            return (text.clone(), Some(text));
+        }
+        TitlebarMode::Agents => "",
+    };
+    (line.into(), None)
 }
 
 impl GhostexGpuiApp {
@@ -218,9 +243,10 @@ impl GhostexGpuiApp {
         let extension_description = extension
             .map(|extension| gpui::SharedString::from(extension.description.clone()))
             .filter(|description| !description.is_empty());
-        let description: gpui::SharedString = extension_description
-            .clone()
-            .unwrap_or_else(|| view_picker_description(mode).into());
+        let (description, full_description) = match extension_description {
+            Some(description) => (description.clone(), Some(description)),
+            None => view_picker_description(mode),
+        };
         let icon = match extension {
             Some(extension) => img(extension.icon_image.clone())
                 .size(px(15.0))
@@ -253,7 +279,7 @@ impl GhostexGpuiApp {
             .bg(fill)
             .cursor_default()
             .when(!available, |this| this.opacity(0.5))
-            .when_some(extension_description.clone(), |this, description| {
+            .when_some(full_description, |this, description| {
                 this.tooltip(move |window, cx| titlebar_tooltip(description.clone(), window, cx))
             })
             .when(available, |this| {
@@ -289,15 +315,13 @@ impl GhostexGpuiApp {
             .when(!description.is_empty(), |this| {
                 this.child(
                     div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
                         .text_size(px(12.0))
                         .line_height(px(16.0))
                         .text_color(titlebar_inactive_text_color())
-                        .when(extension_description.is_some(), |this| {
-                            this.min_w_0()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                        })
                         .child(description),
                 )
             })

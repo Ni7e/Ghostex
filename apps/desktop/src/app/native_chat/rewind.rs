@@ -33,9 +33,9 @@ pub(super) struct RewindWindow {
 
 impl NativeChatView {
     pub(in crate::app::native_chat) fn sync_rewind_window(&mut self, cx: &mut Context<Self>) {
-        if self.snapshot["rewind"].is_null() {
+        if self.pane_hidden || self.snapshot["rewind"].is_null() {
             if let Some(handle) = self.rewind_window.handle.take() {
-                let main = self.main_window;
+                let main = self.main_window.filter(|_| !self.pane_hidden);
                 cx.defer(move |cx| {
                     let _ = handle.update(cx, |_, window, _| window.remove_window());
                     if let Some(main) = main {
@@ -79,6 +79,8 @@ impl NativeChatView {
                     cx.open_window(
                         WindowOptions {
                             kind: crate::app::window::popup_frame::child_window_kind(),
+                            #[cfg(target_os = "linux")]
+                            x11_parent: Some(main),
                             window_bounds: Some(WindowBounds::Windowed(bounds)),
                             display_id,
                             app_id: crate::gpui_platform_window_app_id(),

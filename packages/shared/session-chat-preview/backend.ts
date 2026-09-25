@@ -37,7 +37,6 @@ function chatPreviewFiles() {
       'apps/desktop/src/app/native_chat/suggestions/render.rs',
       'apps/desktop/src/app/native_chat/suggestions/window.rs',
       'apps/mobile/views/chat/session-chat-main.tsx',
-      'apps/web/src/chat/session-chat-transport.ts',
       'packages/core-ui/chat/session-chat-view.tsx',
       'packages/core-ui/chat/session-chat-composer.tsx',
       'packages/core-ui/chat/session-chat-composer-trigger.ts',

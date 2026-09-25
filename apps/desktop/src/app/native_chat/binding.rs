@@ -57,7 +57,7 @@ impl GhostexGpuiApp {
             parent_native_view: self.parent_ns_view,
             client_id: format!("native-desktop-{}", std::process::id()),
             remote,
-            initial_snapshot: self.cached_session_chat_runtime_snapshot(Some(&key)),
+            initial_snapshot: None,
             initial_presentation: self.initial_session_chat_presentation(Some(&key)),
         };
         if let Some(view) = existing {
@@ -89,16 +89,9 @@ impl GhostexGpuiApp {
         let subscription =
             cx.subscribe(
                 &view,
-                move |this, view, event: &NativeChatEvent, cx| match event {
+                move |this, _view, event: &NativeChatEvent, cx| match event {
                     NativeChatEvent::Broker(message) => {
-                        let mut message = message.clone();
-                        message["clientId"] = view.read(cx).config.client_id.clone().into();
-                        message["requestId"] = message["id"]
-                            .as_u64()
-                            .map(|id| id.to_string())
-                            .unwrap_or_default()
-                            .into();
-                        this.relay_session_chat_runtime_request(generation, &message, cx);
+                        this.relay_session_chat_runtime_request(generation, message);
                     }
                     NativeChatEvent::ComposerFocused => {
                         this.reclaim_gpui_root_for_chrome_input_focus();
@@ -128,16 +121,12 @@ impl GhostexGpuiApp {
                                 {
                                     return;
                                 }
-                                if message["action"] == "modelPicker" {
-                                    this.open_session_chat_model_picker(session_id, cx);
-                                } else {
-                                    this.receive_session_chat_host_action(
-                                        session_id,
-                                        &message.to_string(),
-                                        window,
-                                        cx,
-                                    );
-                                }
+                                this.receive_session_chat_host_action(
+                                    session_id,
+                                    &message.to_string(),
+                                    window,
+                                    cx,
+                                );
                             });
                         })
                         .detach();
@@ -146,7 +135,13 @@ impl GhostexGpuiApp {
             );
         view.update(cx, |view, _| view.subscriptions.push(subscription));
         self.agents_chat_page_states.insert(session_id, state);
-        self.native_chat_views.insert(session_id, view.clone());
+        if let Some(previous) = self.native_chat_views.insert(session_id, view.clone())
+            && previous != view
+        {
+            previous.update(cx, |previous, cx| {
+                previous.dismiss_windows_for_hidden_pane(cx)
+            });
+        }
         view
     }
 

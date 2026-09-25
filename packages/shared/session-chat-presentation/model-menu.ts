@@ -34,6 +34,10 @@ const AUTO_MODEL_VALUE = 'auto';
 /** The long-context twin of a model is the same row with another Context Window choice. */
 const LONG_CONTEXT_SUFFIX = '[1m]';
 const CONTEXT_LABELS = { standard: '200K', long: '1M' } as const;
+/** A catalog row named after another with this suffix is that model's fast twin (Grok 4.7 Fast). */
+const FAST_TWIN_LABEL_SUFFIX = ' Fast';
+/** The footer button that switches a model to its fast twin, where the agent has no fast-mode command. */
+const FAST_TWIN_TRAIT = 'fastModel';
 
 export interface ModelMenuTab {
   id: ModelMenuTabId;
@@ -41,6 +45,8 @@ export interface ModelMenuTab {
   icon?: string;
   name: string;
   active: boolean;
+  /** Another agent's tab in a started session: its models hand the conversation off to that agent's CLI. */
+  handoff?: boolean;
 }
 
 export interface ModelMenuVariant {
@@ -58,6 +64,13 @@ export interface ModelMenuEntry {
   label: string;
   description?: string;
   variants: readonly ModelMenuVariant[];
+  /** The model's fast twin, which the Fast button switches to; absent where the model has none. */
+  fast?: ModelMenuVariant;
+}
+
+export interface ModelMenuEffort {
+  value: string;
+  label: string;
 }
 
 export interface ModelMenuRow extends ModelMenuEntry {
@@ -66,8 +79,14 @@ export interface ModelMenuRow extends ModelMenuEntry {
   selected: boolean;
   /** 1 to 9 for the rows Cmd+number reaches. */
   shortcut?: number;
-  /** Favorites mix agents, so those rows name theirs on a second line. */
+  /** Favorites mix agents, so those rows lead with their agent's logo. */
   showAgent: boolean;
+  /** Picking this row hands the conversation off to another agent's CLI rather than switching this session's model. */
+  handoff?: boolean;
+  /** The reasoning levels this model offers, lowest first; empty where it has none. */
+  efforts: readonly ModelMenuEffort[];
+  /** The level a pick of this row uses until Left or Right moves it: the one in use, else the model's default. */
+  effort: string;
 }
 
 export interface ModelMenuTraitChoice {
@@ -80,14 +99,14 @@ export interface ModelMenuTraitChoice {
 }
 
 export interface ModelMenuTrait {
-  /** `context` picks a model variant; anything else is the option descriptor with this id. */
+  /** `context` and `fastModel` pick a model variant (see modelMenuTraitPicksModel); anything else is the option descriptor with this id. */
   id: string;
   label: string;
   valueLabel: string | null;
   disabled?: boolean;
   choices: readonly ModelMenuTraitChoice[];
-  /** The glyph drawn beside the value: a brain for reasoning, chart bars for the context window, a bolt for fast mode. */
-  icon?: 'reasoning' | 'context' | 'fast';
+  /** The glyph drawn beside the value: a brain for reasoning, chart bars for the context window, a bolt for fast mode, a person for the account. */
+  icon?: 'reasoning' | 'context' | 'fast' | 'account';
   /** Present when the button has at most two values: the one a click moves to. Longer lists open a side list instead. */
   toggle?: { value: string; exitPlan?: boolean };
 }
@@ -100,6 +119,18 @@ function entriesFor(provider: ModelPickerProvider, catalog: SessionChatSessionOp
   const values = new Set(choices.map((choice) => choice.value));
   const entries: ModelMenuEntry[] = [];
   for (const choice of choices) {
+    /**
+     * CDXC:SessionChat 2026-09-24 DECISION:
+     * User: Grok Build's "Grok 4.7 Fast" is not a separate model in the picker; the person switches Fast mode on or off on
+     * Grok 4.7 to get the fast model. A model whose label is another's plus " Fast" folds into that row, and the footer's
+     * Fast button picks between the two.
+     */
+    if (
+      choice.label.endsWith(FAST_TWIN_LABEL_SUFFIX) &&
+      choices.some((other) => `${other.label}${FAST_TWIN_LABEL_SUFFIX}` === choice.label)
+    )
+      continue;
+    const fast = choices.find((other) => other.label === `${choice.label}${FAST_TWIN_LABEL_SUFFIX}`);
     const long = choice.value.endsWith(LONG_CONTEXT_SUFFIX);
     const base = long ? choice.value.slice(0, -LONG_CONTEXT_SUFFIX.length) : choice.value;
     if (long && values.has(base)) continue;
@@ -118,6 +149,7 @@ function entriesFor(provider: ModelPickerProvider, catalog: SessionChatSessionOp
               { value: twin, label: CONTEXT_LABELS.long },
             ]
           : [],
+      ...(fast ? { fast: { value: fast.value, label: fast.label } } : {}),
     });
   }
   return entries;
@@ -140,7 +172,8 @@ export function modelMenuEntryFor(
 ): ModelMenuEntry | undefined {
   if (!provider || !model) return undefined;
   return entries[provider]?.find(
-    (entry) => entry.value === model || entry.variants.some((variant) => variant.value === model)
+    (entry) =>
+      entry.value === model || entry.fast?.value === model || entry.variants.some((variant) => variant.value === model)
   );
 }
 
@@ -218,6 +251,8 @@ export function modelMenuRows(
     selected: current !== undefined && current.provider === entry.provider && current.value === entry.value,
     shortcut: index < MODEL_MENU_SHORTCUT_ROWS ? index + 1 : undefined,
     showAgent: favoritesTab,
+    efforts: [],
+    effort: '',
   }));
 }
 
@@ -230,12 +265,16 @@ export function toggleModelMenuFavorite(favorites: readonly string[], key: strin
   return favorites.includes(key) ? favorites.filter((item) => item !== key) : [...favorites, key];
 }
 
-/** The value a row is picked with: the context window in use when the row offers it, else the catalog's default twin. */
+/**
+ * The value a row is picked with: the context window in use when the row offers it, else the catalog's default twin.
+ * A row whose fast twin is running stays on it.
+ */
 export function modelMenuPickValue(
   entry: ModelMenuEntry,
   currentModel: string | undefined,
   defaultValue: string | undefined
 ): string {
+  if (entry.fast && currentModel === entry.fast.value) return currentModel;
   if (entry.variants.length === 0) return entry.value;
   if (currentModel && entry.variants.some((variant) => variant.value === currentModel)) return currentModel;
   const long = entry.variants.find((variant) => variant.value.endsWith(LONG_CONTEXT_SUFFIX));
@@ -256,12 +295,145 @@ export function modelMenuEffortFor(provider: ModelPickerProvider, model: string,
   );
 }
 
+/**
+ * The reasoning levels a row's model offers and the one its pick starts on. For the session's own model the
+ * choices come from the session's live descriptor, so they match what the Reasoning button lists today.
+ */
+export function modelMenuRowEfforts(
+  row: Pick<ModelMenuRow, 'provider' | 'value' | 'selected'> & { variants: readonly ModelMenuVariant[] },
+  params: {
+    pickValue: string;
+    currentEffort: string | undefined;
+    sessionEffort?: SessionChatOptionDescriptor;
+  }
+): { efforts: ModelMenuEffort[]; effort: string } {
+  const descriptor =
+    row.selected && params.sessionEffort
+      ? params.sessionEffort
+      : sessionChatSessionOptionCatalog(row.provider)
+          ?.optionsForModel(params.pickValue)
+          .find((entry) => entry.id === 'effort');
+  const catalog = currentAgentModelCatalog();
+  const efforts = (descriptor?.choices ?? []).map((choice) => ({
+    value: choice.value,
+    label: agentModelCatalogEffortLabel(catalog, choice.value) || choice.label,
+  }));
+  if (efforts.length === 0) return { efforts, effort: '' };
+  const offered = (value: string | undefined) =>
+    value !== undefined && efforts.some((effort) => effort.value === value) ? value : undefined;
+  return {
+    efforts,
+    effort:
+      offered(params.currentEffort) ??
+      offered(descriptor?.defaultValue) ??
+      efforts[Math.floor(efforts.length / 2)]!.value,
+  };
+}
+
+/**
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: take away the full-screen quick picker and make the composer's model pop-up the one model picker, opened by
+ * Option+P in chat and terminal view and driven from the keyboard: "I would actually be able to use the left and
+ * right arrows to change the [effort]". Left and Right move the highlighted model's reasoning one level and stop at
+ * the ends (a small shake, also on a model with no levels); the Reasoning button shows the highlighted model's level,
+ * and Enter saves that model with it.
+ * SEE-ALSO: apps/desktop/src/app/native_chat/option_menu/model_menu/keys.rs, packages/core-ui/chat/session-chat-model-menu.tsx.
+ */
+export function modelMenuStepEffort(row: Pick<ModelMenuRow, 'efforts'>, current: string, step: -1 | 1): string | null {
+  if (row.efforts.length === 0) return null;
+  const index = row.efforts.findIndex((effort) => effort.value === current);
+  if (index < 0) return row.efforts[step > 0 ? 0 : row.efforts.length - 1]!.value;
+  return row.efforts[index + step]?.value ?? null;
+}
+
+/** The Reasoning button for the highlighted model: its levels, with the one Left and Right have moved to marked. */
+export function modelMenuReasoningFor(
+  trait: ModelMenuTrait,
+  row: Pick<ModelMenuRow, 'efforts' | 'selected'> | undefined,
+  effort: string | undefined
+): ModelMenuTrait {
+  if (trait.id !== 'effort' || !row || effort === undefined || row.efforts.length === 0) return trait;
+  if (row.selected && trait.choices.some((choice) => choice.selected && choice.value === effort)) return trait;
+  return {
+    ...trait,
+    disabled: false,
+    valueLabel: row.efforts.find((entry) => entry.value === effort)?.label ?? trait.valueLabel,
+    choices: row.efforts.map((entry) => ({
+      value: entry.value,
+      label: entry.label,
+      selected: entry.value === effort,
+      isDefault: false,
+    })),
+    toggle: undefined,
+  };
+}
+
+/** The tab Tab or Shift+Tab moves to, wrapping round. */
+export function modelMenuNextTab(
+  tabs: readonly Pick<ModelMenuTab, 'id' | 'active'>[],
+  step: -1 | 1
+): ModelMenuTabId | undefined {
+  if (tabs.length === 0) return undefined;
+  const index = Math.max(
+    tabs.findIndex((tab) => tab.active),
+    0
+  );
+  return tabs[(index + step + tabs.length) % tabs.length]!.id;
+}
+
+/** The compact key reminder along the bottom of the pop-up. */
+export const MODEL_MENU_KEY_HINTS: readonly { keys: string; label: string }[] = [
+  { keys: '↑↓', label: 'model' },
+  { keys: '←→', label: 'effort' },
+  { keys: '⇥', label: 'agent' },
+  { keys: '⏎', label: 'save' },
+  { keys: 'esc', label: 'close' },
+];
+
+/** One signed-in account the Account button can switch this session to. */
+export interface ModelMenuAccount {
+  id: string;
+  label: string;
+  current: boolean;
+  ready: boolean;
+}
+
+/**
+ * CDXC:SessionChat 2026-09-24 DECISION:
+ * User: accounts can be switched from the keyboard too, "but make it hidden, need to press enter to show this (same
+ * as fast mode, should take up smaller area)". With more than one signed-in account for the session's agent the
+ * footer gains an Account button beside Fast that shows the account in use; Enter or a click opens the list of
+ * accounts, and Up, Down and Enter switch. It never toggles in place, even with two accounts.
+ */
+export function modelMenuAccountTrait(accounts: readonly ModelMenuAccount[] | undefined): ModelMenuTrait | null {
+  if (!accounts || accounts.filter((account) => account.ready || account.current).length < 2) return null;
+  const current = accounts.find((account) => account.current);
+  return {
+    id: 'account',
+    label: 'Account',
+    valueLabel: current?.label ?? 'Choose',
+    icon: 'account',
+    choices: accounts.map((account) => ({
+      value: account.id,
+      label: account.label,
+      selected: account.current,
+      isDefault: false,
+    })),
+  };
+}
+
 const TRAIT_LABELS: Record<string, string> = { effort: 'Reasoning' };
 const TRAIT_ICONS: Record<string, ModelMenuTrait['icon']> = {
   effort: 'reasoning',
   context: 'context',
   fastMode: 'fast',
+  [FAST_TWIN_TRAIT]: 'fast',
 };
+
+/** Footer buttons whose choices are model values (the context window, a fast twin), picked through the model option. */
+export function modelMenuTraitPicksModel(id: string): boolean {
+  return id === 'context' || id === FAST_TWIN_TRAIT;
+}
 
 /**
  * CDXC:SessionChat 2026-09-21 DECISION:
@@ -353,6 +525,15 @@ export function modelMenuTraits(
   const others = params.descriptors.filter((descriptor) => !isShiftTabModeCycler(descriptor));
   const effort = others.find((descriptor) => descriptor.id === 'effort');
   const fast = others.find((descriptor) => descriptor.id === 'fastMode');
+  const fastTwin = (twin: ModelMenuVariant, base: string): Omit<ModelMenuTrait, 'icon' | 'toggle'> => ({
+    id: FAST_TWIN_TRAIT,
+    label: 'Fast mode',
+    valueLabel: model === twin.value ? 'On' : 'Off',
+    choices: [
+      { value: twin.value, label: 'On', selected: model === twin.value, isDefault: false },
+      { value: base, label: 'Off', selected: model !== twin.value, isDefault: true },
+    ],
+  });
   traits.push(
     (effort && option(effort)) || unavailable('effort', 'Reasoning', 'Default'),
     entry && entry.variants.length > 0
@@ -368,7 +549,9 @@ export function modelMenuTraits(
           })),
         }
       : unavailable('context', 'Context Window', 'Default'),
-    (fast && option(fast)) || unavailable('fastMode', 'Fast mode', detectedFastLabel(params.state))
+    (fast && option(fast)) ||
+      (entry?.fast && fastTwin(entry.fast, entry.value)) ||
+      unavailable('fastMode', 'Fast mode', detectedFastLabel(params.state))
   );
   for (const descriptor of others) {
     if (descriptor === effort || descriptor === fast) continue;
@@ -391,5 +574,6 @@ export function modelMenuPillLabels(
     .filter((trait) => (trait.id === 'effort' || trait.id === 'context') && trait.choices.length > 0)
     .map((trait) => trait.valueLabel)
     .filter((value): value is string => !!value);
-  return { label: entry?.label ?? modelLabel, suffix: parts.length > 0 ? parts.join(' · ') : null };
+  const label = entry?.fast && model === entry.fast.value ? entry.fast.label : entry?.label;
+  return { label: label ?? modelLabel, suffix: parts.length > 0 ? parts.join(' · ') : null };
 }

@@ -6,6 +6,7 @@ import { useEffect, useId, useMemo, useSyncExternalStore } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import type { SessionChatMessage, SessionChatTheme } from '@/packages/shared/session-chat';
 import { SessionChatChoiceRows } from './session-chat-choice-rows';
+import { SessionChatDisclosureBody } from './session-chat-disclosure-body';
 import { SessionQuestionIndicator } from '../session-question-indicator';
 import { SessionChatAnswerInput } from './session-chat-answer-input';
 import type { SaveSessionChatImage } from './session-chat-image-attachments';
@@ -95,8 +96,8 @@ export function SessionChatAsyncQuestions({
         </span>
         {collapsed ? <IconChevronRight size={16} /> : <IconChevronDown size={16} />}
       </button>
-      {!collapsed ? (
-        <div key={question.key} id={panelId} className='ghostex-chat-async-questions-body'>
+      <SessionChatDisclosureBody gap={false} id={panelId} open={!collapsed}>
+        <div key={question.key} className='ghostex-chat-async-questions-body'>
           <p className='whitespace-pre-wrap' id={`${panelId}-question`}>
             {question.title}
           </p>
@@ -177,7 +178,7 @@ export function SessionChatAsyncQuestions({
             </Button>
           </div>
         </div>
-      ) : null}
+      </SessionChatDisclosureBody>
     </section>
   );
 }

@@ -32,8 +32,8 @@ pub(crate) fn dispatch(
     if operation.starts_with("setup") {
         return super::setup::dispatch(state, params);
     }
-    if operation == "prepareReset" {
-        return super::reset_credits::prepare(state, required(params, "id")?);
+    if operation == "redeemReset" {
+        return super::reset_claim::redeem(state, params);
     }
     let titlebar_has_accounts = if operation == "titlebar" {
         let db = crate::storage::open_gxserver_database(&state.paths).map_err(store::error)?;

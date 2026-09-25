@@ -184,6 +184,8 @@ impl Render for GhostexGpuiApp {
         self.main_window_bounds = window.bounds();
         self.main_window_handle = Some(gpui::Window::window_handle(window));
         self.sync_main_window_glass(window, cx);
+        crate::app::window::frosted_host::sync_frosted_tooltip_presenter(window, cx);
+        self.native_docs_drop_unseen_drawer(cx);
         self.main_window_display_id = window.display(cx).map(|display| display.id());
         #[cfg(target_os = "windows")]
         if self.windows_first_run_setup_state != GpuiWindowsFirstRunSetupState::Ready {
@@ -211,9 +213,9 @@ impl Render for GhostexGpuiApp {
         );
         self.sample_panel_motion(window, cx);
         self.refresh_gpui_sidebar_browser_tabs_if_changed(cx);
-        // The displayed set crosses the bridge to the sidebar runtime; while the selection is still moving it would do so once per tab step. The settle repaints, so the set is reported for the tab the user landed on.
+        // The shown sessions are reported to gxserver's Auto Sleep; while the selection is still moving that would happen once per tab step. The settle repaints, so the set is reported for the tab the user landed on.
         if !self.gx_store_selection_is_settling() {
-            self.refresh_gpui_sidebar_displayed_sessions_if_changed(cx);
+            self.gx_store_report_shown_sessions(cx);
         }
         self.prepare_focus_bounds_for_render(window.scale_factor(), cx);
         #[cfg(target_os = "macos")]
@@ -232,6 +234,9 @@ impl Render for GhostexGpuiApp {
             self.titlebar_popup_menu.is_some() || self.titlebar_extension_popup.is_some();
 
         let content = v_flex()
+            .on_action(cx.listener(|this, action: &crate::app::terminal_sync::gpui_engine_terminal_attachment::PickTerminalAttachmentKind, _, cx| {
+                this.request_gpui_engine_terminal_attachment_paths_for_kind(action.target.clone(), action.runtime_session_id, Some(action.directories_only), cx);
+            }))
             .on_action(cx.listener(|this, action: &crate::app::native_sidebar::actions::NativeSidebarAction, window, cx| {
                 this.handle_native_sidebar_action(action, window, cx);
             }))

@@ -2,6 +2,7 @@ use serde_json::{Map, Value};
 
 #[cfg(not(windows))]
 mod claude_background;
+mod claude_identity;
 #[cfg(windows)]
 mod windows;
 use super::*;
@@ -244,12 +245,23 @@ pub(crate) fn to_agent_resume_input(
             })
         })
         .or_else(|| base_command.clone());
+    let agent_session_id = read_text_from_map(&runtime_settings, "agentSessionId");
+    let agent_session_path = read_text_from_map(&runtime_settings, "agentSessionPath");
+    let (agent_session_id, agent_session_path) = if agent_id.as_deref() == Some("claude") {
+        claude_identity::written_claude_identity(
+            read_text_value(session, "zmxName").as_deref(),
+            agent_session_id,
+            agent_session_path,
+        )
+    } else {
+        (agent_session_id, agent_session_path)
+    };
     AgentResumeInput {
         agent_command: runtime_command,
         agent_id,
         agent_lookup_command: base_command,
-        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
-        agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
+        agent_session_id,
+        agent_session_path,
         first_user_message: read_text_from_map(&runtime_settings, "firstUserMessage")
             .or_else(|| read_text_from_map(&launch_settings, "firstUserMessage")),
         project_path: read_text_value(session, "cwd").or_else(|| read_text_value(project, "path")),

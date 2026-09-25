@@ -170,6 +170,10 @@ pub(crate) use crate::app::core::*;
 pub(crate) use crate::app::view_scopes::*;
 
 fn main() {
+    #[cfg(windows)]
+    if gpui_run_windows_remote_ssh_askpass() {
+        return;
+    }
     if std::env::var_os("GHOSTEX_CHAT_PREVIEW_STATE").is_some() {
         chat_preview::run();
         return;
@@ -202,13 +206,12 @@ fn main() {
             );
         }
     }
-    // PATH wrappers for `ghostex`/`gx` go stale across Sparkle and DMG
-    // updates, which swap the bundle but never rewrite them. Refresh
-    // Ghostex-owned wrappers off the main thread so filesystem probing cannot
+    // Install missing `ghostex`/`gx` PATH wrappers and refresh stale
+    // Ghostex-owned ones off the main thread so filesystem probing cannot
     // delay first paint, and only after the PATH normalization above so the
     // scan sees the user's standard tool directories.
     profiling::start();
-    thread::spawn(gpui_auto_repair_stale_ghostex_cli_wrappers);
+    thread::spawn(gpui_auto_install_ghostex_cli_wrappers);
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     cef_component_window::configure_cef_framework_path_for_process();
     // The Linux app is X11-only for v1 (CEF child-window embedding requires
@@ -232,6 +235,7 @@ fn main() {
     // (GPUI previously lost panics to stderr; macOS counterpart:
     // NativeCrashDiagnostics).
     support_logs::install_panic_hook();
+    app::gx_store::initialize_client_storage_at_start();
     cef::prepare_application();
     #[cfg(target_os = "macos")]
     reconcile_gpui_managed_ghostty_config();
@@ -248,6 +252,8 @@ fn main() {
     #[cfg(target_os = "macos")]
     application.on_open_urls(queue_gpui_os_integration_urls);
     application.run(move |cx| {
+        #[cfg(target_os = "windows")]
+        cef::register_windows_shutdown(cx);
         gpui_component::init(cx);
         apply_gpui_component_theme(cx);
         #[cfg(target_os = "macos")]
@@ -349,6 +355,14 @@ fn main() {
             ]);
             bindings
         };
+        // CDXC:Clipboard 2026-09-23 DECISION:
+        // User: Ctrl+Shift+V on Windows and Linux terminals uses the same local clipboard paste action, while configured hotkeys keep precedence. Sending raw Ctrl+V instead makes remote PowerShell paste the remote computer's clipboard.
+        #[cfg(not(target_os = "macos"))]
+        cx.bind_keys([KeyBinding::new(
+            "ctrl-shift-v",
+            PasteIntoFocusedTerminal,
+            Some(terminal_element::TERMINAL_KEY_CONTEXT),
+        )]);
         cx.bind_keys(shell_key_bindings);
         // The user's configured hotkey table binds after the base defaults so
         // configured chords win conflicts. Ids dispatch through the shared
@@ -365,9 +379,11 @@ fn main() {
                 None,
             ),
         };
+        let main_window_background = window_glass_background_appearance();
+        crate::app::helpers::note_main_window_background(main_window_background);
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
-            window_background: window_glass_background_appearance(),
+            window_background: main_window_background,
             display_id,
             window_min_size: Some(size(
                 px(GPUI_WINDOW_FRAME_MIN_WIDTH),

@@ -16,8 +16,15 @@
 //! row and a chat's working row draw are formatted from the deadline against the host's clock
 //! (gx-core `timer_trailing_label`, `armed_actions_by_session`).
 //!
+//! CDXC:Sidebar 2026-09-25 WHY:
+//! The channel goes one fact at a time as the app runtime port moves each one to Rust, which is how
+//! it dies with QuickJS. The HUD left it first: gx_store/hud/ composes it (family F2) and writes
+//! `hud` here, where every reader already looked. The remote machines' client-parked projects come
+//! on their own `remoteRecentProjects` post, because the runtime still writes them, and the HUD
+//! reads them from here.
+//!
 //! SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/sidebar-runtime-facts.ts,
-//! apps/desktop/src/app/gx_store/diagnostics_runtime_facts.rs.
+//! apps/desktop/src/app/gx_store/diagnostics_runtime_facts.rs, apps/desktop/src/app/gx_store/hud/.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,12 +33,13 @@ use ghostex_gx_core::{CloseAfterDoneInput, DelayedSendInput, ProjectDiffStats};
 use serde_json::Value;
 
 use crate::GhostexGpuiApp;
+use crate::app::helpers::gpui_remote_project_reference_from_project_id;
 use crate::app::native_sidebar::model::NativeSidebarRevealRequest;
 
 /// What the channel has delivered.
 #[derive(Default)]
 pub(crate) struct SidebarRuntimeFacts {
-    /// The sidebar HUD as the zustand store holds it, normalized the way the store normalizes it.
+    /// The sidebar HUD, composed by gx_store/hud/ (it used to be the runtime's post).
     ///
     /// CDXC:Sidebar 2026-09-21 WHY:
     /// Behind an `Arc` because every list install used to deep-clone it three times (the install
@@ -41,7 +49,11 @@ pub(crate) struct SidebarRuntimeFacts {
     pub(super) hud: Option<Arc<Value>>,
     pub(super) project_diff_stats: HashMap<String, ProjectDiffStats>,
     pub(super) close_after_done: HashMap<String, CloseAfterDoneInput>,
+    /// This app's own Delayed Sends of workspace sessions (local_delayed_sends.rs).
     pub(super) delayed_sends: HashMap<String, DelayedSendInput>,
+    /// Each remote machine's client-parked projects, in the runtime's stored order: an input of the
+    /// HUD while the runtime still writes them.
+    pub(super) remote_recent_projects: Vec<(String, Vec<Value>)>,
     /// Bumped when a post really replaced the HUD, and when one replaced the per-row facts. The
     /// two are apart so a rows post, which arrives with every projection the runtime builds, does
     /// not make the list re-read the HUD's Recent Projects.
@@ -89,25 +101,31 @@ impl GhostexGpuiApp {
             self.gx_store.runtime_facts.counters.unparsable += 1;
             return;
         };
+        // The runtime's own focus paths (focusSession, Split Right) acknowledge through the store's
+        // one attention tracker while the runtime still owns focus (gx_store/attention/).
+        if value.get("kind").and_then(Value::as_str) == Some("attentionAcknowledge") {
+            match value
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .and_then(ghostex_gx_core::SessionKey::parse_sidebar_session_id)
+            {
+                Some(session) => self.gx_store_acknowledge_attention(session, cx),
+                None => self.gx_store.runtime_facts.counters.unparsable += 1,
+            }
+            return;
+        }
         let mut reveal: Option<NativeSidebarRevealRequest> = None;
+        let mut remote_recents_moved = false;
         let facts = &mut self.gx_store.runtime_facts;
         match value.get("kind").and_then(Value::as_str) {
-            Some("hud") => {
-                facts.hud = value.get("hud").cloned().map(Arc::new);
-                facts.hud_generation += 1;
-                facts.counters.hud_posts += 1;
+            Some("remoteRecentProjects") => {
+                let rows = remote_recent_projects(&value);
+                remote_recents_moved = facts.remote_recent_projects != rows;
+                facts.remote_recent_projects = rows;
             }
             Some("rows") => {
-                facts.project_diff_stats = value
-                    .get("projectDiffStats")
-                    .and_then(Value::as_object)
-                    .map(|entries| {
-                        entries
-                            .iter()
-                            .map(|(id, stats)| (id.clone(), project_diff_stats(stats)))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                // A project's git numbers are the Rust poll's since the runtime port's F5
+                // (gx_store/git/poll.rs), which writes `project_diff_stats` itself.
                 facts.close_after_done = value
                     .get("closeAfterDone")
                     .and_then(Value::as_object)
@@ -115,16 +133,6 @@ impl GhostexGpuiApp {
                         entries
                             .iter()
                             .map(|(id, entry)| (id.clone(), close_after_done(entry)))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                facts.delayed_sends = value
-                    .get("delayedSend")
-                    .and_then(Value::as_object)
-                    .map(|entries| {
-                        entries
-                            .iter()
-                            .map(|(id, entry)| (id.clone(), delayed_send(entry)))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -161,6 +169,54 @@ impl GhostexGpuiApp {
         // Everything the list still borrows moved with this post, so the list is brought up to
         // date now rather than at the next thing that happens to move the store.
         self.gx_store_sidebar_state_changed(cx);
+        if remote_recents_moved {
+            self.gx_store_hud_sources_changed(cx);
+        }
+    }
+
+    /// CDXC:AgentLauncher 2026-09-23 WHY:
+    /// Settings shares the sidebar's machine-scoped project Actions; a local HUD read cannot resolve a remote project and supplies unrelated defaults. Global Actions still come from the local Settings hydrate.
+    pub(crate) fn with_remote_project_action_rows(&self, mut message: Value) -> Value {
+        if let Some(project) = self
+            .gpui_app_modal_active_project_id()
+            .filter(|id| gpui_remote_project_reference_from_project_id(id).is_some())
+        {
+            message["hud"]["commands"] = self
+                .gx_store
+                .runtime_facts
+                .hud
+                .as_deref()
+                .and_then(|hud| hud.get("commandsByProject"))
+                .and_then(|rows| rows.get(&project))
+                .cloned()
+                .unwrap_or_else(|| Value::Array(Vec::new()));
+        }
+        message
+    }
+
+    pub(crate) fn gpui_action_scope_for_command(
+        &self,
+        command_id: &str,
+    ) -> Option<crate::app::helpers::GpuiSidebarCommandScope> {
+        use crate::app::helpers::GpuiSidebarCommandScope;
+        let hud = self.gx_store.runtime_facts.hud.as_deref()?;
+        let contains = |rows: Option<&Value>| {
+            rows.and_then(Value::as_array).is_some_and(|rows| {
+                rows.iter()
+                    .any(|row| row["commandId"].as_str() == Some(command_id))
+            })
+        };
+        let project = self.gpui_app_modal_active_project_id()?;
+        let project_match = contains(
+            hud.get("commandsByProject")
+                .and_then(|rows| rows.get(&project)),
+        );
+        let global_match = contains(hud.get("globalCommands"));
+        match (project_match, global_match) {
+            (true, false) => Some(GpuiSidebarCommandScope::Project),
+            (false, true) => Some(GpuiSidebarCommandScope::Global),
+            _ => None,
+        }
     }
 
     /// Remembers a reveal this app asked for itself (the titlebar's Reveal Active Session), which
@@ -173,16 +229,21 @@ impl GhostexGpuiApp {
     }
 }
 
-fn project_diff_stats(stats: &Value) -> ProjectDiffStats {
-    let number = |key: &str| stats.get(key).and_then(Value::as_i64).unwrap_or_default();
-    let flag = |key: &str| stats.get(key).and_then(Value::as_bool) == Some(true);
-    ProjectDiffStats {
-        additions: number("additions"),
-        deletions: number("deletions"),
-        files: number("files"),
-        is_loading: flag("isLoading"),
-        is_repo: flag("isRepo"),
-    }
+/// `[[machineId, rows], ...]`, the runtime's `remoteRecentProjectsByMachineId`.
+fn remote_recent_projects(value: &Value) -> Vec<(String, Vec<Value>)> {
+    value
+        .get("remoteRecentProjects")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| {
+            Some((
+                entry.get(0)?.as_str()?.to_string(),
+                entry.get(1)?.as_array()?.clone(),
+            ))
+        })
+        .collect()
 }
 
 fn close_after_done(entry: &Value) -> CloseAfterDoneInput {
@@ -191,22 +252,6 @@ fn close_after_done(entry: &Value) -> CloseAfterDoneInput {
         deadline_at: text(entry, "deadlineAt"),
         remaining_label: text(entry, "remainingLabel"),
         remaining_ms: entry.get("remainingMs").and_then(Value::as_i64),
-    }
-}
-
-fn delayed_send(entry: &Value) -> DelayedSendInput {
-    DelayedSendInput {
-        deadline_at: text(entry, "deadlineAt"),
-        remaining_label: text(entry, "remainingLabel"),
-        remaining_ms: entry.get("remainingMs").and_then(Value::as_i64),
-        send_when_all_project_sessions_stop_active: entry
-            .get("sendWhenAllProjectSessionsStopActive")
-            .and_then(Value::as_bool)
-            == Some(true),
-        send_when_agent_stops_active: entry
-            .get("sendWhenAgentStopsActive")
-            .and_then(Value::as_bool)
-            == Some(true),
     }
 }
 

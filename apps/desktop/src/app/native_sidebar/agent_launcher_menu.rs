@@ -10,7 +10,7 @@ use gpui::{
 use gpui_component::{h_flex, v_flex};
 use serde_json::Value;
 
-/// `GROUP_AGENT_MENU_WIDTH_PX` in packages/core-ui/session-group-section.tsx.
+/// `GROUP_AGENT_MENU_WIDTH_PX` in the deleted React sidebar's packages/core-ui/session-group-section.tsx (git history).
 pub(crate) const AGENT_LAUNCHER_MENU_WIDTH: f32 = 220.0;
 const PANEL_PADDING: f32 = 6.0;
 const ROW_GAP: f32 = 2.0;
@@ -113,7 +113,7 @@ impl LauncherPalette {
 impl GhostexGpuiApp {
     /// CDXC:AgentLauncher 2026-09-19 DECISION:
     /// User: the GPUI project header Select Agent menu and its Select Account page must look just like the React sidebar's.
-    /// Mirrors `AgentLauncherMenuItems` in packages/core-ui/accounts/agent-launcher-menu.tsx with its groups.css, accounts.css, and app-menu-panel.css rules: a 220px panel right-aligned under the chevron, 2px row gaps, the accounts button before the chat mark, the last-used agent highlighted, and two-line account rows with a monospace usage line.
+    /// Mirrors `AgentLauncherMenuItems` in the deleted React sidebar's packages/core-ui/accounts/agent-launcher-menu.tsx (git history) with its groups.css, accounts.css, and app-menu-panel.css rules: a 220px panel right-aligned under the chevron, 2px row gaps, the accounts button before the chat mark, the last-used agent highlighted, and two-line account rows with a monospace usage line.
     pub(super) fn render_agent_launcher_menu_panel(
         &self,
         panel_index: usize,
@@ -131,6 +131,7 @@ impl GhostexGpuiApp {
                 .and_then(|snapshot| snapshot.hud["settings"].as_object()),
         );
         let scaled = |value: f32| px(value * scale);
+        let frosted = crate::app::window::frosted_host::frosted_hosting_active();
         let mut content = v_flex()
             .on_children_prepainted(super::menus::measure_menu_panel(
                 view,
@@ -151,23 +152,32 @@ impl GhostexGpuiApp {
             .rounded(scaled(8.0))
             .border_1()
             .border_color(titlebar_popup_menu_border_color())
-            .bg(titlebar_popup_menu_background())
-            .shadow(vec![
-                BoxShadow {
-                    color: gpui::hsla(0.0, 0.0, 0.0, 0.32),
-                    offset: point(px(0.0), scaled(14.0)),
-                    blur_radius: scaled(28.0),
-                    spread_radius: px(0.0),
-                    inset: false,
-                },
-                BoxShadow {
-                    color: gpui::hsla(0.0, 0.0, 1.0, 0.04),
-                    offset: point(px(0.0), px(0.0)),
-                    blur_radius: px(0.0),
-                    spread_radius: px(1.0),
-                    inset: false,
-                },
-            ])
+            .bg(if frosted {
+                popup_window_surface(titlebar_popup_menu_background())
+            } else {
+                titlebar_popup_menu_background()
+            })
+            // In the frosted host the panel sits on its window's blur, which has no room for a shadow.
+            .shadow(if frosted {
+                Vec::new()
+            } else {
+                vec![
+                    BoxShadow {
+                        color: gpui::hsla(0.0, 0.0, 0.0, 0.32),
+                        offset: point(px(0.0), scaled(14.0)),
+                        blur_radius: scaled(28.0),
+                        spread_radius: px(0.0),
+                        inset: false,
+                    },
+                    BoxShadow {
+                        color: gpui::hsla(0.0, 0.0, 1.0, 0.04),
+                        offset: point(px(0.0), px(0.0)),
+                        blur_radius: px(0.0),
+                        spread_radius: px(1.0),
+                        inset: false,
+                    },
+                ]
+            })
             .text_color(palette.foreground)
             .font_weight(FontWeight::NORMAL)
             .text_size(scaled(13.0))

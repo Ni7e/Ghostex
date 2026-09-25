@@ -125,7 +125,8 @@ impl NativeChatView {
         // app shell's pane-focus flag alone missed every moment it lagged the field (a first
         // responder the shell classifies as `Other`, a companion pane, a pane whose focus border
         // is held elsewhere), which read as the feature being missing.
-        let visible = self.maximized_window.is_none()
+        let visible = !self.pane_hidden
+            && self.maximized_window.is_none()
             && (self.pane_focused || self.composer_focused)
             && projection.is_object()
             && self.snapshot["questionCard"]["visible"] != true

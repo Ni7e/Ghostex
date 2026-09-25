@@ -59,6 +59,7 @@ int GhostexGpuiKeyboardRouteNativeEvent(void *gpuiRootView, int action,
                                         const char *characters);
 int GhostexGpuiKeyboardOwnerUsesRendererEditHotkeys(void *gpuiRootView);
 int GhostexGpuiKeyboardOwnerUsesDocsEditorHotkeys(void *gpuiRootView);
+int GhostexGpuiPerformTextInputHistoryCommand(void *gpuiRootView, int redo);
 bool GhostexGpuiNativeViewContainsResponder(void *rootNativeView,
                                             void *responder);
 
@@ -141,6 +142,7 @@ static BOOL GhostexGpuiCEFEventIsCommandA(NSEvent *event);
 static BOOL GhostexGpuiCEFEventIsCommandF(NSEvent *event);
 static BOOL GhostexGpuiCEFEventIsCommandOptionF(NSEvent *event);
 static BOOL GhostexGpuiCEFEventIsCommandY(NSEvent *event);
+static BOOL GhostexGpuiCEFEventIsHistoryChord(NSEvent *event);
 static GhostexGpuiCEFEditCommand
 GhostexGpuiCEFClipboardEditCommandForEvent(NSEvent *event);
 static GhostexGpuiCEFZoomCommand
@@ -221,7 +223,6 @@ static GhostexGpuiSidebarPointerTrackingState g_ghostexGpuiSidebarPointerState =
 
 extern void GhostexGpuiSidebarPointerInsideChanged(bool inside);
 extern void GhostexGpuiSidebarOutsideMouseDown(void);
-extern void GhostexGpuiSidebarScrollGestureBegan(void);
 
 void GhostexGpuiCEFSetSidebarPointerTrackingView(void *view) {
   NSView *sidebarView = (__bridge NSView *)view;
@@ -306,42 +307,8 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void) {
           NSEvent.mouseLocation));
 }
 
-/*
- CDXC:Spaces 2026-08-29:
- The sidebar page navigates Spaces with horizontal trackpad swipes, and DOM
- wheel events carry no NSEvent phase/momentumPhase, so the renderer cannot
- tell "second physical swipe" apart from "momentum tail of the first": every
- delta-magnitude and timing heuristic tried in the page either ate real
- re-swipes or double-switched on long uneven swipes. AppKit has the exact
- bit. A scrollWheel event with phase == NSEventPhaseBegan is fingers landing
- on the pad and starting a scroll (momentum events carry phase == None), so
- observe it here — once per physical gesture, never per delta — and report it
- to Rust when it lands inside the sidebar's frame. Rust forwards it into the
- page, which resets its swipe gesture state.
-*/
-static void GhostexGpuiSidebarScrollGestureObserveEvent(NSEvent *event) {
-  if (event.phase != NSEventPhaseBegan) {
-    return;
-  }
-  NSView *sidebarView = g_ghostexGpuiSidebarPointerTrackingView;
-  NSWindow *window = event.window;
-  if (!sidebarView || !window || sidebarView.window != window ||
-      sidebarView.isHiddenOrHasHiddenAncestor) {
-    return;
-  }
-  NSRect frameInWindow = [sidebarView convertRect:sidebarView.bounds
-                                           toView:nil];
-  if (NSPointInRect(event.locationInWindow, frameInWindow)) {
-    GhostexGpuiSidebarScrollGestureBegan();
-  }
-}
-
 static void GhostexGpuiSidebarPointerTrackingObserveEvent(NSEvent *event) {
   NSEventType type = event.type;
-  if (type == NSEventTypeScrollWheel) {
-    GhostexGpuiSidebarScrollGestureObserveEvent(event);
-    return;
-  }
   BOOL isMove = type == NSEventTypeMouseMoved ||
                 type == NSEventTypeLeftMouseDragged ||
                 type == NSEventTypeRightMouseDragged ||
@@ -374,7 +341,15 @@ static void GhostexGpuiSidebarPointerTrackingObserveEvent(NSEvent *event) {
         !sidebarView.isHiddenOrHasHiddenAncestor &&
         NSPointInRect([sidebarView convertPoint:event.locationInWindow fromView:nil],
                       GhostexGpuiSidebarTrackingRect(sidebarView));
-    if (!clickedSidebar) {
+    /*
+     CDXC:Theming 2026-09-25 WHY:
+     Under window glass the sidebar's own menu draws in a frosted child window over the sidebar
+     (app/window/frosted_host.rs). A press on it is a press on the menu, not outside it: dismissing
+     here closed the menu on mouse-down, before its row could see the click.
+    */
+    BOOL clickedSidebarMenu =
+        [window.identifier isEqualToString:@"ghostex.frostedSidebarMenu"];
+    if (!clickedSidebar && !clickedSidebarMenu) {
       GhostexGpuiSidebarOutsideMouseDown();
     }
   }
@@ -455,6 +430,65 @@ GhostexGpuiCEFDocsEditorHotkeysOwnKeyboardInWindow(NSWindow *window) {
   return gpuiRootView && gpuiRootView.window == window &&
          GhostexGpuiKeyboardOwnerUsesDocsEditorHotkeys(
              (__bridge void *)gpuiRootView) != 0;
+}
+
+static BOOL GhostexGpuiResponderIsChromiumContent(id responder) {
+  static Class contentClass = nil;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    contentClass = NSClassFromString(@"RenderWidgetHostViewCocoa");
+  });
+  return contentClass && [responder isKindOfClass:contentClass];
+}
+
+/*
+ CDXC:UndoRedo 2026-09-25 DECISION:
+ User: Edit > Undo and Redo in the menu bar must work everywhere. A nil-target undo: reaches NSWindow before GPUI's app delegate, and NSWindow's undo manager is always empty, so the items were greyed out for every native text field. These items target this object instead: a focused web page gets Chromium's own undo, anything else goes to the focused GPUI text field.
+ */
+@interface GhostexGpuiEditHistoryMenuTarget : NSObject
+@end
+
+@implementation GhostexGpuiEditHistoryMenuTarget
+- (void)ghostexPerformHistoryCommand:(BOOL)redo sender:(id)sender {
+  NSWindow *window = NSApp.keyWindow;
+  id responder = window.firstResponder;
+  SEL selector = redo ? @selector(redo:) : @selector(undo:);
+  if (GhostexGpuiResponderIsChromiumContent(responder)) {
+    if ([responder respondsToSelector:selector]) {
+      ((void (*)(id, SEL, id))objc_msgSend)(responder, selector, sender);
+    }
+    return;
+  }
+  GhostexGpuiFirstResponderObserver *observer =
+      window ? objc_getAssociatedObject(window,
+                                        GhostexGpuiFirstResponderObserverKey)
+             : nil;
+  GhostexGpuiPerformTextInputHistoryCommand(
+      (__bridge void *)observer.gpuiRootView, redo ? 1 : 0);
+}
+
+- (void)undo:(id)sender {
+  [self ghostexPerformHistoryCommand:NO sender:sender];
+}
+
+- (void)redo:(id)sender {
+  [self ghostexPerformHistoryCommand:YES sender:sender];
+}
+
+- (BOOL)validateMenuItem:(NSMenuItem *)item {
+  (void)item;
+  return NSApp.keyWindow != nil;
+}
+@end
+
+static GhostexGpuiEditHistoryMenuTarget *
+GhostexGpuiEditHistoryMenuTargetShared(void) {
+  static GhostexGpuiEditHistoryMenuTarget *target = nil;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    target = [[GhostexGpuiEditHistoryMenuTarget alloc] init];
+  });
+  return target;
 }
 
 /*
@@ -593,6 +627,17 @@ GhostexGpuiCEFDocsEditorHotkeysOwnKeyboardInWindow(NSWindow *window) {
       [responder keyDown:event];
       return;
     }
+  }
+
+  /*
+   CDXC:UndoRedo 2026-09-25 DECISION:
+   User: when a web page has focus, Cmd+Z and Cmd+Shift+Z go to the page first, so web apps with their own undo (Google Docs, Figma) get them, and Chromium's own undo runs only when the page leaves the key alone. AppKit fires the Edit menu's key equivalent before Chromium sees the key, and GPUI can still hold focus on a hidden native field, so hand the chord straight to the focused Chromium view. An unhandled chord comes back through CEF to the main menu, whose Undo/Redo target runs Chromium's undo.
+   */
+  NSWindow *historyWindow = event.window ?: NSApp.keyWindow;
+  if (GhostexGpuiCEFEventIsHistoryChord(event) &&
+      GhostexGpuiResponderIsChromiumContent(historyWindow.firstResponder)) {
+    [historyWindow.firstResponder keyDown:event];
+    return;
   }
 
   /*
@@ -1037,26 +1082,26 @@ static void GhostexGpuiCEFInstallStandardEditMenu(void) {
                           @"Select All", @selector(selectAll:), @"a")];
   }
 
-  /*
-   CDXC:Hotkeys 2026-08-08:
-   Source and Docs own renderer-level editing histories (Monaco, CodeMirror,
-   and Excalidraw). While either exact workarea is the proven window keyboard
-   owner, keep the standard Edit menu actions clickable but remove their key
-   equivalents so AppKit cannot translate Cmd+Z, Cmd+Shift+Z, Cmd+X/C/V, or
-   Cmd+A into responder selectors before Chromium receives the original
-   trusted key event. Reinstalling the normal menu after focus leaves those
-   workareas restores every standard equivalent for Browser and native text
-   controls.
-   */
-  BOOL rendererEditHotkeyPassthrough =
-      GhostexGpuiCEFRendererEditHotkeysOwnKeyboardInWindow(NSApp.keyWindow);
+  for (NSMenuItem *item in editMenu.itemArray) {
+    if (item.action == @selector(undo:) || item.action == @selector(redo:)) {
+      item.target = GhostexGpuiEditHistoryMenuTargetShared();
+    }
+  }
+  // Undo and Redo keep their key equivalents everywhere: a focused web page
+  // receives the chord before the menu (see the UndoRedo route in sendEvent).
   GhostexGpuiCEFSetEditMenuKeyEquivalent(editMenu, @selector(undo:), @"z",
-                                         NSEventModifierFlagCommand,
-                                         rendererEditHotkeyPassthrough);
+                                         NSEventModifierFlagCommand, NO);
   GhostexGpuiCEFSetEditMenuKeyEquivalent(editMenu, @selector(redo:), @"Z",
                                          NSEventModifierFlagCommand |
                                              NSEventModifierFlagShift,
-                                         rendererEditHotkeyPassthrough);
+                                         NO);
+
+  /*
+   CDXC:Hotkeys 2026-09-25 WHY:
+   Source and Docs own renderer-level editing commands (Monaco, CodeMirror, and Excalidraw). While either exact workarea is the proven window keyboard owner, keep the standard Edit menu actions clickable but remove their key equivalents so AppKit cannot translate Cmd+X/C/V or Cmd+A into responder selectors before Chromium receives the original trusted key event. Reinstalling the normal menu after focus leaves those workareas restores every standard equivalent for Browser and native text controls. Supersedes the 2026-08-08 version, which also stripped Cmd+Z and Cmd+Shift+Z; those now reach every focused web page first through the UndoRedo route in sendEvent.
+   */
+  BOOL rendererEditHotkeyPassthrough =
+      GhostexGpuiCEFRendererEditHotkeysOwnKeyboardInWindow(NSApp.keyWindow);
   GhostexGpuiCEFSetEditMenuKeyEquivalent(editMenu, @selector(cut:), @"x",
                                          NSEventModifierFlagCommand,
                                          rendererEditHotkeyPassthrough);
@@ -1941,6 +1986,27 @@ static BOOL GhostexGpuiCEFEventIsCommandOptionF(NSEvent *event) {
   return
       [GhostexGpuiShortcutCharactersForEvent(event).lowercaseString
           isEqualToString:@"f"];
+}
+
+static BOOL GhostexGpuiCEFEventIsHistoryChord(NSEvent *event) {
+  if (!event || event.type != NSEventTypeKeyDown) {
+    return NO;
+  }
+
+  NSEventModifierFlags modifiers =
+      event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+  if ((modifiers & NSEventModifierFlagCommand) == 0) {
+    return NO;
+  }
+
+  modifiers &= ~(NSEventModifierFlagCommand | NSEventModifierFlagShift);
+  if (modifiers != 0) {
+    return NO;
+  }
+
+  return
+      [GhostexGpuiShortcutCharactersForEvent(event).lowercaseString
+          isEqualToString:@"z"];
 }
 
 static BOOL GhostexGpuiCEFEventIsCommandY(NSEvent *event) {

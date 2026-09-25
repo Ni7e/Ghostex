@@ -78,7 +78,7 @@ Verified facts about the real modal host (from code research — trust these):
 - Outbound (React→host): `window.webkit.messageHandlers.ghostexAppModalHost.postMessage(msg)`
   — `packages/core-ui/app-modal-host-bridge.ts:304` THROWS if the handler is missing, and the host
   posts `{type:"ready"}` on mount ⇒ the shim MUST be installed before the module is
-  imported (mirror `apps/web/src/main.tsx:8` + `apps/web/src/app/app-modal-host-shim.ts`).
+  imported.
 - Inbound (host→React): the host listens for
   `window.dispatchEvent(new CustomEvent("ghostex-app-modal-host-message", { detail }))`.
 - Globals to set in the iframe before import:

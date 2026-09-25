@@ -175,7 +175,8 @@ fn normalize_order(
 /// limit, 7d limit and Repository; Codex stars Account email, 7d limit, 7d reset and Account
 /// resets. This supersedes "starred is never a default". User: Cursor never shows the model or
 /// reasoning effort by default, in the status line or More details, because the chat box already
-/// shows both; it stars Context used and Context tokens.
+/// shows both; its status line is Context used, Branch and Lines changed (2026-09-24, superseding
+/// Context used and Context tokens).
 pub fn default_preferences(agent: ContextDetailsAgent) -> ContextDetailsPreferences {
     let (shown, starred): (&[(&str, bool)], &[&str]) = match agent {
         ContextDetailsAgent::Claude => (
@@ -207,8 +208,10 @@ pub fn default_preferences(agent: ContextDetailsAgent) -> ContextDetailsPreferen
                 ("thinking", false),
                 ("contextUsed", true),
                 ("contextTokens", true),
+                ("totalOutputTokens", true),
+                ("pr", true),
             ],
-            &["contextUsed", "contextTokens"],
+            &["contextUsed", "branch", "lines"],
         ),
     };
     ContextDetailsPreferences {

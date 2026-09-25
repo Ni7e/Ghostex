@@ -100,7 +100,10 @@ import {
 } from '@/packages/core-ui/chat/session-chat-terminal-stream';
 import type { SessionChatTransport } from '@/packages/core-ui/chat/session-chat-transport';
 import { selectSessionChatViewState, sessionChatTranscriptStatusAfterState } from '@/packages/core-ui/chat/session-chat-view-state';
-import { deriveSessionChatWorkingOverride } from '@/packages/core-ui/chat/session-chat-working-status';
+import {
+  deriveSessionChatWorkingOverride,
+  sessionChatTranscriptWorking,
+} from '@/packages/core-ui/chat/session-chat-working-status';
 import {
   FrameState,
   INITIAL_STALL_THRESHOLD_MS,
@@ -217,11 +220,12 @@ export function computeSessionChat(
       // Keep the chosen options' evidence ordering, but allow the seed read to fill stats omitted by a newer terminal capture.
       const codexStatus = nextOptions.codexStatus ?? detected.codexStatus ?? current?.codexStatus;
       const claudeStatus = nextOptions.claudeStatus ?? detected.claudeStatus ?? current?.claudeStatus;
+      const cursorStatus = nextOptions.cursorStatus ?? detected.cursorStatus ?? current?.cursorStatus;
       const contextUsage = nextOptions.contextUsage ?? detected.contextUsage ?? current?.contextUsage;
       const next =
-        !codexStatus && !claudeStatus && !contextUsage
+        !codexStatus && !claudeStatus && !cursorStatus && !contextUsage
           ? nextOptions
-          : { ...nextOptions, codexStatus, claudeStatus, contextUsage };
+          : { ...nextOptions, codexStatus, claudeStatus, cursorStatus, contextUsage };
       selectedOptionsRef.current = next;
       setSelectedOptions(next);
       transport.presentation?.update({ selectedOptions: next });
@@ -1503,7 +1507,12 @@ export function computeSessionChat(
   }, [hasMore, loadEarlier, loadingEarlier, transcript, transport]);
 
   const send = useCallback(
-    async (text: string, imagePaths?: string[], draftVersion?: SessionChatDraftVersion): Promise<void> => {
+    async (
+      text: string,
+      imagePaths?: string[],
+      draftVersion?: SessionChatDraftVersion,
+      hold?: () => Promise<void>
+    ): Promise<void> => {
       const classification = classifySessionChatSend(text, commandCatalog);
       let pendingId: string | null = null;
       let commandMarkerSentAt: number | null = null;
@@ -1512,7 +1521,9 @@ export function computeSessionChat(
         const id = nextSessionChatPendingSendId();
         pendingId = id;
         const baseEntry: SessionChatPendingSend = {
-          afterMessageId: last?.id ?? null,
+          // CDXC:SessionChat 2026-09-23 WHY:
+          // An empty transcript has no earlier turn to exclude. Using the client's send time as its boundary strands the first echo when a remote host's clock is behind the client, so leave that boundary unrestricted; existing transcripts retain their message identity and host timestamp.
+          afterMessageId: last?.id,
           afterMessageTimestamp: last?.timestamp ?? null,
           id,
           imagePaths,
@@ -1550,6 +1561,7 @@ export function computeSessionChat(
         );
       }
       try {
+        await hold?.();
         const receipt = await transport.send(text, imagePaths, draftVersion);
         if (receipt?.queuedPromptId && pendingId !== null) {
           const id = pendingId;
@@ -1811,7 +1823,11 @@ export function computeSessionChat(
     screenProbed,
     view,
     working,
-    workingSignal: workingSignal && !interrupted,
+    transcriptWorking: sessionChatTranscriptWorking({
+      working: workingSignal && !interrupted,
+      lifecycle,
+      workingStartedAt: workingStartedAtRef.current,
+    }),
     sessionWorking: sessionActivityWorking || externalWorking === true,
     ...(transportSendKey ? { sendKey } : {}),
   };

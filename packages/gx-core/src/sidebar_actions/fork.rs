@@ -134,18 +134,12 @@ pub fn plan_fork_request(core: &Core, message: &Value) -> Option<ForkRequest> {
         .loaded(&session.machine)?
         .server_session(&session.project_id, &session.session_id)?;
     let project = session.project_key();
-    // A CHAT project's sessions live in the Chats group, and `forkSession` activates
-    // `createGxserverPresentationProjectGroupId(projectId)` regardless: a group id the sidebar
-    // draws no row for. Reproducing that would leave the store's active group naming a group its
-    // own list does not have, and not reproducing it would be a silent divergence, so a fork from
-    // a chat session stays with the old runtime.
-    if core
-        .presentation()
-        .machine(&session.machine)
-        .is_some_and(|entry| entry.is_chat_project(&session.project_id))
-    {
-        return None;
-    }
+    // CDXC:SessionFork 2026-09-25 WHY:
+    // A CHAT project's session used to be refused here and left to the old runtime, which
+    // activated `createGxserverPresentationProjectGroupId(projectId)`, a group the sidebar draws
+    // no row for. The runtime is going away (its session controls' Fork now lands here too), so a
+    // chat session forks like any other: `group_of_session` names the Chats group, which the host
+    // does not activate, and the fork is placed beside its source.
     // `workspaceSubgroupSidebarIdForSession(projectId, sessionId) ?? the project's own group id`:
     // the source group is the row's, not the user's. `group_of_session` is the same question the
     // focus asks, over the same document, so a fork and a click cannot disagree about which group

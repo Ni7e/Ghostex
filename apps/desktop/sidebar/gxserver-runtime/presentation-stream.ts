@@ -7,8 +7,6 @@ import { GpuiGxserverClient } from './client';
 import {
   GPUI_PRESENTATION_STREAM_HEALTHY_MS,
   GPUI_PRESENTATION_STREAM_RECOVERY_DELAYS_MS,
-  GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS,
-  GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS,
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import { rememberGpuiProjectSession } from './project-activation';
@@ -45,7 +43,6 @@ at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimePresentationStreamMethods {
   applyGxserverBootstrapChanged(bootstrap: GpuiGxserverBootstrap): void;
-  tryStartFromInstalledBootstrap(attempt: number): void;
   startFromBootstrap(bootstrap: GpuiGxserverBootstrap): void;
   applyGxserverBootstrapPresentationState(bootstrap: GpuiValidatedGxserverBootstrap): boolean;
   openPresentationSubscription(clientId: string, lastRevision: number): void;
@@ -88,25 +85,7 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     this.gxserverBootstrap = validated;
   },
 
-  tryStartFromInstalledBootstrap(this: GpuiSidebarRuntime, attempt: number): void {
-    const bootstrap = window.ghostexGpui?.gxserverBootstrap;
-    if (bootstrap) {
-      this.startFromBootstrap(bootstrap);
-      return;
-    }
-    if (attempt >= GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS) {
-      return;
-    }
-    this.bootstrapPollTimeoutId = window.setTimeout(() => {
-      this.tryStartFromInstalledBootstrap(attempt + 1);
-    }, GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS);
-  },
-
   startFromBootstrap(this: GpuiSidebarRuntime, bootstrap: GpuiGxserverBootstrap): void {
-    if (this.bootstrapPollTimeoutId !== undefined) {
-      window.clearTimeout(this.bootstrapPollTimeoutId);
-      this.bootstrapPollTimeoutId = undefined;
-    }
 
     const validated = validateGpuiGxserverBootstrap(bootstrap);
     if (!validated) {
@@ -128,8 +107,6 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     // Adopt whatever trail this scope already has on the daemon so Back keeps
     // working across an app restart instead of starting from an empty stack.
     void this.navigationHistory.refresh();
-    // The bell count is daemon state too; a fresh stream means a fresh feed read.
-    void this.refreshNotificationFeed();
     // Heal the shared composer draft cache from the daemon's durable copy —
     // an app kill can drop localStorage batches the daemon still holds.
     this.reconcileSessionChatDraftCache();
@@ -223,10 +200,6 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
       onGlobalSidebarCommands: () => {
         this.refreshSidebarHudFromClient();
       },
-      onNotificationFeedChanged: () => {
-        void this.refreshNotificationFeed();
-      },
-      onRendererCommand: (command) => this.handleGxserverRendererCommand(command),
       /*
       CDXC:Projects 2026-09-21 WHY:
       This computer's project collections and Spaces documents are NOT taken off this socket any
@@ -343,10 +316,7 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     snapshot: GxserverPresentationSnapshot,
     kind: GpuiSidebarRuntimeSnapshotKind
   ): void {
-    const previousSessions = this.presentation?.sessions ?? [];
-    const projectedSnapshot = this.projectLocalPresentationAttentionAcknowledgementGuards(snapshot);
-    this.presentation = projectedSnapshot;
-    this.syncLocalPresentationAttentionTracking(previousSessions, projectedSnapshot.sessions);
+    this.presentation = snapshot;
     // The snapshot's own copies of the two project documents go the same way as the socket's, and
     // for the same reason: the app judges them behind the guard and hands the result back.
     if (isCustomSessionTagsState(snapshot.customSessionTags)) {
@@ -355,7 +325,6 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     this.publishPresentation(kind);
     this.notifyNativeGxserverPresentationReady();
     if (kind === 'hydrate') {
-      void this.runGpuiAutoSleepMonitor('startup');
       this.autoMaterializeStartupFocusedSession();
     }
   },
@@ -401,13 +370,7 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
       return;
     }
     this.applyDomainProjectDelta(delta);
-    const previousSessions = this.presentation.sessions;
-    const projectedSnapshot = this.projectLocalPresentationAttentionAcknowledgementGuards(
-      reduceGxserverPresentationDelta(this.presentation, delta, gxserverRevision)
-    );
-    this.presentation = projectedSnapshot;
-    this.syncLocalPresentationAttentionTracking(previousSessions, projectedSnapshot.sessions);
-    this.detectSessionAttentionCompletionSounds(previousSessions, projectedSnapshot.sessions);
+    this.presentation = reduceGxserverPresentationDelta(this.presentation, delta, gxserverRevision);
     this.publishPresentation('patch');
   },
 
