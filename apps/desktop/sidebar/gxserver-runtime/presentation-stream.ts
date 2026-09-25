@@ -7,8 +7,6 @@ import { GpuiGxserverClient } from './client';
 import {
   GPUI_PRESENTATION_STREAM_HEALTHY_MS,
   GPUI_PRESENTATION_STREAM_RECOVERY_DELAYS_MS,
-  GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS,
-  GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS,
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import { rememberGpuiProjectSession } from './project-activation';
@@ -45,7 +43,6 @@ at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimePresentationStreamMethods {
   applyGxserverBootstrapChanged(bootstrap: GpuiGxserverBootstrap): void;
-  tryStartFromInstalledBootstrap(attempt: number): void;
   startFromBootstrap(bootstrap: GpuiGxserverBootstrap): void;
   applyGxserverBootstrapPresentationState(bootstrap: GpuiValidatedGxserverBootstrap): boolean;
   openPresentationSubscription(clientId: string, lastRevision: number): void;
@@ -88,25 +85,7 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     this.gxserverBootstrap = validated;
   },
 
-  tryStartFromInstalledBootstrap(this: GpuiSidebarRuntime, attempt: number): void {
-    const bootstrap = window.ghostexGpui?.gxserverBootstrap;
-    if (bootstrap) {
-      this.startFromBootstrap(bootstrap);
-      return;
-    }
-    if (attempt >= GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS) {
-      return;
-    }
-    this.bootstrapPollTimeoutId = window.setTimeout(() => {
-      this.tryStartFromInstalledBootstrap(attempt + 1);
-    }, GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS);
-  },
-
   startFromBootstrap(this: GpuiSidebarRuntime, bootstrap: GpuiGxserverBootstrap): void {
-    if (this.bootstrapPollTimeoutId !== undefined) {
-      window.clearTimeout(this.bootstrapPollTimeoutId);
-      this.bootstrapPollTimeoutId = undefined;
-    }
 
     const validated = validateGpuiGxserverBootstrap(bootstrap);
     if (!validated) {

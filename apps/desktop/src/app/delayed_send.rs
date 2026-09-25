@@ -2017,9 +2017,6 @@ impl GhostexGpuiApp {
             "probeRemoteGxserverInstall" => {
                 self.handle_gpui_probe_remote_gxserver_install_message(command, cx);
             }
-            "remoteGxserverSubscribePresentation" => {
-                self.handle_gpui_remote_gxserver_subscribe_presentation_message(command, cx);
-            }
             "browseRemoteProjectDirectories" => {
                 self.handle_gpui_browse_remote_project_directories_message(command, cx);
             }

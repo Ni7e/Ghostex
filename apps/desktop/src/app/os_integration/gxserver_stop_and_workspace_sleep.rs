@@ -152,26 +152,6 @@ impl GhostexGpuiApp {
         true
     }
 
-    /*
-    CDXC:Spaces 2026-08-29:
-    The AppKit observer saw a finger scroll gesture begin (NSEventPhaseBegan)
-    inside the sidebar's frame. Forward it into the page so the Space-swipe
-    handler can reset its gesture lock: the renderer's wheel stream has no
-    momentum phase and cannot make this call on its own.
-    */
-    #[cfg(target_os = "macos")]
-    pub(crate) fn dispatch_gpui_sidebar_scroll_gesture_began(
-        &mut self,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        sidebar.update(cx, |surface, _| {
-            surface.execute_app_owned_script(GPUI_SIDEBAR_SCROLL_GESTURE_BEGAN_SCRIPT)
-        })
-    }
-
     /// CDXC:Sidebar 2026-09-17 WHY:
     /// Embedded browser panes receive clicks outside GPUI, so the AppKit observer dismisses the native sidebar menu through this callback.
     #[cfg(target_os = "macos")]

@@ -209,7 +209,6 @@ export type GhostexGpuiSidebarBridge = {
    * because DOM wheel events cannot tell a new physical swipe from the
    * previous swipe's momentum tail.
    */
-  onNativeScrollGestureBegan?: () => void;
   onWorkspaceFolderPicked?: (payload: unknown) => void;
   onWorkspaceSessionAttentionAcknowledge?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;

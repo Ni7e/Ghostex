@@ -51,7 +51,6 @@ import { GpuiRemoteLastSeenStore } from './helpers/remote-last-seen';
 import {
   normalizeGpuiSidebarRemoteEvent,
   parseGpuiRemotePresentationProjectId,
-  parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
 import type { GpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
 import { gpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
@@ -213,7 +212,6 @@ export function createGpuiSidebarRuntime(): {
   persistWorkspaceGroups: () => void;
   messageSource: GpuiSidebarLocalMessageSource;
   start: () => void;
-  startLocalGxserver: () => void;
   vscode: WebviewApi;
 } {
   const runtime = new GpuiSidebarRuntime();
@@ -222,7 +220,6 @@ export function createGpuiSidebarRuntime(): {
     persistWorkspaceGroups: () => runtime.persistWorkspaceGroups(),
     messageSource: runtime.messageSource,
     start: () => runtime.start(),
-    startLocalGxserver: () => runtime.startLocalGxserver(),
     vscode: runtime.vscode,
   };
 }
@@ -285,12 +282,6 @@ export class GpuiSidebarRuntime {
     });
   }
 
-  startLocalGxserver(): void {
-    window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
-      type: 'startGxserverFromTitlebar',
-    });
-  }
-
   notifyNativeGxserverPresentationReady(): void {
     window.requestAnimationFrame(() => {
       if (!this.presentation) {
@@ -334,7 +325,6 @@ export class GpuiSidebarRuntime {
   attentionEventIdBySessionKey = new Map<string, string>();
   autoSleepMonitorIntervalId: number | undefined;
   autoSleepMonitorRunning = false;
-  bootstrapPollTimeoutId: number | undefined;
   /**
    * Escalating presentation-stream recovery state. `AcknowledgedAt` is when the
    * daemon last answered a `subscribePresentation` (with a snapshot or with
@@ -515,7 +505,12 @@ export class GpuiSidebarRuntime {
       this.handleGpuiSidebarNavigationHistoryCommand
     );
     this.publishUnavailable('bootstrap-pending');
-    this.tryStartFromInstalledBootstrap(0);
+    // `service.ts` installs the bootstrap from the start config before `start()` runs (an empty
+    // object when there is none), so there is nothing to poll for.
+    const bootstrap = window.ghostexGpui?.gxserverBootstrap;
+    if (bootstrap) {
+      this.startFromBootstrap(bootstrap);
+    }
     this.startGpuiAutoSleepMonitor();
     this.startGitPollingDriver();
     window.setTimeout(() => this.connectSavedRemoteMachinesOnStartup(), 0);
@@ -1207,24 +1202,6 @@ export class GpuiSidebarRuntime {
           await this.updateRemoteSidebarSpaces(message.remoteMachineId, message.state);
         }
         return;
-      case 'copyAttachCommand': {
-        const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
-        if (remoteSession) {
-          this.postRemoteSessionNativeAction('copyRemoteAttachCommand', remoteSession, message);
-          return;
-        }
-        this.handleUnsupportedSidebarMessage(message);
-        return;
-      }
-      case 'copyResumeCommand': {
-        const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
-        if (remoteSession) {
-          this.postRemoteSessionNativeAction('copyRemoteResumeCommand', remoteSession, message);
-          return;
-        }
-        this.handleUnsupportedSidebarMessage(message);
-        return;
-      }
       case 'promptDeleteWorktreeForGroup':
         await this.promptDeleteWorktreeForGroup(message.groupId);
         return;

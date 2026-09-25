@@ -174,11 +174,6 @@ impl GhostexGpuiApp {
                     self.handle_gpui_probe_remote_gxserver_install_message(command, cx);
                 }
             }
-            "remoteGxserverSubscribePresentation" => {
-                if let Some(command) = message.as_object() {
-                    self.handle_gpui_remote_gxserver_subscribe_presentation_message(command, cx);
-                }
-            }
             "browseRemoteProjectDirectories" => {
                 if let Some(command) = message.as_object() {
                     self.handle_gpui_browse_remote_project_directories_message(command, cx);
@@ -515,7 +510,6 @@ impl GhostexGpuiApp {
             }
             // The sidebar's own Load Sessions row reaches the same three steps without this
             // bridge since M5 (gx_store/sidebar_open.rs), so they are one function.
-            "startGxserverFromTitlebar" => self.start_local_gxserver_from_sidebar(cx),
             "accountSwitchProgress" => {
                 let (Some(project_id), Some(session_id)) =
                     (message["projectId"].as_str(), message["sessionId"].as_str())

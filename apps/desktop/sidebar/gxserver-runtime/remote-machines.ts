@@ -63,7 +63,6 @@ export interface GpuiSidebarRuntimeRemoteMachineMethods {
   scheduleRemoteReconnect(remoteMachineId: string): void;
   clearRemoteReconnectTimeout(remoteMachineId: string): void;
   resetRemoteReconnect(remoteMachineId: string): void;
-  startRemoteGxserverPresentationSubscription(remoteMachineId: string): void;
   requestRemoteGxserver<TResult = unknown>(
     remoteMachineId: string,
     path: GxserverEndpointPath,
@@ -291,31 +290,6 @@ export const gpuiSidebarRuntimeRemoteMachineMethods = {
     this.clearRemoteReconnectTimeout(remoteMachineId);
     this.remoteReconnectAttempts.delete(remoteMachineId);
     this.remoteReconnectInFlight.delete(remoteMachineId);
-  },
-
-  startRemoteGxserverPresentationSubscription(this: GpuiSidebarRuntime, remoteMachineId: string): void {
-    const normalizedMachineId = normalizeNonEmptyString(remoteMachineId);
-    if (!normalizedMachineId) {
-      return;
-    }
-    const snapshot = this.remotePresentations.get(normalizedMachineId);
-    const requestId = `remote-presentation-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    try {
-      postAppModalHostMessage(
-        {
-          clientId: `${GPUI_SIDEBAR_DEFAULT_CLIENT_ID}:${normalizedMachineId}`,
-          ...(snapshot ? { lastRevision: snapshot.revision } : {}),
-          remoteMachineId: normalizedMachineId,
-          requestId,
-          type: 'remoteGxserverSubscribePresentation',
-        },
-        'GPUISidebarRemoteMachines:subscribePresentation'
-      );
-    } catch {
-      this.postRemoteToast('warning', 'Remote sidebar stream unavailable', {
-        description: 'GPUI could not reach the native remote presentation bridge.',
-      });
-    }
   },
 
   requestRemoteGxserver<TResult = unknown>(
