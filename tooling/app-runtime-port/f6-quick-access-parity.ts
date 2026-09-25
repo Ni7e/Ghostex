@@ -92,9 +92,8 @@ function previousItem(result: Json): Json | undefined {
 async function buildScenarios(dir: string): Promise<void> {
   // The projection pulls in the client-storage adapter, which needs the shimmed browser first.
   await import('@/tooling/gx-core/browser-shim');
-  const { createGxserverPresentationSidebarGroups } = await import(
-    '@/packages/shared/gxserver-presentation-sidebar-projection'
-  );
+  const { createGxserverPresentationSidebarGroups } =
+    await import('@/packages/shared/gxserver-presentation-sidebar-projection');
   const projection = await import('@/apps/desktop/sidebar/gxserver-runtime/helpers/presentation-projection');
   const daemon = await readDaemon();
   // `createSidebarGroups` for this computer, as the runtime built its store (and as
@@ -164,11 +163,24 @@ async function buildScenarios(dir: string): Promise<void> {
       isOpen: false,
       sessionCount: project.sessionCount ?? 0,
     })),
-    { isOpen: false, path: '/fixture/tabler', projectId: 'fixture-tabler', sessionCount: 2, title: 'Tabler', icon: { kind: 'tabler', icon: 'rocket', color: '#AABBCC' } },
+    {
+      isOpen: false,
+      path: '/fixture/tabler',
+      projectId: 'fixture-tabler',
+      sessionCount: 2,
+      title: 'Tabler',
+      icon: { kind: 'tabler', icon: 'rocket', color: '#AABBCC' },
+    },
     { isOpen: false, path: '/fixture/never', projectId: 'fixture-never', sessionCount: 0, title: 'Never Closed' },
   ];
   const commands = [
-    { actionType: 'terminal', command: 'bun run dev\nsecond line', commandId: 'dev', name: 'Dev Server', closeTerminalOnExit: true },
+    {
+      actionType: 'terminal',
+      command: 'bun run dev\nsecond line',
+      commandId: 'dev',
+      name: 'Dev Server',
+      closeTerminalOnExit: true,
+    },
     { actionType: 'browser', commandId: 'docs', name: '', url: 'https://example.com', icon: 'book' },
     { actionType: 'terminal', commandId: 'empty', name: 'Unconfigured' },
     { actionType: 'terminal', commandId: 'nameless', name: '' },
@@ -182,7 +194,12 @@ async function buildScenarios(dir: string): Promise<void> {
     settings,
   });
   const baseSettings = {
-    hotkeys: { openFindPrompts: 'cmd+shift+f', runActionSlot2: 'ctrl+shift+2', focusGroup3: 'cmd+alt+3', openSettings: '' },
+    hotkeys: {
+      openFindPrompts: 'cmd+shift+f',
+      runActionSlot2: 'ctrl+shift+2',
+      focusGroup3: 'cmd+alt+3',
+      openSettings: '',
+    },
     petOverlayEnabled: false,
     preferredAgentInterface: 'chat',
     sidebarSessionTagListItems: undefined,
@@ -202,7 +219,11 @@ async function buildScenarios(dir: string): Promise<void> {
         hotkeys: { createAgentSession: 'cmd+t', createSession: 'cmd+shift+t', openCommandPalette: 'cmd+k' },
         viewScopes: {
           'official:docs': { default: 'shown', projects: {}, spaces: { 'local:space-a': 'hidden' } },
-          'official:code': { default: 'hidden', projects: firstProject ? { [firstProject.editorProjectId]: 'shown' } : {}, spaces: {} },
+          'official:code': {
+            default: 'hidden',
+            projects: firstProject ? { [firstProject.editorProjectId]: 'shown' } : {},
+            spaces: {},
+          },
         },
       },
     ],
@@ -216,15 +237,48 @@ async function buildScenarios(dir: string): Promise<void> {
   ];
   const commandRunStates = { dev: { status: 'error', activeRunIds: [] } };
   const storage = {
-    hidden: { collectionKeys: ['local:col-1'], groupIds: firstProject ? [`combined-project:${encodeURIComponent(firstProject.editorProjectId)}`] : [] },
+    hidden: {
+      collectionKeys: ['local:col-1'],
+      groupIds: firstProject ? [`combined-project:${encodeURIComponent(firstProject.editorProjectId)}`] : [],
+    },
     collections: [{ collectionId: 'col-1', projectIds: ['fixture-tabler'] }],
     recovered: [
-      { sessionKey: 'p1:s1', projectId: 'p1', sessionId: 's1', text: 'recovered draft\nline two', updatedAt: NOW - 50_000 },
-      { sessionKey: 'p2:s2', projectId: firstProject?.editorProjectId, sessionId: 's2', text: 'another', updatedAt: NOW - 90_000_000 },
+      {
+        sessionKey: 'p1:s1',
+        projectId: 'p1',
+        sessionId: 's1',
+        text: 'recovered draft\nline two',
+        updatedAt: NOW - 50_000,
+      },
+      {
+        sessionKey: 'p2:s2',
+        projectId: firstProject?.editorProjectId,
+        sessionId: 's2',
+        text: 'another',
+        updatedAt: NOW - 90_000_000,
+      },
     ],
     sent: [
-      { promptId: 'sent:a', content: 'sent one', createdAt: new Date(NOW - 10_000).toISOString(), updatedAt: new Date(NOW - 10_000).toISOString(), cwd: null, projectId: firstProject?.editorProjectId ?? null, projectName: null, sessionId: 'x' },
-      { promptId: 'sent:b', content: 'sent two', createdAt: new Date(NOW - 200_000_000).toISOString(), updatedAt: new Date(NOW - 200_000_000).toISOString(), cwd: null, projectId: null, projectName: null, sessionId: null },
+      {
+        promptId: 'sent:a',
+        content: 'sent one',
+        createdAt: new Date(NOW - 10_000).toISOString(),
+        updatedAt: new Date(NOW - 10_000).toISOString(),
+        cwd: null,
+        projectId: firstProject?.editorProjectId ?? null,
+        projectName: null,
+        sessionId: 'x',
+      },
+      {
+        promptId: 'sent:b',
+        content: 'sent two',
+        createdAt: new Date(NOW - 200_000_000).toISOString(),
+        updatedAt: new Date(NOW - 200_000_000).toISOString(),
+        cwd: null,
+        projectId: null,
+        projectName: null,
+        sessionId: null,
+      },
     ],
   };
   const firstClosed = previous[0];
@@ -299,18 +353,38 @@ async function buildScenarios(dir: string): Promise<void> {
       { command: { type: 'open', tab: 'recentSessions' } },
       { flush: true },
       { timer: true },
-      { receive: { type: 'previousSessionsResult', requestId: '$last:previous-sessions', previousSessions: previous, cursor: 'next-1', projects: [{ projectId: 'zz-project', name: 'Zed Project' }] } },
+      {
+        receive: {
+          type: 'previousSessionsResult',
+          requestId: '$last:previous-sessions',
+          previousSessions: previous,
+          cursor: 'next-1',
+          projects: [{ projectId: 'zz-project', name: 'Zed Project' }],
+        },
+      },
       { flush: true },
-      { receive: { type: 'sessionTranscriptSizesResult', requestId: '$last:session-transcript-sizes', sizes: [
-        ...(firstClosed ? [{ key: `closed:${firstClosed.historyId}`, sizeBytes: 1280 }] : []),
-        ...(firstSession ? [{ key: `open:${firstSession.sessionId}`, sizeBytes: null }] : []),
-        { key: 'closed:none', sizeBytes: 5_000_000 },
-      ] } },
+      {
+        receive: {
+          type: 'sessionTranscriptSizesResult',
+          requestId: '$last:session-transcript-sizes',
+          sizes: [
+            ...(firstClosed ? [{ key: `closed:${firstClosed.historyId}`, sizeBytes: 1280 }] : []),
+            ...(firstSession ? [{ key: `open:${firstSession.sessionId}`, sizeBytes: null }] : []),
+            { key: 'closed:none', sizeBytes: 5_000_000 },
+          ],
+        },
+      },
       { flush: true },
       { command: { type: 'query', query: 'fix' } },
       { flush: true },
       { timer: true },
-      { receive: { type: 'previousSessionsResult', requestId: '$last:previous-sessions', previousSessions: previous.slice(0, 5) } },
+      {
+        receive: {
+          type: 'previousSessionsResult',
+          requestId: '$last:previous-sessions',
+          previousSessions: previous.slice(0, 5),
+        },
+      },
       { flush: true },
       { command: { type: 'query', query: 'ab' } },
       { flush: true },
@@ -333,7 +407,14 @@ async function buildScenarios(dir: string): Promise<void> {
       { command: { type: 'loadMore' } },
       { command: { type: 'query', query: '' } },
       { timer: true },
-      { receive: { type: 'previousSessionsResult', requestId: '$last:previous-sessions', previousSessions: previous, cursor: 'next-2' } },
+      {
+        receive: {
+          type: 'previousSessionsResult',
+          requestId: '$last:previous-sessions',
+          previousSessions: previous,
+          cursor: 'next-2',
+        },
+      },
       { flush: true },
       ...(firstClosed
         ? [
@@ -357,13 +438,26 @@ async function buildScenarios(dir: string): Promise<void> {
         ? [
             { command: { type: 'open', tab: 'recentSessions' } },
             { timer: true },
-            { receive: { type: 'previousSessionsResult', requestId: '$last:previous-sessions', previousSessions: previous } },
+            {
+              receive: {
+                type: 'previousSessionsResult',
+                requestId: '$last:previous-sessions',
+                previousSessions: previous,
+              },
+            },
             { command: { type: 'activate', key: `closed:${previous[1].historyId}` } },
           ]
         : []),
     ],
     prompts: [
-      { command: { type: 'open', tab: 'savedPrompts', promptSessionId: promptSession, promptProjectId: firstProject?.editorProjectId } },
+      {
+        command: {
+          type: 'open',
+          tab: 'savedPrompts',
+          promptSessionId: promptSession,
+          promptProjectId: firstProject?.editorProjectId,
+        },
+      },
       { flush: true },
       { receive: { type: 'stashedPromptsResult', requestId: '$last:stashed-prompts', prompts, tags } },
       { flush: true },
@@ -378,7 +472,14 @@ async function buildScenarios(dir: string): Promise<void> {
       { command: { type: 'tagFilter', value: 'tag:all' } },
       { command: { type: 'view', value: 'recovered' } },
       { flush: true },
-      { receive: { type: 'stashedPromptsResult', requestId: '$last:stashed-prompts-recovered', recoveryDrafts: [], drafts: [] } },
+      {
+        receive: {
+          type: 'stashedPromptsResult',
+          requestId: '$last:stashed-prompts-recovered',
+          recoveryDrafts: [],
+          drafts: [],
+        },
+      },
       { flush: true },
       { command: { type: 'secondary', key: 'prompt:recovered:p1:s1', x: 0, y: 0 } },
       { command: { type: 'actionHotkey', key: 'prompt:recovered:p1:s1', hotkey: 'cmd+s' } },
@@ -394,7 +495,13 @@ async function buildScenarios(dir: string): Promise<void> {
       { command: { type: 'tagComposerField', field: 'name', value: '  New   Tag ' } },
       { command: { type: 'tagComposerSubmit' } },
       { flush: true },
-      { receive: { type: 'stashedPromptTagsResult', ok: true, tags: [...tags, { tagId: 'made-1', name: 'new tag', color: '#e3b341' }] } },
+      {
+        receive: {
+          type: 'stashedPromptTagsResult',
+          ok: true,
+          tags: [...tags, { tagId: 'made-1', name: 'new tag', color: '#e3b341' }],
+        },
+      },
       { flush: true },
       { command: { type: 'tagFilter', value: 'tag:all' } },
       ...(firstPrompt
@@ -416,7 +523,14 @@ async function buildScenarios(dir: string): Promise<void> {
             { command: { type: 'editorFavorite' } },
             { command: { type: 'editorSubmit' } },
             { flush: true },
-            { receive: { type: 'saveStashedPromptResult', requestId: '$last:save-stashed-prompt', ok: true, prompt: { ...firstPrompt, content: 'edited text\nsecond' } } },
+            {
+              receive: {
+                type: 'saveStashedPromptResult',
+                requestId: '$last:save-stashed-prompt',
+                ok: true,
+                prompt: { ...firstPrompt, content: 'edited text\nsecond' },
+              },
+            },
             { flush: true },
             { receive: { type: 'setStashedPromptTagsResult', ok: false } },
             { flush: true },
@@ -427,7 +541,9 @@ async function buildScenarios(dir: string): Promise<void> {
       { command: { type: 'editorField', field: 'project', value: 'project:none' } },
       { command: { type: 'editorField', field: 'content', value: 'brand new' } },
       { command: { type: 'editorSubmit' } },
-      { receive: { type: 'saveStashedPromptResult', requestId: '$last:save-stashed-prompt', ok: false, error: 'nope' } },
+      {
+        receive: { type: 'saveStashedPromptResult', requestId: '$last:save-stashed-prompt', ok: false, error: 'nope' },
+      },
       { flush: true },
       { command: { type: 'editorCancel' } },
       ...(firstPrompt
@@ -504,7 +620,10 @@ async function runTypeScript(dir: string, platform: string): Promise<void> {
   } as typeof String.prototype.localeCompare;
   Object.defineProperty(globals, 'navigator', {
     configurable: true,
-    value: { platform: platform === 'mac' ? 'MacIntel' : 'Win32', userAgent: platform === 'mac' ? 'Macintosh' : 'Windows' },
+    value: {
+      platform: platform === 'mac' ? 'MacIntel' : 'Win32',
+      userAgent: platform === 'mac' ? 'Macintosh' : 'Windows',
+    },
   });
   await import('@/tooling/gx-core/browser-shim');
   const { resetBrowserStorage } = await import('@/tooling/gx-core/browser-shim');
@@ -589,7 +708,11 @@ async function runTypeScript(dir: string, platform: string): Promise<void> {
     storageScope(['collections']).setItem(
       'ghostex.sidebar.projectCollections.v1',
       JSON.stringify({
-        collections: scenario.storage.collections.map((collection: Json) => ({ ...collection, title: 'Fixture', color: '#2f9b95' })),
+        collections: scenario.storage.collections.map((collection: Json) => ({
+          ...collection,
+          title: 'Fixture',
+          color: '#2f9b95',
+        })),
         nextCollectionNumber: 2,
       })
     );
@@ -709,13 +832,18 @@ const MUTATIONS: Record<string, (steps: Json[]) => Json[]> = {
 
 function diff(left: Json, right: Json, path: string, out: string[]): void {
   if (out.length > 40) return;
-  if (typeof left !== typeof right || Array.isArray(left) !== Array.isArray(right) || (left === null) !== (right === null)) {
+  if (
+    typeof left !== typeof right ||
+    Array.isArray(left) !== Array.isArray(right) ||
+    (left === null) !== (right === null)
+  ) {
     out.push(`${path}: ${JSON.stringify(left)?.slice(0, 160)} != ${JSON.stringify(right)?.slice(0, 160)}`);
     return;
   }
   if (Array.isArray(left)) {
     if (left.length !== right.length) out.push(`${path}: length ${left.length} != ${right.length}`);
-    for (let index = 0; index < Math.min(left.length, right.length); index++) diff(left[index], right[index], `${path}[${index}]`, out);
+    for (let index = 0; index < Math.min(left.length, right.length); index++)
+      diff(left[index], right[index], `${path}[${index}]`, out);
     return;
   }
   if (left && typeof left === 'object') {
@@ -724,7 +852,8 @@ function diff(left: Json, right: Json, path: string, out: string[]): void {
     }
     return;
   }
-  if (left !== right) out.push(`${path}: ${JSON.stringify(left)?.slice(0, 160)} != ${JSON.stringify(right)?.slice(0, 160)}`);
+  if (left !== right)
+    out.push(`${path}: ${JSON.stringify(left)?.slice(0, 160)} != ${JSON.stringify(right)?.slice(0, 160)}`);
 }
 
 async function main(): Promise<void> {
@@ -772,7 +901,9 @@ async function main(): Promise<void> {
         for (const line of found.slice(0, 12)) console.log(`  ${line}`);
       }
     }
-    console.log(`${readdirSync(join(dir, 'scenarios')).length} scenarios, ${steps} steps, ${effects} effects, ${differences} differences`);
+    console.log(
+      `${readdirSync(join(dir, 'scenarios')).length} scenarios, ${steps} steps, ${effects} effects, ${differences} differences`
+    );
     process.exitCode = differences === 0 ? 0 : 1;
   } finally {
     if (!keep) rmSync(dir, { force: true, recursive: true });
