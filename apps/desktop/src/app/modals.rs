@@ -1520,9 +1520,14 @@ impl GhostexGpuiApp {
             .and_then(serde_json::Value::as_array)
             .is_some_and(|projects| !projects.is_empty());
         let main_window_native_view = self.parent_ns_view;
+        let window_border = self.gpui_native_modal_palette().window_border();
         self.app_modal_window = cx
             .open_window(options, |modal_window, cx| {
                 if !modal.has_titlebar() {
+                    crate::app::window::popup_frame::frame_app_modal_window(
+                        modal_window,
+                        window_border,
+                    );
                     modal_window.set_window_title(
                         if cfg!(any(target_os = "windows", target_os = "linux")) {
                             &window_title

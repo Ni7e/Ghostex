@@ -46,3 +46,42 @@ pub(crate) fn strip_gpui_popup_window_frame(window: &mut Window) {
     #[cfg(not(target_os = "macos"))]
     let _ = window;
 }
+
+/// CDXC:AppModal 2026-09-25 DECISION:
+/// User: on Windows the modals shown without decoration (Add a project and the like) "blend with the bg of the app", so they need a border. macOS draws a rim and shadow around these borderless windows; a Windows PopUp gets neither, and the modal surface is tinted from the app chrome. Windows 11 DWM gives the modal window rounded corners, its shadow and a border in `border`, the same frame for the React and native modal hosts. Windows 10 ignores both attributes.
+pub(crate) fn frame_app_modal_window(window: &mut Window, border: gpui::Rgba) {
+    #[cfg(target_os = "windows")]
+    {
+        use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+        use windows_sys::Win32::Graphics::Dwm::{
+            DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+        };
+        let Ok(handle) = window.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+            return;
+        };
+        let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+        let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u32;
+        // COLORREF is 0x00BBGGRR.
+        let color: u32 = channel(border.r) | channel(border.g) << 8 | channel(border.b) << 16;
+        let corner = DWMWCP_ROUND;
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+                (&raw const corner).cast(),
+                std::mem::size_of_val(&corner) as u32,
+            );
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_BORDER_COLOR as u32,
+                (&raw const color).cast(),
+                std::mem::size_of_val(&color) as u32,
+            );
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (window, border);
+}

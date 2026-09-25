@@ -73,8 +73,10 @@ impl GhostexGpuiApp {
         };
         let view_slot: Rc<RefCell<Option<AnyEntity>>> = Rc::new(RefCell::new(None));
         let view_out = view_slot.clone();
+        let window_border = self.gpui_native_modal_palette().window_border();
         let window = cx
             .open_window(options, move |window, cx| {
+                crate::app::window::popup_frame::frame_app_modal_window(window, window_border);
                 window.set_window_title(if cfg!(any(target_os = "windows", target_os = "linux")) {
                     kind.window_title()
                 } else {
