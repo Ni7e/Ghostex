@@ -81,13 +81,16 @@ impl Render for NativeChatView {
         its background only.
         */
         let maximized = self.maximized_window.is_some();
-        let search_bar = if maximized {
+        let glass = crate::app::helpers::window_glass_active_in(window);
+        // Under glass the subagent viewer sits straight on the pane's glass, so the chat behind it
+        // is not painted (subagent_view.rs, `render_subagent_viewer`).
+        let covered = maximized || (glass && self.snapshot["subagent"].is_object());
+        let search_bar = if covered {
             None
         } else {
             self.render_search_bar(&p, window, cx)
         };
-        let glass = crate::app::helpers::window_glass_active_in(window);
-        let fork_branch_badge = if maximized {
+        let fork_branch_badge = if covered {
             None
         } else {
             self.render_fork_branch_badge(&p, glass, cx)
@@ -110,7 +113,7 @@ impl Render for NativeChatView {
         and anchored to the transcript alone a forked session with no rows yet would have lost its
         switcher entirely.
         */
-        let body = if maximized {
+        let body = if covered {
             None
         } else {
             let content = transcript;
@@ -131,10 +134,12 @@ impl Render for NativeChatView {
                     .into_any_element(),
             )
         };
-        let composer = if self.maximized_window.is_none() {
+        let composer = if !covered {
             self.render_composer(&p, window, cx)
-        } else {
+        } else if maximized {
             div().h(px(148.0 * s)).into_any_element()
+        } else {
+            div().into_any_element()
         };
         let bounds = self.bounds.clone();
         let picker_chat = cx.weak_entity();
@@ -218,7 +223,7 @@ impl Render for NativeChatView {
             // Only React's one manual case: a transcript with no rows yet. A filled
             // one pages itself near the top and keeps its anchor (pagination.rs).
             .when(
-                !maximized && state["hasMore"] == true && self.list.item_count() == 0,
+                !covered && state["hasMore"] == true && self.list.item_count() == 0,
                 |this| {
                     this.child(
                         div().flex().justify_center().child(
