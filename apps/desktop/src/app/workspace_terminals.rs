@@ -227,17 +227,6 @@ impl GhostexGpuiApp {
         GpuiWorkspaceRenameCommandDelivery::Delivered
     }
 
-    pub(crate) fn receive_sidebar_workspace_terminal_enter_payload(
-        &mut self,
-        payload: &str,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Ok(message) = gpui_sidebar_workspace_terminal_enter_from_json(payload) else {
-            return;
-        };
-        let _ = self.send_enter_key_to_local_agents_workspace_session(&message, cx);
-    }
-
     pub(crate) fn receive_sidebar_session_completion_sound_payload(
         &mut self,
         payload: &str,
@@ -273,31 +262,6 @@ impl GhostexGpuiApp {
             .completion_flashes
             .insert(session_id, std::time::Instant::now());
         cx.notify();
-    }
-
-    pub(crate) fn send_enter_key_to_local_agents_workspace_session(
-        &mut self,
-        message: &GpuiSidebarWorkspaceTerminalEnterMessage,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            let key = GpuiLocalWorkspaceSessionKey::from(message);
-            let Some(target) = self.local_workspace_rename_command_target(&key) else {
-                return false;
-            };
-            // macOS sendTerminalEnter preserves focus: press Return on the mapped
-            // surface without selecting its tab or moving focus. A session whose
-            // tab is not the active mounted tab has no surface to receive the key
-            // and is skipped rather than yanking the visible tab.
-            self.send_return_key_to_mounted_agents_terminal_surface(target.slot_id, cx)
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (message, cx);
-            false
-        }
     }
 
     pub(crate) fn set_sidebar_gxserver_presentation_focus_state(

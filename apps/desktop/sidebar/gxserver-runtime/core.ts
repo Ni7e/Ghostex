@@ -1,5 +1,4 @@
-import { createAccountSwitchTransport } from '../account-switch';
-import type { AccountsTransport } from '@/packages/shared/agent-accounts';
+import { nativePost } from '@/packages/shared/native-runtime/bridge';
 /*
 CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
@@ -53,15 +52,12 @@ import { GpuiRemoteLastSeenStore } from './helpers/remote-last-seen';
 import {
   normalizeGpuiSidebarRemoteEvent,
   parseGpuiRemotePresentationProjectId,
-  parseGpuiRemotePresentationGroupId,
   parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
 import type { GpuiSidebarRuntimeNotificationFeedMethods } from './notification-feed';
 import { gpuiSidebarRuntimeNotificationFeedMethods } from './notification-feed';
 import type { GpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
 import { gpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
-import type { GpuiSidebarRuntimePreviousSessionMethods } from './previous-sessions';
-import { gpuiSidebarRuntimePreviousSessionMethods } from './previous-sessions';
 import type { GpuiSidebarRuntimeProjectBoardMethods } from './project-board';
 import { gpuiSidebarRuntimeProjectBoardMethods } from './project-board';
 import type { GpuiSidebarRuntimeProjectAndCommandMethods } from './projects-and-commands';
@@ -115,8 +111,6 @@ import {
   writePrimaryAgentLauncherId,
   type PrimaryAgentLauncherChangedEvent,
 } from '@/packages/core-ui/primary-agent-launcher';
-import type { AgentAccountsState } from '@/packages/shared/agent-accounts';
-import { parseGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import { reduceGxserverPresentationDelta } from '@/packages/shared/gxserver-presentation-cache';
 import type {
   GxserverAppUserData,
@@ -281,44 +275,8 @@ export class GpuiSidebarLocalMessageSource {
 }
 
 export class GpuiSidebarRuntime {
-  private readonly accountTransports = new Map<string, AccountsTransport>();
   readonly messageSource = new GpuiSidebarLocalMessageSource();
   readonly vscode: WebviewApi = {
-    requestGroupAccounts: async (groupId, params) => {
-      const remote = parseGpuiRemotePresentationGroupId(groupId);
-      if (remote) return this.requestRemoteGxserver<AgentAccountsState>(remote.machineId, '/api/agentAccounts', params);
-      if (!this.client) throw new Error('The project’s computer is unavailable.');
-      return this.client.rpc<AgentAccountsState>('/api/agentAccounts', params);
-    },
-    requestSessionAccounts: async (sessionId, params) => {
-      let transport = this.accountTransports.get(sessionId);
-      if (!transport) {
-        const remote = parseGpuiRemotePresentationSessionId(sessionId);
-        const local = parseGxserverPresentationProjectSessionId(sessionId);
-        const target = remote ?? local;
-        if (!target) throw new Error('The session’s computer is unavailable.');
-        transport = createAccountSwitchTransport(
-          async (request) => {
-            const payload = { ...request, projectId: target.projectId, sessionId: target.sessionId };
-            if (remote)
-              return this.requestRemoteGxserver<AgentAccountsState>(remote.machineId, '/api/agentAccounts', payload);
-            if (!this.client) throw new Error('The session’s computer is unavailable.');
-            return this.client.rpc<AgentAccountsState>('/api/agentAccounts', payload);
-          },
-          (progress) => {
-            window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
-              type: 'accountSwitchProgress',
-              projectId: target.projectId,
-              sessionId: target.sessionId,
-              machineId: remote?.machineId,
-              progress,
-            });
-          }
-        );
-        this.accountTransports.set(sessionId, transport);
-      }
-      return transport(params);
-    },
     postMessage: (message) => {
       void this.handleSidebarMessage(message);
     },
@@ -354,8 +312,6 @@ export class GpuiSidebarRuntime {
     });
   }
 
-  openSidebarContextMenuCount = 0;
-  sidebarContextMenuFocusHeld = false;
   activeProjectContextRetryId: number | undefined;
   titlebarGitMenuStateRetryId: number | undefined;
   lastTitlebarGitMenuStatePayload: string | undefined;
@@ -1179,32 +1135,20 @@ export class GpuiSidebarRuntime {
   };
 
   async handleSidebarMessage(message: SidebarToExtensionMessage): Promise<void> {
+    /*
+     * CDXC:Diagnostics 2026-09-25 WHY:
+     * The app runtime port's meter counts every handler call here, whichever of the four doors
+     * delivered it (onSidebarCommand, onSidebarHostMessage, the Git modal commands, Quick Access).
+     * The service drops this message unless the `native.runtime.trace` scenario armed it.
+     */
+    nativePost({ kind: 'traceEntry', name: `handleSidebarMessage:${message.type}` });
     switch (message.type) {
-      case 'sidebarDebugLog':
-        window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
-          details: message.details,
-          event: message.event,
-          scenarioId: message.scenarioId,
-          type: 'sidebarDiagnosticLog',
-        });
-        return;
       case 'focusGroup':
         this.focusGroup(message.groupId, message);
         return;
       case 'focusSession':
         await this.focusSession(message.sessionId, message);
         this.postSidebarSessionFocusConfirmation(message.sessionId);
-        return;
-      case 'jumpToStashedPromptSession':
-        await this.jumpToStashedPromptSession(message);
-        return;
-      case 'focusSessionMode':
-        if (parseGpuiRemotePresentationSessionId(message.sessionId)) {
-          await this.focusSession(message.sessionId, message);
-          this.postSidebarSessionFocusConfirmation(message.sessionId);
-          return;
-        }
-        this.handleUnsupportedSidebarMessage(message);
         return;
       case 'createSession':
         await this.createSession();
@@ -1256,23 +1200,6 @@ export class GpuiSidebarRuntime {
         this.runSidebarCommand(commandId, message, message.scope ?? 'project');
         return;
       }
-      case 'runGhostexHotkeyAction': {
-        this.postGhostexHotkeyAction(message);
-        return;
-      }
-      case 'endSidebarCommandRun': {
-        /*
-        CDXC:CommandPane 2026-06-26-05:22:
-        Closing a command-pane Action run is command-id-only. Validate the selector at the runtime boundary so malformed renderer messages with command text, URLs, paths, cwd/env, logs, or output are unsupported no-ops instead of crashing before the run-end bridge can decline them.
-        */
-        const commandId = normalizeNonEmptyString(message.commandId);
-        if (!commandId) {
-          this.handleUnsupportedSidebarMessage(message);
-          return;
-        }
-        this.endSidebarCommandRun(commandId, message);
-        return;
-      }
       case 'setSessionSleeping':
         await this.setSessionSleeping(message.sessionId, message.sleeping);
         return;
@@ -1291,18 +1218,8 @@ export class GpuiSidebarRuntime {
       case 'copySessionDetails':
         this.copySessionDetails(message);
         return;
-      case 'sidebarContextMenuOpened':
-        this.noteSidebarContextMenuOpened();
-        return;
-      case 'sidebarContextMenuClosed':
-        this.noteSidebarContextMenuClosed();
-        return;
       case 'fullReloadSession':
-      case 'restartSession':
         await this.fullReloadSession(message.sessionId);
-        return;
-      case 'switchSessionAgent':
-        await this.switchSessionAgent(message.sessionId, message.agentId);
         return;
       case 'fullReloadProjectZmxSessions':
         await this.fullReloadProjectZmxSessions(message.groupId);
@@ -1353,12 +1270,6 @@ export class GpuiSidebarRuntime {
       case 'renameSession':
         await this.renameSession(message);
         return;
-      case 'setSessionFavorite':
-        await this.updateSessionFlags(message.sessionId, {
-          isFavorite: message.favorite,
-          sessionTag: message.favorite ? 'favorite' : null,
-        });
-        return;
       case 'setSessionTag':
         await this.updateSessionFlags(message.sessionId, {
           isFavorite: message.sessionTag === 'favorite',
@@ -1385,12 +1296,6 @@ export class GpuiSidebarRuntime {
       (a working or blocked session cannot settle) that the client must not
       pre-empt.
       */
-      case 'settleSession':
-        await this.runSessionLifecycleCommand(message.sessionId, '/api/settleSession', {});
-        return;
-      case 'unsettleSession':
-        await this.runSessionLifecycleCommand(message.sessionId, '/api/unsettleSession', {});
-        return;
       case 'snoozeSession':
         await this.snoozeSession(message.sessionId, message.snoozedUntil);
         return;
@@ -1447,17 +1352,8 @@ export class GpuiSidebarRuntime {
         }
         this.queueCustomSessionTagsServerSync(message.state);
         return;
-      case 'requestPreviousSessions':
-        await this.requestPreviousSessions(message);
-        return;
       case 'searchPreviousSessionsByText':
         this.searchPreviousSessionsByText();
-        return;
-      case 'restorePreviousSession':
-        await this.restorePreviousSession(message.historyId);
-        return;
-      case 'deletePreviousSession':
-        await this.deletePreviousSession(message.historyId);
         return;
       case 'copyAttachCommand': {
         const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
@@ -1477,100 +1373,20 @@ export class GpuiSidebarRuntime {
         this.handleUnsupportedSidebarMessage(message);
         return;
       }
-      case 'requestProjectWorktrees':
-        await this.requestProjectWorktrees(message);
-        return;
-      case 'savePinnedPrompt':
-        await this.savePinnedPrompt(message);
-        return;
-      case 'createProjectWorktree':
-        await this.createProjectWorktree(message);
-        return;
-      case 'createWorktreeSession':
-        await this.createWorktreeSession(message);
-        return;
-      case 'removeSessionWorktree':
-        await this.removeSessionWorktree(message);
-        return;
       case 'promptDeleteWorktreeForGroup':
         await this.promptDeleteWorktreeForGroup(message.groupId);
-        return;
-      case 'confirmDeleteWorktree':
-        await this.confirmDeleteWorktree(message);
         return;
       case 'promptRenameWorktreeForGroup':
         await this.promptRenameWorktreeForGroup(message.groupId);
         return;
-      case 'confirmRenameWorktree':
-        await this.confirmRenameWorktree(message);
-        return;
-      case 'updateSettingsPatch':
-        this.saveSidebarSettingsPatch(message);
-        return;
       case 'openExternalUrl':
         this.openExternalUrl(message);
-        return;
-      case 'openSettings':
-        this.openAppModal('settings');
-        return;
-      /*
-       * CDXC:Onboarding 2026-09-15 DECISION:
-       * User: "i want setup button in the tips dropdown to open this new one instead of the old one". The
-       * Tips "Setup" button and the Quick Access "Setup" command share this one `openWorkspaceWelcome`
-       * message, so it opens the Onboarding modal on every host that handles it; the automatic first run
-       * opens the same modal (with `firstRun`) from apps/desktop/src/app/modals.rs. The old
-       * FirstLaunchSetup modal stays in the tree under its own id and nothing opens it by default.
-       * SEE-ALSO: apps/desktop/src/app/delayed_send.rs handles the same message natively.
-       */
-      case 'openWorkspaceWelcome':
-        this.openAppModal('onboarding');
-        return;
-      case 'openHighlightedFeatures':
-      case 'openGhostexTutorialVideo':
-        this.openAppModal('watchGhostexVideo');
         return;
       case 'reconnectRemoteMachine':
         this.reconnectRemoteMachine(message.remoteMachineId, message.installApproved === true);
         return;
-      case 'pickWorkspaceFolder':
-        this.pickWorkspaceFolder(message);
-        return;
       case 'removeProject':
         await this.removeProject(message.projectId);
-        return;
-      case 'restoreRecentProject':
-        await this.restoreRecentProject(message.projectId);
-        return;
-      case 'removeRecentProject':
-        await this.removeRecentProject(message.projectId);
-        return;
-      case 'copyRecentProjectPath':
-        {
-          const remoteProject = parseGpuiRemotePresentationProjectId(message.projectId);
-          if (remoteProject) {
-            this.postRemoteProjectNativeAction('copyRemoteProjectPath', remoteProject, message);
-            return;
-          }
-        }
-        this.postNativeProjectPathAction('copyRecentProjectPath', message.projectId, message);
-        return;
-      case 'openRecentProjectInFinder':
-        {
-          const remoteProject = parseGpuiRemotePresentationProjectId(message.projectId);
-          if (remoteProject) {
-            this.postRemoteProjectNativeAction('openRemoteProjectTerminal', remoteProject, message);
-            return;
-          }
-        }
-        this.postNativeProjectPathAction('openRecentProjectInFinder', message.projectId, message);
-        return;
-      case 'openRecentProjectTerminal':
-        {
-          const remoteProject = parseGpuiRemotePresentationProjectId(message.projectId);
-          if (remoteProject) {
-            this.postRemoteProjectNativeAction('openRemoteProjectTerminal', remoteProject, message);
-          }
-        }
         return;
       case 'closeWorkspaceProjectForGroup':
         await this.closeProjectForGroup(message.groupId, message.successorSessionId);
@@ -1587,45 +1403,8 @@ export class GpuiSidebarRuntime {
       case 'openWorkspaceProjectInIdeForGroup':
         this.postProjectPathActionForGroup('openWorkspaceProjectInIde', message.groupId, message);
         return;
-      case 'openActiveWorkspaceProjectInFinder':
-        this.postActiveProjectPathAction('openActiveWorkspaceProjectInFinder', message);
-        return;
-      case 'openActiveWorkspaceProjectInIde':
-        if (message.targetApp !== 'vscode' && message.targetApp !== 'zed') {
-          this.handleUnsupportedSidebarMessage(message);
-          return;
-        }
-        this.postActiveProjectPathAction(
-          message.targetApp === 'vscode' ? 'openActiveWorkspaceProjectInVscode' : 'openActiveWorkspaceProjectInZed',
-          message
-        );
-        return;
       case 'removeWorkspaceProjectForGroup':
         await this.removeProjectForGroup(message.groupId);
-        return;
-      case 'setProjectWorktreeCommand':
-        await this.updateProjectWorktreeCommand(message.projectId, message.command);
-        return;
-      case 'setProjectBeadsDisplayKey':
-        await this.updateProjectBeadsDisplayKey(message.projectId, message.displayKey);
-        return;
-      case 'setProjectBeadsDirectory':
-        await this.updateProjectBeadsDirectory(message.projectId, message.directory);
-        return;
-      case 'setProjectDocsDirectory':
-        await this.updateProjectDocsDirectory(message.projectId, message.directory);
-        return;
-      case 'refreshGitState':
-        await this.refreshGitStateForMessage(message);
-        return;
-      case 'setSidebarGitPrimaryAction':
-        await this.persistGitPreferences({ primaryAction: message.action }, message);
-        return;
-      case 'setSidebarGitCommitConfirmationEnabled':
-        await this.persistGitPreferences({ confirmCommit: message.enabled }, message);
-        return;
-      case 'setSidebarGitGenerateCommitBodyEnabled':
-        await this.persistGitPreferences({ generateCommitBody: message.enabled }, message);
         return;
       case 'runSidebarGitAction':
         await this.runSidebarGitAction(message);
@@ -1643,45 +1422,11 @@ export class GpuiSidebarRuntime {
       case 'confirmSidebarGitDirectMerge':
         await this.confirmSidebarGitDirectMerge(message);
         return;
-      case 'commitWorktreeBeforeDelete':
-        await this.runSidebarGitAction({
-          action: 'commit',
-          groupId: message.groupId,
-          type: 'runSidebarGitAction',
-        });
-        return;
       case 'openSidebarGitChangedFileDiff':
         await this.openSidebarGitChangedFileDiff(message.filePath, message.requestId);
         return;
       case 'openSidebarGitChangedFile':
         await this.openSidebarGitChangedFileInIde(message);
-        return;
-      case 'saveSidebarAgent':
-        await this.saveSidebarAgent(message);
-        return;
-      case 'deleteSidebarAgent':
-        await this.deleteSidebarAgent(message.agentId);
-        return;
-      case 'syncSidebarAgentOrder':
-        await this.syncSidebarAgentOrder(message.requestId, message.agentIds);
-        return;
-      case 'saveSidebarCommand':
-        await this.saveSidebarCommand(message);
-        return;
-      case 'deleteSidebarCommand':
-        await this.deleteSidebarCommand(message.commandId);
-        return;
-      case 'syncSidebarCommandOrder':
-        await this.syncSidebarCommandOrder(message.requestId, message.commandIds);
-        return;
-      case 'saveGlobalSidebarCommand':
-        await this.saveGlobalSidebarCommand(message);
-        return;
-      case 'deleteGlobalSidebarCommand':
-        await this.deleteGlobalSidebarCommand(message.commandId);
-        return;
-      case 'syncGlobalSidebarCommandOrder':
-        await this.syncGlobalSidebarCommandOrder(message.requestId, message.commandIds);
         return;
       default:
         this.handleUnsupportedSidebarMessage(message);
@@ -1723,7 +1468,6 @@ export interface GpuiSidebarRuntime
     GpuiSidebarRuntimeSessionCreateMethods,
     GpuiSidebarRuntimeDraftSessionMethods,
     GpuiSidebarRuntimeAutoSleepMethods,
-    GpuiSidebarRuntimePreviousSessionMethods,
     GpuiSidebarRuntimeProjectBoardMethods,
     GpuiSidebarRuntimeConversationJumpMethods,
     GpuiSidebarRuntimeStashedPromptJumpMethods,
@@ -1757,7 +1501,6 @@ installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSessionFocusMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeSessionCreateMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeDraftSessionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAutoSleepMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimePreviousSessionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeProjectBoardMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeConversationJumpMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeStashedPromptJumpMethods);

@@ -413,20 +413,8 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::WorkspaceTerminalRenameCommand(payload) => {
                 self.receive_sidebar_workspace_terminal_rename_command_payload(&payload, cx);
             }
-            cef::SidebarBridgeEvent::WorkspaceTerminalEnter(payload) => {
-                self.receive_sidebar_workspace_terminal_enter_payload(&payload, cx);
-            }
             cef::SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(payload) => {
                 self.receive_sidebar_workspace_terminal_lifecycle_result_payload(&payload, cx);
-            }
-            cef::SidebarBridgeEvent::SourceWorkareaReadiness(_)
-            | cef::SidebarBridgeEvent::BrowserWorkareaReadiness(_)
-            | cef::SidebarBridgeEvent::ProjectWorkareaReadiness(_)
-            | cef::SidebarBridgeEvent::ManageFileWorkareaOperationRequest(_) => {
-                /*
-                CDXC:Workarea 2026-06-29-00:02:
-                Legacy sidebar readiness/proof messages stay accepted as compatibility no-ops. Source, Kanban, Automate, and Manage mounting now follows only the current runtime URL gate plus owned CEF surface map, and first-party Kanban/Automate/Manage CEF requests still flow through the separate project-workarea bridge.
-                */
             }
             cef::SidebarBridgeEvent::NativeProjectPathAction(payload) => {
                 self.receive_sidebar_native_project_path_action_payload(&payload, cx);

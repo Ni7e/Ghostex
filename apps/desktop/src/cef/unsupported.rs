@@ -97,10 +97,6 @@ pub type BrowserMediaAccessHandler = Rc<dyn Fn(BrowserMediaAccessRequest)>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SidebarBridgeEvent {
     ActiveProjectContext(String),
-    SourceWorkareaReadiness(String),
-    BrowserWorkareaReadiness(String),
-    ProjectWorkareaReadiness(String),
-    ManageFileWorkareaOperationRequest(String),
     NativeProjectPathAction(String),
     NativeAppShotPrompt(String),
     SidebarCommandAction(String),
@@ -111,7 +107,6 @@ pub enum SidebarBridgeEvent {
     CreateProjectTerminal(String),
     WorkspaceTerminalFocus(String),
     WorkspaceTerminalRenameCommand(String),
-    WorkspaceTerminalEnter(String),
     WorkspaceTerminalLifecycleResult(String),
     SessionCompletionSound(String),
     SessionStatusIndicators(String),

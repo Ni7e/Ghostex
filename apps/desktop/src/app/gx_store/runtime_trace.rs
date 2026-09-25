@@ -5,7 +5,8 @@
 //! - `runtime.rpc`: a gxserver call the old QuickJS runtime sent (`packages/chat-runtime` hands it
 //!   over as a `trace` message when [`runtime_trace_enabled`] armed it).
 //! - `runtime.entry`: a script or command that still reached the old runtime
-//!   (`NativeService::execute_app_owned_script`), named by [`runtime_entry_name`].
+//!   (`NativeService::execute_app_owned_script`), named by [`runtime_entry_name`], and every
+//!   `handleSidebarMessage` call the runtime reports itself (`handleSidebarMessage:<type>`).
 //! - `runtime.post`: a bridge post, `nativeHost` or `modalHost` message the old runtime sent to
 //!   Rust.
 //! - `gxRpc.rpc`: a gxserver call a Rust executor sent through `gx_rpc`.
@@ -90,6 +91,16 @@ pub(crate) fn trace_runtime_entry(source: &str) {
     );
 }
 
+/// A `traceEntry` message from the runtime: a `handleSidebarMessage` call, named
+/// `handleSidebarMessage:<type>`, whichever door delivered it.
+pub(crate) fn trace_runtime_handler(message: &Value) {
+    let name = message["name"]
+        .as_str()
+        .and_then(identifier)
+        .unwrap_or_else(|| "handleSidebarMessage:untyped".into());
+    write("runtime.entry", json!({ "name": name }));
+}
+
 /// A message the runtime posted to Rust: `sidebar` (a bridge function), `nativeHost` or
 /// `modalHost` (named by the message's `type`).
 pub(crate) fn trace_runtime_post(message: &Value) {
@@ -119,13 +130,21 @@ fn message_type(message: &Value) -> String {
 }
 
 /// Names a script the way the ledger names its entry point: the first `bridge.on<Name>` callback
-/// it calls (with the message `type` for the three callbacks that carry a command), else the first
+/// it calls (with the message `type` for the callbacks that carry a typed command), else the first
 /// `CustomEvent` it dispatches, else the first `ghostexGpui` field it assigns.
 pub(crate) fn runtime_entry_name(source: &str) -> String {
     if let Some(callback) = first_callback(source) {
         if matches!(
             callback.as_str(),
-            "onSidebarCommand" | "onSidebarHostMessage" | "onNativeQuickAccessCommand"
+            "onSidebarCommand"
+                | "onSidebarHostMessage"
+                | "onNativeQuickAccessCommand"
+                | "onGitCommitModalCommand"
+                | "onWorktreeModalCommand"
+                | "onExportTranscriptModalCommand"
+                | "onOsIntegrationCommand"
+                | "onWorkspaceTerminalRuntimeAction"
+                | "onTitlebarGitAction"
         ) {
             if let Some(kind) = first_type_value(source) {
                 return format!("{callback}:{kind}");

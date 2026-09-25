@@ -118,15 +118,6 @@ impl From<&GpuiSidebarWorkspaceTerminalRenameCommandMessage> for GpuiLocalWorksp
     }
 }
 
-impl From<&GpuiSidebarWorkspaceTerminalEnterMessage> for GpuiLocalWorkspaceSessionKey {
-    fn from(message: &GpuiSidebarWorkspaceTerminalEnterMessage) -> Self {
-        Self {
-            project_id: message.project_id.clone(),
-            session_id: message.session_id.clone(),
-        }
-    }
-}
-
 pub(crate) fn local_workspace_session_mappings_to_shell_state_json(
     mappings: &HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
     workspace: &WorkspaceModel,

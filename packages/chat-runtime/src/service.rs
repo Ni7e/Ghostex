@@ -54,10 +54,13 @@ impl ServiceRuntime {
                 Function::new(
                     ctx.clone(),
                     move |message: String| -> rquickjs::Result<()> {
-                        let message = serde_json::from_str(&message).map_err(|_| {
+                        let message: Value = serde_json::from_str(&message).map_err(|_| {
                             rquickjs::Error::new_from_js("string", "native message")
                         })?;
                         // CDXC:StateSync 2026-09-17 WHY: A ready focus message must reach GPUI before unrelated network callbacks, timer work, or later JavaScript jobs finish. Emitting in bridge-call order also keeps project and wake prerequisites ahead of their dependent focus message.
+                        if message["kind"] == "traceEntry" && !trace.load(Ordering::Relaxed) {
+                            return Ok(());
+                        }
                         if trace.load(Ordering::Relaxed) {
                             if let Some(record) = super::network::trace_record(&message) {
                                 post(record);

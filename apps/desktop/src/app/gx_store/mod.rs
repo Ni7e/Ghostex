@@ -132,6 +132,7 @@ pub(crate) use rpc::gx_rpc;
 #[allow(unused_imports)]
 pub(crate) use rpc_types::GxRpcError;
 pub(crate) use runtime_trace::{
-    runtime_trace_enabled, trace_runtime_entry, trace_runtime_post, trace_runtime_rpc,
+    runtime_trace_enabled, trace_runtime_entry, trace_runtime_handler, trace_runtime_post,
+    trace_runtime_rpc,
 };
 pub(crate) use workspace_groups::note_native_host_message_dropped;

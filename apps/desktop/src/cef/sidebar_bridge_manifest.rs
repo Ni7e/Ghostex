@@ -1,10 +1,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SidebarBridgeFunctionId {
     ActiveProjectContext,
-    SourceWorkareaReadiness,
-    BrowserWorkareaReadiness,
-    ProjectWorkareaReadiness,
-    ManageFileWorkareaOperationRequest,
     NativeProjectPathAction,
     NativeAppShotPrompt,
     SidebarCommandAction,
@@ -16,7 +12,6 @@ pub(crate) enum SidebarBridgeFunctionId {
     CreateProjectTerminal,
     WorkspaceTerminalFocus,
     WorkspaceTerminalRenameCommand,
-    WorkspaceTerminalEnter,
     WorkspaceTerminalLifecycleResult,
     SessionCompletionSound,
     SessionStatusIndicators,
@@ -73,14 +68,6 @@ pub(crate) struct AppModalHostBridgeSurfaceSpec {
 
 const SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.activeProjectContext";
-const SIDEBAR_SOURCE_WORKAREA_READINESS_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.sourceWorkareaReadiness";
-const SIDEBAR_BROWSER_WORKAREA_READINESS_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.browserWorkareaReadiness";
-const SIDEBAR_PROJECT_WORKAREA_READINESS_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.projectWorkareaReadiness";
-const SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.manageFileWorkareaOperationRequest";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.nativeProjectPathAction";
 const SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME: &str =
@@ -101,8 +88,6 @@ const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalFocus";
 const SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
-const SIDEBAR_WORKSPACE_TERMINAL_ENTER_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.workspaceTerminalEnter";
 const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
 const SIDEBAR_SESSION_COMPLETION_SOUND_PROCESS_MESSAGE_NAME: &str =
@@ -122,11 +107,6 @@ const SIDEBAR_RESOURCES_SNAPSHOT_REQUEST_PROCESS_MESSAGE_NAME: &str =
 
 pub(crate) const SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE: &str = "ghostexGpui";
 const SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION: &str = "postActiveProjectContext";
-const SIDEBAR_SOURCE_WORKAREA_READINESS_JS_FUNCTION: &str = "postSourceWorkareaReadiness";
-const SIDEBAR_BROWSER_WORKAREA_READINESS_JS_FUNCTION: &str = "postBrowserWorkareaReadiness";
-const SIDEBAR_PROJECT_WORKAREA_READINESS_JS_FUNCTION: &str = "postProjectWorkareaReadiness";
-const SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_JS_FUNCTION: &str =
-    "postManageFileWorkareaOperationRequest";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION: &str = "postNativeProjectPathAction";
 const SIDEBAR_NATIVE_APP_SHOT_PROMPT_JS_FUNCTION: &str = "postNativeAppShotPromptToSession";
 const SIDEBAR_COMMAND_ACTION_JS_FUNCTION: &str = "postSidebarCommandAction";
@@ -139,7 +119,6 @@ const SIDEBAR_CREATE_PROJECT_TERMINAL_JS_FUNCTION: &str = "postCreateProjectTerm
 const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_JS_FUNCTION: &str = "postWorkspaceTerminalFocus";
 const SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_JS_FUNCTION: &str =
     "postWorkspaceTerminalRenameCommand";
-const SIDEBAR_WORKSPACE_TERMINAL_ENTER_JS_FUNCTION: &str = "postWorkspaceTerminalEnter";
 const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION: &str =
     "postWorkspaceTerminalLifecycleResult";
 const SIDEBAR_SESSION_COMPLETION_SOUND_JS_FUNCTION: &str = "postSessionCompletionSound";
@@ -418,7 +397,7 @@ The sidebar CEF post-function allowlist must have one Rust manifest shared by ma
 CDXC:CefRuntime 2026-06-29-14:45:
 GPUI CEF bridge names, payload budgets, and allowed app-modal/project-workarea surfaces live in this Rust manifest so the macOS browser process and helper renderer consume one ownership point. Keep sidebar, project-workarea, and app-modal handlers surface-specific; this manifest is an allowlist, not a generic IPC bus.
 */
-pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 29] = [
+pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 24] = [
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::SidebarRuntimeFacts,
         js_function_name: "postSidebarRuntimeFacts",
@@ -433,26 +412,6 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 29] 
         id: SidebarBridgeFunctionId::ActiveProjectContext,
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
         process_message_name: SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::SourceWorkareaReadiness,
-        js_function_name: SIDEBAR_SOURCE_WORKAREA_READINESS_JS_FUNCTION,
-        process_message_name: SIDEBAR_SOURCE_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::BrowserWorkareaReadiness,
-        js_function_name: SIDEBAR_BROWSER_WORKAREA_READINESS_JS_FUNCTION,
-        process_message_name: SIDEBAR_BROWSER_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::ProjectWorkareaReadiness,
-        js_function_name: SIDEBAR_PROJECT_WORKAREA_READINESS_JS_FUNCTION,
-        process_message_name: SIDEBAR_PROJECT_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::ManageFileWorkareaOperationRequest,
-        js_function_name: SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_JS_FUNCTION,
-        process_message_name: SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::NativeProjectPathAction,
@@ -508,11 +467,6 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 29] 
         id: SidebarBridgeFunctionId::WorkspaceTerminalRenameCommand,
         js_function_name: SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_JS_FUNCTION,
         process_message_name: SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        id: SidebarBridgeFunctionId::WorkspaceTerminalEnter,
-        js_function_name: SIDEBAR_WORKSPACE_TERMINAL_ENTER_JS_FUNCTION,
-        process_message_name: SIDEBAR_WORKSPACE_TERMINAL_ENTER_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::WorkspaceTerminalLifecycleResult,

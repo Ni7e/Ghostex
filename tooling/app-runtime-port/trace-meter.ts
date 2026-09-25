@@ -68,7 +68,9 @@ function readLedger(): Row[] {
 
 function readLog(): Line[] {
   if (!existsSync(logPath)) {
-    console.error(`No trace log at ${logPath}. Turn on "Show debug UI controls" and the "App runtime port trace" scenario.`);
+    console.error(
+      `No trace log at ${logPath}. Turn on "Show debug UI controls" and the "App runtime port trace" scenario.`
+    );
     process.exit(2);
   }
   return readFileSync(logPath, 'utf8')
@@ -86,9 +88,13 @@ function readLog(): Line[] {
 const ledger = readLedger();
 const lines = readLog();
 
-/** The ledger row a trace name belongs to: the full name first, then the part after `:`. */
+/**
+ * The ledger row a trace name belongs to: the full name, then the message type after `:` (an H row
+ * for `handleSidebarMessage:createSession`), then the door before it (a C or R row for
+ * `onWorktreeModalCommand:confirmDeleteWorktree`).
+ */
 function rowFor(name: string): Row | undefined {
-  const candidates = [name, name.split(':').pop() ?? name];
+  const candidates = [name, name.split(':').pop() ?? name, name.split(':')[0]];
   for (const candidate of candidates) {
     const row = ledger.find((entry) => entry.tokens.includes(candidate));
     if (row) return row;
@@ -129,6 +135,8 @@ for (const [key, count] of [...rpcs.entries()].sort((a, b) => b[1] - a[1])) {
 const total = [...counts.values()].reduce((sum, { count }) => sum + count, 0);
 console.log(
   `\nStill reaching the runtime${family ? ` (${family})` : ''}: ${total} line(s) from ${lines.length} traced.` +
-    (byFamily.size ? ` By family: ${[...byFamily.entries()].map(([name, count]) => `${name} ${count}`).join(', ')}.` : '')
+    (byFamily.size
+      ? ` By family: ${[...byFamily.entries()].map(([name, count]) => `${name} ${count}`).join(', ')}.`
+      : '')
 );
 process.exit(flag('--expect-zero') && total > 0 ? 1 : 0);

@@ -80,6 +80,9 @@ impl NativeService {
                 Ok(message) if message["kind"] == "trace" => {
                     crate::app::gx_store::trace_runtime_rpc(&message)
                 }
+                Ok(message) if message["kind"] == "traceEntry" => {
+                    crate::app::gx_store::trace_runtime_handler(&message)
+                }
                 Ok(message) => {
                     crate::app::gx_store::trace_runtime_post(&message);
                     match message["kind"].as_str() {
