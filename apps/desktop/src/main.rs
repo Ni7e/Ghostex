@@ -235,6 +235,7 @@ fn main() {
     // (GPUI previously lost panics to stderr; macOS counterpart:
     // NativeCrashDiagnostics).
     support_logs::install_panic_hook();
+    app::gx_store::initialize_client_storage_at_start();
     cef::prepare_application();
     #[cfg(target_os = "macos")]
     reconcile_gpui_managed_ghostty_config();

@@ -55,6 +55,7 @@
 mod added_project;
 mod burst;
 mod client_document;
+mod client_storage_init;
 mod collection_menu;
 mod diagnostics;
 mod diagnostics_open;
@@ -70,7 +71,10 @@ mod records_storage;
 mod remote_clients;
 mod remote_last_seen;
 mod remote_project_docs;
+mod rpc;
+mod rpc_types;
 mod runtime_facts;
+mod runtime_trace;
 mod session_walk;
 mod shadow_diff;
 mod sidebar_accounts;
@@ -121,5 +125,13 @@ pub(crate) use sidebar_ui_storage::{
     read_preference_value, with_read_connection, with_write_connection, write_client_document_value,
 };
 
+pub(crate) use client_storage_init::initialize_client_storage_at_start;
 pub(crate) use host::GxStoreHost;
+#[allow(unused_imports)] // the first callers arrive with the runtime port's family commits
+pub(crate) use rpc::gx_rpc;
+#[allow(unused_imports)]
+pub(crate) use rpc_types::GxRpcError;
+pub(crate) use runtime_trace::{
+    runtime_trace_enabled, trace_runtime_entry, trace_runtime_post, trace_runtime_rpc,
+};
 pub(crate) use workspace_groups::note_native_host_message_dropped;

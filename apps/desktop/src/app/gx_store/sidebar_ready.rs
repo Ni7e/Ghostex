@@ -94,7 +94,26 @@ impl GhostexGpuiApp {
     pub(crate) fn gx_store_sidebar_list_ready(&self) -> bool {
         let recovery = self.gx_store.sidebar_list.ready_recovery();
         (self.gx_store.sidebar_ui.restored() || recovery.state)
-            && (self.gx_store.runtime_facts.hud().is_some() || recovery.hud)
+            && (self.gx_store.runtime_facts.hud().is_some()
+                || recovery.hud
+                || !Self::gx_store_hud_leg_expected())
+    }
+
+    /// Whether the HUD leg is worth waiting for at all.
+    ///
+    /// CDXC:Sidebar 2026-09-25 WHY:
+    /// Only the old QuickJS runtime posts the HUD today, so once it has failed to start there is
+    /// nothing to wait for and the list is drawn at once with the empty HUD, instead of after
+    /// `RECOVERY_WAIT` (app runtime port, step 0 item 4). The HUD's Rust source (family F2 in
+    /// docs/2026-09-25/app-runtime-port/PLAN.md) replaces this test with its own.
+    fn gx_store_hud_leg_expected() -> bool {
+        !crate::app::native_service::NativeService::start_failed()
+    }
+
+    /// The runtime failed to start: the HUD leg stops holding the list, so rebuild it now rather
+    /// than on the next state change.
+    pub(crate) fn gx_store_runtime_start_failed(&mut self, cx: &mut gpui::Context<Self>) {
+        self.gx_store_sidebar_state_changed(cx);
     }
 
     /// The HUD the installed list carries, which is an empty object once the HUD leg was given up
@@ -103,12 +122,9 @@ impl GhostexGpuiApp {
     pub(super) fn gx_store_sidebar_hud(&self) -> Option<Arc<Value>> {
         match self.gx_store.runtime_facts.hud() {
             Some(hud) => Some(Arc::clone(hud)),
-            None => self
-                .gx_store
-                .sidebar_list
-                .ready_recovery()
-                .hud
-                .then(|| Arc::new(json!({}))),
+            None => (self.gx_store.sidebar_list.ready_recovery().hud
+                || !Self::gx_store_hud_leg_expected())
+            .then(|| Arc::new(json!({}))),
         }
     }
 

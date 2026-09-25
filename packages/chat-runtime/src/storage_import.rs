@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 use std::{collections::HashMap, fs, path::Path};
 
 /// CDXC:Drafts 2026-09-17 WHY: Native chat must retain browser-era draft ownership, recovery records and preferences without starting a hidden browser to read them. Import only the app's file origin, resolve deletion tombstones before decoding, and leave the source intact until the strict native transaction commits.
-pub(crate) fn import(storage: &mut Storage, profile: &Path) -> Result<()> {
+/// `Ok(true)` when this call imported, `Ok(false)` when an earlier start already had.
+pub(crate) fn import(storage: &mut Storage, profile: &Path) -> Result<bool> {
     let imported: Option<String> = storage
         .database
         .query_row(
@@ -17,7 +18,7 @@ pub(crate) fn import(storage: &mut Storage, profile: &Path) -> Result<()> {
         )
         .optional()?;
     if imported.is_some() {
-        return Ok(());
+        return Ok(false);
     }
     let local = profile.join("Local Storage/leveldb");
     let mut preferences = Vec::new();
@@ -118,7 +119,7 @@ pub(crate) fn import(storage: &mut Storage, profile: &Path) -> Result<()> {
         params!["browserImportV1", json!(true).to_string()],
     )?;
     transaction.commit()?;
-    Ok(())
+    Ok(true)
 }
 
 pub(crate) fn latest_records(path: &Path) -> Result<Vec<leveldb_core::Record>> {

@@ -2,7 +2,15 @@ use super::{network::Network, platform, storage::Storage};
 use anyhow::{Result, anyhow};
 use rquickjs::{CaughtError, Context, Function, Promise, Runtime};
 use serde_json::{Value, json};
-use std::{cell::RefCell, path::Path, rc::Rc};
+use std::{
+    cell::RefCell,
+    path::Path,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 pub struct ServiceRuntime {
     context: Context,
@@ -10,16 +18,21 @@ pub struct ServiceRuntime {
     network: Rc<RefCell<Network>>,
 }
 impl ServiceRuntime {
-    pub fn new(config: &Value, database: &Path, post: impl Fn(Value) + 'static) -> Result<Self> {
+    /// `trace` arms the `native.runtime.trace` records (`network::trace_record`); the desktop
+    /// flips it when the diagnostic scenario changes.
+    pub fn new(
+        config: &Value,
+        database: &Path,
+        trace: Arc<AtomicBool>,
+        post: impl Fn(Value) + 'static,
+    ) -> Result<Self> {
         let runtime = Runtime::new()?;
         runtime.set_memory_limit(256 * 1024 * 1024);
         runtime.set_max_stack_size(2 * 1024 * 1024);
         let context = Context::full(&runtime)?;
-        let mut storage = Storage::open(database)?;
-        if let Some(profile) = config["legacyProfile"].as_str() {
-            super::storage_import::import(&mut storage, Path::new(profile))?;
-        }
-        let storage = Rc::new(RefCell::new(storage));
+        // The tables, the browser-era import and the migrations ran at app start
+        // (`initialize_client_storage`), before this runtime was started.
+        let storage = Rc::new(RefCell::new(Storage::open(database)?));
         let network = Rc::new(RefCell::new(Network::new()));
         let post_network = network.clone();
         context.with(|ctx| -> rquickjs::Result<()> {
@@ -45,6 +58,11 @@ impl ServiceRuntime {
                             rquickjs::Error::new_from_js("string", "native message")
                         })?;
                         // CDXC:StateSync 2026-09-17 WHY: A ready focus message must reach GPUI before unrelated network callbacks, timer work, or later JavaScript jobs finish. Emitting in bridge-call order also keeps project and wake prerequisites ahead of their dependent focus message.
+                        if trace.load(Ordering::Relaxed) {
+                            if let Some(record) = super::network::trace_record(&message) {
+                                post(record);
+                            }
+                        }
                         if !post_network.borrow_mut().dispatch(&message) {
                             post(message);
                         }

@@ -8,13 +8,17 @@ mod platform;
 mod service;
 mod service_worker;
 mod storage;
+mod storage_catalog;
 mod storage_import;
 mod storage_import_docs;
+mod storage_init;
 mod storage_metadata;
 mod storage_records;
 pub use service::ServiceRuntime;
 pub use service_worker::ServiceWorker;
+pub use storage_catalog::{CATALOG, CatalogBackend, CatalogStore, definition_for_key};
 pub use storage_import_docs::import_docs_browser_state;
+pub use storage_init::{StorageInitReport, initialize_client_storage};
 pub use storage_metadata::{
     RecordStoreUsage, apply_record_metadata, recompute_record_metadata, scan_record_usage,
 };

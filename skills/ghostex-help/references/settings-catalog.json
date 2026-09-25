@@ -7741,6 +7741,14 @@
           "value": "gpui-session-chat-debug.jsonl"
         },
         {
+          "label": "App runtime port trace",
+          "value": "native.runtime.trace"
+        },
+        {
+          "label": "gpui-runtime-trace.jsonl",
+          "value": "gpui-runtime-trace.jsonl"
+        },
+        {
           "label": "Daemon lifecycle",
           "value": "gxserver.lifecycle"
         },
