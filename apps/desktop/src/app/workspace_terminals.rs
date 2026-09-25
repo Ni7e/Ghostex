@@ -1129,13 +1129,21 @@ impl GhostexGpuiApp {
         else {
             return;
         };
-        let Some(request) = self
-            .local_workspace_lifecycle_requests
-            .remove(&message.request_id)
-        else {
+        self.finish_local_workspace_lifecycle_request(message.request_id, message.ok, cx);
+    }
+
+    /// The daemon's answer to a pending Sleep or Wake of a tab: apply it when it succeeded, drop
+    /// the request either way. Close is never pending, so its answer finds nothing here.
+    pub(crate) fn finish_local_workspace_lifecycle_request(
+        &mut self,
+        request_id: u64,
+        ok: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(request) = self.local_workspace_lifecycle_requests.remove(&request_id) else {
             return;
         };
-        if !message.ok {
+        if !ok {
             return;
         }
         self.apply_local_workspace_terminal_lifecycle_result(request, cx);

@@ -13,6 +13,7 @@
 //! - Daemon rows are replaced whole, never merged; local edits are overlays that never renumber
 //!   the revision.
 
+mod attention;
 mod change;
 mod connection;
 mod core;
@@ -35,6 +36,9 @@ mod sidebar_ui;
 mod sidebar_view;
 mod workspace_groups;
 
+pub use crate::attention::{
+    AgentActivityReport, ATTENTION_PATCH_TTL_MS, ESCAPE_DONE_SUPPRESSION_MS, MIN_ATTENTION_VISIBLE_MS,
+};
 pub use crate::change::{ChangeSummary, IgnoredReason, SideStateChanges};
 pub use crate::connection::{ConnectionPhase, ConnectionState, ConnectionUpdate};
 pub use crate::core::{Core, Effect, Event, Intent, Output, ResubscribeReason};
@@ -103,6 +107,10 @@ pub use crate::sidebar_actions::{
     REMOTE_AWAITED_TIMEOUT_MS, REMOTE_FIRE_AND_FORGET_TIMEOUT_MS, REMOTE_FOCUS_MESSAGE_TYPES,
     REMOTE_SESSION_MESSAGE_TYPES,
     SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES, SORT_ACTIONS,
+};
+pub use crate::sidebar_actions::{
+    open_remote_session_terminal, provider_transition_committed, running_local_session_ids,
+    terminal_lifecycle_fallback_focus, titlebar_sleep_inactive_ids,
 };
 pub use crate::sidebar_actions::{
     normalize_remote_machine_settings, owns_agent_run_command, owns_delayed_send_command,

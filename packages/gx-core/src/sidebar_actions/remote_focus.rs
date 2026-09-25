@@ -230,7 +230,7 @@ pub fn plan_remote_focus(
 /// `postNativeProjectPathAction`'s payload, with the three options that ride only when they are
 /// set: the TypeScript spreads `options.placement ? { placement } : {}`, and an absent key is a
 /// different message from a `false` or a `null` to the strict parser on the other side.
-fn open_remote_session_terminal(
+pub fn open_remote_session_terminal(
     scoped_session_id: &str,
     keep_view: bool,
     preferred_interface: Option<&str>,

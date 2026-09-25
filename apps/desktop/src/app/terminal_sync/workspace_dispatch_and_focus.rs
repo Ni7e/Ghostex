@@ -221,10 +221,10 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
-    /// Fork/Reload for Agents terminals follow macOS ownership: Rust resolves
-    /// the mapped gxserver identity and the sidebar runtime commits the
-    /// gxserver mutation (`/api/forkSession` or the sleep→wake full reload).
-    /// Unmapped local placeholder tabs have no gxserver identity and no-op.
+    /// Fork/Reload for Agents terminals follow macOS ownership: Rust resolves the mapped gxserver
+    /// identity and runs the same store action a sidebar row runs (`/api/forkSession` or the
+    /// sleep then wake full reload). Unmapped local placeholder tabs have no gxserver identity and
+    /// no-op.
     pub(crate) fn dispatch_gpui_workspace_terminal_runtime_action(
         &mut self,
         action: &str,
@@ -241,9 +241,8 @@ impl GhostexGpuiApp {
         self.dispatch_gpui_workspace_session_key_runtime_action(action, &key, cx)
     }
 
-    /// Same sidebar-runtime lifecycle route addressed by gxserver identity, for
-    /// sessions that exist in the daemon presentation without a mounted pane in
-    /// this window.
+    /// Same store lifecycle route addressed by gxserver identity, for sessions that exist in the
+    /// daemon presentation without a mounted pane in this window.
     pub(crate) fn dispatch_gpui_workspace_session_key_runtime_action(
         &mut self,
         action: &str,
@@ -255,8 +254,8 @@ impl GhostexGpuiApp {
 
     /// CDXC:AgentProviders 2026-09-03: Switch Account from the terminal action
     /// bar or the chat composer, addressed like Fork / Full reload but carrying
-    /// the picked agent id, which the runtime forwards to
-    /// `/api/switchSessionAgent` before running its Full reload.
+    /// the picked agent id, which goes to `/api/switchSessionAgent` before the
+    /// Full reload.
     pub(crate) fn dispatch_gpui_workspace_terminal_switch_account(
         &mut self,
         shell_session_id: TerminalSessionId,
@@ -317,6 +316,14 @@ impl GhostexGpuiApp {
         agent_id: Option<&str>,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        // Close, Sleep, Fork, Full Reload, Note and Switch Account are the store's own session
+        // actions (gx_store/terminal_lifecycle/runtime_actions.rs); only Export and Handoff still
+        // open the runtime's export dialog.
+        if let Some(performed) =
+            self.gx_store_run_workspace_runtime_action(action, key, agent_id, cx)
+        {
+            return performed;
+        }
         let Some(sidebar) = self.sidebar.clone() else {
             return false;
         };

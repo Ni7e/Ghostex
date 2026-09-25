@@ -1516,13 +1516,7 @@ impl GhostexGpuiApp {
         CDXC:Workarea 2026-06-26-07:25:
         Native GPUI workspace tab lifecycle: the request carries only request id, action, bounded gxserver project/session ids, and optional replacement ids; the store performs the gxserver half (gx_store/terminal_lifecycle/lifecycle_requests.rs) while the workspace keeps pane/tab ownership local.
         */
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
-        self.gx_store_flush_old_runtime_tell(cx);
-        let script = gpui_workspace_terminal_lifecycle_request_script(&message);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+        self.gx_store_run_tab_lifecycle_request(&message, cx)
     }
 
     #[cfg(target_os = "macos")]

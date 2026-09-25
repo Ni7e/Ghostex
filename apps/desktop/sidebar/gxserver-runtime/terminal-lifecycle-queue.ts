@@ -4,31 +4,21 @@ Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
 import {
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_VERSION,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION,
-  GPUI_WORKSPACE_TERMINAL_LIFECYCLE_BRIDGE_RETRY_DELAY_MS,
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
-import { focusMovedElsewhereDuringWake } from './helpers/auto-sleep';
 import { normalizeGpuiWorkspaceTabSessionSelection } from './helpers/command-palette';
 import { rememberGpuiProjectSession } from './project-activation';
 import {
-  createGpuiRemotePresentationSessionId,
   parseGpuiRemotePresentationProjectId,
   parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
 import {
   gpuiWorkspaceTerminalTitleCommandForAgent,
-  normalizeGpuiWorkspaceTerminalLifecycleRequest,
   normalizeGpuiWorkspaceTerminalRuntimeAction,
-  normalizeQueuedGpuiWorkspaceTerminalLifecycleRequest,
-  shouldApplyGpuiLocalWorkspaceTransition,
 } from './helpers/terminal-lifecycle';
-import type { GpuiRemoteProjectReference, GpuiWorkspaceTerminalLifecycleRequest } from './types-and-protocol';
 import { createGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
-import type { GxserverSessionTransitionResult } from '@/packages/shared/gxserver-protocol';
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -43,22 +33,6 @@ export interface GpuiSidebarRuntimeTerminalLifecycleMethods {
   handleGpuiWorkspaceTabSessionSelected(payload: unknown): void;
   handleGpuiWorkspaceTerminalRuntimeAction(payload: unknown): Promise<void>;
   postLocalWorkspaceTerminalRenameCommand(projectId: string, sessionId: string, title: string): void;
-  transitionWorkspaceTerminalLifecycleClose(
-    request: GpuiWorkspaceTerminalLifecycleRequest,
-    fallbackReplacementSessionId: string | undefined
-  ): boolean;
-  workspaceTerminalLifecycleResultBridgeReady(): boolean;
-  handleOrQueueWorkspaceTerminalLifecycleRequest(payload: unknown): void;
-  queuePendingWorkspaceTerminalLifecycleRequest(request: GpuiWorkspaceTerminalLifecycleRequest): void;
-  scheduleWorkspaceTerminalLifecycleBridgeRetry(): void;
-  drainPendingWorkspaceTerminalLifecycleRequests(queuedRequests?: readonly unknown[]): void;
-  handleNormalizedWorkspaceTerminalLifecycleRequest(request: GpuiWorkspaceTerminalLifecycleRequest): Promise<void>;
-  applyWorkspaceTerminalLifecycleRequest(request: GpuiWorkspaceTerminalLifecycleRequest): Promise<boolean>;
-  applyRemoteWorkspaceTerminalLifecycleRequest(
-    request: GpuiWorkspaceTerminalLifecycleRequest,
-    remoteProject: GpuiRemoteProjectReference
-  ): Promise<boolean>;
-  postWorkspaceTerminalLifecycleResult(requestId: number, ok: boolean): void;
 }
 
 export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
@@ -121,59 +95,20 @@ export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
 
   async handleGpuiWorkspaceTerminalRuntimeAction(this: GpuiSidebarRuntime, payload: unknown): Promise<void> {
     /*
-    Rust-origin Fork/Reload for focused Agents terminals reuse the exact card
-    action paths so gxserver ownership, focus follow-up, and reload semantics
-    stay identical to sidebar-driven Fork/Full Reload.
+    Only the export dialog's two actions still arrive here; a session control's Close, Sleep,
+    Fork, Full Reload, Note and Switch Account are Rust's
+    (gx_store/terminal_lifecycle/runtime_actions.rs).
     */
     const request = normalizeGpuiWorkspaceTerminalRuntimeAction(payload);
     if (!request) {
       return;
     }
-    if (request.action === 'sleepInactiveSessions') {
-      await this.sleepInactiveSessionsFromTitlebar();
-      return;
-    }
-    if (request.action === 'sleepAllDaemonSessions') {
-      await this.sleepAllLocalDaemonSessions();
-      return;
-    }
     const sessionId = createGxserverPresentationProjectSessionId(request.projectId, request.sessionId);
-    if (request.action === 'closeSession') {
-      await this.transitionSession(sessionId, 'close');
-      return;
-    }
-    /*
-    CDXC:Resources 2026-09-04 WHY:
-    The titlebar Resources panel lists the project's live sessions even when no
-    pane is mounted for them, so its moon and Sleep Project cannot go through
-    Rust's pane-owned sleep for those rows. They arrive here by gxserver
-    identity and take the same sleep path a sidebar row's Sleep uses.
-    */
-    if (request.action === 'sleepSession') {
-      await this.setSessionSleeping(sessionId, true);
-      return;
-    }
-    if (request.action === 'forkSession') {
-      await this.forkSession(sessionId);
-      return;
-    }
     if (request.action === 'exportTranscript') {
       await this.exportSessionTranscript(sessionId);
       return;
     }
-    if (request.action === 'handoffToModel') {
-      await this.exportSessionTranscript(sessionId, request.target);
-      return;
-    }
-    if (request.action === 'openSessionNote') {
-      this.openSessionNoteEditor(sessionId);
-      return;
-    }
-    if (request.action === 'switchSessionAgent') {
-      await this.switchSessionAgent(sessionId, request.agentId);
-      return;
-    }
-    await this.fullReloadSession(sessionId);
+    await this.exportSessionTranscript(sessionId, request.target);
   },
 
   postLocalWorkspaceTerminalRenameCommand(
@@ -221,296 +156,6 @@ export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
     if (!bridgeSent) {
       throw new Error('Renderer command bridge unavailable.');
     }
-  },
-
-  transitionWorkspaceTerminalLifecycleClose(
-    this: GpuiSidebarRuntime,
-    request: GpuiWorkspaceTerminalLifecycleRequest,
-    fallbackReplacementSessionId: string | undefined
-  ): boolean {
-    /*
-    CDXC:Workarea 2026-06-26-23:59:
-    Rust-origin mapped Agents close matches macOS local-first behavior: hide/remove the SidebarApp row and focus the Rust-provided or project-list replacement locally, then attempt gxserver `/api/transitionSession` best-effort. Provider transition failure must not keep a retryable Ghostty close-confirm prompt or block the native tab close.
-    */
-    this.removePresentationSession(request.projectId, request.sessionId);
-    const replacementProjectId = request.replacementProjectId ?? request.projectId;
-    const replacementSessionId = request.replacementSessionId ?? fallbackReplacementSessionId;
-    if (replacementSessionId) {
-      this.focusLocalWorkspaceSession(replacementProjectId, replacementSessionId);
-      this.publishPresentation('patch');
-    }
-    const client = this.client;
-    if (client) {
-      void client
-        .rpc<GxserverSessionTransitionResult>('/api/transitionSession', {
-          action: request.action,
-          projectId: request.projectId,
-          reason: 'closeTerminal',
-          sessionId: request.sessionId,
-        })
-        .catch(() => undefined);
-    }
-    return true;
-  },
-
-  workspaceTerminalLifecycleResultBridgeReady(this: GpuiSidebarRuntime): boolean {
-    return typeof window.ghostexGpui?.postWorkspaceTerminalLifecycleResult === 'function';
-  },
-
-  handleOrQueueWorkspaceTerminalLifecycleRequest(this: GpuiSidebarRuntime, payload: unknown): void {
-    const request = normalizeGpuiWorkspaceTerminalLifecycleRequest(payload);
-    if (!request) {
-      return;
-    }
-    if (!this.workspaceTerminalLifecycleResultBridgeReady()) {
-      this.queuePendingWorkspaceTerminalLifecycleRequest(request);
-      return;
-    }
-    void this.handleNormalizedWorkspaceTerminalLifecycleRequest(request);
-  },
-
-  queuePendingWorkspaceTerminalLifecycleRequest(
-    this: GpuiSidebarRuntime,
-    request: GpuiWorkspaceTerminalLifecycleRequest
-  ): void {
-    const gpuiBridge = (window.ghostexGpui = window.ghostexGpui ?? {});
-    const pending = Array.isArray(gpuiBridge.pendingWorkspaceTerminalLifecycleRequests)
-      ? gpuiBridge.pendingWorkspaceTerminalLifecycleRequests
-      : [];
-    pending.push(request);
-    gpuiBridge.pendingWorkspaceTerminalLifecycleRequests = pending;
-    this.scheduleWorkspaceTerminalLifecycleBridgeRetry();
-  },
-
-  scheduleWorkspaceTerminalLifecycleBridgeRetry(this: GpuiSidebarRuntime): void {
-    if (this.workspaceTerminalLifecycleBridgeRetryId !== undefined) {
-      return;
-    }
-    this.workspaceTerminalLifecycleBridgeRetryId = window.setTimeout(() => {
-      this.workspaceTerminalLifecycleBridgeRetryId = undefined;
-      this.drainPendingWorkspaceTerminalLifecycleRequests();
-    }, GPUI_WORKSPACE_TERMINAL_LIFECYCLE_BRIDGE_RETRY_DELAY_MS);
-  },
-
-  drainPendingWorkspaceTerminalLifecycleRequests(this: GpuiSidebarRuntime, queuedRequests?: readonly unknown[]): void {
-    const gpuiBridge = (window.ghostexGpui = window.ghostexGpui ?? {});
-    const pending = [
-      ...(queuedRequests ?? []),
-      ...(Array.isArray(gpuiBridge.pendingWorkspaceTerminalLifecycleRequests)
-        ? gpuiBridge.pendingWorkspaceTerminalLifecycleRequests.splice(0)
-        : []),
-    ];
-    if (pending.length === 0) {
-      return;
-    }
-    if (!this.workspaceTerminalLifecycleResultBridgeReady()) {
-      for (const payload of pending) {
-        const request = normalizeQueuedGpuiWorkspaceTerminalLifecycleRequest(payload);
-        if (request) {
-          this.queuePendingWorkspaceTerminalLifecycleRequest(request);
-        }
-      }
-      return;
-    }
-    for (const payload of pending) {
-      const request = normalizeQueuedGpuiWorkspaceTerminalLifecycleRequest(payload);
-      if (request) {
-        void this.handleNormalizedWorkspaceTerminalLifecycleRequest(request);
-      }
-    }
-  },
-
-  async handleNormalizedWorkspaceTerminalLifecycleRequest(
-    this: GpuiSidebarRuntime,
-    request: GpuiWorkspaceTerminalLifecycleRequest
-  ): Promise<void> {
-    let ok = false;
-    try {
-      ok = await this.applyWorkspaceTerminalLifecycleRequest(request);
-    } catch {
-      ok = false;
-    }
-    this.postWorkspaceTerminalLifecycleResult(request.requestId, ok);
-  },
-
-  async applyWorkspaceTerminalLifecycleRequest(
-    this: GpuiSidebarRuntime,
-    request: GpuiWorkspaceTerminalLifecycleRequest
-  ): Promise<boolean> {
-    const remoteProject = parseGpuiRemotePresentationProjectId(request.projectId);
-    if (remoteProject) {
-      return this.applyRemoteWorkspaceTerminalLifecycleRequest(request, remoteProject);
-    }
-    const fallbackReplacementSessionId =
-      request.replacementSessionId === undefined && !request.skipReplacementFallback
-        ? this.resolveLocalProjectListTransitionFocusTarget(request.projectId, request.sessionId)
-        : undefined;
-    if (request.action === 'close') {
-      /*
-      CDXC:Workarea 2026-07-10:
-      Close is local-first and must hide the sidebar row even when gxserver is
-      disconnected. The provider transition is best-effort cleanup owned by
-      transitionWorkspaceTerminalLifecycleClose; unlike Sleep and Wake, it is
-      not a prerequisite for acknowledging the user's tab close.
-      */
-      return this.transitionWorkspaceTerminalLifecycleClose(request, fallbackReplacementSessionId);
-    }
-    if (!this.client) {
-      return false;
-    }
-    if (request.action === 'wake') {
-      /*
-      CDXC:Workarea 2026-06-26-23:24:
-      Rust-origin mapped sleeping placeholder activation must mirror macOS wake ownership: SidebarApp/gxserver commits `/api/wakeSession`, the sidebar marks the row running, and only the result ack lets Rust move the native tab into Mounting. Do not post WorkspaceTerminalFocus from this branch or the wake request would re-enter Rust before its pending lifecycle mutation applies.
-      */
-      const focusedSessionIdBeforeWake = this.focusedSessionId;
-      await this.client.rpc('/api/wakeSession', {
-        projectId: request.projectId,
-        reason: 'gpui-sidebar',
-        sessionId: request.sessionId,
-      });
-      this.patchPresentationSession(request.projectId, request.sessionId, {
-        lifecycleState: 'running',
-      });
-      /*
-      CDXC:Workarea 2026-09-04 WHY:
-      `keepSidebarFocus` marks a startup-restore wake of a split pane that is not the focused pane.
-      Moving the sidebar focus to it would republish and persist that session as the focused one, so after a restart with several sleeping panes the last wake to finish decided what the next restart focuses.
-      */
-      if (
-        !request.keepSidebarFocus &&
-        !focusMovedElsewhereDuringWake(this.focusedSessionId, focusedSessionIdBeforeWake, request.sessionId)
-      ) {
-        this.setLocalPresentationSessionFocus(request.projectId, request.sessionId);
-      }
-      this.publishPresentation('patch');
-      return true;
-    }
-    const result = await this.client.rpc<GxserverSessionTransitionResult>('/api/transitionSession', {
-      action: request.action,
-      projectId: request.projectId,
-      reason: 'sleepSession',
-      sessionId: request.sessionId,
-    });
-    if (!shouldApplyGpuiLocalWorkspaceTransition(result, request.action)) {
-      return false;
-    }
-    this.patchPresentationSession(request.projectId, request.sessionId, {
-      lifecycleState: 'sleeping',
-    });
-    const replacementProjectId = request.replacementProjectId ?? request.projectId;
-    const replacementSessionId = request.replacementSessionId ?? fallbackReplacementSessionId;
-    if (replacementSessionId) {
-      this.focusLocalWorkspaceSession(replacementProjectId, replacementSessionId);
-      this.publishPresentation('patch');
-    }
-    return true;
-  },
-
-  async applyRemoteWorkspaceTerminalLifecycleRequest(
-    this: GpuiSidebarRuntime,
-    request: GpuiWorkspaceTerminalLifecycleRequest,
-    remoteProject: GpuiRemoteProjectReference
-  ): Promise<boolean> {
-    const scopedSessionId = createGpuiRemotePresentationSessionId(
-      remoteProject.machineId,
-      remoteProject.projectId,
-      request.sessionId
-    );
-    const replacementProject = request.replacementProjectId
-      ? parseGpuiRemotePresentationProjectId(request.replacementProjectId)
-      : undefined;
-    const focusReplacement = (): void => {
-      if (
-        replacementProject &&
-        request.replacementSessionId &&
-        replacementProject.machineId === remoteProject.machineId
-      ) {
-        const replacementReference = {
-          machineId: replacementProject.machineId,
-          projectId: replacementProject.projectId,
-          sessionId: request.replacementSessionId,
-        };
-        /*
-        CDXC:RemoteMachines 2026-08-08:
-        A remote direct close must focus its surviving terminal through the
-        same native open/focus bridge as a remote sidebar session click. A
-        presentation-only focus update selects the replacement row but never
-        transfers AppKit/GPUI keyboard ownership, leaving both the Agents pane
-        and project-editor companion unable to type until clicked.
-        */
-        this.postRemoteSessionNativeAction('openRemoteSessionTerminal', replacementReference, {
-          sessionId: createGpuiRemotePresentationSessionId(
-            replacementReference.machineId,
-            replacementReference.projectId,
-            replacementReference.sessionId
-          ),
-          type: 'focusSession',
-        });
-        this.setRemotePresentationSessionFocus(replacementReference);
-      }
-    };
-
-    if (request.action === 'close') {
-      const presentation = this.remotePresentations.get(remoteProject.machineId);
-      if (presentation) {
-        this.remotePresentations.set(remoteProject.machineId, {
-          ...presentation,
-          sessions: presentation.sessions.filter(
-            (session) => session.projectId !== remoteProject.projectId || session.sessionId !== request.sessionId
-          ),
-        });
-      }
-      if (this.focusedSessionId === scopedSessionId) {
-        this.focusedSessionId = undefined;
-        this.visibleSessionIds.delete(scopedSessionId);
-      }
-      focusReplacement();
-      this.publishRemotePresentationPatch();
-      void this.requestRemoteGxserver(remoteProject.machineId, '/api/killSession', {
-        projectId: remoteProject.projectId,
-        reason: 'closeTerminal',
-        sessionId: request.sessionId,
-      })
-        .then(() => this.refreshRemotePresentationFromGxserver(remoteProject.machineId))
-        .catch(() => undefined);
-      return true;
-    }
-
-    await this.requestRemoteGxserver(
-      remoteProject.machineId,
-      request.action === 'wake' ? '/api/wakeSession' : '/api/sleepSession',
-      {
-        projectId: remoteProject.projectId,
-        reason: 'gpui-sidebar',
-        sessionId: request.sessionId,
-      }
-    );
-    await this.refreshRemotePresentationFromGxserver(remoteProject.machineId);
-    if (request.action === 'wake') {
-      this.setRemotePresentationSessionFocus({
-        machineId: remoteProject.machineId,
-        projectId: remoteProject.projectId,
-        sessionId: request.sessionId,
-      });
-    } else {
-      focusReplacement();
-    }
-    return true;
-  },
-
-  postWorkspaceTerminalLifecycleResult(this: GpuiSidebarRuntime, requestId: number, ok: boolean): void {
-    const postResult = window.ghostexGpui?.postWorkspaceTerminalLifecycleResult;
-    if (typeof postResult !== 'function') {
-      return;
-    }
-    const payload = JSON.stringify({
-      ok,
-      requestId,
-      type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE,
-      version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_VERSION,
-    });
-    postResult(payload);
   },
 };
 

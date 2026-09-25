@@ -112,45 +112,24 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    /// The titlebar batch sleep reuses the sidebar runtime's inactive-session
-    /// revalidation (same filter as per-project bulk sleep) so working,
-    /// attention, and already-sleeping sessions stay untouched like macOS.
+    /// The titlebar batch sleep reuses the store's inactive-session filter (the one a project's
+    /// Sleep Inactive uses) across every connected machine, so working, attention, background-work
+    /// and already-sleeping sessions stay untouched like macOS.
     pub(crate) fn dispatch_gpui_workspace_sleep_inactive_sessions(
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let message = serde_json::json!({
-            "action": "sleepInactiveSessions",
-            "type": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE,
-            "version": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION,
-        });
-        let script = gpui_workspace_terminal_runtime_action_script(&message);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+        self.gx_store_sleep_inactive_sessions_everywhere(cx)
     }
 
-    /// macOS `killTerminalDaemon` parity: since the gxserver cutover the
-    /// Running Sessions daemon-stop control never stops the shared gxserver
-    /// process — macOS routes every awake gxserver-presented terminal through
-    /// the shared sleep path and refreshes the modal. GPUI forwards the same
-    /// bulk request to the sidebar runtime, which owns the paced sleep
-    /// transitions; the modal refresh converges as sessions go to sleep.
+    /// macOS `killTerminalDaemon` parity: since the gxserver cutover the Running Sessions
+    /// daemon-stop control never stops the shared gxserver process. Every awake local session goes
+    /// through the shared paced sleep path; the modal refresh converges as sessions go to sleep.
     pub(crate) fn dispatch_gpui_workspace_sleep_all_daemon_sessions(
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let message = serde_json::json!({
-            "action": "sleepAllDaemonSessions",
-            "type": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE,
-            "version": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION,
-        });
-        let script = gpui_workspace_terminal_runtime_action_script(&message);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+        self.gx_store_sleep_all_local_daemon_sessions(cx)
     }
 
     #[cfg(target_os = "macos")]

@@ -8,15 +8,12 @@ import {
   GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_TYPE,
-  GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_VERSION,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE,
   GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION,
 } from '../constants';
 import type {
   GpuiWorkspaceSessionAttentionAcknowledgePayload,
   GpuiWorkspaceTerminalEscapePressedPayload,
-  GpuiWorkspaceTerminalLifecycleRequest,
   GpuiWorkspaceTerminalRuntimeActionPayload,
 } from '../types-and-protocol';
 import { isObjectRecord, normalizeNonEmptyString } from './records';
@@ -70,23 +67,12 @@ export function normalizeGpuiWorkspaceTerminalRuntimeAction(
   ) {
     return undefined;
   }
-  if (record.action === 'sleepInactiveSessions' || record.action === 'sleepAllDaemonSessions') {
-    if (record.projectId !== undefined || record.sessionId !== undefined) {
-      return undefined;
-    }
-    return { action: record.action };
-  }
-  const action =
-    record.action === 'closeSession' ||
-    record.action === 'exportTranscript' ||
-    record.action === 'forkSession' ||
-    record.action === 'fullReloadSession' ||
-    record.action === 'handoffToModel' ||
-    record.action === 'openSessionNote' ||
-    record.action === 'sleepSession' ||
-    record.action === 'switchSessionAgent'
-      ? record.action
-      : undefined;
+  /*
+  Close, Sleep, Fork, Full Reload, Note, Switch Account and the two sleep sweeps are Rust's
+  (gx_store/terminal_lifecycle/runtime_actions.rs); only the export dialog's two actions still
+  arrive here.
+  */
+  const action = record.action === 'exportTranscript' || record.action === 'handoffToModel' ? record.action : undefined;
   const projectId = normalizeNonEmptyString(record.projectId)?.trim();
   const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
   if (
@@ -97,13 +83,6 @@ export function normalizeGpuiWorkspaceTerminalRuntimeAction(
     !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
   ) {
     return undefined;
-  }
-  if (action === 'switchSessionAgent') {
-    const agentId = normalizeNonEmptyString(record.agentId)?.trim();
-    if (!agentId) {
-      return undefined;
-    }
-    return { action, agentId, projectId, sessionId };
   }
   if (record.agentId !== undefined) {
     return undefined;
@@ -220,173 +199,6 @@ export function normalizeGpuiWorkspaceRemoteSessionAttentionAcknowledge(value: u
     return undefined;
   }
   return sessionId;
-}
-
-export function normalizeQueuedGpuiWorkspaceTerminalLifecycleRequest(
-  value: unknown
-): GpuiWorkspaceTerminalLifecycleRequest | undefined {
-  /*
-  CDXC:Workarea 2026-06-26-05:23:
-  Lifecycle retries may contain either the raw fixed bridge payload queued before React started or the runtime's already-normalized id-only request queued while the CEF result bridge was missing. Accept only those two bounded shapes so retries do not reintroduce paths, commands, terminal text, URLs, tokens, or generic IPC fields.
-  */
-  return (
-    normalizeGpuiWorkspaceTerminalLifecycleRequest(value) ?? normalizeGpuiWorkspaceTerminalLifecycleQueuedRequest(value)
-  );
-}
-
-export function normalizeGpuiWorkspaceTerminalLifecycleQueuedRequest(
-  value: unknown
-): GpuiWorkspaceTerminalLifecycleRequest | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    Object.keys(record).some(
-      (key) =>
-        ![
-          'action',
-          'keepSidebarFocus',
-          'projectId',
-          'replacementProjectId',
-          'replacementSessionId',
-          'requestId',
-          'sessionId',
-          'skipReplacementFallback',
-        ].includes(key)
-    )
-  ) {
-    return undefined;
-  }
-  if (typeof record.requestId !== 'number' || !Number.isSafeInteger(record.requestId) || record.requestId <= 0) {
-    return undefined;
-  }
-  const action =
-    record.action === 'close' || record.action === 'sleep' || record.action === 'wake' ? record.action : undefined;
-  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
-  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
-  const replacementProjectId = normalizeNonEmptyString(record.replacementProjectId)?.trim();
-  const replacementSessionId = normalizeNonEmptyString(record.replacementSessionId)?.trim();
-  if (
-    !action ||
-    !projectId ||
-    !sessionId ||
-    (record.skipReplacementFallback !== true && record.skipReplacementFallback !== false) ||
-    (record.keepSidebarFocus !== undefined && record.keepSidebarFocus !== true) ||
-    !gpuiWorkspaceLifecycleProjectIdAllowed(projectId) ||
-    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
-  ) {
-    return undefined;
-  }
-  if ((replacementProjectId && !replacementSessionId) || (!replacementProjectId && replacementSessionId)) {
-    return undefined;
-  }
-  if (record.skipReplacementFallback === true && replacementProjectId && replacementSessionId) {
-    return undefined;
-  }
-  if (
-    replacementProjectId &&
-    replacementSessionId &&
-    (!gpuiWorkspaceLifecycleProjectIdAllowed(replacementProjectId) ||
-      !gpuiLocalWorkspaceLifecycleSessionIdAllowed(replacementSessionId))
-  ) {
-    return undefined;
-  }
-  return {
-    action,
-    keepSidebarFocus: record.keepSidebarFocus === true,
-    projectId,
-    ...(replacementProjectId && replacementSessionId ? { replacementProjectId, replacementSessionId } : {}),
-    requestId: record.requestId,
-    sessionId,
-    skipReplacementFallback: record.skipReplacementFallback,
-  };
-}
-
-export function normalizeGpuiWorkspaceTerminalLifecycleRequest(
-  value: unknown
-): GpuiWorkspaceTerminalLifecycleRequest | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    Object.keys(record).some(
-      (key) =>
-        ![
-          'action',
-          'keepSidebarFocus',
-          'projectId',
-          'replacementProjectId',
-          'replacementSessionId',
-          'requestId',
-          'sessionId',
-          'skipReplacementFallback',
-          'type',
-          'version',
-        ].includes(key)
-    )
-  ) {
-    return undefined;
-  }
-  if (
-    record.type !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_TYPE ||
-    record.version !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_VERSION ||
-    typeof record.requestId !== 'number' ||
-    !Number.isSafeInteger(record.requestId) ||
-    record.requestId <= 0
-  ) {
-    return undefined;
-  }
-  const action =
-    record.action === 'close' || record.action === 'sleep' || record.action === 'wake' ? record.action : undefined;
-  if (!action) {
-    return undefined;
-  }
-  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
-  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
-  const replacementProjectId = normalizeNonEmptyString(record.replacementProjectId)?.trim();
-  const replacementSessionId = normalizeNonEmptyString(record.replacementSessionId)?.trim();
-  const skipReplacementFallback =
-    record.skipReplacementFallback === undefined ? false : record.skipReplacementFallback === true;
-  const keepSidebarFocus = record.keepSidebarFocus === undefined ? false : record.keepSidebarFocus === true;
-  if (record.keepSidebarFocus !== undefined && record.keepSidebarFocus !== true) {
-    return undefined;
-  }
-  if (
-    !projectId ||
-    !sessionId ||
-    !gpuiWorkspaceLifecycleProjectIdAllowed(projectId) ||
-    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
-  ) {
-    return undefined;
-  }
-  if (record.skipReplacementFallback !== undefined && record.skipReplacementFallback !== true) {
-    return undefined;
-  }
-  if ((replacementProjectId && !replacementSessionId) || (!replacementProjectId && replacementSessionId)) {
-    return undefined;
-  }
-  if (skipReplacementFallback && replacementProjectId && replacementSessionId) {
-    return undefined;
-  }
-  if (
-    replacementProjectId &&
-    replacementSessionId &&
-    (!gpuiWorkspaceLifecycleProjectIdAllowed(replacementProjectId) ||
-      !gpuiLocalWorkspaceLifecycleSessionIdAllowed(replacementSessionId))
-  ) {
-    return undefined;
-  }
-  return {
-    action,
-    keepSidebarFocus,
-    projectId,
-    ...(replacementProjectId && replacementSessionId ? { replacementProjectId, replacementSessionId } : {}),
-    requestId: record.requestId,
-    sessionId,
-    skipReplacementFallback,
-  };
 }
 
 export function didGpuiGxserverProviderTransitionCommit(result: GxserverSessionTransitionResult): boolean {

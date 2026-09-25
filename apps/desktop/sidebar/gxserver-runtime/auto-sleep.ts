@@ -42,8 +42,6 @@ at the bottom of this file is what keeps the two in step.
 export interface GpuiSidebarRuntimeAutoSleepMethods {
   startGpuiAutoSleepMonitor(): void;
   runGpuiAutoSleepMonitor(_source: 'interval' | 'settings-change' | 'startup'): Promise<void>;
-  sleepInactiveSessionsFromTitlebar(): Promise<void>;
-  sleepAllLocalDaemonSessions(): Promise<void>;
   setGroupSleeping(groupId: string, sleeping: boolean): Promise<void>;
   setSessionsSleeping(sessionIds: readonly string[], sleeping: boolean): Promise<void>;
   setSessionSleeping(
@@ -121,58 +119,6 @@ export const gpuiSidebarRuntimeAutoSleepMethods = {
     } finally {
       this.autoSleepMonitorRunning = false;
     }
-  },
-
-  async sleepInactiveSessionsFromTitlebar(this: GpuiSidebarRuntime): Promise<void> {
-    /*
-    macOS's titlebar Resources shortcut revalidates and sleeps every inactive
-    awake terminal. GPUI derives the same set from the shared inactive-session
-    filter used by per-project bulk sleep, across the local daemon and every
-    connected remote presentation.
-    */
-    const sessionIds: string[] = [];
-    for (const tab of this.browserTabs) {
-      if (!tab.isSleeping && !tab.isVisible) {
-        sessionIds.push(gpuiBrowserSidebarSessionId(tab));
-      }
-    }
-    for (const session of this.presentation?.sessions ?? []) {
-      if (isGpuiInactiveProjectPresentationSession(session)) {
-        sessionIds.push(createGxserverPresentationProjectSessionId(session.projectId, session.sessionId));
-      }
-    }
-    for (const [machineId, presentation] of this.remotePresentations) {
-      for (const session of presentation.sessions ?? []) {
-        if (isGpuiInactiveProjectPresentationSession(session)) {
-          sessionIds.push(createGpuiRemotePresentationSessionId(machineId, session.projectId, session.sessionId));
-        }
-      }
-    }
-    if (sessionIds.length === 0) {
-      return;
-    }
-    await this.setSessionsSleeping(sessionIds, true);
-  },
-
-  /*
-  macOS killTerminalDaemon parity: since the gxserver cutover the Running
-  Sessions daemon-stop control is a local-first bulk sleep — macOS routes
-  every awake gxserver-presented terminal through the shared sleep path and
-  leaves the shared daemon process running. GPUI sleeps every running local
-  daemon session the same way; remote presentations are untouched
-  because the modal lists local daemon state.
-  */
-  async sleepAllLocalDaemonSessions(this: GpuiSidebarRuntime): Promise<void> {
-    const sessionIds = this.browserTabs.filter((tab) => !tab.isSleeping).map(gpuiBrowserSidebarSessionId);
-    for (const session of this.presentation?.sessions ?? []) {
-      if (session.lifecycleState === 'running') {
-        sessionIds.push(createGxserverPresentationProjectSessionId(session.projectId, session.sessionId));
-      }
-    }
-    if (sessionIds.length === 0) {
-      return;
-    }
-    await this.setSessionsSleeping(sessionIds, true);
   },
 
   /*

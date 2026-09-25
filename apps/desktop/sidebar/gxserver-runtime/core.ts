@@ -499,7 +499,6 @@ export class GpuiSidebarRuntime {
   lastForwardedRemoteSidebarSpacesJsonByMachineId = new Map<string, string>();
   lastForwardedCustomSessionTagsJson: string | undefined;
   lastForwardedRemoteCustomSessionTagsJsonByMachineId = new Map<string, string>();
-  workspaceTerminalLifecycleBridgeRetryId: number | undefined;
 
   start(): void {
     this.installGpuiBridgeCallbacks();
@@ -590,16 +589,6 @@ export class GpuiSidebarRuntime {
     };
     gpuiBridge.onBrowserTabsChanged = applyBrowserTabs;
     applyBrowserTabs(gpuiBridge.browserTabs);
-    gpuiBridge.onWorkspaceTerminalLifecycleRequest = (payload) => {
-      /*
-      CDXC:Workarea 2026-06-26-07:25:
-      GPUI native workspace lifecycle must follow macOS ownership: Rust commits Close locally before this callback and uses the sidebar only for asynchronous provider cleanup, while Sleep/Wake still report transition success through the fixed result bridge. Payloads are bounded ids plus action/request enums only; no titles, paths, commands, terminal text, URLs, tokens, or daemon bodies cross this callback.
-
-      CDXC:Workarea 2026-06-26-05:23:
-      The callback may be installed before CEF exposes `postWorkspaceTerminalLifecycleResult`. Queue normalized requests until that bridge exists so Close provider cleanup and acknowledged Sleep/Wake transitions are not lost during startup.
-      */
-      this.handleOrQueueWorkspaceTerminalLifecycleRequest(payload);
-    };
     const applyCommandPaneSessions = (sessions: readonly GpuiCommandPaneSessionSummary[] | undefined) => {
       /*
       CDXC:CommandPane 2026-06-25-10:50:
@@ -758,12 +747,6 @@ export class GpuiSidebarRuntime {
         this.handleGpuiWorkspaceTabSessionSelected(payload);
       }
     }
-    const pendingWorkspaceTerminalLifecycleRequests = Array.isArray(
-      gpuiBridge.pendingWorkspaceTerminalLifecycleRequests
-    )
-      ? gpuiBridge.pendingWorkspaceTerminalLifecycleRequests.splice(0)
-      : [];
-    this.drainPendingWorkspaceTerminalLifecycleRequests(pendingWorkspaceTerminalLifecycleRequests);
     const pendingWorkspaceFolderPicks = Array.isArray(gpuiBridge.pendingWorkspaceFolderPicks)
       ? gpuiBridge.pendingWorkspaceFolderPicks.splice(0)
       : [];

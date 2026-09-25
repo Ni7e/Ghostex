@@ -216,7 +216,6 @@ export type GhostexGpuiSidebarBridge = {
   onWorkspaceSessionAttentionAcknowledge?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;
   onWorkspaceTerminalEscapePressed?: (payload: unknown) => void;
-  onWorkspaceTerminalLifecycleRequest?: (payload: unknown) => void;
   onWorkspaceTerminalRuntimeAction?: (payload: unknown) => void;
   pendingExportTranscriptModalCommands?: unknown[];
   pendingGitCommitModalCommands?: unknown[];
@@ -234,7 +233,6 @@ export type GhostexGpuiSidebarBridge = {
   pendingWorkspaceSessionAttentionAcknowledgements?: unknown[];
   pendingWorkspaceTabSessionSelections?: unknown[];
   pendingWorkspaceTerminalEscapePresses?: unknown[];
-  pendingWorkspaceTerminalLifecycleRequests?: unknown[];
   pendingWorkspaceTerminalRuntimeActions?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
   postBrowserTabFocus?: (payload: string) => boolean;
@@ -255,7 +253,6 @@ export type GhostexGpuiSidebarBridge = {
   postSessionStatusIndicators?: (payload: string) => boolean;
   postTitlebarGitMenuState?: (payload: string) => boolean;
   postWorkspaceTerminalFocus?: (payload: string) => boolean;
-  postWorkspaceTerminalLifecycleResult?: (payload: string) => boolean;
   postWorkspaceTerminalRenameCommand?: (payload: string) => boolean;
   runtimeSettings?: GpuiSidebarRuntimeSettings;
 };
@@ -267,17 +264,6 @@ declare global {
 }
 
 export type GpuiSidebarRuntimeSnapshotKind = 'hydrate' | 'patch';
-
-export type GpuiWorkspaceTerminalLifecycleRequest = {
-  action: 'close' | 'sleep' | 'wake';
-  keepSidebarFocus: boolean;
-  projectId: string;
-  replacementProjectId?: string;
-  replacementSessionId?: string;
-  requestId: number;
-  sessionId: string;
-  skipReplacementFallback: boolean;
-};
 
 export type GpuiValidatedGxserverBootstrap = {
   authToken: string;
@@ -774,20 +760,7 @@ export type GpuiWorkspaceTerminalFocusPlacement = 'splitRight';
 
 export type GpuiWorkspaceTerminalRuntimeActionPayload =
   | {
-      action:
-        'closeSession' | 'exportTranscript' | 'forkSession' | 'fullReloadSession' | 'openSessionNote' | 'sleepSession';
-      projectId: string;
-      sessionId: string;
-    }
-  | {
-      /**
-       * CDXC:AgentProviders 2026-09-03:
-       * Rust-origin Switch Account (terminal action bar, chat composer). The
-       * agent id is one of the rows the runtime itself forwarded to Rust on the
-       * tab session's `switchableAgents`.
-       */
-      action: 'switchSessionAgent';
-      agentId: string;
+      action: 'exportTranscript';
       projectId: string;
       sessionId: string;
     }
@@ -797,9 +770,7 @@ export type GpuiWorkspaceTerminalRuntimeActionPayload =
       projectId: string;
       sessionId: string;
       target: GpuiHandoffModelTarget;
-    }
-  | { action: 'sleepAllDaemonSessions' }
-  | { action: 'sleepInactiveSessions' };
+    };
 
 export type GpuiPresentationProjectProjectionMetadata = {
   chatProjectIds: ReadonlySet<string>;

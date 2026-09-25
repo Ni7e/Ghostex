@@ -35,7 +35,7 @@ import {
 } from './helpers/remote-presentation';
 import { shouldApplyGpuiLocalWorkspaceTransition } from './helpers/terminal-lifecycle';
 import type { GpuiWorkspaceTerminalFocusPlacement } from './types-and-protocol';
-import { closeAppModal, openAppModal, postAppModalHostMessage } from '@/packages/core-ui/app-modal-host-bridge';
+import { postAppModalHostMessage } from '@/packages/core-ui/app-modal-host-bridge';
 import {
   resolveEffectivePreferredAgentInterface,
   type PreferredAgentInterface,
@@ -111,7 +111,6 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
   copySessionDetails(message: Extract<SidebarToExtensionMessage, { type: 'copySessionDetails' }>): void;
   fullReloadSession(sessionId: string): Promise<void>;
   splitSessionRight(sessionId: string): Promise<void>;
-  switchSessionAgent(sessionId: string, agentId: string): Promise<void>;
   fullReloadProjectZmxSessions(groupId: string): Promise<void>;
   fullReloadWorkspaceGroup(groupId: string): Promise<void>;
   resolveLocalProjectListTransitionFocusTarget(projectId: string, removedSessionId: string): string | undefined;
@@ -126,7 +125,6 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
   ): Promise<void>;
   setSessionParked(sessionId: string, parked: boolean): Promise<void>;
   snoozeSession(sessionId: string, snoozedUntil: string): Promise<void>;
-  openSessionNoteEditor(sessionId: string): void;
   saveSessionNote(sessionId: string, note: string): Promise<void>;
   runSessionLifecycleCommand(
     sessionId: string,
@@ -665,43 +663,6 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     this.publishPresentation('patch');
   },
 
-  async switchSessionAgent(this: GpuiSidebarRuntime, sessionId: string, agentId: string): Promise<void> {
-    /*
-    CDXC:AgentProviders 2026-09-03:
-    Resume the same conversation under another same-family agent configuration
-    (another account). The owning daemon rewrites the row's launch identity;
-    the provider cycle that follows is Full Reload itself, so the wake resumes
-    through the ordinary restore path with the new agent's command. A refused
-    switch (incompatible agent, draft, old daemon) leaves the row untouched, so
-    nothing is reloaded and the daemon's own sentence is what the user sees.
-    */
-    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
-    const reference = parseGxserverPresentationProjectSessionId(sessionId);
-    try {
-      if (remoteSession) {
-        await this.requestRemoteGxserver(remoteSession.machineId, '/api/switchSessionAgent', {
-          agentId,
-          projectId: remoteSession.projectId,
-          sessionId: remoteSession.sessionId,
-        });
-      } else if (reference && this.client) {
-        await this.client.rpc('/api/switchSessionAgent', {
-          agentId,
-          projectId: reference.projectId,
-          sessionId: reference.sessionId,
-        });
-      } else {
-        return;
-      }
-    } catch (error) {
-      this.postRemoteToast('error', 'Could not switch account', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-      return;
-    }
-    await this.fullReloadSession(sessionId);
-  },
-
   async fullReloadProjectZmxSessions(this: GpuiSidebarRuntime, groupId: string): Promise<void> {
     const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
     if (remoteGroup) {
@@ -1139,35 +1100,6 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
   remote resolve from their own machine's presentation for the same reason
   `saveSessionNote` writes to its own machine's daemon.
   */
-  openSessionNoteEditor(this: GpuiSidebarRuntime, sessionId: string): void {
-    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
-    const presentation = remoteSession ? this.remotePresentations.get(remoteSession.machineId) : this.presentation;
-    const reference = remoteSession ?? parseGxserverPresentationProjectSessionId(sessionId);
-    if (!reference || !presentation) {
-      return;
-    }
-    const session = presentation.sessions.find(
-      (candidate) => candidate.projectId === reference.projectId && candidate.sessionId === reference.sessionId
-    );
-    if (!session) {
-      return;
-    }
-    const sessionTitle =
-      normalizeNonEmptyString(session.primaryTitle) ??
-      normalizeNonEmptyString(session.title) ??
-      normalizeNonEmptyString(session.terminalTitle);
-    // Same modal-host contract as the row's own entry: the note editor replaces
-    // whatever modal is open instead of stacking behind it.
-    closeAppModal('SettingsDismissal:terminalActionBarNote');
-    openAppModal({
-      initialNote: session.sessionNote ?? '',
-      modal: 'sessionNote',
-      sessionId,
-      ...(sessionTitle ? { sessionTitle } : {}),
-      type: 'open',
-    });
-  },
-
   /*
   CDXC:SessionNotes 2026-08-24:
   Save (or, with an empty note, clear) this session's free-text note.

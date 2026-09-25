@@ -327,19 +327,3 @@ pub(crate) fn gpui_workspace_terminal_runtime_action_script(message: &serde_json
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalRuntimeAction==='function'){{bridge.onWorkspaceTerminalRuntimeAction(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalRuntimeActions)?bridge.pendingWorkspaceTerminalRuntimeActions:[];pending.push(payload);bridge.pendingWorkspaceTerminalRuntimeActions=pending;}}}})(); undefined;"
     )
 }
-
-/*
-CDXC:Sidebar 2026-08-02:
-`data-native-pointer-inside` is a pure CSS state flag whose only writer is the
-native pointer observer, so it is set directly on `document.body` rather than
-through a page bridge: the attribute exists from the first paint, no page code
-has to be mounted for the write to land, and an absent attribute is already the
-correct "pointer position unknown, hover normally" state.
-*/
-pub(crate) fn gpui_workspace_terminal_lifecycle_request_script(
-    message: &serde_json::Value,
-) -> String {
-    format!(
-        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalLifecycleRequest==='function'&&typeof bridge.postWorkspaceTerminalLifecycleResult==='function'){{bridge.onWorkspaceTerminalLifecycleRequest(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalLifecycleRequests)?bridge.pendingWorkspaceTerminalLifecycleRequests:[];pending.push(payload);bridge.pendingWorkspaceTerminalLifecycleRequests=pending;}}}})(); undefined;"
-    )
-}
