@@ -149,6 +149,9 @@ impl GhostexGpuiApp {
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        // The titlebar sweep is not a project action, so it still includes app tabs: every awake
+        // browser tab that is not showing in a pane.
+        self.gx_store_sleep_browser_tabs(false, cx);
         let ids = titlebar_sleep_inactive_ids(&self.gx_store.core);
         self.gx_store_sleep_session_set(ids, cx)
     }
@@ -159,8 +162,62 @@ impl GhostexGpuiApp {
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        // Every awake browser tab too, as the Running Sessions stop always did.
+        self.gx_store_sleep_browser_tabs(true, cx);
         let ids = running_local_session_ids(&self.gx_store.core);
         self.gx_store_sleep_session_set(ids, cx)
+    }
+
+    /// Sleeps the loaded browser tabs of every project that still own a page, the visible ones
+    /// only when `include_visible`.
+    ///
+    /// CDXC:SessionSleep 2026-09-21 DECISION:
+    /// User: a PROJECT's Sleep, Wake, Sleep Inactive and Close Inactive touch only its sessions; the titlebar sweep and the Running Sessions stop are not project actions and still include app tabs.
+    fn gx_store_sleep_browser_tabs(&mut self, include_visible: bool, cx: &mut gpui::Context<Self>) {
+        let active_project = self.browser_tabs_project_id.clone();
+        let mut targets: Vec<(String, crate::app::model::BrowserTabId, bool)> = Vec::new();
+        let mut collect = |project_id: &str,
+                           model: &crate::app::model::BrowserTabModel,
+                           awake: &std::collections::HashSet<crate::app::model::BrowserTabId>,
+                           is_active: bool| {
+            let visible: std::collections::HashSet<_> = model
+                .rendered_leaf_order()
+                .into_iter()
+                .filter_map(|pane_id| model.active_tab_id_for_pane(pane_id))
+                .collect();
+            for tab in &model.tabs {
+                if tab.state != crate::app::model::BrowserTabState::Loaded
+                    || !awake.contains(&tab.id)
+                    || (!include_visible && visible.contains(&tab.id))
+                {
+                    continue;
+                }
+                targets.push((project_id.to_string(), tab.id, is_active));
+            }
+        };
+        if let Some(project_id) = active_project.as_deref() {
+            let awake: std::collections::HashSet<_> =
+                self.browser_surfaces.keys().copied().collect();
+            collect(project_id, &self.browser_tabs, &awake, true);
+        }
+        for (project_id, model) in &self.parked_browser_tabs_by_project {
+            if active_project.as_deref() == Some(project_id.as_str()) {
+                continue;
+            }
+            let awake: std::collections::HashSet<_> = self
+                .parked_browser_runtimes_by_project
+                .get(project_id)
+                .map(|runtime| runtime.surface_tab_ids())
+                .unwrap_or_default();
+            collect(project_id, model, &awake, false);
+        }
+        for (project_id, tab_id, is_active) in targets {
+            if is_active {
+                self.sleep_browser_tab(tab_id, cx);
+            } else {
+                self.sleep_parked_browser_tab(&project_id, tab_id, cx);
+            }
+        }
     }
 
     fn gx_store_sleep_session_set(
