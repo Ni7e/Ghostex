@@ -67,6 +67,7 @@ mod effects;
 mod host;
 mod layout_persist;
 mod local_focus;
+mod notifications;
 mod project_docs;
 mod records_storage;
 mod remote_clients;

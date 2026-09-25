@@ -19,8 +19,10 @@ mod core;
 mod doc_sync;
 mod focus;
 mod keys;
+mod notification_feed;
 mod overlay;
 mod presentation_store;
+mod refetch;
 mod project_docs;
 mod selectors;
 mod sidebar_accounts;
@@ -45,6 +47,11 @@ pub use crate::focus::{
 pub use crate::keys::{
     decode_uri_component, encode_uri_component, encode_workspace_subgroup_id,
     parse_workspace_subgroup_id, MachineId, ProjectKey, SessionKey, CHATS_GROUP_ID,
+};
+pub use crate::notification_feed::{
+    notification_feed_jump_target, notification_feed_state_message, NotificationFeedCommand,
+    NOTIFICATION_FEED_READ_ENDPOINT, NOTIFICATION_FEED_STATE_MESSAGE_TYPE,
+    NOTIFICATION_FEED_UPDATE_ENDPOINT,
 };
 pub use crate::overlay::SessionPatch;
 pub use crate::sidebar_actions::{

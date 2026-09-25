@@ -26,7 +26,6 @@ import {
   GPUI_REMOTE_MACHINE_RECONNECT_STOP_STATES,
   GPUI_REMOTE_MACHINE_RETRY_STATES,
   GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
-  GPUI_SIDEBAR_NOTIFICATION_FEED_COMMAND_EVENT_NAME,
   GPUI_SIDEBAR_REMOTE_EVENT_NAME,
 } from './constants';
 import type { GpuiSidebarRuntimeExportTranscriptMethods } from './export-transcript';
@@ -54,8 +53,6 @@ import {
   parseGpuiRemotePresentationProjectId,
   parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
-import type { GpuiSidebarRuntimeNotificationFeedMethods } from './notification-feed';
-import { gpuiSidebarRuntimeNotificationFeedMethods } from './notification-feed';
 import type { GpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
 import { gpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
 import type { GpuiSidebarRuntimeProjectBoardMethods } from './project-board';
@@ -122,8 +119,6 @@ import type {
   GxserverCustomSessionTagsState,
 } from '@/packages/shared/gxserver-protocol';
 import { NAVIGATION_HISTORY_SCOPE_GPUI } from '@/packages/shared/navigation-history/navigation-history-contract';
-import { EMPTY_NOTIFICATION_FEED_STATE } from '@/packages/shared/notification-feed/notification-feed-contract';
-import type { NotificationFeedState } from '@/packages/shared/notification-feed/notification-feed-contract';
 import { NavigationHistoryController } from '@/packages/shared/navigation-history/navigation-history-controller';
 import type { SidebarProjectDiffStats } from '@/packages/shared/project-diff-stats';
 import type {
@@ -329,8 +324,6 @@ export class GpuiSidebarRuntime {
   activeGroupId: string | undefined;
   activeProjectId: string | undefined;
   lastNavigationHistoryStatePayload: string | undefined;
-  lastNotificationFeedStatePayload: string | undefined;
-  notificationFeedState: NotificationFeedState = EMPTY_NOTIFICATION_FEED_STATE;
   readonly navigationHistory = new NavigationHistoryController({
     activate: (entry) => this.activateNavigationHistoryEntry(entry),
     onStateChange: (state) => this.postNavigationHistoryState(state),
@@ -531,9 +524,6 @@ export class GpuiSidebarRuntime {
     window.addEventListener(
       GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
       this.handleGpuiSidebarNavigationHistoryCommand
-    );
-    window.addEventListener(GPUI_SIDEBAR_NOTIFICATION_FEED_COMMAND_EVENT_NAME, (event) =>
-      this.handleGpuiSidebarNotificationFeedCommand(event)
     );
     this.publishUnavailable('bootstrap-pending');
     this.tryStartFromInstalledBootstrap(0);
@@ -1380,7 +1370,6 @@ export interface GpuiSidebarRuntime
     GpuiSidebarRuntimeRemoteMachineMethods,
     GpuiSidebarRuntimeAppShotAndMiscMethods,
     GpuiSidebarRuntimeResourcesSnapshotMethods,
-    GpuiSidebarRuntimeNotificationFeedMethods,
     GpuiSidebarRuntimeProjectAndCommandMethods {}
 
 function installGpuiSidebarRuntimeMethods(methods: Record<string, unknown>): void {
@@ -1413,5 +1402,4 @@ installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeWorkspaceGroupMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeRemoteMachineMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAppShotAndMiscMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeResourcesSnapshotMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeNotificationFeedMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeProjectAndCommandMethods);

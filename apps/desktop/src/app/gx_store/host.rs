@@ -153,6 +153,8 @@ pub(crate) struct GxStoreHost {
     pub(super) runtime_route: super::sidebar_runtime_route::SidebarRuntimeRouteCounters,
     /// The runtime's one-way facts channel, beside the publish it is compared with.
     pub(crate) runtime_facts: super::runtime_facts::SidebarRuntimeFacts,
+    /// The effects the app performs rather than the store (`effects.rs`).
+    pub(super) app_effects: super::effects::AppEffectQueue,
     /// The collection a project move just created, which the renderer opens its Rename on. Held
     /// here rather than carried from the old projection's publish, because the create is the
     /// store's now and the publish would not know about it.
@@ -360,6 +362,7 @@ impl GhostexGpuiApp {
         // The sidebar's own once-a-second tick, which the armed-timer labels and the menu-host
         // re-read ride (sidebar_clock.rs). Started once, and not tied to having a transport.
         self.gx_store_start_sidebar_clock(cx);
+        self.gx_store_start_app_effects(cx);
         // The sidebar's own state is read once, and again later if that read failed.
         self.gx_store_restore_sidebar_ui(cx);
         // A machine may already have connected before the store came up, and the machine tabs are

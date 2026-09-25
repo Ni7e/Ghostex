@@ -468,9 +468,6 @@ impl GhostexGpuiApp {
             navigation_history::NAVIGATION_HISTORY_STATE_MESSAGE_TYPE => {
                 self.receive_navigation_history_state_message(&message, cx);
             }
-            notification_feed::NOTIFICATION_FEED_STATE_MESSAGE_TYPE => {
-                self.receive_notification_feed_state_message(&message, cx);
-            }
             "runProcess" => {
                 self.receive_gpui_titlebar_native_host_run_process(message, cx);
             }
