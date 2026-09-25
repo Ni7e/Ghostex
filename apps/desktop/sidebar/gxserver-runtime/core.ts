@@ -412,7 +412,6 @@ export class GpuiSidebarRuntime {
   remoteSidebarHuds = new Map<string, GpuiRemoteSidebarHud>();
   remoteLastSeenPresentations = new Map<string, GxserverPresentationSnapshot>();
   remoteLastSeenStore = new GpuiRemoteLastSeenStore();
-  remoteLastSeenPersistTimeoutId: number | undefined;
   remoteRecentProjectsByMachineId = new Map<string, GxserverRecentProjectDomainState[]>();
   remoteGroupOrderByMachineId = new Map<string, string[]>();
   revision = 0;

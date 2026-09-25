@@ -110,6 +110,9 @@ impl GhostexGpuiApp {
     /// and after that reconciles the ladder with Settings (`reconcileRemoteMachineRetryTargets`):
     /// a machine that was disabled or removed stops retrying, one that was enabled connects.
     pub(crate) fn remote_reconnect_sync_with_settings(&mut self, cx: &mut gpui::Context<Self>) {
+        // The same two moments are when a machine can stop being saved, so its stored last-seen
+        // copy goes here too (gx_store/remote_last_seen_prune.rs).
+        self.gx_store_prune_remote_last_seen();
         let enabled = enabled_remote_machine_ids();
         let ladder = &mut self.gx_store.remote_reconnect;
         let to_connect: Vec<String> = if !ladder.started {

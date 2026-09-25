@@ -76,6 +76,7 @@ mod project_docs;
 mod records_storage;
 mod remote_clients;
 mod remote_last_seen;
+mod remote_last_seen_prune;
 mod remote_project_docs;
 mod renderer_commands;
 mod rpc;

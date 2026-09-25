@@ -271,7 +271,6 @@ export const GPUI_REMOTE_GROUP_ORDER_STORAGE_KEY =
   "ghostex-gpui-remote-group-order";
 export const GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_STORAGE_KEY =
   "ghostex-gpui-remote-last-seen-presentations";
-export const GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_PERSIST_DELAY_MS = 2_000;
 
 export const GPUI_COMMAND_PANE_SESSION_SUMMARY_LIMIT = 128;
 export const GPUI_COMMAND_PANE_SESSION_STRING_MAX_LENGTH = 512;

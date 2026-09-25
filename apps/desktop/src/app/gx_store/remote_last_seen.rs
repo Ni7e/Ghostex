@@ -23,8 +23,10 @@
 //! `/api/readPresentationSnapshot` deliver, which is why gx-core needs no codec of its own for it
 //! and why a build from before this port still reads what this one wrote.
 //!
-//! SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/helpers/remote-last-seen.ts (the writer that
-//! still runs until M4d part 2 deletes it), packages/gx-core/src/presentation_store/snapshot_out.rs
+//! This is the only writer since 2026-09-25: the old runtime still READS the key for its own rows,
+//! and a machine removed from Settings loses its copy in `remote_last_seen_prune.rs`.
+//!
+//! SEE-ALSO: packages/gx-core/src/presentation_store/snapshot_out.rs
 //! (the store written back out as one snapshot), packages/gx-core/src/presentation_store/apply.rs
 //! (`seed_last_seen`, and the revision rules that make these rows "held, not live").
 
@@ -49,7 +51,7 @@ const CACHE_MAX_AGE_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 /// The catalog row (`remotePresentations`, `packages/client-storage/catalog.ts`): the `cache` base
 /// on the indexeddb backend, with its own entry, store and entry-count bounds and that base's age
 /// limit.
-const STORE: RecordStore = RecordStore {
+pub(super) const STORE: RecordStore = RecordStore {
     id: "remotePresentations",
     version: 1,
     max_entry_bytes: 8 * 1024 * 1024,
@@ -61,11 +63,10 @@ const STORE: RecordStore = RecordStore {
 /// The catalog row's `key` prefix, with the per-machine infix `RemoteLastSeenStore` appends.
 /// `GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_STORAGE_KEY` in
 /// `apps/desktop/sidebar/gxserver-runtime/constants.ts`, then `:machine:`.
-const MACHINE_KEY_PREFIX: &str = "ghostex-gpui-remote-last-seen-presentations:machine:";
+pub(super) const MACHINE_KEY_PREFIX: &str = "ghostex-gpui-remote-last-seen-presentations:machine:";
 
-/// `GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_PERSIST_DELAY_MS`, the delay the old sidebar's own writer
-/// batches behind. The same number on both sides so the two writers of this key settle on the same
-/// payload rather than taking turns at different rhythms.
+/// `GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_PERSIST_DELAY_MS`, the delay the old runtime's writer
+/// batched behind before this became the only writer.
 const WRITE_DELAY: Duration = Duration::from_millis(2_000);
 /// A write that lost the lock race is owed again, a bounded number of times, and the quit path
 /// flushes whatever is still owed.

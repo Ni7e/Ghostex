@@ -15,7 +15,6 @@ import {
   GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE,
   GPUI_QUICK_AUTOMATIONS_PROJECT_ID,
   GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID,
-  GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_PERSIST_DELAY_MS,
   GPUI_SIDEBAR_GLOBAL_ACTIONS_MESSAGE_TYPE,
   GPUI_SIDEBAR_GLOBAL_ACTIONS_MESSAGE_VERSION,
   GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE,
@@ -1528,6 +1527,12 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     });
   },
 
+  /*
+  CDXC:RemoteMachines 2026-09-25 WHY:
+  Only this runtime's in-memory copy is kept here: the stored per-machine
+  copy has one writer, Rust (apps/desktop/src/app/gx_store/remote_last_seen.rs,
+  and remote_last_seen_prune.rs for a machine removed from Settings).
+  */
   captureRemoteLastSeenPresentations(this: GpuiSidebarRuntime): void {
     if (this.runtimeSettings?.settings === undefined) return;
     const savedMachineIds = new Set(
@@ -1538,30 +1543,13 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     for (const machineId of this.remoteLastSeenPresentations.keys()) {
       if (!savedMachineIds.has(machineId)) {
         this.remoteLastSeenPresentations.delete(machineId);
-        this.remoteLastSeenStore.queue(machineId, null);
       }
     }
     for (const [machineId, snapshot] of this.remotePresentations) {
-      if (
-        savedMachineIds.has(machineId) &&
-        this.remoteLastSeenPresentations.get(machineId) !== snapshot
-      ) {
+      if (savedMachineIds.has(machineId)) {
         this.remoteLastSeenPresentations.set(machineId, snapshot);
-        this.remoteLastSeenStore.queue(machineId, snapshot);
       }
     }
-    if (
-      !this.remoteLastSeenStore.hasPending ||
-      this.remoteLastSeenPersistTimeoutId !== undefined
-    ) {
-      return;
-    }
-    this.remoteLastSeenPersistTimeoutId = window.setTimeout(() => {
-      this.remoteLastSeenPersistTimeoutId = undefined;
-      this.remoteLastSeenStore.flush();
-      if (this.remoteLastSeenStore.hasPending)
-        this.captureRemoteLastSeenPresentations();
-    }, GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_PERSIST_DELAY_MS);
   },
 
   /*
