@@ -68,7 +68,7 @@ pub(crate) struct SidebarRemoteFocusCounters {
     /// Of those, the ones that carried each option.
     pub(crate) keep_view: u64,
     pub(crate) chat_interface: u64,
-    /// Attention acknowledgements asked of the store, one per answered click.
+    /// Attention acknowledgements asked of the store, one per answered click on a streamed machine.
     pub(crate) acknowledgements: u64,
     /// Remote tab selections sent to the old runtime, from any sender (the store's opens and a
     /// slow attach landing). Each one moves the remote focus marks: once per click on a row whose
@@ -80,9 +80,9 @@ pub(crate) struct SidebarRemoteFocusCounters {
     /// A remote row's click the store did not answer because the renderer is not drawing its list.
     /// Local rows are not counted: they were never this path's.
     pub(crate) declined_source: u64,
-    /// A remote row's click the planner refused, which the old runtime then performs whole: in
-    /// practice a machine that is offline or has not streamed yet. Local and browser rows, and ids
-    /// that do not parse as remote, are not counted.
+    /// A remote row's click the planner refused. Nothing takes such a click any more (a machine
+    /// that is offline or has not streamed yet is answered too), so this stays zero on a healthy
+    /// run. Local and browser rows, and ids that do not parse as remote, are not counted.
     pub(crate) handed_back: u64,
     /// Remote selections the store's core focus took (`gx_store_select_remote_session`), from any
     /// sender: one per tab selection sent, so it follows `tab_selections`.
@@ -187,8 +187,11 @@ impl GhostexGpuiApp {
         // The runtime handles scripts in order, so a local selection it has not heard of yet goes
         // before the open, as it went before the forwarded command.
         self.gx_store_flush_old_runtime_tell(cx);
-        self.gx_store_acknowledge_attention(plan.session.clone(), cx);
-        self.gx_store.sidebar_remote_focus.counters.acknowledgements += 1;
+        // A machine this run has not streamed holds no live row to acknowledge (`plan.live`).
+        if plan.live {
+            self.gx_store_acknowledge_attention(plan.session.clone(), cx);
+            self.gx_store.sidebar_remote_focus.counters.acknowledgements += 1;
+        }
         let tab_selections = self.gx_store.sidebar_remote_focus.counters.tab_selections;
         {
             let counters = &mut self.gx_store.sidebar_remote_focus.counters;

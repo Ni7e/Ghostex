@@ -251,8 +251,7 @@ impl GhostexGpuiApp {
         // A click on a row of a REMOTE machine, and its Split Right: the store acknowledges the
         // attention, performs the same `openRemoteSessionTerminal` the old runtime posted, and the
         // open's own tab selection moves the remote focus marks, so the command goes no further
-        // (gx_store/sidebar_remote_focus.rs). A click the store does not answer (the old list is
-        // drawn, or the machine has not streamed) is sent on and the old runtime performs it whole.
+        // (gx_store/sidebar_remote_focus.rs), for a machine this run has not streamed too.
         if let Some(plan) = self.gx_store_plan_remote_row_focus(&command) {
             self.gx_store_focus_remote_row(&command, &plan, cx);
             return;

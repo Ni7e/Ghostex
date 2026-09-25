@@ -33,10 +33,9 @@
 //! Since remote focus part 2 step 2 the core's focus DOES follow a remote focus (the host's tab selection takes it, and the shadow mirror follows the runtime's own), but it still cannot stand in for the runtime's group, for two reasons. The core names the user-made group a row sits in (`group_of_session`), where `setRemotePresentationSessionFocus` always names the project's own group or the machine's Chats, and the string rule above answers differently for the two. And the runtime's `activeGroupId` still moves on paths the store does not see in the moment (a group attach from navigation history or a Space restore, a lifecycle replacement and its restores); the store learns those from the runtime's publish, which lags the command. Planning from `core.focus()` before step 2 sent a `keepView` the runtime did not on every second click inside the active remote project. So the group is what the runtime holds at the moment of the click, which [`RuntimeActiveGroup`] tracks from what the host SENT the runtime and what the runtime last PUBLISHED; its comment has the proof.
 //!
 //! Refused, each with its reason: a LOCAL row (the store's own focus path owns it), a browser row
-//! (an app tab, not a session), an id that does not parse as a remote session, and a machine whose
+//! (an app tab, not a session), and an id that does not parse as a remote session. A machine whose
 //! rows did not come from THIS run's stream (not loaded yet, or drawn from the stored last-seen
-//! copy), because the old runtime reads the agent from its live presentations only and so sends a
-//! different payload for such a row than the store's rows would give.
+//! copy) is answered too, the way the old runtime answered it: see [`RemoteFocusPlan::live`].
 //!
 //! SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/sessions-and-focus.ts (`focusSession`'s remote
 //! branch, `focusChangesActiveProject`, `sessionPreferredAgentInterface`, `splitSessionRight`),
@@ -102,6 +101,16 @@ impl PreferredInterfaceSettings {
 pub struct RemoteFocusPlan {
     /// The row, as a key that carries its machine.
     pub session: SessionKey,
+    /// Whether the machine's rows came from THIS run's stream.
+    ///
+    /// CDXC:RemoteMachines 2026-09-25 WHY:
+    /// For a machine that is offline and showing its last-seen rows, or connected with no snapshot
+    /// yet, the old runtime still posted the open, but WITHOUT `preferredInterface` (it read the
+    /// agent from `this.remotePresentations`, which holds only what a stream delivered), and its
+    /// attention acknowledgement found no row and did nothing. The planner used to refuse such a
+    /// click and hand it back, but no runtime path was left to take it: the click reached nobody.
+    /// It is answered here now with that same payload, and the host skips the acknowledgement.
+    pub live: bool,
     /// The acknowledgement the host sends the old runtime BEFORE the open, as `focusSession` and
     /// `splitSessionRight` both acknowledge first. Always sent: whether the row is in attention,
     /// and whether the minimum visible window defers the clear, is the runtime's to decide, so the
@@ -176,17 +185,9 @@ pub fn plan_remote_focus(
         return None;
     }
     let session = SessionKey::parse_remote_scoped_session_id(sidebar_session_id)?;
-    // CDXC:RemoteMachines 2026-09-21 WHY:
-    // Only a machine THIS run's stream delivered is answered here. `sessionPreferredAgentInterface`
-    // reads the row out of `this.remotePresentations`, which holds only what a stream delivered and
-    // loses the machine on disconnect; it never reads the last-seen map it draws faded rows from.
-    // So for a machine that is offline and showing its last-seen rows, or connected with no snapshot
-    // yet, the old runtime still posts the open but WITHOUT `preferredInterface`, while the store's
-    // last-seen rows would name the agent and add the field. Handing the click back keeps the one
-    // payload that has always been sent, exactly as `loaded_live` does for the set planners.
-    if core.presentation().loaded_live(&session.machine).is_none() {
-        return None;
-    }
+    // `sessionPreferredAgentInterface` reads the row out of the machine's LIVE presentation only
+    // (see `RemoteFocusPlan::live`), so a machine this run has not streamed opens without it.
+    let live = core.presentation().loaded_live(&session.machine).is_some();
     let split_right = kind == "splitSessionRight";
     // Split Right hands `focusLocalWorkspaceSession` a placement and NOTHING else: no `keepView`,
     // and no preferred interface either, so the two fields are the focus click's alone.
@@ -197,7 +198,7 @@ pub fn plan_remote_focus(
                 || focus_changes_active_project(runtime_active_group, &session)
         }
     };
-    let preferred_interface = match split_right {
+    let preferred_interface = match split_right || !live {
         true => None,
         false => settings
             .resolve(agent_id_of(core, &session))
@@ -217,6 +218,7 @@ pub fn plan_remote_focus(
         "version": SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION,
     });
     Some(RemoteFocusPlan {
+        live,
         session,
         attention_acknowledgement,
         keep_view,
