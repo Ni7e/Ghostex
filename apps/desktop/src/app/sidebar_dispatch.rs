@@ -1424,6 +1424,10 @@ impl GhostexGpuiApp {
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
+    /// Called after every command-pane change; returns whether a tab's summary (status, focus,
+    /// timer labels) moved, which the policy poll and the ready replay use to repaint. The summaries
+    /// no longer cross to the app runtime: its HUD's command-session indicators had no reader once
+    /// the HUD became Rust's (ledger R032).
     pub(crate) fn refresh_sidebar_command_pane_sessions_if_changed(
         &mut self,
         cx: &mut gpui::Context<Self>,
@@ -1437,9 +1441,6 @@ impl GhostexGpuiApp {
         );
         let snapshot = sessions.to_string();
         if self.sidebar_command_pane_sessions_snapshot == snapshot {
-            return false;
-        }
-        if !self.dispatch_gpui_sidebar_command_pane_sessions(&sessions, cx) {
             return false;
         }
         self.sidebar_command_pane_sessions_snapshot = snapshot;
@@ -1628,57 +1629,20 @@ impl GhostexGpuiApp {
         true
     }
 
-    pub(crate) fn dispatch_gpui_sidebar_command_pane_sessions(
-        &mut self,
-        sessions: &serde_json::Value,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        /*
-        CDXC:CommandPane 2026-06-25-10:50:
-        Command-pane session indicators use a dedicated first-party sidebar bridge callback and cached `window.ghostexGpui.commandPaneSessions` value so restored tabs can hydrate before React installs listeners. The script may carry only sanitized session summaries, never action command text, cwd, env, status-file paths, terminal output, or project paths.
-        */
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let script = gpui_sidebar_command_pane_sessions_script(sessions);
-        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
-    }
-
     pub(crate) fn dispatch_gpui_sidebar_command_run_state(
         &mut self,
         command_id: &str,
         run_id: &str,
         state: GpuiSidebarCommandRunState,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
+    ) {
         self.sidebar_command_run_feedback_states
             .entry(command_id.to_string())
             .or_default()
             .apply_run_state(run_id, state);
-        self.dispatch_gpui_sidebar_host_message(
-            serde_json::json!({
-                "commandId": command_id,
-                "runId": run_id,
-                "state": state.as_str(),
-                "type": "sidebarCommandRunStateChanged",
-            }),
-            cx,
-        )
     }
 
-    pub(crate) fn dispatch_gpui_sidebar_command_run_state_cleared(
-        &mut self,
-        command_id: &str,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
+    pub(crate) fn dispatch_gpui_sidebar_command_run_state_cleared(&mut self, command_id: &str) {
         self.sidebar_command_run_feedback_states.remove(command_id);
-        self.dispatch_gpui_sidebar_host_message(
-            serde_json::json!({
-                "commandId": command_id,
-                "type": "sidebarCommandRunStateCleared",
-            }),
-            cx,
-        )
     }
 
     pub(crate) fn dispatch_gpui_command_action_completions(
@@ -1691,7 +1655,6 @@ impl GhostexGpuiApp {
                 &completion.command_id,
                 &completion.run_id,
                 completion.run_state(),
-                cx,
             );
             if let Some(action) =
                 gpui_project_board_action_for_command_id(completion.command_id.as_str())
@@ -1777,7 +1740,7 @@ impl GhostexGpuiApp {
         let slot = self
             .command_pane
             .take_action_session_slot_for_action_close(command_id);
-        self.dispatch_gpui_sidebar_command_run_state_cleared(command_id, cx);
+        self.dispatch_gpui_sidebar_command_run_state_cleared(command_id);
         let Some(slot) = slot else {
             cx.notify();
             return false;

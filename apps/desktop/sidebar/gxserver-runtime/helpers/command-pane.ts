@@ -4,21 +4,8 @@ CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
-import {
-  GPUI_COMMAND_PANE_SESSION_STRING_MAX_LENGTH,
-  GPUI_COMMAND_PANE_SESSION_SUMMARY_LIMIT,
-  GPUI_COMMAND_PANE_TIMER_DEADLINE_MAX_LENGTH,
-  GPUI_COMMAND_PANE_TIMER_LABEL_MAX_LENGTH,
-  GPUI_COMMAND_PANE_TIMER_REMAINING_MS_MAX,
-  GPUI_DEFAULT_VISIBLE_COUNT,
-  GPUI_GXSERVER_LOCAL_COMMAND_PANE_SESSION_ID_PATTERN,
-} from '../constants';
-import type {
-  GpuiCommandPaneSessionSummary,
-  GpuiRemoteSidebarHud,
-  GpuiSidebarCommandSessionIndicatorScope,
-  GpuiSidebarRuntimeSettings,
-} from '../types-and-protocol';
+import { GPUI_DEFAULT_VISIBLE_COUNT } from '../constants';
+import type { GpuiRemoteSidebarHud, GpuiSidebarRuntimeSettings } from '../types-and-protocol';
 import { createGpuiSidebarSettings } from './bootstrap';
 import { createGpuiProjectSettingsProjects } from './presentation-projection';
 import { createGpuiRemotePresentationProjectId } from './remote-presentation';
@@ -36,11 +23,7 @@ import type {
   GxserverRecentProjectDomainState,
   GxserverSidebarHudResponse,
 } from '@/packages/shared/gxserver-protocol';
-import type {
-  SidebarCommandSessionIndicator,
-  SidebarHudState,
-  SidebarSessionGroup,
-} from '@/packages/shared/session-grid-contract';
+import type { SidebarHudState, SidebarSessionGroup } from '@/packages/shared/session-grid-contract';
 import { resolveSidebarTheme } from '@/packages/shared/session-grid-contract';
 import type { SidebarAgentButton } from '@/packages/shared/sidebar-agents';
 import { createSidebarAgentButtons } from '@/packages/shared/sidebar-agents';
@@ -49,277 +32,8 @@ import { createSidebarCommandButtons } from '@/packages/shared/sidebar-commands'
 import type { SidebarGitState } from '@/packages/shared/sidebar-git';
 import { createDefaultSidebarGitState } from '@/packages/shared/sidebar-git';
 
-export function normalizeGpuiCommandPaneSessions(
-  sessions: readonly GpuiCommandPaneSessionSummary[] | unknown
-): GpuiCommandPaneSessionSummary[] {
-  if (!Array.isArray(sessions)) {
-    return [];
-  }
-  return sessions.slice(0, GPUI_COMMAND_PANE_SESSION_SUMMARY_LIMIT).flatMap((session) => {
-    if (!session || typeof session !== 'object') {
-      return [];
-    }
-    const record = session as Partial<Record<keyof GpuiCommandPaneSessionSummary, unknown>>;
-    const sessionId = normalizeGpuiCommandPaneSessionString(record.sessionId);
-    const status = normalizeGpuiCommandPaneSessionStatus(record.status);
-    if (!sessionId || !status || !isGpuiGxserverLocalCommandPaneSessionId(sessionId)) {
-      return [];
-    }
-    const commandId = normalizeGpuiCommandPaneSessionString(record.commandId);
-    const title = normalizeGpuiCommandPaneSessionString(record.title);
-    const delayedSendDeadlineAt = normalizeGpuiCommandPaneTimerDeadlineAt(record.delayedSendDeadlineAt);
-    const delayedSendRemainingLabel = normalizeGpuiCommandPaneTimerRemainingLabel(record.delayedSendRemainingLabel);
-    const delayedSendRemainingMs = normalizeGpuiCommandPaneTimerRemainingMs(record.delayedSendRemainingMs);
-    const closeAfterDoneDeadlineAt = normalizeGpuiCommandPaneTimerDeadlineAt(record.closeAfterDoneDeadlineAt);
-    const closeAfterDoneRemainingLabel = normalizeGpuiCommandPaneTimerRemainingLabel(
-      record.closeAfterDoneRemainingLabel
-    );
-    const closeAfterDoneRemainingMs = normalizeGpuiCommandPaneTimerRemainingMs(record.closeAfterDoneRemainingMs);
-    return [
-      {
-        ...(commandId ? { commandId } : {}),
-        /*
-        CDXC:DelayedSend 2026-06-27-02:05:
-        Native Rust emits command-pane timer summaries with only Delayed Send and Close After Done display fields. Keep the TypeScript bridge at the same privacy boundary by normalizing and forwarding just bounded timer strings, non-negative remaining milliseconds, and a true-only Close After Done flag; never pass command text, cwd/env, URLs, paths, output, run ids, status-file paths, tokens, or unknown native fields into the Sidebar HUD.
-        */
-        ...(record.closeAfterDone === true ? { closeAfterDone: true } : {}),
-        ...(closeAfterDoneDeadlineAt ? { closeAfterDoneDeadlineAt } : {}),
-        ...(closeAfterDoneRemainingLabel ? { closeAfterDoneRemainingLabel } : {}),
-        ...(closeAfterDoneRemainingMs !== undefined ? { closeAfterDoneRemainingMs } : {}),
-        ...(delayedSendDeadlineAt ? { delayedSendDeadlineAt } : {}),
-        ...(delayedSendRemainingLabel ? { delayedSendRemainingLabel } : {}),
-        ...(delayedSendRemainingMs !== undefined ? { delayedSendRemainingMs } : {}),
-        ...(record.isActive === true ? { isActive: true } : {}),
-        ...(record.isPaneOwner === true ? { isPaneOwner: true } : {}),
-        sessionId,
-        status,
-        ...(title ? { title } : {}),
-      },
-    ];
-  });
-}
-
-export function normalizeGpuiCommandPaneSessionString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().replace(/\s+/g, ' ');
-  if (
-    !normalized ||
-    normalized.length > GPUI_COMMAND_PANE_SESSION_STRING_MAX_LENGTH ||
-    /[\u0000-\u001F\u007F]/.test(normalized)
-  ) {
-    return undefined;
-  }
-  return normalized;
-}
-
-export function normalizeGpuiCommandPaneTimerDeadlineAt(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim();
-  if (
-    !normalized ||
-    normalized.length > GPUI_COMMAND_PANE_TIMER_DEADLINE_MAX_LENGTH ||
-    /[\u0000-\u001F\u007F]/.test(normalized) ||
-    !/^\d{4}-\d{2}-\d{2}T/u.test(normalized) ||
-    Number.isNaN(Date.parse(normalized))
-  ) {
-    return undefined;
-  }
-  return normalized;
-}
-
-export function normalizeGpuiCommandPaneTimerRemainingLabel(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().replace(/\s+/g, ' ');
-  if (
-    !normalized ||
-    normalized.length > GPUI_COMMAND_PANE_TIMER_LABEL_MAX_LENGTH ||
-    /[\u0000-\u001F\u007F]/.test(normalized) ||
-    !/^[0-9dhms: .+-]+$/iu.test(normalized)
-  ) {
-    return undefined;
-  }
-  return normalized;
-}
-
-export function normalizeGpuiCommandPaneTimerRemainingMs(value: unknown): number | undefined {
-  if (
-    typeof value !== 'number' ||
-    !Number.isFinite(value) ||
-    value < 0 ||
-    value > GPUI_COMMAND_PANE_TIMER_REMAINING_MS_MAX
-  ) {
-    return undefined;
-  }
-  return Math.ceil(value);
-}
-
-export function normalizeGpuiCommandPaneSessionStatus(
-  value: unknown
-): SidebarCommandSessionIndicator['status'] | undefined {
-  return isValidGpuiCommandPaneSessionStatus(value) ? value : undefined;
-}
-
-export function isValidGpuiCommandPaneSessionStatus(value: unknown): value is SidebarCommandSessionIndicator['status'] {
-  return value === 'idle' || value === 'running' || value === 'error';
-}
-
-export function hasSameGpuiCommandPaneSessions(
-  current: readonly GpuiCommandPaneSessionSummary[],
-  next: readonly GpuiCommandPaneSessionSummary[]
-): boolean {
-  if (current.length !== next.length) {
-    return false;
-  }
-  return current.every((session, index) => {
-    const candidate = next[index];
-    return (
-      session.commandId === candidate?.commandId &&
-      session.closeAfterDone === candidate?.closeAfterDone &&
-      session.closeAfterDoneDeadlineAt === candidate?.closeAfterDoneDeadlineAt &&
-      session.closeAfterDoneRemainingLabel === candidate?.closeAfterDoneRemainingLabel &&
-      session.closeAfterDoneRemainingMs === candidate?.closeAfterDoneRemainingMs &&
-      session.delayedSendDeadlineAt === candidate?.delayedSendDeadlineAt &&
-      session.delayedSendRemainingLabel === candidate?.delayedSendRemainingLabel &&
-      session.delayedSendRemainingMs === candidate?.delayedSendRemainingMs &&
-      session.isActive === candidate?.isActive &&
-      session.isPaneOwner === candidate?.isPaneOwner &&
-      session.sessionId === candidate?.sessionId &&
-      session.status === candidate?.status &&
-      session.title === candidate?.title
-    );
-  });
-}
-
-export function isGpuiGxserverLocalCommandPaneSessionId(sessionId: unknown): sessionId is string {
-  /*
-  CDXC:CommandPane 2026-06-27-01:37:
-  GPUI command-pane summaries are live local tab state for gxserver-backed native-shaped `G...` command sessions only. Rust shell internals may still carry numeric ids, so drop raw numeric strings, lowercase `g...`, malformed strings, and non-string rows at the bridge boundary before stale native-local command tabs can drive HUD indicators, active-tab state, timer projection, or auto-sleep protection.
-  */
-  return typeof sessionId === 'string' && GPUI_GXSERVER_LOCAL_COMMAND_PANE_SESSION_ID_PATTERN.test(sessionId);
-}
-
-export function filterGpuiGxserverLocalCommandPaneSessions(
-  commandPaneSessions: readonly GpuiCommandPaneSessionSummary[],
-  scope: GpuiSidebarCommandSessionIndicatorScope = {}
-): GpuiCommandPaneSessionSummary[] {
-  /*
-  CDXC:CommandPane 2026-06-27-08:32:
-  Command-pane ownership consumers require both an external native-shaped local `G...` id and a valid Sidebar HUD status. Reuse this filter for HUD indicators and Auto Sleep owner protection so malformed native rows, including `isPaneOwner:true` rows with invalid status, cannot keep sessions awake.
-
-  CDXC:CommandPane 2026-06-27-08:45:
-  Native presentation cleanup removes stale command-panel rows after authoritative gxserver snapshots and explicit removal deltas. When the live HUD is built with an active project and presentation, require the command-pane summary id to still exist in that active project so deleted local `G...` tabs cannot keep Action indicators, timers, or active states visible.
-  */
-  const presentedSessionIds =
-    scope.activeProjectId && scope.presentation
-      ? new Set<string>(
-          scope.presentation.sessions.flatMap((session) =>
-            session.projectId === scope.activeProjectId ? [session.sessionId] : []
-          )
-        )
-      : undefined;
-  return commandPaneSessions.filter((session) => {
-    if (
-      !isGpuiGxserverLocalCommandPaneSessionId(session.sessionId) ||
-      !isValidGpuiCommandPaneSessionStatus(session.status)
-    ) {
-      return false;
-    }
-    return presentedSessionIds ? presentedSessionIds.has(session.sessionId) : true;
-  });
-}
-
-export function createGpuiSidebarCommandSessionIndicators(
-  commands: readonly SidebarCommandButton[],
-  commandPaneSessions: readonly GpuiCommandPaneSessionSummary[],
-  scope: GpuiSidebarCommandSessionIndicatorScope = {}
-): SidebarCommandSessionIndicator[] {
-  /*
-  CDXC:CommandPane 2026-06-27-06:30:
-  Command-session HUD status is owned by Rust's sanitized command-pane summary. The TypeScript bridge may forward only external native-shaped local `G...` command-pane rows whose status is already a Sidebar HUD status; internal Rust numeric shell ids and malformed bridge rows must not match HUD Actions or infer status from renderer activity, command text, paths, URLs, output, logs, titles, status files, or other private fields.
-
-  CDXC:CommandPane 2026-06-27-08:45:
-  Keep the exported helper backward-compatible for direct two-argument tests and callers. Live HUD construction passes the optional active-project presentation scope so stale command-pane summaries are pruned against the full current presentation, not against whichever ids happen to appear in a non-removal delta.
-  */
-  const localCommandPaneSessions = filterGpuiGxserverLocalCommandPaneSessions(commandPaneSessions, scope);
-  return commands.flatMap((command) => {
-    if (command.actionType !== 'terminal') {
-      return [];
-    }
-    const commandTitleKey = getGpuiSidebarCommandTitleKey(getGpuiSidebarCommandSessionTitle(command));
-    if (!commandTitleKey) {
-      return [];
-    }
-    const mappedSession = localCommandPaneSessions.find(
-      (session) =>
-        session.commandId === command.commandId && getGpuiSidebarCommandTitleKey(session.title) === commandTitleKey
-    );
-    const session =
-      mappedSession ??
-      localCommandPaneSessions.find((candidate) => getGpuiSidebarCommandTitleKey(candidate.title) === commandTitleKey);
-    if (!session) {
-      return [];
-    }
-    return [
-      {
-        commandId: command.commandId,
-        ...(session.closeAfterDone === true ? { closeAfterDone: true } : {}),
-        ...(session.closeAfterDoneDeadlineAt
-          ? {
-              closeAfterDoneDeadlineAt: session.closeAfterDoneDeadlineAt,
-            }
-          : {}),
-        ...(session.closeAfterDoneRemainingLabel
-          ? {
-              closeAfterDoneRemainingLabel: session.closeAfterDoneRemainingLabel,
-            }
-          : {}),
-        ...(session.closeAfterDoneRemainingMs !== undefined
-          ? {
-              closeAfterDoneRemainingMs: session.closeAfterDoneRemainingMs,
-            }
-          : {}),
-        ...(session.delayedSendDeadlineAt
-          ? {
-              delayedSendDeadlineAt: session.delayedSendDeadlineAt,
-            }
-          : {}),
-        ...(session.delayedSendRemainingLabel
-          ? {
-              delayedSendRemainingLabel: session.delayedSendRemainingLabel,
-            }
-          : {}),
-        ...(session.delayedSendRemainingMs !== undefined
-          ? {
-              delayedSendRemainingMs: session.delayedSendRemainingMs,
-            }
-          : {}),
-        isActive: session.isActive === true,
-        sessionId: session.sessionId,
-        status: session.status,
-        ...(session.title ? { title: session.title } : {}),
-      },
-    ];
-  });
-}
-
-export function getGpuiSidebarCommandSessionTitle(command: SidebarCommandButton): string {
-  const normalizedActionName = command.name.trim();
-  return normalizedActionName.length > 0 ? normalizedActionName : (command.command ?? '').trim().slice(0, 20);
-}
-
-export function getGpuiSidebarCommandTitleKey(value: string | undefined): string {
-  return normalizeGpuiCommandPaneSessionString(value)?.toLocaleLowerCase() ?? '';
-}
-
 export function createGpuiSidebarHudState({
   activeProjectId,
-  commandPaneSessions = [],
   domainProjects = [],
   focusedSessionId,
   git,
@@ -333,7 +47,6 @@ export function createGpuiSidebarHudState({
   sidebarHud,
 }: {
   activeProjectId?: string;
-  commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
   domainProjects?: readonly GxserverProjectDomainState[];
   focusedSessionId?: string;
   git?: SidebarGitState;
@@ -431,10 +144,8 @@ export function createGpuiSidebarHudState({
     agents,
     commands,
     ...(commandsByProject ? { commandsByProject } : {}),
-    commandSessionIndicators: createGpuiSidebarCommandSessionIndicators(commands, commandPaneSessions, {
-      activeProjectId,
-      presentation,
-    }),
+    // Command-pane tabs are Rust's; nothing reads this runtime HUD's indicators any more.
+    commandSessionIndicators: [],
     completionBellEnabled: settings.completionSound !== 'off',
     completionSound: settings.completionSound === 'off' ? DEFAULT_COMPLETION_SOUND : settings.completionSound,
     completionSoundLabel: getCompletionSoundLabel(

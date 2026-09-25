@@ -6,8 +6,4 @@ have to change. The 21,861-line implementation now lives in
 prototype composition that re-attaches the per-responsibility method modules.
 */
 export { createGpuiSidebarRuntime, GpuiSidebarLocalMessageSource } from './gxserver-runtime/core';
-export type {
-  GhostexGpuiSidebarBridge,
-  GpuiCommandPaneSessionSummary,
-  GpuiGxserverBootstrap,
-} from './gxserver-runtime/types-and-protocol';
+export type { GhostexGpuiSidebarBridge, GpuiGxserverBootstrap } from './gxserver-runtime/types-and-protocol';

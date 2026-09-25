@@ -56,26 +56,6 @@ export type GpuiRemoteSidebarHud = Pick<
   'commands' | 'commandsByProject' | 'globalCommands'
 >;
 
-export type GpuiCommandPaneSessionSummary = {
-  commandId?: string;
-  closeAfterDone?: boolean;
-  closeAfterDoneDeadlineAt?: string;
-  closeAfterDoneRemainingLabel?: string;
-  closeAfterDoneRemainingMs?: number;
-  delayedSendDeadlineAt?: string;
-  delayedSendRemainingLabel?: string;
-  delayedSendRemainingMs?: number;
-  isActive?: boolean;
-  /*
-  CDXC:SessionSleep 2026-06-27-06:54:
-  Rust forwards this true-only bit for native-shaped external `G...` command-panel split pane owners so GPUI Auto Sleep can protect every active command leaf while keeping `isActive` scoped to HUD/responder focus. Rust shell internals may still use numeric ids, but those ids must not cross this TypeScript bridge as command-pane owners.
-  */
-  isPaneOwner?: true;
-  sessionId: string;
-  status: SidebarCommandSessionIndicator['status'];
-  title?: string;
-};
-
 export type GpuiFirstPromptTitleRuntimeSettings = {
   firstPromptTitleGenerationAgent: GxserverFirstPromptTitleGenerationAgent;
   firstPromptTitleGenerationCommand?: string;
@@ -105,7 +85,6 @@ export type GpuiSidebarHostMessage = ExtensionToSidebarMessage;
 
 export type GhostexGpuiSidebarBridge = {
   browserTabs?: readonly GpuiBrowserTabSummary[];
-  commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
   /**
    * CDXC:SessionSleep 2026-08-20:
    * The local gxserver sessions the shell is rendering right now, terminal body
@@ -121,7 +100,6 @@ export type GhostexGpuiSidebarBridge = {
    * those rows, so Rust never has to know the sidebar's id format.
    */
   gxserverBootstrap?: GpuiGxserverBootstrap;
-  onCommandPaneSessionsChanged?: (sessions: readonly GpuiCommandPaneSessionSummary[]) => void;
   onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
   onExportTranscriptModalCommand?: (payload: unknown) => void;
   onGitCommitModalCommand?: (payload: unknown) => void;
@@ -584,11 +562,6 @@ export type GpuiRemoteCreatePullRequestResult = {
 
 export type GpuiPresentationSubscription = {
   close: () => void;
-};
-
-export type GpuiSidebarCommandSessionIndicatorScope = {
-  activeProjectId?: string;
-  presentation?: GxserverPresentationSnapshot;
 };
 
 export type GpuiWorktreeDeleteBranchMetadata = {

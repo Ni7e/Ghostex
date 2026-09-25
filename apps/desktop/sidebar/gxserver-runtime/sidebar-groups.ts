@@ -204,7 +204,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     const previousHud = this.latestHud;
     this.latestHud = createGpuiSidebarHudState({
       activeProjectId: this.activeProjectId,
-      commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
       groups,
       presentation,
@@ -299,7 +298,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     ];
     this.latestHud = createGpuiSidebarHudState({
       activeProjectId: this.activeProjectId,
-      commandPaneSessions: this.commandPaneSessions,
       groups: this.latestGroups,
       runtimeSettings: this.runtimeSettings,
       domainProjects: this.domainProjects,
@@ -351,7 +349,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
         ];
     this.latestHud = createGpuiSidebarHudState({
       activeProjectId: this.activeProjectId,
-      commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
       groups,
       presentation: this.presentation,
@@ -466,7 +463,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     const previousHud = this.latestHud;
     this.latestHud = createGpuiSidebarHudState({
       activeProjectId: this.activeProjectId,
-      commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
       groups: this.latestGroups,
       presentation: this.presentation,

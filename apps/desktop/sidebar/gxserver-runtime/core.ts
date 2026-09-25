@@ -33,8 +33,6 @@ import {
 import { normalizeGpuiBrowserTabs } from './helpers/browser-tabs';
 import {
   createGpuiSidebarHudState,
-  hasSameGpuiCommandPaneSessions,
-  normalizeGpuiCommandPaneSessions,
 } from './helpers/command-pane';
 import { readStoredGpuiRemoteGroupOrder, readStoredGpuiRemoteRecentProjects } from './helpers/recent-projects';
 import { normalizeNonEmptyString } from './helpers/records';
@@ -59,7 +57,6 @@ import type { GpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-life
 import { gpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-lifecycle-queue';
 import type {
   GpuiBrowserTabSummary,
-  GpuiCommandPaneSessionSummary,
   GpuiPendingNativeAppShotPromptInsertion,
   GpuiPendingRemoteGxserverRequest,
   GpuiPresentationSubscription,
@@ -228,7 +225,6 @@ export class GpuiSidebarRuntime {
   readonly staleRemotePresentationRefreshes = new Map<string, { lastStartedAt: number; trailingTimeoutId?: number }>();
   browserTabs: GpuiBrowserTabSummary[] = [];
   client: GpuiGxserverClient | undefined;
-  commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
   domainProjects: GxserverProjectDomainState[] = [];
   focusedSessionId: string | undefined;
   /**
@@ -332,21 +328,6 @@ export class GpuiSidebarRuntime {
     };
     gpuiBridge.onBrowserTabsChanged = applyBrowserTabs;
     applyBrowserTabs(gpuiBridge.browserTabs);
-    const applyCommandPaneSessions = (sessions: readonly GpuiCommandPaneSessionSummary[] | undefined) => {
-      /*
-      CDXC:CommandPane 2026-06-25-10:50:
-      Rust owns GPUI command-pane session identity, activity, and active-tab state. The external bridge uses native-shaped `G...` local command-pane ids even though Rust internal shell state may still use numeric ids; the sidebar runtime only matches those sanitized summaries to current gxserver HUD command buttons by command id first and normalized title second, mirroring macOS without exposing command text, cwd, output, status-file paths, or shell-state JSON to React.
-      */
-      const next = normalizeGpuiCommandPaneSessions(sessions);
-      gpuiBridge.commandPaneSessions = next;
-      if (hasSameGpuiCommandPaneSessions(this.commandPaneSessions, next)) {
-        return;
-      }
-      this.commandPaneSessions = next;
-      this.publishHudPatch();
-    };
-    gpuiBridge.onCommandPaneSessionsChanged = applyCommandPaneSessions;
-    applyCommandPaneSessions(gpuiBridge.commandPaneSessions);
     gpuiBridge.onNativeAppShotCaptured = (payload) => {
       void this.handleNativeAppShotCaptured(payload);
     };
