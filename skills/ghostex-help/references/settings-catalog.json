@@ -7695,22 +7695,6 @@
           "value": "gpui-session-chat-debug.jsonl"
         },
         {
-          "label": "Chat recording for reproducing a problem (contains your conversation)",
-          "value": "native.chat.replay"
-        },
-        {
-          "label": "/tmp/gx-chat/*.jsonl",
-          "value": "/tmp/gx-chat/*.jsonl"
-        },
-        {
-          "label": "Chat engine shadow comparison",
-          "value": "native.chat.shadow"
-        },
-        {
-          "label": "gpui-session-chat-debug.jsonl",
-          "value": "gpui-session-chat-debug.jsonl"
-        },
-        {
           "label": "Daemon lifecycle",
           "value": "gxserver.lifecycle"
         },
@@ -7760,28 +7744,6 @@
         }
       ],
       "agentWritable": false
-    },
-    {
-      "key": "chatBrain",
-      "title": "Chat brain",
-      "subtitle": "Which engine runs the chat. Rust is the default; switch back to QuickJS only if a chat misbehaves, then tell us.",
-      "tab": "debugging",
-      "tabTitle": "Debugging",
-      "section": "controls",
-      "sectionTitle": "Debug controls",
-      "type": "enum",
-      "default": "rust",
-      "options": [
-        {
-          "label": "Rust",
-          "value": "rust"
-        },
-        {
-          "label": "QuickJS (previous engine)",
-          "value": "quickjs"
-        }
-      ],
-      "agentWritable": true
     },
     {
       "key": "showSessionCommandCopyActions",

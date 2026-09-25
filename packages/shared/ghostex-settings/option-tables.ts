@@ -6,7 +6,6 @@ import type { DarkThemePreset, LightThemePreset } from './titlebar-color';
 import {
   type AppShotsHotkey,
   type AutoSleepIdleMinutes,
-  type ChatBrain,
   type ChatFileOpenView,
   type CommandsPanelSide,
   type DefaultEditorCommand,
@@ -315,14 +314,6 @@ export const GHOSTTY_SCROLLBAR_OPTIONS: ReadonlyArray<{
 }> = [
   { label: 'System', value: 'system' },
   { label: 'Never', value: 'never' },
-];
-
-export const CHAT_BRAIN_OPTIONS: ReadonlyArray<{
-  label: string;
-  value: ChatBrain;
-}> = [
-  { label: 'Rust', value: 'rust' },
-  { label: 'QuickJS (previous engine)', value: 'quickjs' },
 ];
 
 export const PROMPT_EDITOR_BACKEND_OPTIONS: ReadonlyArray<{

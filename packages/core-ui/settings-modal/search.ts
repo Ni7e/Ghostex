@@ -3,7 +3,6 @@ import Fuse from 'fuse.js';
 import { Command } from '@/packages/components/ui/command';
 import {
   APP_SHOTS_HOTKEY_OPTIONS,
-  CHAT_BRAIN_OPTIONS,
   DIAGNOSTIC_LOGGING_SCENARIOS,
   SESSION_TITLE_GENERATION_AGENT_OPTIONS,
 } from '../../shared/ghostex-settings';
@@ -273,12 +272,6 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
               { label: scenario.label, value: scenario.id },
               ...scenario.logFiles.map((logFile) => ({ label: logFile, value: logFile })),
             ]),
-          },
-          {
-            key: 'chatBrain',
-            title: 'Chat brain',
-            subtitle: 'Which engine runs the chat. Rust is the default; switch back to QuickJS only if a chat misbehaves, then tell us.',
-            options: CHAT_BRAIN_OPTIONS.map((option) => ({ label: option.label, value: option.value })),
           },
           {
             key: 'showSessionCommandCopyActions',
