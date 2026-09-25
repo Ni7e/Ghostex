@@ -166,7 +166,6 @@ export type GhostexGpuiSidebarBridge = {
   onWorkspaceSessionAttentionAcknowledge?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;
   onWorkspaceTerminalEscapePressed?: (payload: unknown) => void;
-  onWorkspaceTerminalRuntimeAction?: (payload: unknown) => void;
   pendingExportTranscriptModalCommands?: unknown[];
   pendingGitCommitModalCommands?: unknown[];
   pendingMenuBarProjectActivations?: unknown[];
@@ -179,7 +178,6 @@ export type GhostexGpuiSidebarBridge = {
   pendingWorkspaceSessionAttentionAcknowledgements?: unknown[];
   pendingWorkspaceTabSessionSelections?: unknown[];
   pendingWorkspaceTerminalEscapePresses?: unknown[];
-  pendingWorkspaceTerminalRuntimeActions?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
   postBrowserTabFocus?: (payload: string) => boolean;
   postCreateProjectAgent?: (payload: string) => boolean;
