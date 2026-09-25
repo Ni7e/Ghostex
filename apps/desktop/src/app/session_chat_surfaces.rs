@@ -889,7 +889,6 @@ impl GhostexGpuiApp {
             if let Some(key) = state.account_key.as_ref() {
                 self.forget_session_chat_presentation(key);
             }
-            self.release_session_chat_runtime_subscription(state.generation, cx);
         }
         self.drop_pending_keyboard_handoff_for_session(session_id);
         self.pending_session_chat_composer_insert

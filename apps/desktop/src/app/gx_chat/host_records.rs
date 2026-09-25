@@ -222,7 +222,7 @@ pub(super) fn record_sent_prompt(
         "sent:{}",
         delivery_id
             .map(str::to_string)
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+            .unwrap_or_else(super::platform::uuid_v4)
     );
     let prompt = SentPrompt {
         prompt_id: prompt_id.clone(),

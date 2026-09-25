@@ -45,8 +45,13 @@ impl NativeChatView {
                 .is_some_and(Vec::is_empty)
         {
             let (body, actions) = self.render_terminal_dialog(&notice["dialog"], p, window, cx);
+            let copy_title = text(&notice["dialog"]["presentation"]["copy"], "title");
             return Some(self.status_card(
-                text(&notice["dialog"], "title"),
+                if copy_title.is_empty() {
+                    text(&notice["dialog"], "title")
+                } else {
+                    copy_title
+                },
                 "titlebar/terminal-2.svg",
                 body,
                 actions,

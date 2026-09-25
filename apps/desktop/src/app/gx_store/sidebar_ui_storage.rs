@@ -557,7 +557,7 @@ pub(crate) fn with_write_connection<T>(
 /// One preference by key, for a caller that owns a single key rather than the sidebar's set. The
 /// workspace session groups document (K4) is read and written through here so the connection pool,
 /// the busy timeout and the error vocabulary are the ones every other key already uses.
-pub(super) fn read_preference_value(key: &str) -> Result<Option<String>, &'static str> {
+pub(crate) fn read_preference_value(key: &str) -> Result<Option<String>, &'static str> {
     let mut held = connections()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -583,7 +583,7 @@ pub(super) fn read_preference_value(key: &str) -> Result<Option<String>, &'stati
 /// prevent; the first cut of K4's write was a bare `INSERT ... ON CONFLICT` with none of
 /// `admission`'s four refusals, inside no transaction. The bounds are the `workspaceGroups`
 /// catalog row's own, which are four times the entry size the other three share.
-pub(super) fn write_client_document_value(
+pub(crate) fn write_client_document_value(
     key: &str,
     raw: Option<&str>,
 ) -> Result<Option<&'static str>, &'static str> {

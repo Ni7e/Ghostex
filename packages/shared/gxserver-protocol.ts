@@ -2472,7 +2472,7 @@ export interface GxserverSleepSessionResult {
   targeted sleeping or stopped history. In every case the session was not
   touched, so a client must not optimistically mark the row sleeping.
   */
-  declined?: "keptAwake" | "neverActive" | "notRunning";
+  declined?: "backgroundWork" | "keptAwake" | "neverActive" | "notRunning";
   kill?: Record<string, unknown>;
   session: GxserverSessionDomainState;
 }

@@ -212,6 +212,15 @@ export function shouldAutoSleepGpuiPresentationAgentSession({
   if (session.hasEverBeenActive !== true) {
     return false;
   }
+  /*
+  CDXC:SessionSleep 2026-09-24 DECISION:
+  User: a session whose agent still has a background shell or monitor running
+  (the grey dot) is not inactive. gxserver declines the same sweep with
+  `declined: "backgroundWork"`; this keeps the sweep from asking.
+  */
+  if (session.backgroundWorkDetectedAt) {
+    return false;
+  }
   if (protectedProjectSessionKeys.has(gpuiAutoSleepProjectSessionKey(session.projectId, session.sessionId))) {
     return false;
   }

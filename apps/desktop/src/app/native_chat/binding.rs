@@ -91,14 +91,7 @@ impl GhostexGpuiApp {
                 &view,
                 move |this, view, event: &NativeChatEvent, cx| match event {
                     NativeChatEvent::Broker(message) => {
-                        let mut message = message.clone();
-                        message["clientId"] = view.read(cx).config.client_id.clone().into();
-                        message["requestId"] = message["id"]
-                            .as_u64()
-                            .map(|id| id.to_string())
-                            .unwrap_or_default()
-                            .into();
-                        this.relay_session_chat_runtime_request(generation, &message, cx);
+                        this.relay_session_chat_runtime_request(generation, message);
                     }
                     NativeChatEvent::ComposerFocused => {
                         this.reclaim_gpui_root_for_chrome_input_focus();

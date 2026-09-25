@@ -230,6 +230,28 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        // A row clicked in the frosted host window acts in the window the menu belongs to: its
+        // actions open dialogs and move focus there, not in the host.
+        if let Some(source) = self.native_sidebar.menu.as_ref().map(|menu| menu.window)
+            && source != window.window_handle()
+        {
+            let app = cx.entity();
+            cx.defer(move |cx| {
+                let _ = source.update(cx, |_, window, cx| {
+                    app.update(cx, |app, cx| {
+                        app.activate_native_sidebar_menu_item(
+                            panel_index,
+                            item_index,
+                            row_bounds,
+                            toggle,
+                            window,
+                            cx,
+                        );
+                    });
+                });
+            });
+            return;
+        }
         let Some(menu) = self.native_sidebar.menu.as_mut() else {
             return;
         };
@@ -316,6 +338,89 @@ impl GhostexGpuiApp {
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> Option<AnyElement> {
+        use crate::app::window::frosted_host::{
+            FrostedHostKind, frosted_hosting_active, hide_frosted_host, show_frosted_host,
+        };
+        let Some(menu) = self.native_sidebar.menu.as_ref() else {
+            hide_frosted_host(FrostedHostKind::SidebarMenu, cx);
+            return None;
+        };
+        let sidebar = self.native_sidebar.bounds;
+        let hosted = frosted_hosting_active();
+        let (panels, union) = self.native_sidebar_menu_panels(hosted, cx)?;
+        let layers = div()
+            .id("native-sidebar-menu-layers")
+            .absolute()
+            .left(union.left() - sidebar.left())
+            .top(union.top() - sidebar.top())
+            .w(union.size.width)
+            .h(union.size.height)
+            .track_focus(&menu.focus)
+            .on_mouse_down_out(
+                cx.listener(|app, event: &gpui::MouseDownEvent, window, cx| {
+                    let position = window.mouse_position();
+                    if app
+                        .native_sidebar
+                        .more_button_bounds
+                        .get()
+                        .is_some_and(|bounds| {
+                            bounds.contains(&position) || bounds.contains(&event.position)
+                        })
+                    {
+                        return;
+                    }
+                    if app
+                        .native_sidebar
+                        .menu
+                        .as_ref()
+                        .is_some_and(SidebarMenuState::dropped_from_trigger)
+                    {
+                        app.native_sidebar.more_menu_dismissed_at = Some(web_time::Instant::now());
+                    }
+                    app.close_native_sidebar_menu(window, cx);
+                }),
+            )
+            .on_key_down(cx.listener(Self::native_sidebar_menu_key_down));
+        if hosted {
+            // The panels draw in the frosted host above the sidebar; this window keeps only the
+            // menu's keyboard focus and its click-outside dismissal. It still owns the menu's
+            // frame: as the key window it goes on getting pointer moves under the host, and the
+            // rows beneath must not light up there (the same frame its panels occluded unhosted).
+            let layers = layers.occlude();
+            let app = cx.entity();
+            show_frosted_host(
+                FrostedHostKind::SidebarMenu,
+                menu.window,
+                union,
+                None,
+                std::rc::Rc::new(move |_, cx| {
+                    app.update(cx, |app, cx| {
+                        app.native_sidebar_menu_panels(true, cx)
+                            .map(|(panels, _)| panels.into_any_element())
+                            .unwrap_or_else(|| div().into_any_element())
+                    })
+                }),
+                Some(cx.entity()),
+                cx,
+            );
+            return Some(deferred(layers).with_priority(20).into_any_element());
+        }
+        hide_frosted_host(FrostedHostKind::SidebarMenu, cx);
+        Some(
+            deferred(layers.child(panels))
+                .with_priority(20)
+                .into_any_element(),
+        )
+    }
+
+    /// The menu's panels, positioned inside the box that holds them all (returned with it, in
+    /// window coordinates). `frosted` draws them for the frosted host: a thinned fill over the
+    /// host's blur, each panel reporting its frame as the blurred region.
+    fn native_sidebar_menu_panels(
+        &self,
+        frosted: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<(gpui::Div, Bounds<Pixels>)> {
         let menu = self.native_sidebar.menu.as_ref()?;
         let sidebar = self.native_sidebar.bounds;
         let scale = menu.scale;
@@ -357,133 +462,26 @@ impl GhostexGpuiApp {
             .map(|bounds| bounds.bottom())
             .max()
             .unwrap_or(top);
-        let mut layers = div()
-            .id("native-sidebar-menu-layers")
-            .absolute()
-            .left(left - sidebar.left())
-            .top(top - sidebar.top())
-            .w(right - left)
-            .h(bottom - top)
-            .track_focus(&menu.focus)
-            .on_mouse_down_out(
-                cx.listener(|app, event: &gpui::MouseDownEvent, window, cx| {
-                    let position = window.mouse_position();
-                    if app
-                        .native_sidebar
-                        .more_button_bounds
-                        .get()
-                        .is_some_and(|bounds| {
-                            bounds.contains(&position) || bounds.contains(&event.position)
-                        })
-                    {
-                        return;
-                    }
-                    if app
-                        .native_sidebar
-                        .menu
-                        .as_ref()
-                        .is_some_and(SidebarMenuState::dropped_from_trigger)
-                    {
-                        app.native_sidebar.more_menu_dismissed_at = Some(web_time::Instant::now());
-                    }
-                    app.close_native_sidebar_menu(window, cx);
-                }),
-            )
-            .on_key_down(cx.listener(|app, event: &gpui::KeyDownEvent, window, cx| {
-                let key = event.keystroke.key.as_str();
-                let Some(menu) = app.native_sidebar.menu.as_mut() else {
-                    return;
-                };
-                // The agent account page returns to the agent list on Escape or Left, like the React launcher.
-                let back = menu
-                    .panels
-                    .last()
-                    .and_then(|panel| panel.items.first())
-                    .and_then(|item| item.get("command"))
-                    .filter(|command| {
-                        command["type"] == "agentAccounts" && command["action"] == "root"
-                    })
-                    .cloned();
-                match key {
-                    "escape" => {
-                        if let Some(command) = back {
-                            app.dispatch_native_sidebar_ui(command, cx);
-                        } else {
-                            app.close_native_sidebar_menu(window, cx);
-                        }
-                    }
-                    "left" => {
-                        if menu.panels.len() > 1 {
-                            let len = menu.panels.len() - 1;
-                            truncate_panels(menu, len);
-                            // The parent row keeps the keyboard cursor but no longer owns a panel,
-                            // so Right reopens the submenu instead of finding it already open.
-                            if let Some(panel) = menu.panels.last_mut() {
-                                panel.child_item = None;
-                            }
-                        } else if let Some(items) = menu.panels[0].pages.pop() {
-                            menu.panels[0].replace_items(items);
-                        } else if let Some(command) = back {
-                            app.dispatch_native_sidebar_ui(command, cx);
-                        }
-                    }
-                    "up" | "down" | "home" | "end" => {
-                        if let Some(panel) = menu.panels.last_mut() {
-                            panel.move_selection(key);
-                        }
-                    }
-                    "enter" | "space" | "right" => {
-                        let panel_index = menu.panels.len() - 1;
-                        let panel = &menu.panels[panel_index];
-                        if let Some(index) = panel.selected {
-                            if key == "right" && panel.items[index].get("secondary").is_some() {
-                                app.activate_native_sidebar_menu_secondary(panel_index, index, cx);
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                return;
-                            }
-                            let bounds = panel.bounds(
-                                app.native_sidebar.bounds,
-                                menu.scale,
-                                panel_index > 0,
-                            );
-                            let y = panel.items[..index]
-                                .iter()
-                                .map(|item| {
-                                    if item["separator"] == true {
-                                        13.0
-                                    } else {
-                                        34.0
-                                    }
-                                })
-                                .sum::<f32>();
-                            let row_bounds = Bounds {
-                                origin: Point::new(
-                                    bounds.left(),
-                                    bounds.top() + px((6.0 + y) * menu.scale),
-                                ),
-                                size: gpui::size(bounds.size.width, px(34.0 * menu.scale)),
-                            };
-                            app.activate_native_sidebar_menu_item(
-                                panel_index,
-                                index,
-                                row_bounds,
-                                false,
-                                window,
-                                cx,
-                            );
-                        }
-                    }
-                    _ => return,
-                }
-                window.prevent_default();
-                cx.stop_propagation();
-                cx.notify();
-            }));
+        let mut layers = div().relative().w(right - left).h(bottom - top);
         let view = cx.entity();
         for (panel_index, panel) in panels.iter().enumerate() {
             let bounds = panel.bounds(sidebar, scale, panel_index > 0);
             let relative = bounds.origin - Point::new(left, top);
+            if frosted {
+                // The host's blur follows each panel's frame; the gaps between panels stay clear.
+                let radius = px(8.0 * scale);
+                layers = layers.child(
+                    gpui::canvas(
+                        |_, _, _| {},
+                        move |bounds, _, window, _| window.report_frosted_region(bounds, radius),
+                    )
+                    .absolute()
+                    .left(relative.x)
+                    .top(relative.y)
+                    .w(bounds.size.width)
+                    .h(bounds.size.height),
+                );
+            }
             if panel.is_agent_launcher() {
                 layers = layers.child(self.render_agent_launcher_menu_panel(
                     panel_index,
@@ -515,7 +513,11 @@ impl GhostexGpuiApp {
                 .rounded(px(8.0 * scale))
                 .border_1()
                 .border_color(titlebar_popup_menu_border_color())
-                .bg(background)
+                .bg(if frosted {
+                    popup_window_surface(background)
+                } else {
+                    background
+                })
                 .text_color(foreground)
                 .font_weight(FontWeight::NORMAL)
                 .text_size(px(13.0 * scale))
@@ -708,7 +710,102 @@ impl GhostexGpuiApp {
             }
             layers = layers.child(content);
         }
-        Some(deferred(layers).with_priority(20).into_any_element())
+        Some((
+            layers,
+            Bounds::from_corners(Point::new(left, top), Point::new(right, bottom)),
+        ))
+    }
+
+    fn native_sidebar_menu_key_down(
+        app: &mut Self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let key = event.keystroke.key.as_str();
+        let Some(menu) = app.native_sidebar.menu.as_mut() else {
+            return;
+        };
+        // The agent account page returns to the agent list on Escape or Left, like the React launcher.
+        let back = menu
+            .panels
+            .last()
+            .and_then(|panel| panel.items.first())
+            .and_then(|item| item.get("command"))
+            .filter(|command| command["type"] == "agentAccounts" && command["action"] == "root")
+            .cloned();
+        match key {
+            "escape" => {
+                if let Some(command) = back {
+                    app.dispatch_native_sidebar_ui(command, cx);
+                } else {
+                    app.close_native_sidebar_menu(window, cx);
+                }
+            }
+            "left" => {
+                if menu.panels.len() > 1 {
+                    let len = menu.panels.len() - 1;
+                    truncate_panels(menu, len);
+                    // The parent row keeps the keyboard cursor but no longer owns a panel,
+                    // so Right reopens the submenu instead of finding it already open.
+                    if let Some(panel) = menu.panels.last_mut() {
+                        panel.child_item = None;
+                    }
+                } else if let Some(items) = menu.panels[0].pages.pop() {
+                    menu.panels[0].replace_items(items);
+                } else if let Some(command) = back {
+                    app.dispatch_native_sidebar_ui(command, cx);
+                }
+            }
+            "up" | "down" | "home" | "end" => {
+                if let Some(panel) = menu.panels.last_mut() {
+                    panel.move_selection(key);
+                }
+            }
+            "enter" | "space" | "right" => {
+                let panel_index = menu.panels.len() - 1;
+                let panel = &menu.panels[panel_index];
+                if let Some(index) = panel.selected {
+                    if key == "right" && panel.items[index].get("secondary").is_some() {
+                        app.activate_native_sidebar_menu_secondary(panel_index, index, cx);
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        return;
+                    }
+                    let bounds =
+                        panel.bounds(app.native_sidebar.bounds, menu.scale, panel_index > 0);
+                    let y = panel.items[..index]
+                        .iter()
+                        .map(|item| {
+                            if item["separator"] == true {
+                                13.0
+                            } else {
+                                34.0
+                            }
+                        })
+                        .sum::<f32>();
+                    let row_bounds = Bounds {
+                        origin: Point::new(
+                            bounds.left(),
+                            bounds.top() + px((6.0 + y) * menu.scale),
+                        ),
+                        size: gpui::size(bounds.size.width, px(34.0 * menu.scale)),
+                    };
+                    app.activate_native_sidebar_menu_item(
+                        panel_index,
+                        index,
+                        row_bounds,
+                        false,
+                        window,
+                        cx,
+                    );
+                }
+            }
+            _ => return,
+        }
+        window.prevent_default();
+        cx.stop_propagation();
+        cx.notify();
     }
 }
 

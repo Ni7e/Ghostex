@@ -462,9 +462,7 @@ pub struct GhostexGpuiApp {
     pub(crate) agents_chat_prewarm_scheduled: bool,
     /// Sessions whose chat is in a visible pane, as of the last chat surface reconcile.
     pub(crate) native_chat_visible_sessions: HashSet<TerminalSessionId>,
-    /// Each runtime's own broker subscribe request, replayed when a paused view is shown again.
-    pub(crate) session_chat_subscribe_requests: HashMap<u64, serde_json::Value>,
-    /// Runtime generations whose broker subscription is paused because their view is hidden.
+    /// Runtime generations whose document is paused because their view is hidden.
     pub(crate) session_chat_paused_generations: HashSet<u64>,
     pub(crate) native_chat_pool_pass_scheduled: bool,
     /// Tabs opened by project-header agent launches that are still waiting for their created session.
@@ -475,8 +473,8 @@ pub struct GhostexGpuiApp {
     pub(crate) agents_chat_reconcile_scheduled: bool,
     pub(crate) native_chat_views:
         HashMap<TerminalSessionId, Entity<super::native_chat::state::NativeChatView>>,
+    /// The gxserver endpoint each machine's chat socket was last given.
     pub(crate) session_chat_broker_endpoints: HashMap<String, (String, String)>,
-    pub(crate) session_chat_broker_epoch: Option<String>,
     pub(crate) session_chat_presentations:
         Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
     pub(crate) account_switch_progress:
@@ -968,6 +966,8 @@ pub struct GhostexGpuiApp {
     pub(crate) sidebar: Option<Entity<crate::app::native_service::NativeService>>,
     pub(crate) native_sidebar: crate::app::native_sidebar::state::NativeSidebarState,
     /// The native Kanban board's state; see app/native_kanban/.
+    /// The native Docs view's state; see app/native_docs/.
+    pub(crate) native_docs: crate::app::native_docs::state::NativeDocsState,
     pub(crate) native_kanban: crate::app::native_kanban::state::NativeKanbanState,
     pub(crate) floating_reveal: crate::app::floating_reveal::model::FloatingRevealState,
     pub(crate) panel_motion: crate::app::panel_motion::PanelMotions,

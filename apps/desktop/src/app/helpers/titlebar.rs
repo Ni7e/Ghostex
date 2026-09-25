@@ -1549,8 +1549,12 @@ pub(crate) fn titlebar_popup_menu_hover_color() -> Hsla {
         .into()
 }
 
+/// A menu's or tooltip's outline: a faint ink line, fainter still on the frosted menus of window
+/// glass, where it only has to catch the edge of the blur.
 pub(crate) fn titlebar_popup_menu_border_color() -> Hsla {
-    titlebar_overlay_base().opacity(0.12).into()
+    titlebar_overlay_base()
+        .opacity(if window_glass_active() { 0.10 } else { 0.12 })
+        .into()
 }
 
 pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
@@ -1570,6 +1574,7 @@ pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
     theme.tokens.popover = titlebar_popup_menu_background().into();
     theme.popover_foreground = titlebar_popup_menu_foreground();
     theme.border = titlebar_popup_menu_border_color();
+    gpui_component::tooltip::set_frosted_tooltip_alpha(WINDOW_GLASS_MENU_ALPHA);
     theme.radius = px(2.0);
     theme.scrollbar = gpui::transparent_black();
     theme.scrollbar_show = gpui_component::scroll::ScrollbarShow::Hover;

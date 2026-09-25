@@ -789,7 +789,8 @@ terminal status line.
 The chat input row has one model pill. It shows the agent's logo, the model, and
 after it the reasoning level and the context window, for example
 "Fable 5.1 High · 200K". Click it to open the model picker: a row of agent tabs
-with a starred Favorites tab first, a search box, the models of the chosen tab,
+with a starred Favorites tab first, the models of the chosen tab (starred ones
+first, in their usual order),
 and along the bottom a button each for the reasoning level (brain), the context
 window (chart bars) and Fast mode (bolt). Clicking the context window or Fast
 mode button switches it; the reasoning button opens a short list to the side. A
@@ -804,14 +805,13 @@ off to that agent instead of changing this session's model. With more than one s
 button beside Fast mode shows the account in use and opens the list to switch.
 
 The Model & Effort Picker shortcut (Option+P by default on macOS) opens the same
-picker from the keyboard, and pressing it again closes it. Type to filter the
-list; Up and Down move through the models and then the bottom buttons, stopping
+picker from the keyboard, and pressing it again closes it. Up and Down move through the models and then the bottom buttons, stopping
 at the top and bottom; Left and
 Right change the highlighted model's reasoning level, which the reasoning button
-shows; Option plus the letter on a bottom button uses it (Option+R Reasoning,
-Option+C Context, Option+F Fast mode, Option+A Account); Tab and Shift+Tab move through the Favorites and agent tabs. Enter uses the highlighted model and level in
+shows; the letter on each bottom button's icon uses it (R Reasoning, C Context,
+F Fast mode, A Account); Tab and Shift+Tab move through the Favorites and agent tabs. Enter uses the highlighted model and level in
 this session and closes the picker, Shift+Enter saves them as the agent's default,
-F switches Fast mode and C the context window while the search box is empty, and Cmd+1 to Cmd+9
+and Cmd+1 to Cmd+9
 jump the highlight to one of the first nine rows without applying it. Escape closes it
 without changing anything. The key reminder along the bottom lists these.
 
@@ -1166,6 +1166,13 @@ sessions, so any client can control agents on any machine.
   Localhost links in chat, terminals, and browser
   actions open in Web Preview through the connected computer, including their
   path and query, instead of the phone's external browser.
+  To read a project's docs on the phone, long-press the project and choose
+  Docs, or choose Docs from a session's ⋯ menu. It lists the project's Markdown
+  and HTML files from the same folders the desktop Docs view shows, with search
+  and the most recently changed files on top. Files open in a reader on the
+  phone, and Reload picks up an agent's latest edit. HTML pages include the
+  Agentation annotation tool (the pen button hides it); its copy button puts
+  your notes on the phone's clipboard, ready to paste into a session.
 - **From another computer**: Settings > Remote > Remote machines > Add a
   machine with SSH details or an Easy Connect code, then Install / Connect
   gxserver on it. The machine appears as a sidebar section with its own
@@ -1266,23 +1273,31 @@ docs directory), `hideProjectHeaderDiffStats`,
 
 ## Extensions, Open In, and integrations
 
-- Settings > Extensions manages the built-in views, the official extensions
-  (Code, Browser, Storybook, Kanban, Automate, Docs, Chromium runtime), the Extension
-  store for audited third-party extensions, and Your views (custom URLs,
-  Linear, GitHub Issues, dev server commands, HTML reports).
-  Extension commands use the active local project's folder unless the extension
-  supplies a folder; relative folders are resolved inside the active project.
-  Every row on this page has an Edit (pencil) button that chooses where that
-  view, header button, or extension appears. Pick a Default of Shown
-  everywhere or Hidden unless chosen, then turn individual projects and spaces
-  on or off to override it, so a view can be hidden in one project without
-  listing every other one. A project's own setting wins over its space, and a
-  space's setting wins over the Default. Worktrees follow their parent project,
-  and a project inside a group follows the group. A row narrowed this way shows
-  its scope under its description, and the view or button is simply absent
-  wherever it is hidden, so its hotkeys and command palette entries go away with
-  it. Custom views under Your views keep their own Available in picker inside
-  their own editor.
+- Settings > Extensions shows every extension as a card, three to a row: the
+  built-in ones, grouped by category (Project websites, Code and files,
+  Planning and automation, Header buttons, Menus and panels, Shared runtime),
+  then the Extensions Store (installed extensions first, then the audited
+  third-party ones you can install), then Your views (custom URLs, Linear,
+  GitHub Issues, dev server commands, HTML reports). One filter bar above them
+  searches all of them at once and filters by source, type, and category; the
+  count beside it says how many are shown. Each card's switch turns it on or
+  off, and its actions (Edit, Details, Remove, Reinstall) appear when you hover
+  it. Extension commands use the active local project's folder unless the
+  extension supplies a folder; relative folders are resolved inside the active
+  project.
+  The Edit (pencil) button on a card chooses where that view, header button, or
+  extension appears. Pick **Everywhere** or **Only in selected places**, then
+  choose projects and spaces from the dropdown next to **Except in** (or
+  **Show in**), so a view can be hidden in one project without listing every
+  other one. Once a space is picked, **But keep in** (or **But not in**) lists
+  projects that should ignore their space's choice, because a project's own
+  setting wins over its space, and a space wins over the default. A sentence
+  under the choices spells out the result. Worktrees follow their parent
+  project, and a project inside a group follows the group. A card narrowed this
+  way shows its scope under its description, and the view or button is simply
+  absent wherever it is hidden, so its hotkeys and command palette entries go
+  away with it. Custom views under Your views keep their own Available in
+  picker inside their own editor.
   Its Account usage in the sidebar section lets you star saved Claude and Codex
   accounts to show their usage at the bottom of the desktop sidebar, or unstar
   them to hide it. These are the same per-account stars available in
@@ -1390,7 +1405,7 @@ transparency in the macOS accessibility settings, or turning off Transparency ef
 in Windows Settings > Personalization > Colors, always makes the window opaque. On
 Windows, turning glass on takes effect the next time Ghostex starts, the corners of
 menus and pop-ups follow Windows' own rounding, and notifications keep solid cards.
-Glass shows (macOS only) picks what the glass blurs: Desktop and windows (the default) shows everything behind Ghostex. Wallpaper only shows just your desktop wallpaper, so other windows never show through; built-in wallpapers such as Sequoia or the aerials show as a still picture of that wallpaper, and a solid color wallpaper shows everything behind the window. Custom image shows a picture you choose instead, one for dark mode and one for light mode (Glass image for dark mode and Glass image for light mode, each with a Choose image button); a mode with no picture shows everything behind the window. For Wallpaper only and Custom image, Glass picture position picks Moves with the window (the default: the picture covers the window and moves with it) or Stays with the desktop (the picture stays put while the window moves over it, and can trail the window while you drag it) (`windowGlassSource`, `windowGlassImagePlacement`, `windowGlassImageDark`, `windowGlassImageLight`).
+Glass shows (macOS only) picks what the glass blurs: Desktop and windows (the default) shows everything behind Ghostex. Wallpaper only shows just your desktop wallpaper, so other windows never show through; built-in wallpapers such as Sequoia or the aerials show as a still picture of that wallpaper, and a solid color wallpaper shows everything behind the window. Custom image shows a picture you choose instead, one for dark mode and one for light mode (Glass image for dark mode and Glass image for light mode, each with a Choose image button); a mode with no picture shows everything behind the window. Video plays a muted, looping, blurred video behind the glass, one for dark mode and one for light mode (Glass video for dark mode and Glass video for light mode): pick an aerial wallpaper your computer has already downloaded (download more by choosing them in System Settings > Wallpaper), or Choose a file… for a .mov or .mp4 video. The video pauses whenever Ghostex is in the background, hidden or minimized, while the display sleeps and in Low Power Mode; Reduce Motion shows a still frame; and Play glass video only when plugged in (on by default) pauses it on battery. For Wallpaper only, Custom image and Video, Glass picture position picks Moves with the window (the default: the picture covers the window and moves with it) or Stays with the desktop (the picture stays put while the window moves over it, and can trail the window while you drag it) (`windowGlassSource`, `windowGlassImagePlacement`, `windowGlassImageDark`, `windowGlassImageLight`, `windowGlassVideoDark`, `windowGlassVideoLight`, `windowGlassVideoOnlyOnPower`).
 While glass is on, four sliders tune it, each in dark mode and in light mode: Sidebar tint and Work area tint set how much of the desktop each area hides, independently, so either can be the darker one; lower shows more of your desktop.
 Keep Awake (Power)
 prevents sleep while agents work.

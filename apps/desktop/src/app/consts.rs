@@ -1082,10 +1082,9 @@ pub(crate) const TITLEBAR_MORE_TOOLTIP: &str = "More";
 
 pub(crate) const TITLEBAR_GIT_TOOLTIP: &str = "Git actions";
 
-pub(crate) const TITLEBAR_ACTIONS_TOOLTIP: &str = "Quick Actions. Right click for more options";
+pub(crate) const TITLEBAR_ACTIONS_TOOLTIP: &str = "Quick Actions";
 
-pub(crate) const TITLEBAR_OPEN_TARGETS_TOOLTIP: &str =
-    "Open in an app. Right click for more options";
+pub(crate) const TITLEBAR_OPEN_TARGETS_TOOLTIP: &str = "Open in an app";
 
 pub(crate) const TITLEBAR_UPDATE_AVAILABLE_TOOLTIP: &str =
     "Update Ghostex! All your sessions will continue running.";

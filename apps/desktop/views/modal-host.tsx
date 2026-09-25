@@ -584,6 +584,16 @@ type AppModalHostMessage =
       path: string;
       type: "windowGlassImageFilePicked";
     }
+  | {
+      type: "windowGlassVideosListed";
+      videos: { name: string; value: string }[];
+    }
+  | {
+      appearance: "dark" | "light";
+      error?: string;
+      path?: string;
+      type: "windowGlassVideoFilePicked";
+    }
   | { path: string; type: "firstLaunchProjectFolderPicked" }
   | {
       error?: string;

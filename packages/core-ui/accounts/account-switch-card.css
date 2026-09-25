@@ -16,7 +16,7 @@
  * User: redesign the account-switch card as the "compact tiles" mockup (docs/2026-09-23/account-switch-card/01-compact-tiles.html): smaller, following the chat theme, and without the green / yellow / red usage colours.
  * Each account is a From / To line with its email, then three small tiles (label, percent, reset) with a thin bar along the tile's bottom edge showing how full the limit is. Usage is one ink at rising strength; a tile at 100% gets a stronger outline instead of red. The account being switched to, finished steps and the moving line use the theme accent. Steps stay numbered with the moving line under the active one, just smaller.
  * This supersedes the 2026-09-12 proximity colours and red at 100%, and the 2026-09-15 separate narrow layout (the card is compact at every width). The 2026-09-15 light-appearance support stays: every surface is a step off the chat's own background, so each theme preset tints the card.
- * SEE-ALSO: apps/desktop/src/app/native_chat/account_switch_card.rs draws the same card natively.
+ * The native card (apps/desktop/src/app/native_chat/account_switch_card.rs) moved on to the 2026-09-25 decision there (bigger card, no tile bars, one agent icon); React chat is being retired and keeps this design.
  */
 .gx-account-switch-card {
   --as-accent: var(--ghostex-accent, #86d3f8);

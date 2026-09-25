@@ -139,7 +139,7 @@ impl NativeChatView {
 /// The chat window's content area in screen coordinates, which is what element bounds and child
 /// window frames are measured from. Chat Lab's regular macOS titlebar sits outside it; the app's
 /// own windows draw under their titlebar, so there the two are the same.
-pub(super) fn content_bounds(window: &gpui::Window) -> Bounds<Pixels> {
+pub(crate) fn content_bounds(window: &gpui::Window) -> Bounds<Pixels> {
     let bounds = window.bounds();
     #[cfg(target_os = "macos")]
     let bounds = Bounds::from_corners(
@@ -159,7 +159,7 @@ pub(super) fn content_bounds(window: &gpui::Window) -> Bounds<Pixels> {
 /// CDXC:SessionChat 2026-09-19 WHY:
 /// AppKit reports the new size to GPUI synchronously from `setFrame:`, and GPUI drops that report while the app is borrowed, which left a child window moved from inside an update painting at its old size inside its new frame. The frame is therefore set from a task that runs outside any app update, the way GPUI's own `Window::resize` does.
 #[cfg(target_os = "macos")]
-pub(super) fn move_child_window(
+pub(crate) fn move_child_window(
     handle: gpui::AnyWindowHandle,
     parent: *mut std::ffi::c_void,
     frame: Bounds<Pixels>,
@@ -210,7 +210,7 @@ pub(super) fn move_child_window(
 /// CDXC:PlatformSupport 2026-09-24 WHY:
 /// Floating X11 windows are still independent frames; owner-relative placement keeps previews and editors aligned when their chat pane moves. The backend uses the explicit creation-time owner rather than keyboard focus.
 #[cfg(target_os = "linux")]
-pub(super) fn move_child_window(
+pub(crate) fn move_child_window(
     handle: gpui::AnyWindowHandle,
     _: *mut std::ffi::c_void,
     frame: Bounds<Pixels>,
@@ -222,7 +222,7 @@ pub(super) fn move_child_window(
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub(super) fn move_child_window(
+pub(crate) fn move_child_window(
     _: gpui::AnyWindowHandle,
     _: *mut std::ffi::c_void,
     _: Bounds<Pixels>,

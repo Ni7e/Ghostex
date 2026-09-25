@@ -117,7 +117,9 @@ mod workspace_groups;
 pub(crate) use records_storage::{
     RecordRead, RecordStore, read_record_raw, remove_record, scan_record_raw, write_record,
 };
-pub(crate) use sidebar_ui_storage::{with_read_connection, with_write_connection};
+pub(crate) use sidebar_ui_storage::{
+    read_preference_value, with_read_connection, with_write_connection, write_client_document_value,
+};
 
 pub(crate) use host::GxStoreHost;
 pub(crate) use workspace_groups::note_native_host_message_dropped;

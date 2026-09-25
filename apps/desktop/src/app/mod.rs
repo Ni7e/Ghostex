@@ -51,6 +51,7 @@ pub(crate) mod modals;
 pub(crate) mod native_app_modal_lifecycle;
 pub(crate) mod native_automate;
 pub(crate) mod native_chat;
+pub(crate) mod native_docs;
 pub(crate) mod native_kanban;
 pub(crate) mod native_service;
 pub(crate) mod native_sidebar;

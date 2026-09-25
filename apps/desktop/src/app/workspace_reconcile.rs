@@ -989,18 +989,16 @@ impl GhostexGpuiApp {
                         parked_at: Some(Instant::now()),
                     },
                 );
-                if let Some(replaced) = self
-                    .parked_agents_chat_runtimes_by_project
-                    .insert(old_project_id, parked_chat_runtime)
-                {
-                    self.release_parked_session_chat_runtime_subscriptions(&replaced, cx);
-                }
+                // A replaced parking's views drop here, which detaches them from the chat host.
+                drop(
+                    self.parked_agents_chat_runtimes_by_project
+                        .insert(old_project_id, parked_chat_runtime),
+                );
             }
             // No owning project id means there is nothing to park these pages
             // under and nothing that could ever restore them, so they are
             // destroyed here exactly as the pre-parking teardown did.
             None => {
-                self.release_parked_session_chat_runtime_subscriptions(&parked_chat_runtime, cx);
                 drop(parked_chat_runtime);
             }
         }

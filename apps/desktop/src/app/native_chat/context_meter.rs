@@ -202,13 +202,13 @@ impl NativeChatView {
         vec![json!({"context":self.snapshot["contextMeter"]})]
     }
 
+    /// CDXC:SessionChat 2026-09-24 DECISION: The user asked for the context window button's tooltip to say only "Statusline Config" instead of the usage summary.
     pub(super) fn render_context_meter(
         &self,
         appearance: &ChatAppearance,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let context = &self.snapshot["contextMeter"];
-        let tooltip = text(context, "tooltip");
         let bounds = Rc::new(Cell::new(Bounds::default()));
         let measured = bounds.clone();
         let percentage = context["usedPercentage"].as_f64().unwrap_or(0.0) as f32;
@@ -229,8 +229,8 @@ impl NativeChatView {
                 this.bg(appearance.border)
             })
             .hover(|style| style.bg(appearance.border))
-            .tooltip(move |window, cx| {
-                gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
+            .tooltip(|window, cx| {
+                gpui_component::tooltip::Tooltip::new("Statusline Config").build(window, cx)
             })
             .child(ring(percentage, appearance))
             .on_click(cx.listener(move |chat, _, window, cx| {

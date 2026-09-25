@@ -1,19 +1,16 @@
 //! Where each `Effect` goes: this thread, or the renderer's own dispatch.
 //!
-//! The core returns `Vec<Effect>` from every `handle`. Half of them are I/O this host performs off
-//! the UI thread (gxserver is not one of them: see below); the other half are things only the view
-//! can do, because it owns the composer field, the clipboard, the window and the app shell. Those
-//! ride back in the frame's `requests` array in the exact wire form
+//! The core returns `Vec<Effect>` from every `handle`. Half of them are I/O this host performs
+//! itself (storage, timers, and the chat socket in `transport.rs`); the other half are things only
+//! the view can do, because it owns the composer field, the clipboard, the window and the app
+//! shell. Those ride back in the frame's `requests` array in the exact wire form
 //! `apps/desktop/src/app/native_chat/state.rs` already dispatches, so no drawing or dispatch code
 //! changes when the brain does.
 //!
 //! CDXC:SessionChat 2026-09-22 WHY:
-//! `Effect::SendRpc` is forwarded as a `rpc` request rather than called from this thread, and the
-//! socket stays the one the app runtime already owns. `packages/gx-client` deliberately refuses to
-//! subscribe to a session chat (a second subscriber starts a new epoch and rebroadcasts a snapshot
-//! to every client) and has no public `POST /api/{method}`, so a Rust-side transport would be a
-//! second client against the same daemon, not a reuse of the first. The brain moves first; the
-//! transport follows when `gx-client` grows a chat subscription.
+//! `Effect::SendRpc` is forwarded as a `rpc` request rather than called from this thread: the view
+//! already performs every chat RPC (`native_chat/rpc.rs`, with the remote machine's target and the
+//! web build's `fetch`), and an answer is `resolve`d back by the id the core allocated.
 
 use ghostex_gx_chat_core::{Effect, HostRequest, OpenTarget, RequestKind, UserAction};
 use serde_json::{Map, Value};
@@ -63,12 +60,15 @@ pub(super) fn route(effect: Effect) -> Routed {
         | Effect::FlushStorage { .. }
         | Effect::ReadRetainedSnapshot
         | Effect::WriteRetainedSnapshot { .. }
-        | Effect::SetTimer { .. } => Routed::Host(effect),
+        | Effect::SetTimer { .. }
+        | Effect::Subscribe { .. }
+        | Effect::Unsubscribe
+        | Effect::Reconnect => Routed::Host(effect),
         // `{kind: 'broker', method: 'presentation', params: {state}}`, which is what
-        // `native-host.ts:676` pushes and what `relay_session_chat_runtime_request` already reads
+        // `native-host.ts:676` pushed and what each app's chat binding reads
         // (`message["method"] == "presentation"` takes `params.state`). It goes to the renderer
-        // rather than being performed here because the cache it feeds is the SIDEBAR's, owned by
-        // the app runtime beside the socket; this host has no door onto it.
+        // rather than being performed here because the cache it feeds is the APP's (the next view
+        // of the session opens from it); this host has no door onto it.
         Effect::UpdatePresentation { state } => {
             let mut params = Map::new();
             params.insert("state".into(), *state);
@@ -84,14 +84,6 @@ pub(super) fn route(effect: Effect) -> Routed {
             method: method.as_str().to_string(),
             params: object(*params),
         })),
-        Effect::Subscribe { limit, catalog } => {
-            let mut params = Map::new();
-            params.insert("limit".into(), Value::from(limit));
-            params.insert("catalog".into(), Value::Bool(catalog));
-            Routed::Renderer(Box::new(broker("subscribe", params)))
-        }
-        Effect::Unsubscribe => Routed::Renderer(Box::new(broker("unsubscribe", Map::new()))),
-        Effect::Reconnect => Routed::Renderer(Box::new(broker("reconnect", Map::new()))),
         Effect::SetComposerText {
             content,
             caret,
@@ -245,7 +237,7 @@ fn host_action(action: String, params: Value) -> Routed {
     Routed::Renderer(Box::new(dispatched(&action, object(params))))
 }
 
-/// `{kind: "broker", method, params}`: what the view forwards to the app runtime's transport.
+/// `{kind: "broker", method, params}`: what the view hands its app, which is the presentation cache.
 fn broker(method: &str, params: Map<String, Value>) -> HostRequest {
     HostRequest {
         id: None,

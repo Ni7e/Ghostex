@@ -2,10 +2,10 @@
 //!
 //! Two different keys, for two different tables, and they are not interchangeable:
 //!
-//! - The RETENTION key is `JSON.stringify([machineId, projectId, sessionId])`, which is what
-//!   `apps/desktop/sidebar/session-chat-runtime/store.ts` keys its retained sessions by.
+//! - The RETENTION key is `JSON.stringify([machineId, projectId, sessionId])`, which is what the
+//!   deleted QuickJS retained store keyed its sessions by, and what the snapshot cache is keyed by.
 //! - The STORAGE session key is `<projectId>:<sessionId>`, with a `remote-<machineId>:` prefix off
-//!   the local machine (`broker.ts`). It is what every per-session client-storage record's suffix
+//!   the local machine (the deleted `broker.ts`'s rule). It is what every per-session client-storage record's suffix
 //!   is built from, so a draft written under one spelling is invisible under the other.
 
 use serde_json::Value;
@@ -49,6 +49,16 @@ impl ChatIdentity {
                 .unwrap_or_default()
                 .to_string(),
         }
+    }
+
+    /// The identity a retention key spells, for a chat the store has already let go.
+    pub(super) fn from_retention_key(key: &str) -> Option<Self> {
+        let [machine, project_id, session_id]: [String; 3] = serde_json::from_str(key).ok()?;
+        Some(Self {
+            machine_id: (machine != LOCAL_MACHINE_ID).then_some(machine),
+            project_id,
+            session_id,
+        })
     }
 
     /// `JSON.stringify([machineId, projectId, sessionId])`, the retention key.

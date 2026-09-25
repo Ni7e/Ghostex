@@ -1278,6 +1278,7 @@ impl GhostexGpuiApp {
             };
             self.report_session_chat_file_opening("Docs view", &file_path, cx);
             self.pending_docs_file_open = Some(relative_path);
+            self.native_docs.pending_origin = Some(session_id);
             self.switch_workarea_from_hotkey(TitlebarMode::Manage, window, cx);
             self.mark_project_editor_mode_awake(TitlebarMode::Manage, cx);
             self.focus_project_editor_surface(TitlebarMode::Manage, window, cx);
@@ -1486,6 +1487,11 @@ impl GhostexGpuiApp {
         let Some(relative_path) = self.pending_docs_file_open.clone() else {
             return false;
         };
+        if crate::app::native_docs::render::native_docs_enabled() {
+            self.pending_docs_file_open = None;
+            self.native_docs_open_external(relative_path, cx);
+            return true;
+        }
         let Some(surface) = self
             .project_workarea_runtime_cef_surfaces
             .get(&ProjectWorkareaCefSurfaceSlotKey::Manage)

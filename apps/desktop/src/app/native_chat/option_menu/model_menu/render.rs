@@ -9,7 +9,6 @@ use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement as _, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, div, px, svg, uniform_list,
 };
-use gpui_component::input::Input;
 use serde_json::{Value, json};
 
 /// An agent's logo in its brand tone; a white mark turns dark on the light surface.
@@ -339,7 +338,9 @@ impl ChatOptionMenuPanel {
                     Some("account") => Some("titlebar/user.svg"),
                     _ => None,
                 };
-                let letter = setting["icon"].as_str().and_then(super::keys::button_letter);
+                let letter = setting["icon"]
+                    .as_str()
+                    .and_then(super::keys::button_letter);
                 let shaking = setting["id"] == "effort" && shake != 0.0;
                 // Fast mode reads as a switch: lit in the pill's marker tone when on, dimmed when off.
                 let fast = setting["icon"] == "fast";
@@ -363,7 +364,7 @@ impl ChatOptionMenuPanel {
                     format!("{label}: {value}")
                 };
                 let tooltip = match letter {
-                    Some(letter) => format!("{tooltip} (⌥{letter})"),
+                    Some(letter) => format!("{tooltip} ({letter})"),
                     None => tooltip,
                 };
                 let tooltip = match setting["icon"].as_str() {
@@ -426,12 +427,36 @@ impl ChatOptionMenuPanel {
                         )
                         .map(|button| match icon {
                             Some(path) => button.child(
-                                svg()
-                                    .path(path)
+                                div()
+                                    .relative()
                                     .flex_shrink_0()
-                                    .size(px(14.0 * scale))
-                                    .text_color(if on { palette.on } else { palette.muted })
-                                    .when(fast && !on, |icon| icon.opacity(0.6)),
+                                    .child(
+                                        svg()
+                                            .path(path)
+                                            .size(px(14.0 * scale))
+                                            .text_color(if on { palette.on } else { palette.muted })
+                                            .when(fast && !on, |icon| icon.opacity(0.6)),
+                                    )
+                                    // The hotkey floats off the icon's bottom-right corner as a letter in a filled circle.
+                                    .when_some(letter, |icon, letter| {
+                                        icon.child(
+                                            div()
+                                                .absolute()
+                                                .right(px(-5.0 * scale))
+                                                .bottom(px(-4.0 * scale))
+                                                .size(px(10.0 * scale))
+                                                .rounded_full()
+                                                .bg(palette.muted)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .text_size(px(7.0 * scale))
+                                                .line_height(px(10.0 * scale))
+                                                .font_weight(gpui::FontWeight::BOLD)
+                                                .text_color(palette.surface)
+                                                .child(letter),
+                                        )
+                                    }),
                             ),
                             None => button.child(
                                 div()
@@ -440,18 +465,7 @@ impl ChatOptionMenuPanel {
                                     .child(label.clone()),
                             ),
                         })
-                        .child(div().min_w_0().truncate().text_color(tone).child(value))
-                        .when_some(letter, |button, letter| {
-                            button.child(
-                                div()
-                                    .flex_shrink_0()
-                                    .font_family("Menlo")
-                                    .text_size(px(9.5 * scale))
-                                    .text_color(palette.muted)
-                                    .opacity(0.8)
-                                    .child(letter),
-                            )
-                        }),
+                        .child(div().min_w_0().truncate().text_color(tone).child(value)),
                 );
             }
             tray = tray.child(buttons);
@@ -479,12 +493,6 @@ impl ChatOptionMenuPanel {
         if shake != 0.0 {
             window.request_animation_frame();
         }
-        let input = state.input.clone();
-        let key_context = if input.read(cx).value().is_empty() {
-            super::keys::EMPTY_QUERY_KEY_CONTEXT
-        } else {
-            super::keys::KEY_CONTEXT
-        };
         let scroll = state.scroll.clone();
         let count = state.rows().len();
         let list = if count == 0 {
@@ -531,7 +539,8 @@ impl ChatOptionMenuPanel {
         };
         div()
             .id("chat-model-menu")
-            .key_context(key_context)
+            .key_context(super::keys::KEY_CONTEXT)
+            .track_focus(&self.focus)
             .role(gpui::Role::Menu)
             .capture_action(cx.listener(Self::model_menu_key_action))
             .size_full()
@@ -546,37 +555,6 @@ impl ChatOptionMenuPanel {
             .text_color(palette.text)
             .text_size(px(13.0 * scale))
             .child(self.render_model_tabs(&view, &appearance, &palette, cx))
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .h(px(BAR_HEIGHT * scale))
-                    .px(px(10.0 * scale))
-                    .border_b_1()
-                    .border_color(palette.ink(0.08))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0 * scale))
-                    .child(
-                        svg()
-                            .path("titlebar/search.svg")
-                            .flex_shrink_0()
-                            .size(px(14.0 * scale))
-                            .text_color(palette.muted),
-                    )
-                    .child(
-                        div().flex_1().min_w_0().child(
-                            Input::new(&input)
-                                .appearance(false)
-                                .bordered(false)
-                                .focus_bordered(false)
-                                .w_full()
-                                .p_0()
-                                .text_size(px(13.0 * scale))
-                                .text_color(palette.text)
-                                .placeholder_color(palette.muted),
-                        ),
-                    ),
-            )
             .when_some(view["error"].as_str(), |card, error| {
                 // A choice the agent's own list could not offer is said here, where it was made.
                 card.child(

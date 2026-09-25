@@ -594,14 +594,14 @@ export function getSettingsSearchSectionDefinitions() {
           key: 'windowGlassSource',
           options: WINDOW_GLASS_SOURCE_OPTIONS,
           subtitle:
-            'Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose.',
+            'Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose, and Video plays a video behind it.',
           title: 'Glass shows',
         },
         {
           key: 'windowGlassImagePlacement',
           options: WINDOW_GLASS_IMAGE_PLACEMENT_OPTIONS,
           subtitle:
-            'Where the wallpaper or custom picture sits behind the glass. Stays with the desktop can trail the window while you drag it.',
+            'Where the wallpaper, custom picture or video sits behind the glass. Stays with the desktop can trail the window while you drag it.',
           title: 'Glass picture position',
         },
         {
@@ -613,6 +613,24 @@ export function getSettingsSearchSectionDefinitions() {
           key: 'windowGlassImageLight',
           subtitle: 'The picture the glass blurs in light mode when Glass shows is Custom image.',
           title: 'Glass image for light mode',
+        },
+        {
+          key: 'windowGlassVideoDark',
+          subtitle:
+            'The video the glass plays in dark mode when Glass shows is Video: an aerial wallpaper your computer has downloaded, or a video file you choose.',
+          title: 'Glass video for dark mode',
+        },
+        {
+          key: 'windowGlassVideoLight',
+          subtitle:
+            'The video the glass plays in light mode when Glass shows is Video: an aerial wallpaper your computer has downloaded, or a video file you choose.',
+          title: 'Glass video for light mode',
+        },
+        {
+          key: 'windowGlassVideoOnlyOnPower',
+          subtitle:
+            'Pause the glass video while your computer runs on battery. It always pauses when Ghostex is in the background.',
+          title: 'Play glass video only when plugged in',
         },
         {
           key: 'windowGlassSidebarOpacityDark',

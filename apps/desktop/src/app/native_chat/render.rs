@@ -102,7 +102,7 @@ impl Render for NativeChatView {
         } else {
             self.composer_frame(cx).transcript_inset
         };
-        crate::app::helpers::indicator_animation::render_indicators_at_display_rate(cx.entity_id());
+        crate::app::helpers::indicator_animation::render_indicator_frames_animation_only(cx.entity_id());
         let transcript = self.render_transcript_host(window, cx);
         let rows = self.list.item_count();
         /*

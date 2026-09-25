@@ -1210,6 +1210,74 @@ impl GhostexGpuiApp {
         );
     }
 
+    /// Settings -> Window glass -> Video: the aerial wallpapers macOS has downloaded, for the dark
+    /// and light video dropdowns.
+    pub(crate) fn handle_gpui_list_window_glass_videos_message(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let videos: Vec<serde_json::Value> =
+            crate::app::helpers::window_glass_video::downloaded_aerial_videos()
+                .into_iter()
+                .map(|video| {
+                    serde_json::json!({
+                        "name": video.name,
+                        "value": crate::app::helpers::window_glass_video::aerial_reference(&video.id),
+                    })
+                })
+                .collect();
+        self.dispatch_open_gpui_app_modal_message(
+            serde_json::json!({ "type": "windowGlassVideosListed", "videos": videos }),
+            cx,
+        );
+    }
+
+    /// Settings -> Window glass -> Video: "Choose a file…" for the dark or light video. The dialog
+    /// cannot filter by type, so a picked file that is not a .mov, .mp4 or .m4v comes back as an
+    /// error for the row to show.
+    pub(crate) fn handle_gpui_pick_window_glass_video_message(
+        &mut self,
+        message: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let appearance = if message["appearance"] == "light" {
+            "light"
+        } else {
+            "dark"
+        };
+        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Choose Video".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let message = if crate::app::helpers::window_glass_video::is_video_file(&path) {
+                serde_json::json!({
+                    "appearance": appearance,
+                    "path": path.to_string_lossy(),
+                    "type": "windowGlassVideoFilePicked",
+                })
+            } else {
+                serde_json::json!({
+                    "appearance": appearance,
+                    "error": "Choose a .mov, .mp4 or .m4v video.",
+                    "type": "windowGlassVideoFilePicked",
+                })
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.dispatch_open_gpui_app_modal_message(message, cx);
+            });
+        })
+        .detach();
+    }
+
     /// A native image dialog whose picked absolute path is posted back to the open app-modal
     /// window as the message `reply` builds.
     fn pick_image_for_app_modal(

@@ -37,7 +37,7 @@ export type DefaultEditorCommand =
   'code' | 'code-insiders' | 'zed' | 'zeditor' | 'cursor' | 'windsurf' | 'codium' | 'subl' | 'other';
 export type CommandsPanelSide = 'bottom' | 'right';
 export type WindowGlassMode = 'auto' | 'frosted' | 'opaque';
-export type WindowGlassSource = 'wallpaper' | 'desktopAndWindows' | 'customImage';
+export type WindowGlassSource = 'wallpaper' | 'desktopAndWindows' | 'customImage' | 'video';
 export type WindowGlassImagePlacement = 'static' | 'desktop';
 export type PanelAnimationSpeed = 'off' | 'slow' | 'normal' | 'fast';
 export const MIN_WINDOW_GLASS_SIDEBAR_OPACITY_PERCENT = 40;
@@ -809,6 +809,13 @@ export type ghostexSettings = {
    */
   windowGlassImageDark: string;
   windowGlassImageLight: string;
+  /**
+   * CDXC:Theming 2026-09-23 SEE-ALSO:
+   * The videos Video glass plays in dark and light mode: `aerial:<id>` for an aerial wallpaper macOS has downloaded, or the absolute path of a .mov/.mp4/.m4v file (empty: none chosen, the live blur shows). `windowGlassVideoOnlyOnPower` pauses them on battery. window_glass.rs holds the user's decision and the GPUI macOS window plays them.
+   */
+  windowGlassVideoDark: string;
+  windowGlassVideoLight: string;
+  windowGlassVideoOnlyOnPower: boolean;
   /**
    * CDXC:Theming 2026-09-23 SEE-ALSO:
    * Whether the Wallpaper only or Custom image picture covers the window and moves with it (static) or stays still against the screen (desktop); window_glass.rs holds the user's decision and the GPUI macOS window places it.

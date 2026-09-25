@@ -3300,6 +3300,15 @@ export type SidebarToExtensionMessage =
       appearance: 'dark' | 'light';
       type: 'pickWindowGlassImageFile';
     }
+  /** Settings -> Window glass -> Video: the downloaded aerial wallpapers, answered as windowGlassVideosListed. */
+  | {
+      type: 'listWindowGlassVideos';
+    }
+  /** Settings -> Window glass -> Video: "Choose a file…", answered as windowGlassVideoFilePicked with a path or an error. */
+  | {
+      appearance: 'dark' | 'light';
+      type: 'pickWindowGlassVideoFile';
+    }
   /**
    * CDXC:Onboarding 2026-08-24:
    * The onboarding footer's Add 1st project action opens a native folder dialog

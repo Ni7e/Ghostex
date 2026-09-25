@@ -131,7 +131,7 @@ fn client_id(now_ms: i64, errors: &mut BootReads) -> String {
     let created = format!(
         "gx-{}{}",
         base36(u64::from_be_bytes(
-            uuid::Uuid::new_v4().into_bytes()[..8]
+            super::platform::random_bytes()[..8]
                 .try_into()
                 .unwrap_or_default()
         )),
@@ -218,7 +218,7 @@ fn entry_with_version(stored: Option<&StoredDraftRecord>) -> Value {
 /// The core generates no ids on purpose (it reads no random source and must cross UniFFI), so the
 /// host mints them, in the same v4 shape `crypto.randomUUID()` produces inside QuickJS.
 pub(super) fn next_draft_version() -> Value {
-    json!({"draftId": uuid::Uuid::new_v4().to_string(), "revision": 1})
+    json!({"draftId": super::platform::uuid_v4(), "revision": 1})
 }
 
 /// `{ "<sessionKey>[#<scope>]": <value> }` for every stored record of this session.

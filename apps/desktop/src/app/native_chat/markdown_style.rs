@@ -63,7 +63,7 @@ static LIGHT_CODE_THEME: LazyLock<Arc<HighlightTheme>> =
     LazyLock::new(|| Arc::new(CODE_THEMES.light.clone()));
 
 /// The syntax palette a fenced block is painted with, matching React's Shiki themes.
-pub(super) fn highlight_theme(light: bool) -> Arc<HighlightTheme> {
+pub(crate) fn highlight_theme(light: bool) -> Arc<HighlightTheme> {
     if light {
         LIGHT_CODE_THEME.clone()
     } else {

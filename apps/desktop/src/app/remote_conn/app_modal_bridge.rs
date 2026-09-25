@@ -142,6 +142,12 @@ impl GhostexGpuiApp {
             "pickWindowGlassImageFile" => {
                 self.handle_gpui_pick_window_glass_image_message(&message, cx);
             }
+            "listWindowGlassVideos" => {
+                self.handle_gpui_list_window_glass_videos_message(cx);
+            }
+            "pickWindowGlassVideoFile" => {
+                self.handle_gpui_pick_window_glass_video_message(&message, cx);
+            }
             "pickFirstLaunchProjectFolder" => {
                 self.handle_gpui_pick_first_launch_project_folder_message(cx);
             }
@@ -432,11 +438,6 @@ impl GhostexGpuiApp {
         let Some(message_type) = message.get("type").and_then(serde_json::Value::as_str) else {
             return;
         };
-
-        if message_type == "sessionChatRuntimeBroker" {
-            self.receive_session_chat_runtime_broker(&message, cx);
-            return;
-        }
 
         match message_type {
             "sidebarDiagnosticLog" => {

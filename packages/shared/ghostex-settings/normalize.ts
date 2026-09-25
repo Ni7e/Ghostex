@@ -977,6 +977,21 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       'windowGlassImageLight',
       DEFAULT_ghostex_SETTINGS.windowGlassImageLight
     ).trim(),
+    windowGlassVideoDark: readString(
+      source,
+      'windowGlassVideoDark',
+      DEFAULT_ghostex_SETTINGS.windowGlassVideoDark
+    ).trim(),
+    windowGlassVideoLight: readString(
+      source,
+      'windowGlassVideoLight',
+      DEFAULT_ghostex_SETTINGS.windowGlassVideoLight
+    ).trim(),
+    windowGlassVideoOnlyOnPower: readBoolean(
+      source,
+      'windowGlassVideoOnlyOnPower',
+      DEFAULT_ghostex_SETTINGS.windowGlassVideoOnlyOnPower
+    ),
     windowGlassSidebarOpacityDark: clampWindowGlassSidebarOpacityPercent(
       readNumber(source, 'windowGlassSidebarOpacityDark', DEFAULT_ghostex_SETTINGS.windowGlassSidebarOpacityDark),
       DEFAULT_ghostex_SETTINGS.windowGlassSidebarOpacityDark
@@ -1246,7 +1261,7 @@ function normalizeWindowGlassMode(value: string | undefined): WindowGlassMode {
 }
 
 function normalizeWindowGlassSource(value: string | undefined): WindowGlassSource {
-  return value === 'wallpaper' || value === 'desktopAndWindows' || value === 'customImage'
+  return value === 'wallpaper' || value === 'desktopAndWindows' || value === 'customImage' || value === 'video'
     ? value
     : DEFAULT_ghostex_SETTINGS.windowGlassSource;
 }

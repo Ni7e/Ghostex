@@ -155,6 +155,7 @@ export const WINDOW_GLASS_SOURCE_OPTIONS: ReadonlyArray<{
   { label: 'Desktop and windows', value: 'desktopAndWindows' },
   { label: 'Wallpaper only', value: 'wallpaper' },
   { label: 'Custom image', value: 'customImage' },
+  { label: 'Video', value: 'video' },
 ];
 
 export const WINDOW_GLASS_IMAGE_PLACEMENT_OPTIONS: ReadonlyArray<{

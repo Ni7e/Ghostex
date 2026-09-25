@@ -12,10 +12,10 @@ use std::{
 
 #[derive(Clone)]
 pub(crate) struct NativeChatConfig {
-    /// `"local"` for a chat on this computer, the saved machine's settings id otherwise. It is the
-    /// spelling `session_chat_runtime.rs` puts on the broker's `identity`, and the Rust host builds
-    /// its `remote-<machineId>:` storage prefix from the same test, so a remote chat reads back the
-    /// drafts, notices and option pills the TypeScript brain wrote rather than a local session's.
+    /// `"local"` for a chat on this computer, the saved machine's settings id otherwise. The Rust
+    /// chat host keys the machine's chat socket by it and builds its `remote-<machineId>:` storage
+    /// prefix from the same test, so a remote chat reads back the drafts, notices and option pills
+    /// the TypeScript brain wrote rather than a local session's.
     pub(crate) machine_id: String,
     pub(crate) project_id: String,
     pub(crate) session_id: String,
@@ -162,8 +162,6 @@ pub(crate) struct NativeChatView {
     /// React's remembered last choice (session-chat-code-wrap.ts): the blocks that
     /// scroll into view after a toggle start the way the reader last asked for.
     pub(super) code_wrap_default: bool,
-    /// The tables whose cells the reader collapsed to one line; the rest wrap their cells.
-    pub(super) table_collapsed: HashSet<String>,
     pub(crate) list: gpui::ListState,
     /// The transcript's own cached view, created on the first draw (transcript_host.rs).
     pub(super) transcript_host: Option<Entity<super::transcript_host::TranscriptHost>>,
@@ -212,8 +210,13 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) -> ChatRuntimeWorker {
         let (wake, mut wakes) = futures::channel::mpsc::unbounded::<()>();
+        // A remote chat names its machine's gxserver, which its chat socket connects to; this
+        // computer's daemon is the app's to give the chat host (`gx_chat::set_endpoint`).
+        let endpoint = config.remote.as_ref().map(|target| {
+            json!({"baseUrl": format!("http://127.0.0.1:{}", target.local_port), "authToken": target.token})
+        });
         let runtime = ChatRuntimeWorker::start(
-            json!({"clientId":config.client_id,"machineId":config.machine_id,"projectId":config.project_id,"sessionId":config.session_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
+            json!({"clientId":config.client_id,"machineId":config.machine_id,"projectId":config.project_id,"sessionId":config.session_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview,"endpoint":endpoint}),
             move || {
                 let _ = wake.unbounded_send(());
             },
@@ -360,7 +363,6 @@ impl NativeChatView {
             collapsed: HashSet::new(),
             code_wrap: HashMap::new(),
             code_wrap_default: false,
-            table_collapsed: HashSet::new(),
             list,
             transcript_host: None,
             transcript_reveal: Default::default(),
@@ -506,11 +508,6 @@ impl NativeChatView {
         payload: &Value,
         cx: &mut Context<Self>,
     ) {
-        if callback == "onSessionChatRuntimeMessage" {
-            if let Some(runtime) = &self.runtime {
-                runtime.call("brokerMessage", vec![payload.clone()]);
-            }
-        }
         if callback == "onSessionChatAttachmentsPicked" {
             self.invoke(json!({"type":"attachPaths","paths":payload["paths"]}), cx);
         }
@@ -617,13 +614,6 @@ impl NativeChatView {
         }
         self.last_notified = Some(now);
         cx.notify();
-    }
-
-    /// A broker event as JSON text; the runtime thread parses it, so the UI thread never builds the value.
-    pub(crate) fn receive_broker_raw(&mut self, raw: String) {
-        if let Some(runtime) = &self.runtime {
-            runtime.call_raw("brokerMessage", raw);
-        }
     }
 
     fn apply_output(&mut self, mut output: Value, cx: &mut Context<Self>) {

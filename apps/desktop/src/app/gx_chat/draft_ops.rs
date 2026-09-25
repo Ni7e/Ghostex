@@ -135,7 +135,7 @@ pub(super) fn park(
     };
     write_draft(session_key, &parked, now_ms)?;
     Ok(ParkResult {
-        handoff_id: uuid::Uuid::new_v4().to_string(),
+        handoff_id: super::platform::uuid_v4(),
         content: current.text,
         draft_version: current
             .version

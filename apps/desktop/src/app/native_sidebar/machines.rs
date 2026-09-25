@@ -38,6 +38,7 @@ impl GhostexGpuiApp {
                     .child(div().min_w_0().text_ellipsis().child(machine.label.clone()))
                     .when(machine.working_count > 0, |row| row.child(div().text_color(rgb(super::status::WORKING_COLOR)).child(machine.working_count.to_string())))
                     .when(machine.attention_count > 0, |row| row.child(div().text_color(rgb(0x95d7f6)).child(machine.attention_count.to_string())))
+                    .when(machine.working_count == 0 && machine.background_work_count > 0, |row| row.child(div().text_color(super::status::background_work_color()).child(machine.background_work_count.to_string())))
                     .when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.tooltip_show_delay(appearance.tooltip_delay).tooltip(move |window, cx| titlebar_tooltip(tooltip.clone(), window, cx)))
                     .on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_ui(json!({"type": "selectMachine", "machineId": id}), cx); }))
                     .when(machine.id != "local", |row| row.on_mouse_down(MouseButton::Right, move |event, window, cx| {

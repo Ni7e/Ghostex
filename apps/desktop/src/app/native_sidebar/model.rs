@@ -62,6 +62,8 @@ pub(crate) struct NativeSidebarSection {
     pub(crate) contains_active_session: bool,
     pub(crate) working_count: usize,
     pub(crate) attention_count: usize,
+    #[serde(default)]
+    pub(crate) background_work_count: usize,
     pub(crate) question_count: usize,
     pub(crate) session_ids: Vec<String>,
 }
@@ -111,6 +113,8 @@ impl NativeSidebarSession {
 pub(crate) struct NativeSidebarMachine {
     pub(crate) working_count: usize,
     pub(crate) attention_count: usize,
+    #[serde(default)]
+    pub(crate) background_work_count: usize,
     pub(crate) id: String,
     pub(crate) label: String,
     pub(crate) state: String,
@@ -128,6 +132,8 @@ pub(crate) struct NativeSidebarSpace {
     pub(crate) contains_active_session: bool,
     pub(crate) working_count: usize,
     pub(crate) attention_count: usize,
+    #[serde(default)]
+    pub(crate) background_work_count: usize,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -148,6 +154,8 @@ pub(crate) struct NativeSidebarCollection {
     pub(crate) contains_active_session: bool,
     pub(crate) working_count: usize,
     pub(crate) attention_count: usize,
+    #[serde(default)]
+    pub(crate) background_work_count: usize,
     pub(crate) menu: Arc<Value>,
 }
 

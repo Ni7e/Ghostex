@@ -532,19 +532,7 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
             title: 'Chromium runtime (CEF)',
           },
         ],
-        title: 'Official Extensions',
-      },
-      {
-        id: 'accountUsage',
-        settings: [
-          {
-            key: 'accountTitlebarUsage',
-            title: 'Account usage in the sidebar',
-            subtitle:
-              'Show or hide usage stats for saved Claude and Codex accounts at the bottom of the desktop sidebar. Star accounts to pin their usage.',
-          },
-        ],
-        title: 'Account usage in the sidebar',
+        title: 'Built-in',
       },
       {
         id: 'store',
@@ -568,6 +556,18 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
           },
         ],
         title: 'Your views',
+      },
+      {
+        id: 'accountUsage',
+        settings: [
+          {
+            key: 'accountTitlebarUsage',
+            title: 'Account usage in the sidebar',
+            subtitle:
+              'Show or hide usage stats for saved Claude and Codex accounts at the bottom of the desktop sidebar. Star accounts to pin their usage.',
+          },
+        ],
+        title: 'Account usage in the sidebar',
       },
     ],
     title: 'Extensions',

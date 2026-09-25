@@ -6,7 +6,7 @@ use crate::sidebar_view::collections::CollectionsState;
 use crate::sidebar_view::spaces::SpacesState;
 use crate::sidebar_view::view::SessionView;
 
-use super::commands::{message, MenuCommand};
+use super::commands::{MenuCommand, message};
 use super::group::MenuGroup;
 use super::item::MenuItem;
 use super::membership::project_membership_menu;
@@ -146,6 +146,7 @@ pub fn project_menu(input: &ProjectMenuInput<'_>) -> Vec<MenuItem> {
             && row.lifecycle_state == "running"
             && row.activity != "working"
             && row.activity != "attention"
+            && !row.has_background_work
     });
     menu.push(
         MenuItem::row(

@@ -11,7 +11,11 @@ pub(crate) const WORKING_COLOR: u32 = 0xc68a06;
 /// User: "make the working indicator just the orange dot without animation. i dont mind. like the one we have in the SESSIONS header", so a working session shows the same static 8px orange dot the section headers draw.
 /// This supersedes the 2026-09-17 decision that brought the animated working spinner back.
 /// CDXC:SessionStatus 2026-09-22 DECISION:
-/// User: "make shell running just show a #B4B8BF color dot in the sidebar in dark mode and a darker dot in light mode", so a row whose agent still has a background shell or monitor running after its turn draws a grey dot in place of the time; working and attention keep precedence over it.
+/// User: "make shell running just show a #B4B8BF color dot in the sidebar in dark mode and a darker dot in light mode", so a row whose agent still has a background shell or monitor running after its turn draws a grey dot in place of the time; working and attention keep precedence over it. Headers (sections, projects, collections, Spaces, machines) draw the same grey when they have no working session but have a grey-dot session.
+pub(crate) fn background_work_color() -> gpui::Rgba {
+    chrome_color(0xb4b8bf, 0x6b7078)
+}
+
 pub(crate) fn activity_indicator(
     activity: &str,
     has_background_work: bool,
@@ -31,7 +35,7 @@ pub(crate) fn activity_indicator(
         _ if has_background_work => div()
             .size(px(8.0 * scale))
             .rounded_full()
-            .bg(chrome_color(0xb4b8bf, 0x6b7078))
+            .bg(background_work_color())
             .into_any_element(),
         _ => return None,
     };

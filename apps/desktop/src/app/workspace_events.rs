@@ -85,6 +85,15 @@ impl GhostexGpuiApp {
                     }
                     return;
                 }
+                // Native Docs' browser area: a link in an HTML file opens that file in Docs.
+                if let Ok(request) = serde_json::from_str::<serde_json::Value>(&payload)
+                    && manage_request_string(&request, "action").as_deref() == Some("openDocsFile")
+                {
+                    if let Some(path) = manage_request_string(&request, "path") {
+                        self.native_docs_open_external(path, cx);
+                    }
+                    return;
+                }
                 // Annotation feedback never touches the file system: the target
                 // session and the delivery are app state, so both requests are
                 // answered here instead of through the git-backed file bridge.
@@ -113,81 +122,14 @@ impl GhostexGpuiApp {
                     }
                     return;
                 }
-                /*
-                CDXC:Docs 2026-07-11:
-                This arm previously ran synchronously inside the bridge event
-                handler, but manage_files_bridge_result shells out to `git`
-                (rev-parse/check-ignore/cat-file, up to six calls, no timeout)
-                and reads files/directories — all on the main thread. A stuck
-                git (index.lock, network filesystem, slow hook) beach-balled
-                the app. Run it on the background executor like the Beads and
-                automation-board arms, then dispatch the response from the
-                follow-up update.
-                */
-                let snapshot = self.latest_sidebar_project_snapshot.clone();
-                let additional_docs_folders_text = gpui_manage_additional_docs_folders_text(
-                    &self.sidebar_runtime_settings_snapshot,
-                );
-                let global_docs_directory_text =
-                    gpui_global_docs_directory_text(&self.sidebar_runtime_settings_snapshot);
-                let remote_context = snapshot
-                    .as_ref()
-                    .and_then(|snapshot| snapshot.active_project_id.as_ref())
-                    .and_then(|project_id| {
-                        gpui_remote_project_reference_from_project_id(project_id.0.as_str())
-                    })
-                    .map(|reference| {
-                        let target = self.gpui_remote_gxserver_request_target(
-                            reference.remote_machine_id.as_str(),
-                        );
-                        (reference, target)
-                    });
-                let background = cx.background_executor().clone();
-                cx.spawn(async move |this, cx| {
-                    let outcome = background
-                        .spawn(async move {
-                            match remote_context {
-                                Some((reference, target)) => {
-                                    run_remote_manage_files_bridge_request_for_project_snapshot(
-                                        &payload,
-                                        snapshot.as_ref(),
-                                        &additional_docs_folders_text,
-                                        &reference,
-                                        target.as_ref(),
-                                    )
-                                }
-                                None => run_manage_files_bridge_request_for_project_snapshot(
-                                    &payload,
-                                    snapshot.as_ref(),
-                                    &additional_docs_folders_text,
-                                    &global_docs_directory_text,
-                                ),
-                            }
-                        })
-                        .await;
-                    let _ = this.update(cx, |this, cx| {
-                        let ManageFilesBridgeOutcome {
-                            action,
-                            request_id,
-                            mut response,
-                            side_effect,
-                        } = outcome;
-                        if let Some(side_effect) = side_effect
-                            && let Err(error) =
-                                this.perform_manage_files_bridge_side_effect(side_effect, cx)
-                        {
-                            response =
-                                manage_files_bridge_error_response(&action, &request_id, &error);
-                        }
-                        this.dispatch_project_workarea_json_event(
-                            slot_key,
-                            "ghostex-manage-files-response",
-                            &response.to_string(),
-                            cx,
-                        );
-                    });
-                })
-                .detach();
+                self.run_docs_files_request(payload, cx, move |this, response, cx| {
+                    this.dispatch_project_workarea_json_event(
+                        slot_key,
+                        "ghostex-manage-files-response",
+                        &response.to_string(),
+                        cx,
+                    );
+                });
             }
             (
                 ProjectWorkareaCefSurfaceSlotKey::Kanban

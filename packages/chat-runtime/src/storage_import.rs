@@ -121,7 +121,7 @@ pub(crate) fn import(storage: &mut Storage, profile: &Path) -> Result<()> {
     Ok(())
 }
 
-fn latest_records(path: &Path) -> Result<Vec<leveldb_core::Record>> {
+pub(crate) fn latest_records(path: &Path) -> Result<Vec<leveldb_core::Record>> {
     let mut latest: HashMap<Vec<u8>, leveldb_core::Record> = HashMap::new();
     for entry in fs::read_dir(path)? {
         let path = entry?.path();
@@ -169,7 +169,7 @@ fn prefix(key: &[u8]) -> Option<(usize, u64, usize)> {
         .fold(0, |v, (i, b)| v | ((*b as u64) << (i * 8)));
     Some((index_offset, database, index_len))
 }
-fn unwrap_values(records: &mut [leveldb_core::Record], blobs: &Path) -> Result<()> {
+pub(crate) fn unwrap_values(records: &mut [leveldb_core::Record], blobs: &Path) -> Result<()> {
     let externals: HashMap<Vec<u8>, Vec<u8>> = records
         .iter()
         .filter(|row| {
@@ -236,7 +236,7 @@ fn unwrap_values(records: &mut [leveldb_core::Record], blobs: &Path) -> Result<(
     }
     Ok(())
 }
-fn to_json(value: V8Value) -> Result<Value> {
+pub(crate) fn to_json(value: V8Value) -> Result<Value> {
     Ok(match value {
         V8Value::Undefined | V8Value::Null | V8Value::Hole => Value::Null,
         V8Value::Bool(value) | V8Value::BooleanObject(value) => json!(value),

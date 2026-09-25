@@ -1300,7 +1300,8 @@ impl Render for GpuiNewThreadPickerWindow {
             .border_color(hsla(c.frame_border))
             // Under window glass the picker's window blurs what is behind it, so its fill thins.
             .bg(hsla(if self.glass {
-                rgba_of(c.surface, 0.78)
+                // Same coverage as the app's other frosted menus (`WINDOW_GLASS_MENU_ALPHA`).
+                rgba_of(c.surface, 0.62)
             } else {
                 c.surface
             }))

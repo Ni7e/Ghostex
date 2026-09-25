@@ -7215,7 +7215,7 @@
     {
       "key": "windowGlassSource",
       "title": "Glass shows",
-      "subtitle": "Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose.",
+      "subtitle": "Wallpaper only keeps other windows from showing through the glass. Custom image shows a picture you choose, and Video plays a video behind it.",
       "tab": "theme",
       "tabTitle": "Theme",
       "group": "appearance",
@@ -7236,6 +7236,10 @@
         {
           "label": "Custom image",
           "value": "customImage"
+        },
+        {
+          "label": "Video",
+          "value": "video"
         }
       ],
       "agentWritable": true
@@ -7243,7 +7247,7 @@
     {
       "key": "windowGlassImagePlacement",
       "title": "Glass picture position",
-      "subtitle": "Where the wallpaper or custom picture sits behind the glass. Stays with the desktop can trail the window while you drag it.",
+      "subtitle": "Where the wallpaper, custom picture or video sits behind the glass. Stays with the desktop can trail the window while you drag it.",
       "tab": "theme",
       "tabTitle": "Theme",
       "group": "appearance",
@@ -7290,6 +7294,48 @@
       "sectionTitle": "Theme",
       "type": "string",
       "default": "",
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassVideoDark",
+      "title": "Glass video for dark mode",
+      "subtitle": "The video the glass plays in dark mode when Glass shows is Video: an aerial wallpaper your computer has downloaded, or a video file you choose.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "string",
+      "default": "",
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassVideoLight",
+      "title": "Glass video for light mode",
+      "subtitle": "The video the glass plays in light mode when Glass shows is Video: an aerial wallpaper your computer has downloaded, or a video file you choose.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "string",
+      "default": "",
+      "agentWritable": true
+    },
+    {
+      "key": "windowGlassVideoOnlyOnPower",
+      "title": "Play glass video only when plugged in",
+      "subtitle": "Pause the glass video while your computer runs on battery. It always pauses when Ghostex is in the background.",
+      "tab": "theme",
+      "tabTitle": "Theme",
+      "group": "appearance",
+      "groupTitle": "Theme",
+      "section": "theming",
+      "sectionTitle": "Theme",
+      "type": "boolean",
+      "default": true,
       "agentWritable": true
     },
     {
@@ -8747,7 +8793,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8758,7 +8804,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8769,7 +8815,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8780,7 +8826,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8791,7 +8837,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8802,7 +8848,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8813,7 +8859,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8824,7 +8870,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8835,7 +8881,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8846,7 +8892,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8857,7 +8903,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8868,7 +8914,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8879,7 +8925,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8890,7 +8936,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8901,7 +8947,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8912,7 +8958,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8923,7 +8969,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8934,7 +8980,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8945,7 +8991,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8956,7 +9002,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8967,7 +9013,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8978,7 +9024,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -8989,7 +9035,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -9000,7 +9046,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -9011,7 +9057,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -9022,18 +9068,7 @@
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
-      "sectionTitle": "Official Extensions",
-      "type": "ui",
-      "agentWritable": false
-    },
-    {
-      "key": "accountTitlebarUsage",
-      "title": "Account usage in the sidebar",
-      "subtitle": "Show or hide usage stats for saved Claude and Codex accounts at the bottom of the desktop sidebar. Star accounts to pin their usage.",
-      "tab": "extensions",
-      "tabTitle": "Extensions",
-      "section": "accountUsage",
-      "sectionTitle": "Account usage in the sidebar",
+      "sectionTitle": "Built-in",
       "type": "ui",
       "agentWritable": false
     },
@@ -9058,6 +9093,17 @@
       "sectionTitle": "Your views",
       "type": "json",
       "default": [],
+      "agentWritable": false
+    },
+    {
+      "key": "accountTitlebarUsage",
+      "title": "Account usage in the sidebar",
+      "subtitle": "Show or hide usage stats for saved Claude and Codex accounts at the bottom of the desktop sidebar. Star accounts to pin their usage.",
+      "tab": "extensions",
+      "tabTitle": "Extensions",
+      "section": "accountUsage",
+      "sectionTitle": "Account usage in the sidebar",
+      "type": "ui",
       "agentWritable": false
     },
     {

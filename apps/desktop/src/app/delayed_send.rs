@@ -1990,6 +1990,15 @@ impl GhostexGpuiApp {
                     cx,
                 );
             }
+            "listWindowGlassVideos" => {
+                self.handle_gpui_list_window_glass_videos_message(cx);
+            }
+            "pickWindowGlassVideoFile" => {
+                self.handle_gpui_pick_window_glass_video_message(
+                    &serde_json::Value::Object(command.clone()),
+                    cx,
+                );
+            }
             "pickFirstLaunchProjectFolder" => {
                 self.handle_gpui_pick_first_launch_project_folder_message(cx);
             }
