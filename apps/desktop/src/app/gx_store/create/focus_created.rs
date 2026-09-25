@@ -37,7 +37,7 @@ pub(crate) struct CreatedAttaches {
 impl GhostexGpuiApp {
     /// `focusLocalWorkspaceSession(projectId, sessionId, { keepView, preferredInterface })` for a
     /// session a create just made.
-    pub(super) fn gx_store_focus_created_session(
+    pub(crate) fn gx_store_focus_created_session(
         &mut self,
         project_id: &str,
         session_id: &str,

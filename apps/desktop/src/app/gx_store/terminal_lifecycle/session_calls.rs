@@ -36,3 +36,11 @@ pub(crate) async fn toggle_close_after_done(
         .await
         .map(|result| result.get("armed").and_then(serde_json::Value::as_bool) == Some(true))
 }
+
+/// `/api/openConversation` on the local daemon: `{ outcome, projectId, sessionId }` where the
+/// outcome is `focus` (a live session), `restored` or `resumed` (a new one).
+pub(crate) async fn open_conversation(
+    params: serde_json::Value,
+) -> Result<serde_json::Value, GxRpcError> {
+    gx_rpc(None, "/api/openConversation", params).await
+}

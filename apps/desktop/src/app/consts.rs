@@ -466,11 +466,6 @@ pub(crate) const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION: u6
 pub(crate) const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTabSessionSelected";
 
-pub(crate) const GPUI_SIDEBAR_STASHED_PROMPT_SESSION_JUMP_MESSAGE_VERSION: u64 = 1;
-
-pub(crate) const GPUI_SIDEBAR_STASHED_PROMPT_SESSION_JUMP_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.stashedPromptSessionJump";
-
 pub(crate) const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION: u64 = 1;
 
 pub(crate) const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_TYPE: &str =

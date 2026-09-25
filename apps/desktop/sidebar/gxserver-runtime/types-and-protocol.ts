@@ -145,7 +145,6 @@ export type GhostexGpuiSidebarBridge = {
    * from. Rust forwards the row's raw gxserver ids plus the durable provider
    * conversation id; this runtime resolves the best available target.
    */
-  onStashedPromptSessionJump?: (payload: unknown) => void;
   onTitlebarGitAction?: (payload: unknown) => void;
   onWorktreeModalCommand?: (payload: unknown) => void;
   /**
@@ -175,7 +174,6 @@ export type GhostexGpuiSidebarBridge = {
   pendingNativeAppShots?: unknown[];
   pendingSidebarCommands?: unknown[];
   pendingProjectBoardConversationRequests?: unknown[];
-  pendingStashedPromptSessionJumps?: unknown[];
   pendingTitlebarGitActions?: unknown[];
   pendingWorktreeModalCommands?: unknown[];
   pendingWorkspaceSessionAttentionAcknowledgements?: unknown[];

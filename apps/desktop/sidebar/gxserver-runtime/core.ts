@@ -62,8 +62,6 @@ import type { GpuiSidebarRuntimeSessionFocusMethods } from './sessions-and-focus
 import { gpuiSidebarRuntimeSessionFocusMethods } from './sessions-and-focus';
 import type { GpuiSidebarRuntimeSidebarGroupMethods } from './sidebar-groups';
 import { gpuiSidebarRuntimeSidebarGroupMethods } from './sidebar-groups';
-import type { GpuiSidebarRuntimeStashedPromptJumpMethods } from './stashed-prompt-jump';
-import { gpuiSidebarRuntimeStashedPromptJumpMethods } from './stashed-prompt-jump';
 import type { GpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-lifecycle-queue';
 import { gpuiSidebarRuntimeTerminalLifecycleMethods } from './terminal-lifecycle-queue';
 import type {
@@ -380,9 +378,6 @@ export class GpuiSidebarRuntime {
     gpuiBridge.onMenuBarProjectActivation = (payload) => {
       this.handleGpuiMenuBarProjectActivation(payload);
     };
-    gpuiBridge.onStashedPromptSessionJump = (payload) => {
-      void this.handleGpuiStashedPromptSessionJump(payload);
-    };
     gpuiBridge.onProjectBoardConversationRequest = (payload) => {
       void this.handleGpuiProjectBoardConversationRequest(payload);
     };
@@ -414,12 +409,6 @@ export class GpuiSidebarRuntime {
       for (const payload of pendingMenuBarProjectActivations) {
         this.handleGpuiMenuBarProjectActivation(payload);
       }
-    }
-    const pendingStashedPromptSessionJumps = Array.isArray(gpuiBridge.pendingStashedPromptSessionJumps)
-      ? gpuiBridge.pendingStashedPromptSessionJumps.splice(0)
-      : [];
-    for (const payload of pendingStashedPromptSessionJumps) {
-      void this.handleGpuiStashedPromptSessionJump(payload);
     }
     const pendingProjectBoardConversationRequests = Array.isArray(gpuiBridge.pendingProjectBoardConversationRequests)
       ? gpuiBridge.pendingProjectBoardConversationRequests.splice(0)
@@ -822,7 +811,6 @@ export interface GpuiSidebarRuntime
     GpuiSidebarRuntimeAutoSleepMethods,
     GpuiSidebarRuntimeProjectBoardMethods,
     GpuiSidebarRuntimeConversationJumpMethods,
-    GpuiSidebarRuntimeStashedPromptJumpMethods,
     GpuiSidebarRuntimeAttentionMethods,
     GpuiSidebarRuntimeCloseAfterDoneMethods,
     GpuiSidebarRuntimeTerminalLifecycleMethods,
@@ -852,7 +840,6 @@ installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeDraftSessionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAutoSleepMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeProjectBoardMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeConversationJumpMethods);
-installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeStashedPromptJumpMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeAttentionMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeCloseAfterDoneMethods);
 installGpuiSidebarRuntimeMethods(gpuiSidebarRuntimeTerminalLifecycleMethods);
