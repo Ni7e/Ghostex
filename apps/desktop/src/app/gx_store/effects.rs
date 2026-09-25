@@ -140,6 +140,7 @@ impl GhostexGpuiApp {
             Effect::MachineLive { machine } => {
                 if machine.is_local() {
                     self.gx_store_refresh_notification_feed(cx);
+                    self.navigation_history_refresh(cx);
                 }
                 self.gx_store_perform_hud_effect(Effect::MachineLive { machine }, cx);
             }

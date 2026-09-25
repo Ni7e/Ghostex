@@ -104,9 +104,6 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     this.gxserverBootstrap = validated;
     this.client = new GpuiGxserverClient(validated);
     this.applyGxserverBootstrapPresentationState(validated);
-    // Adopt whatever trail this scope already has on the daemon so Back keeps
-    // working across an app restart instead of starting from an empty stack.
-    void this.navigationHistory.refresh();
     // Heal the shared composer draft cache from the daemon's durable copy —
     // an app kill can drop localStorage batches the daemon still holds.
     this.reconcileSessionChatDraftCache();

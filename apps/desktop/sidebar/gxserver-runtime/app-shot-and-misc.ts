@@ -3,7 +3,6 @@ CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
 changed. See `core.ts` for how the runtime's methods are re-attached.
 */
-import { parseGpuiWorkspaceSessionSubgroupId } from '../workspace-session-groups';
 import {
   APP_SHOT_PROMPT_INSERT_RESULT_TIMEOUT_MS,
   APP_SHOT_RECENT_TARGET_MS,
@@ -44,8 +43,6 @@ import { openAppModal, postAppModalHostMessage } from '@/packages/core-ui/app-mo
 import type { AppToastLevel } from '@/packages/shared/app-toast-contract';
 import { createAppToastRequest } from '@/packages/shared/app-toast-contract';
 import type { PreferredAgentInterface } from '@/packages/shared/ghostex-settings';
-import type { NavigationHistoryEntry } from '@/packages/shared/navigation-history/navigation-history-contract';
-import type { NavigationHistoryRpc } from '@/packages/shared/navigation-history/navigation-history-controller';
 import type { SidebarSessionItem, SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
 import type { SidebarCommandButton } from '@/packages/shared/sidebar-commands';
 import { isSidebarCommandRunMode } from '@/packages/shared/sidebar-commands';
@@ -72,10 +69,6 @@ export interface GpuiSidebarRuntimeAppShotAndMiscMethods {
   handleNativeAppShotPromptResult(payload: unknown): void;
   resolvePendingNativeAppShotPromptInsertion(pending: GpuiPendingNativeAppShotPromptInsertion, ok: boolean): void;
   rememberNativeAppShotTargetSessionId(sessionId: string): void;
-  createNavigationHistoryEntry(): NavigationHistoryEntry | undefined;
-  navigationHistoryRpc(): NavigationHistoryRpc | undefined;
-  activateNavigationHistoryEntry(entry: NavigationHistoryEntry): boolean;
-  postNavigationHistoryState(state: { canGoBack: boolean; canGoForward: boolean }): void;
   postAppShotToast(
     level: AppToastLevel,
     title: string,
@@ -375,104 +368,6 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
     }
     this.lastAppShotTargetSessionId = normalizedSessionId;
     this.lastAppShotTargetAt = Date.now();
-  },
-
-  /*
-  CDXC:Navigation 2026-08-19:
-  Trail stops are recorded from the SAME projection the titlebar label reads,
-  so "where the user is" can never disagree between the label and Back. A stop
-  needs a real project: Quick/projectless and the synthetic Chats collection
-  publish nothing rather than pushing a stop that cannot be returned to.
-  */
-  createNavigationHistoryEntry(this: GpuiSidebarRuntime): NavigationHistoryEntry | undefined {
-    const activeGroup = this.activeProjectContextGroups().find((group) => group.isActive);
-    if (!activeGroup) {
-      return undefined;
-    }
-    const projectId =
-      activeGroup.projectContext?.editor.projectId ??
-      parseGpuiWorkspaceSessionSubgroupId(activeGroup.groupId)?.projectId;
-    if (!projectId) {
-      return undefined;
-    }
-    const focusedSession = activeGroup.sessions.find((session) => session.isFocused);
-    const sessionLabel = focusedSession
-      ? (focusedSession.displayTitle ?? focusedSession.primaryTitle ?? focusedSession.alias)
-      : undefined;
-    return {
-      groupId: activeGroup.groupId,
-      projectId,
-      ...(activeGroup.title ? { projectLabel: activeGroup.title } : {}),
-      ...(focusedSession ? { sessionId: focusedSession.sessionId } : {}),
-      ...(sessionLabel ? { sessionLabel } : {}),
-    };
-  },
-
-  navigationHistoryRpc(this: GpuiSidebarRuntime): NavigationHistoryRpc | undefined {
-    const client = this.client;
-    if (!client) {
-      return undefined;
-    }
-    return (path, params) => client.rpc<unknown>(path, params);
-  },
-
-  /**
-   * Focus a trail stop, or report it as gone so the daemon drops it and Back
-   * keeps walking. Sessions win over their project: the stop recorded a session
-   * because that is what the user was looking at.
-   */
-  activateNavigationHistoryEntry(this: GpuiSidebarRuntime, entry: NavigationHistoryEntry): boolean {
-    if (entry.sessionId) {
-      const exists = this.latestGroups.some((group) =>
-        group.sessions.some((session) => session.sessionId === entry.sessionId)
-      );
-      if (!exists) {
-        return false;
-      }
-      void this.focusSession(entry.sessionId, {
-        sessionId: entry.sessionId,
-        type: 'focusSession',
-      });
-      return true;
-    }
-    const groupId = entry.groupId;
-    if (!groupId || !this.latestGroups.some((group) => group.groupId === groupId)) {
-      return false;
-    }
-    this.focusGroup(groupId, { groupId, type: 'focusGroup' });
-    return true;
-  },
-
-  /**
-   * The native titlebar renders the two buttons from this cached state; it must
-   * never issue an RPC of its own on a render pass. Deduplicated so a publish
-   * storm cannot turn into a bridge-message storm.
-   */
-  postNavigationHistoryState(
-    this: GpuiSidebarRuntime,
-    state: {
-      canGoBack: boolean;
-      canGoForward: boolean;
-    }
-  ): void {
-    /*
-    CDXC:Navigation 2026-08-19:
-    Availability only. The native arrows have no hover tooltip, so sending the
-    destination labels would wake the bridge — and a titlebar repaint check —
-    every time a back/forward target's title changed, for pixels that cannot
-    move.
-    */
-    const message = {
-      canGoBack: state.canGoBack,
-      canGoForward: state.canGoForward,
-      type: 'navigationHistoryState',
-    };
-    const payload = JSON.stringify(message);
-    if (payload === this.lastNavigationHistoryStatePayload) {
-      return;
-    }
-    this.lastNavigationHistoryStatePayload = payload;
-    window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage(message);
   },
 
   postAppShotToast(

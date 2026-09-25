@@ -205,6 +205,11 @@ impl SidebarList {
         self.model.view()
     }
 
+    /// The model itself, for readers of the groups it built (Back/Forward's trail stop).
+    pub(crate) fn model(&self) -> &SidebarViewModel {
+        &self.model
+    }
+
     /// The session Close Project focuses before it parks the project
     /// (gx_store/sidebar_close_project.rs).
     pub(crate) fn close_project_successor_session_id(&self, group_id: &str) -> Option<String> {
@@ -531,6 +536,7 @@ impl GhostexGpuiApp {
         // this update's list. Nothing happens unless the focused row really changed
         // (`take_followed_session`), so every other path through here pays one comparison.
         self.gx_store_follow_active_session_space(cx);
+        self.navigation_history_sidebar_changed(cx);
         // Every so often the same inputs are also built from scratch and the two lists compared:
         // this port's own cache invalidation, which has no second list to lean on since the page
         // was deleted (gx_store/sidebar_self_check.rs).

@@ -1,5 +1,6 @@
-//! Clicks outside the sidebar that land on a session: the status item and the pet, a menu bar
-//! session row, a Quick Access or command palette session row, and a palette Action run.
+//! Clicks outside the sidebar that land on a session or a group: the status item and the pet, a
+//! menu bar session row, a Quick Access or command palette session row, a palette Action run, and
+//! a Back or Forward stop.
 //!
 //! CDXC:StatusPet 2026-09-25 WHY:
 //! Each of these used to reach the app runtime through a callback of its own
@@ -35,6 +36,33 @@ impl GhostexGpuiApp {
         self.gx_store_send_sidebar_runtime_command(
             json!({ "type": "focusSession", "sessionId": session_id }),
             cx,
+        )
+    }
+
+    /// Focuses one sidebar group (a project, or a user-made group in one) the way a header click
+    /// does. Returns whether a runtime took it.
+    pub(crate) fn gx_store_focus_activated_group(
+        &mut self,
+        group_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if group_id.is_empty() {
+            return false;
+        }
+        self.gx_store_flush_old_runtime_tell(cx);
+        self.gx_store_send_sidebar_runtime_command(
+            json!({ "type": "focusGroup", "groupId": group_id }),
+            cx,
+        )
+    }
+
+    /// The Back/Forward stop the sidebar is on (navigation_history/controller.rs).
+    pub(crate) fn gx_store_navigation_entry(
+        &self,
+    ) -> Option<ghostex_gx_core::navigation_history::NavigationHistoryEntry> {
+        ghostex_gx_core::navigation_history::sidebar_navigation_entry(
+            self.gx_store.sidebar_list.model(),
+            self.gx_store.core.focus(),
         )
     }
 

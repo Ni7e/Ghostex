@@ -149,14 +149,6 @@ export const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.nativeAppShotPromptResult";
 export const GPUI_SIDEBAR_REMOTE_EVENT_NAME =
   "ghostex-gpui-sidebar-remote-event";
-/*
-CDXC:Navigation 2026-08-19:
-The native titlebar owns the Back/Forward buttons but not the trail: Rust
-dispatches the click here and this runtime performs the same gxserver walk and
-sidebar activation the web app does, so both apps share one implementation.
-*/
-export const GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME =
-  "ghostex-gpui-sidebar-navigation-history-command";
 export const APP_SHOT_RECENT_TARGET_MS = 60_000;
 export const APP_SHOT_PROMPT_INSERT_RESULT_TIMEOUT_MS = 2_000;
 export const GPUI_STATUS_INDICATOR_MAX_CANDIDATES = 96;

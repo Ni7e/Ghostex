@@ -21,7 +21,6 @@ import type { GpuiSidebarRuntimeCloseAfterDoneMethods } from './close-after-done
 import { gpuiSidebarRuntimeCloseAfterDoneMethods } from './close-after-done';
 import {
   GPUI_REMOTE_MACHINE_PRESENTATION_CLEAR_STATES,
-  GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
   GPUI_SIDEBAR_REMOTE_EVENT_NAME,
 } from './constants';
 import type { GpuiSidebarRuntimeGitMethods } from './git';
@@ -89,8 +88,6 @@ import type {
   GxserverSidebarProjectCollectionsState,
   GxserverSidebarSpacesState,
 } from '@/packages/shared/gxserver-protocol';
-import { NAVIGATION_HISTORY_SCOPE_GPUI } from '@/packages/shared/navigation-history/navigation-history-contract';
-import { NavigationHistoryController } from '@/packages/shared/navigation-history/navigation-history-controller';
 import type {
   ExtensionToSidebarMessage,
   SidebarGroupsChangedMessage,
@@ -219,13 +216,6 @@ export class GpuiSidebarRuntime {
 
   activeGroupId: string | undefined;
   activeProjectId: string | undefined;
-  lastNavigationHistoryStatePayload: string | undefined;
-  readonly navigationHistory = new NavigationHistoryController({
-    activate: (entry) => this.activateNavigationHistoryEntry(entry),
-    onStateChange: (state) => this.postNavigationHistoryState(state),
-    resolveRpc: () => this.navigationHistoryRpc(),
-    scopeId: NAVIGATION_HISTORY_SCOPE_GPUI,
-  });
   appUserData: GxserverAppUserData = createEmptyGpuiAppUserData();
   /**
    * Escalating presentation-stream recovery state. `AcknowledgedAt` is when the
@@ -319,10 +309,6 @@ export class GpuiSidebarRuntime {
     this.remoteLastSeenPresentations = this.remoteLastSeenStore.read();
     this.workspaceGroups = readStoredGpuiWorkspaceSessionGroupsState();
     window.addEventListener(GPUI_SIDEBAR_REMOTE_EVENT_NAME, this.handleGpuiSidebarRemoteEvent);
-    window.addEventListener(
-      GPUI_SIDEBAR_NAVIGATION_HISTORY_COMMAND_EVENT_NAME,
-      this.handleGpuiSidebarNavigationHistoryCommand
-    );
     this.publishUnavailable('bootstrap-pending');
     // `service.ts` installs the bootstrap from the start config before `start()` runs (an empty
     // object when there is none), so there is nothing to poll for.
@@ -607,15 +593,6 @@ export class GpuiSidebarRuntime {
     if ('domainProject' in remoteEvent.payload.delta) {
       void this.refreshRemoteSidebarHudFromGxserver(remoteEvent.remoteMachineId).catch(() => undefined);
     }
-  };
-
-  readonly handleGpuiSidebarNavigationHistoryCommand = (event: Event): void => {
-    const detail = (event as CustomEvent<unknown>).detail;
-    const direction = detail && typeof detail === 'object' ? (detail as { direction?: unknown }).direction : undefined;
-    if (direction !== 'back' && direction !== 'forward') {
-      return;
-    }
-    void this.navigationHistory.navigate(direction);
   };
 
   async handleSidebarMessage(message: SidebarToExtensionMessage): Promise<void> {

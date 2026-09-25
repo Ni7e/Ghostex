@@ -502,14 +502,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       */
       return;
     }
-    /*
-    CDXC:Navigation 2026-08-19:
-    Every path that republishes active-project identity lands here, which makes
-    it the one place the trail has to be fed from. The controller collapses an
-    unchanged target to a string compare, so this stays free on the hot path.
-    */
-    this.navigationHistory.recordVisit(this.createNavigationHistoryEntry());
-
     // The service installs every bridge function before `start()`, so this is always present.
     const postActiveProjectContext =
       window.ghostexGpui?.postActiveProjectContext;

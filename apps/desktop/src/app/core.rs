@@ -157,6 +157,7 @@ pub struct GhostexGpuiApp {
     value — see `navigation_history` for why the titlebar owns no trail state.
     */
     pub(crate) navigation_history_state: navigation_history::GpuiNavigationHistoryState,
+    pub(crate) navigation_history: navigation_history::NavigationHistoryHost,
     /// The notification feed rows and unread count, pushed by the sidebar
     /// runtime whenever gxserver's feed changes. Render-path read only; see
     /// `notification_feed` for the ownership split.
