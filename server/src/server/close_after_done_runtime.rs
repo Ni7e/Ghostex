@@ -94,6 +94,15 @@ fn tick(state: &AppState) {
                     "close-after-done".to_string(),
                     params,
                 );
+                // A close the provider refused leaves the session in place and no longer armed;
+                // clients must see the badge go either way.
+                let _ = schedule_presentation_session_delta(
+                    state,
+                    &db,
+                    &repository,
+                    project_id,
+                    session_id,
+                );
             }
         }
     }
