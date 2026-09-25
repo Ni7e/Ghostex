@@ -51,6 +51,12 @@ impl GhostexGpuiApp {
                     return;
                 }
             };
+            // The chat host's socket connects to the same daemon (`app/gx_chat/`).
+            crate::app::gx_chat::set_endpoint(
+                crate::app::gx_chat::LOCAL_MACHINE_ID,
+                &endpoint.base_url,
+                &endpoint.auth_token,
+            );
             let _ = app.update(cx, |app, _| app.gx_store.endpoint = Some(endpoint.clone()));
             let mut attempt = 0u32;
             loop {

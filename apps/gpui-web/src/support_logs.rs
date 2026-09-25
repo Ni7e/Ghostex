@@ -24,6 +24,7 @@ pub(crate) fn temporary_epoch_ms() -> u64 {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum GpuiDiagnosticScenario {
     SidebarRefresh,
+    SessionChat,
 }
 
 /// Scenario-gated disk logging has no disk to write to here, so no scenario is ever on.

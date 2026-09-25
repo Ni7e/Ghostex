@@ -3,6 +3,7 @@ pub(crate) mod chat_host;
 pub(crate) mod consts;
 pub(crate) mod element;
 pub(crate) mod floating_reveal;
+pub(crate) mod gx_chat;
 pub(crate) mod gx_store;
 pub(crate) mod helpers;
 pub(crate) mod hotkeys;
