@@ -430,6 +430,7 @@ impl GhostexGpuiApp {
             unavailable,
             store.remote.tabs(),
         );
+        self.gx_store_indicators_changed(&changes, &inputs, cx);
         let settings_moved = self.gx_store.sidebar_list.last_inputs.settings != inputs.settings;
         let last_update = LastUpdate {
             changes_empty: changes.is_empty(),

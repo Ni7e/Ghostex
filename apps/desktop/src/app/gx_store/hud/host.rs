@@ -163,9 +163,16 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    /// Settings were saved or re-read: the HUD's `settings` block and everything drawn from it.
+    /// Settings were saved or re-read: the HUD's `settings` block and everything drawn from it,
+    /// and the status item and pet, which read the same settings (gx_store/indicators/).
     pub(crate) fn gx_store_hud_settings_changed(&mut self, cx: &mut gpui::Context<Self>) {
         self.gx_store_hud_sources_changed(cx);
+        self.gx_store_indicators_settings_changed(cx);
+    }
+
+    /// The saved settings object the HUD was last composed from.
+    pub(in crate::app::gx_store) fn gx_store_hud_settings_value(&self) -> Value {
+        self.gx_store.hud.sources.settings.clone()
     }
 
     /// A source moved outside a list update: recompose, and bring the list up to date with it.

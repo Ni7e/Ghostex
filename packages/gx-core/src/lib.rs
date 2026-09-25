@@ -20,6 +20,7 @@ mod core;
 mod doc_sync;
 mod focus;
 pub mod hud;
+pub mod indicators;
 pub mod git_menu;
 mod keys;
 mod notification_feed;

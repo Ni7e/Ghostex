@@ -70,6 +70,7 @@ mod effects;
 pub(crate) mod git;
 mod host;
 mod hud;
+mod indicators;
 mod layout_persist;
 mod primary_launcher;
 mod local_delayed_sends;

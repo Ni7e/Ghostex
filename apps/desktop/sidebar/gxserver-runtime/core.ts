@@ -465,7 +465,6 @@ export class GpuiSidebarRuntime {
         return;
       }
       this.publishHudPatch();
-      this.postGpuiStatusPetState();
       this.postActiveProjectContext();
     };
     gpuiBridge.onGxserverBootstrapChanged = (bootstrap) => {

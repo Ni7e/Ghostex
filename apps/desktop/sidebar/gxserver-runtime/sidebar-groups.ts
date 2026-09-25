@@ -44,12 +44,7 @@ import {
   parseGpuiRemotePresentationProjectId,
   parseGpuiRemotePresentationSessionId,
 } from "./helpers/remote-presentation";
-import {
-  boundedGpuiActiveWorkspaceTabSessionTitle,
-  createGpuiPetOverlayStatePayload,
-  createGpuiSessionStatusIndicatorCandidatesFromSidebarGroups,
-  createGpuiSessionStatusIndicatorsPayload,
-} from "./helpers/status-indicators";
+import { boundedGpuiActiveWorkspaceTabSessionTitle } from "./helpers/status-indicators";
 import type {
   GpuiActiveWorkspaceTabSessionPayload,
   GpuiPresentationProjectProjectionMetadata,
@@ -113,7 +108,6 @@ export interface GpuiSidebarRuntimeSidebarGroupMethods {
   activeRemoteProjectReference():
     { machineId: string; projectId: string } | undefined;
   activeWorkspaceTabSessionsFromLatestGroups(): GpuiActiveWorkspaceTabSessionPayload[];
-  postGpuiStatusPetState(): void;
   createHydrateMessage(
     groups: SidebarSessionGroup[],
     hud: SidebarHudState,
@@ -237,7 +231,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     }
     this.latestGroups = groups;
     postGpuiSidebarRuntimeFactsRows(this);
-    this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
   },
@@ -321,7 +314,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     );
     this.hasHydrated = true;
     postGpuiSidebarRuntimeFactsRows(this);
-    this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
   },
@@ -385,7 +377,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     }
     this.latestGroups = groups;
     postGpuiSidebarRuntimeFactsRows(this);
-    this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
   },
@@ -740,40 +731,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       });
     }
     return sessions;
-  },
-
-  postGpuiStatusPetState(this: GpuiSidebarRuntime): void {
-    const settings = createGpuiSidebarSettings(this.runtimeSettings);
-    const candidates =
-      createGpuiSessionStatusIndicatorCandidatesFromSidebarGroups(
-        this.latestGroups,
-        settings.enableSessionParking,
-      );
-    const statusPayload = createGpuiSessionStatusIndicatorsPayload(
-      candidates,
-      settings,
-    );
-    const petPayload = createGpuiPetOverlayStatePayload(candidates, settings);
-    /*
-    CDXC:StatusPet 2026-06-26-04:38:
-    GPUI status indicators and the pet overlay consume the same saved shared Settings object as SidebarApp hydrate. Publish only bounded counts, booleans, pet id, and sidebar-projected project/session ids/titles through fixed bridge functions.
-
-    CDXC:StatusPet 2026-06-27-20:11:
-    The standalone GPUI floating session indicator was removed. Keep posting
-    status counts/projects for the menu bar and pet badge surfaces, but do not
-    include floating visibility or floating size settings in the status payload.
-    */
-    try {
-      window.ghostexGpui?.postSessionStatusIndicators?.(
-        JSON.stringify(statusPayload),
-      );
-      window.ghostexGpui?.postPetOverlayState?.(JSON.stringify(petPayload));
-    } catch {
-      /*
-      CDXC:StatusPet 2026-06-26-04:38:
-      The status/pet bridge is presentation-only. If CEF has not installed the fixed functions or rejects a payload, keep SidebarApp state authoritative and avoid fallback UI state, raw JSON logging, project/path/title side channels, or invented native indicators.
-      */
-    }
   },
 
   createHydrateMessage(
